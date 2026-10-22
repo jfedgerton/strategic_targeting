@@ -20,7 +20,9 @@
 ## correlations. Because a_i is a type mixture (not MVN), the "true Omega" reported is
 ## the realised sample covariance of (c_i, a_i1, a_i2) across states.
 ## ============================================================================
-simulate_targeting <- function(family = c("M1b", "M2b"), S = 40L, Tt = 25L, K = 2L,
+## family "M1m": one-dimensional truth -- the stage-2 utility uses only dM with scalar mu_i = X beta[,1] + a_i1
+## and scalar variance sigma_x[1]^2 (beta[,2], a_i2, rho, dR play no role); used by run_sim_1d.R.
+simulate_targeting <- function(family = c("M1b", "M2b", "M1m"), S = 40L, Tt = 25L, K = 2L,
                                seed = 123L, target_rate = 0.45) {
   family <- match.arg(family)
   set.seed(seed)
@@ -92,7 +94,7 @@ simulate_targeting <- function(family = c("M1b", "M2b"), S = 40L, Tt = 25L, K = 
   alts$Z1 <- contig[cbind(alts$state_idx, alts$target_idx)]
   alts$Z2 <- ally[cbind(alts$state_idx, alts$target_idx)]
   d1 <- alts$dM - Mu[alts$sy_row, 1]; d2 <- alts$dR - Mu[alts$sy_row, 2]
-  quad <- Sinv[1, 1] * d1^2 + 2 * Sinv[1, 2] * d1 * d2 + Sinv[2, 2] * d2^2
+  quad <- if (family == "M1m") d1^2 / sigma_x[1]^2 else Sinv[1, 1] * d1^2 + 2 * Sinv[1, 2] * d1 * d2 + Sinv[2, 2] * d2^2
   util <- -0.5 * quad + b_j[alts$target_idx] + alts$Z1 * gamma[1] + alts$Z2 * gamma[2]
   if (family == "M2b") util <- util + rowSums(U[alts$state_idx, , drop = FALSE] * V[alts$target_idx, , drop = FALSE])
   alts$util <- util
@@ -120,6 +122,8 @@ simulate_targeting <- function(family = c("M1b", "M2b"), S = 40L, Tt = 25L, K = 
                 Omega = Omega_true, sd_re = sqrt(diag(Omega_true)), R_Om = cov2cor(Omega_true),
                 U = U, V = V, UV = if (!is.null(U)) U %*% t(V) else NULL, family = family, K = K,
                 mu_state_ref0 = a_i)       # mu_i at X = 0 is exactly a_i
-  list(sy = sy, alts = alts, ev = ev, truth = truth, types = types,
+  ## one-axis truth labels for the 1-D family (material axis): weaker / peer / stronger with band 0.8
+  types_1d <- ifelse(a_i[, 1] > 0.8, "weaker", ifelse(a_i[, 1] < -0.8, "stronger", "peer"))
+  list(sy = sy, alts = alts, ev = ev, truth = truth, types = types, types_1d = types_1d,
        meta = list(S = S, Tt = Tt, N1 = N1, N2 = nrow(alts), E = nrow(ev), seed = seed))
 }
