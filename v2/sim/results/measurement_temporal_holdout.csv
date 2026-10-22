@@ -1,0 +1,3 @@
+"spec","cutoff","n_train_events","n_test_events","hit_rate_top1","hit_rate_top5","mean_rank","mean_set_size","mean_log_score","baseline_log_score_uniform"
+"a_independent",11,125,36,0.0555555555555556,0.416666666666667,9.33444444444445,29,-3.11526544704717,-3.36729582998647
+"b_joint",11,125,36,0.0555555555555556,0.444444444444444,8.6125,29,-2.95633206369555,-3.36729582998647

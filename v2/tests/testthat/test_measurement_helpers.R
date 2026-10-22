@@ -42,3 +42,15 @@ test_that("misclassification helper and holdout split keep one state index space
   expect_equal(d2$S, S + 3)
   expect_error(build_stan_data(sim$sy, sim$alts, sim$ev, c("W1", "W2"), paste0("X", 1:4), c("Z1", "Z2"), joint = 0L, S = 2))
 })
+
+test_that("extract_draws handles rstan's 1-d arrays for scalars and subsets every parameter", {
+  p <- file.path(root, "stan", "build", "m1_latent_additive.rds")
+  if (!file.exists(p)) skip("compiled model missing")
+  suppressPackageStartupMessages(library(rstan))
+  d7 <- build_stan_data(sim$sy, sim$alts, sim$ev, c("W1", "W2"), paste0("X", 1:4), c("Z1", "Z2"), joint = 1L, x_ref = rep(0, 4))
+  f <- sampling(readRDS(p), data = d7, chains = 1, iter = 30, warmup = 10, seed = 123, refresh = 0)
+  dr <- extract_draws(f, n_use = 5)
+  expect_equal(length(dr$rho), 5); expect_equal(dim(dr$beta), c(5, 4, 2)); expect_equal(dim(dr$sigma_x), c(5, 2))
+  sc <- stage2_scores(d7, dr)
+  expect_equal(nrow(sc), d7$E); expect_true(all(is.finite(sc$log_p_chosen)))
+})

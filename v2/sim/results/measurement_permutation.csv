@@ -1,0 +1,2 @@
+"mode","n_perm","observed_log_score_a","observed_log_score_b","observed_advantage","mean_permuted_advantage","mean_permuted_log_score_a","mean_permuted_log_score_b","p_value_adv_ge_observed"
+"rescore",20,-359.589035266213,-344.770916217418,14.8181190487946,-80.3699336555944,-587.59535578248,-667.965289438075,0

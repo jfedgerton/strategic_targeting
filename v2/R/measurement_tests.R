@@ -60,7 +60,9 @@ extract_draws <- function(fit, n_use = 100, seed = V2_SEED) {
   if (has_uv) pars <- c(pars, "U", "V")
   dr <- rstan::extract(fit, pars = pars)
   n <- length(dr$rho); set.seed(seed); idx <- sort(sample.int(n, min(n_use, n)))
-  lapply(dr, function(a) if (is.null(dim(a))) a[idx] else if (length(dim(a)) == 2) a[idx, , drop = FALSE] else a[idx, , , drop = FALSE])
+  ## rstan returns scalars as 1-d arrays (dim = n), vectors as [n, k], matrices as [n, r, c]
+  lapply(dr, function(a) { nd <- length(dim(a))
+    if (nd <= 1) as.numeric(a)[idx] else if (nd == 2) a[idx, , drop = FALSE] else a[idx, , , drop = FALSE] })
 }
 stage2_scores <- function(dat, draws) {
   ## owner state-year of every row: IV rows first, then (if sampled) the per-event blocks
