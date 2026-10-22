@@ -87,7 +87,7 @@ assert_matches_manifest <- function(path, manifest_path) {
 build_stan_data <- function(sy, alts, ev, W_cols, X_cols, Z_cols, joint, sampled = 0L,
                             n_full = NULL, x_ref = NULL, K = NULL, anchor = NULL,
                             prior_beta_sd = 1, allow_orphan_initiations = FALSE, S = NULL, prior_only = 0L,
-                            D_mode = 3L) {
+                            D_mode = 3L, grainsize = NULL) {
   stopifnot(is.data.frame(sy), is.data.frame(alts), is.data.frame(ev))
   sampled <- as.integer(sampled)
   if (sampled == 1) {
@@ -135,7 +135,9 @@ build_stan_data <- function(sy, alts, ev, W_cols, X_cols, Z_cols, joint, sampled
               joint = as.integer(joint), sampled = sampled,
               x_ref = as.numeric(x_ref), prior_beta_sd = prior_beta_sd, prior_only = as.integer(prior_only),
               D_mode = as.integer(D_mode))
-  stopifnot(dat$D_mode %in% 1:3)
+  ## reduce_sum_static slice size over state-years: NULL -> one slice (exact serial sum, threads = 1)
+  dat$grainsize <- as.integer(if (is.null(grainsize)) dat$N1 else max(1L, grainsize))
+  stopifnot(dat$D_mode %in% 1:3, dat$grainsize >= 1)
   dimnames(dat$W) <- NULL; dimnames(dat$X) <- NULL; dimnames(dat$Z) <- NULL
   if (!is.null(K)) {
     stopifnot(K >= 1, K <= S - 1)
@@ -250,3 +252,6 @@ procrustes_align <- function(U_draws, V_draws, ref_chain = 1) {
   }
   list(U = U_draws, V = V_draws, rotations = rotations)
 }
+
+## grainsize for reduce_sum_static: with 1 thread one slice (serial); otherwise about 4 slices per thread
+choose_grainsize <- function(N1, threads) if (threads <= 1) N1 else max(1L, as.integer(ceiling(N1 / (4 * threads))))

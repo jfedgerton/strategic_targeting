@@ -4,6 +4,13 @@
 ## Output: v2/stan/build/{m1_latent_additive,m2_ame}.rds  (gitignored)
 ## ============================================================================
 suppressPackageStartupMessages(library(rstan))
+## Threading: rstan 2.32 puts -DSTAN_THREADS in its own CPPFLAGS (rstan:::PKG_CPPFLAGS_env_fun), so every
+## model compiled here supports reduce_sum multi-threading via rstan_options(threads_per_chain = k).
+## Assert it, so a different rstan build on Roar fails loudly instead of silently running serial.
+cppflags <- tryCatch(rstan:::PKG_CPPFLAGS_env_fun(), error = function(e) "")
+if (!grepl("STAN_THREADS", cppflags) && !grepl("STAN_THREADS", Sys.getenv("PKG_CPPFLAGS")))
+  stop("rstan's CPPFLAGS lack -DSTAN_THREADS; export PKG_CPPFLAGS=-DSTAN_THREADS (see v2/slurm/00_env.sh) and recompile")
+cat("compiling with -DSTAN_THREADS (rstan ", as.character(packageVersion("rstan")), ")\n", sep = "")
 source(file.path(dirname(sub("^--file=", "", grep("^--file=", commandArgs(FALSE), value = TRUE))), "00_helpers.R"))
 root <- v2_root()
 dir.create(file.path(root, "stan", "build"), showWarnings = FALSE, recursive = TRUE)

@@ -16,5 +16,10 @@ if [ ! -f "$V2_ROOT/R/01_build_data.R" ]; then
 fi
 export R_LIBS_USER="${R_LIBS_USER:-$HOME/R/x86_64-pc-linux-gnu-library/4.2}"
 export OMP_NUM_THREADS=1
+# Within-chain parallelism (reduce_sum): rstan 2.32 adds -DSTAN_THREADS itself; this makes it explicit
+# for any other build so compile_models.R's assertion passes. Threads are set per fit with
+# --threads_per_chain (02_fit_model.R) and cpus-per-task = chains x threads in the sbatch scripts.
+export PKG_CPPFLAGS="${PKG_CPPFLAGS:-} -DSTAN_THREADS"
+export STAN_NUM_THREADS="${STAN_NUM_THREADS:-${THREADS_PER_CHAIN:-1}}"
 mkdir -p "$V2_ROOT/logs" "$V2_ROOT/output"
 echo "host $(hostname); gcc $(gcc -dumpversion); R $(R --version | head -1); V2_ROOT=$V2_ROOT"

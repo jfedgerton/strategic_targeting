@@ -5,7 +5,7 @@
 ##   Rscript v2/R/02_fit_model.R --sample=mid --lag=5 --variant=all --model=M1b \
 ##          [--centrality=pr|eig] [--K=2] [--chains=4] [--iter=2000] [--warmup=1000] \
 ##          [--sampled_m=0] [--conflict_history=TRUE] [--distance=FALSE] [--contiguity=TRUE]
-##          [--adapt_delta=0.9] [--max_treedepth=10] [--pilot=FALSE] [--dry_run=FALSE]
+##          [--adapt_delta=0.9] [--max_treedepth=10] [--pilot=FALSE] [--dry_run=FALSE] [--threads_per_chain=1]
 ##
 ##   sample    : mid (all MIDs) | fmid (fatal MIDs) | war (hostility level 5)
 ##   lag       : 1 | 3 | 5 | 10         change-window length h
@@ -17,6 +17,8 @@
 ##   conflict_history: TRUE = include conflict-history controls in W, X and Z (main spec); FALSE = drop them
 ##   distance  : FALSE (main) | TRUE adds log1p(capital-to-capital km) to Z; cell name gets "_dist"
 ##   contiguity: TRUE (main) | FALSE drops land contiguity from Z; cell name gets "_nocontig"
+##   threads_per_chain: within-chain parallelism via reduce_sum over state-years (default 1 = serial, exact).
+##               Request cpus-per-task = chains x threads_per_chain in Slurm.
 ##   Main specification: --variant=all --sampled_m=0 (full all-states choice sets), the defaults.
 ##
 ## Every input file is checked against v2/data/manifest.csv (nrow + sha256) before use
@@ -46,6 +48,7 @@ CHAINS <- as.integer(get_arg("chains", 4)); ITER <- as.integer(get_arg("iter", 2
 SAMPLED_M <- as.integer(get_arg("sampled_m", 0)); CONFLICT_HISTORY <- get_arg("conflict_history", TRUE)
 ADAPT_DELTA <- get_arg("adapt_delta", 0.9); MAX_TD <- as.integer(get_arg("max_treedepth", 10)); PILOT <- get_arg("pilot", FALSE)
 DRY_RUN <- get_arg("dry_run", FALSE)      # TRUE = assemble and validate the Stan data, write it, do NOT sample
+THREADS <- as.integer(get_arg("threads_per_chain", 1))   # within-chain parallelism (reduce_sum); cpus = chains x threads
 DISTANCE <- get_arg("distance", FALSE)    # TRUE = add log1p(capital distance km) to Z (alternative spec, not main)
 CONTIGUITY <- get_arg("contiguity", TRUE) # FALSE = drop land contiguity from Z (robustness option)
 stopifnot(SAMPLE %in% c("mid", "fmid", "war"), LAG %in% c(1L, 3L, 5L, 10L), VARIANT %in% c("all", "polrel"),
@@ -62,7 +65,9 @@ log_open(paste0("02_fit_", cell))
 logf("cell = %s", cell)
 set.seed(V2_SEED)
 rstan_options(auto_write = FALSE)
-options(mc.cores = min(CHAINS, parallel::detectCores()))
+rstan_options(threads_per_chain = THREADS)                 # needs the model compiled with -DSTAN_THREADS (rstan 2.32 default)
+options(mc.cores = min(CHAINS, max(1L, parallel::detectCores() %/% THREADS)))
+logf("threads_per_chain = %d; mc.cores = %d", THREADS, getOption("mc.cores"))
 data_dir <- file.path(v2_root(), "data"); out_dir <- file.path(v2_root(), "output"); dir.create(out_dir, showWarnings = FALSE)
 manifest_path <- file.path(data_dir, "manifest.csv")
 
@@ -75,7 +80,8 @@ state_codes <- A$state_codes; x_ref <- A$x_ref; n_full <- A$n_full; sampled <- A
 joint <- as.integer(grepl("b$", MODEL)); family <- if (grepl("^M1", MODEL)) "m1_latent_additive" else "m2_ame"
 dat <- build_stan_data(sy, alts, ev, W_cols, X_cols, Z_cols, joint = joint, sampled = sampled, n_full = n_full,
                        x_ref = x_ref, K = if (family == "m2_ame") K else NULL, allow_orphan_initiations = TRUE,
-                       D_mode = D_MODE)
+                       D_mode = D_MODE, grainsize = choose_grainsize(nrow(sy), THREADS))
+logf("reduce_sum grainsize = %d (N1 = %d)", dat$grainsize, dat$N1)
 logf("D_mode = %d (%s)", D_MODE, c("material only", "relational only", "both dimensions")[D_MODE])
 if (family == "m2_ame") logf("AME anchors (most initiations first): ccodes %s", paste(state_codes[dat$anchor], collapse = ", "))
 logf("Stan data: S=%d N1=%d N2=%d E=%d P1=%d P=%d Pz=%d joint=%d sampled=%d D_mode=%d", dat$S, dat$N1, dat$N2, dat$E, dat$P1, dat$P, dat$Pz, dat$joint, dat$sampled, dat$D_mode)
@@ -109,6 +115,7 @@ saveRDS(list(fit = fit, dat = dat, cell = cell, state_codes = state_codes, W_col
              manifest = man[man$file %in% c(sprintf("stage1_panel_lag%d.rds", LAG), sprintf("alts_lag%d_%s.rds", LAG, VARIANT), "events.rds"), ],
              args = list(sample = SAMPLE, lag = LAG, variant = VARIANT, model = MODEL, centrality = CENT, K = K, chains = CHAINS,
                          iter = ITER, warmup = WARMUP, sampled_m = SAMPLED_M, conflict_history = CONFLICT_HISTORY,
-                         distance = DISTANCE, contiguity = CONTIGUITY, D_mode = D_MODE, seed = V2_SEED)),
+                         distance = DISTANCE, contiguity = CONTIGUITY, D_mode = D_MODE, threads_per_chain = THREADS,
+                         grainsize = dat$grainsize, seed = V2_SEED)),
         file.path(out_dir, paste0("fit_", cell, ".rds")))
 logf("saved %s", file.path(out_dir, paste0("fit_", cell, ".rds")))

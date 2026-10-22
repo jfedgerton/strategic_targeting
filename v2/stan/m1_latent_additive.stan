@@ -43,12 +43,16 @@
 // here (cheap) so that IV has the full systematic-utility level.
 //
 // Ragged choice sets are flattened: rows cs_start[n]..cs_end[n] belong to state-year n.
+// Within-chain parallelism: the likelihood is a reduce_sum_static over state-years (grainsize is
+// data; grainsize >= N1 gives one slice, i.e. the exact serial sum). Generated quantities are serial.
+// profile() sections: priors, stage2_utility, stage1_iv, stage2_events, stage1_bernoulli.
 // ============================================================================
 functions {
-  // Utility of every alternative row for state-year n, given mu[n] (length-2 row).
+  // Utility of the alternative rows s..e for one state-year, given its mu (row of length D),
+  // the dyadic-control contribution zg_local (length e - s + 1).
   // D = 2: quadratic form in (dM, dR); D = 1: squared distance on column dcol only.
-  vector util_block(int n, int s, int e, matrix x, row_vector mu_n, vector sigma_x,
-                    real rho, vector b_j, array[] int alt_target, vector zg, int D, int dcol) {
+  vector util_block(int s, int e, matrix x, row_vector mu_n, vector sigma_x,
+                    real rho, vector b_j, array[] int alt_target, vector zg_local, int D, int dcol) {
     int L = e - s + 1;
     vector[L] q;
     if (D == 2) {
@@ -59,7 +63,61 @@ functions {
       vector[L] d1 = (segment(col(x, dcol), s, L) - mu_n[1]) / sigma_x[1];
       q = d1 .* d1;
     }
-    return -0.5 * q + b_j[segment(alt_target, s, L)] + segment(zg, s, L);
+    return -0.5 * q + b_j[segment(alt_target, s, L)] + zg_local;
+  }
+  // Dyadic-control contribution for rows s..e (per block, so partial sums are independent).
+  vector zg_block(matrix Z, vector gamma, int s, int e, int Pz) {
+    int L = e - s + 1;
+    if (Pz > 0) return block(Z, s, 1, L, Pz) * gamma;
+    return rep_vector(0, L);
+  }
+  // Partial log-likelihood (stage 1 + stage 2) for a slice of state-years; used by reduce_sum.
+  // sy_slice holds state-year indices; events of a state-year are ev_sorted[ev_first[n] .. +ev_count[n]-1].
+  real sy_partial_sum(array[] int sy_slice, int start, int end,
+                      array[] int y1, array[] int sy_state, matrix W, matrix X,
+                      array[] int cs_start, array[] int cs_end, vector iv_corr,
+                      matrix x, array[] int alt_target, matrix Z, int Pz,
+                      array[] int ev_first, array[] int ev_count, array[] int ev_sorted,
+                      array[] int ev_row, array[] int ev_start, array[] int ev_end, int sampled,
+                      int D, int dcol,
+                      real alpha0, vector alpha, real tau, matrix beta, matrix a_i, vector c_i,
+                      vector sigma_x, real rho, vector b_j, vector gamma) {
+    int L = end - start + 1;
+    vector[L] eta;
+    real lp = 0;
+    for (k in 1:L) {
+      int n = sy_slice[k];
+      int s = cs_start[n];
+      int e = cs_end[n];
+      row_vector[D] mu_n = X[n] * beta + a_i[sy_state[n]];
+      vector[e - s + 1] u;
+      real lse;
+      profile("stage2_utility") {
+        u = util_block(s, e, x, mu_n, sigma_x, rho, b_j, alt_target, zg_block(Z, gamma, s, e, Pz), D, dcol);
+      }
+      profile("stage1_iv") {
+        lse = log_sum_exp(u);
+        eta[k] = alpha0 + W[n] * alpha + c_i[sy_state[n]] + tau * (lse + iv_corr[n]);
+      }
+      profile("stage2_events") {
+        for (j in 1:ev_count[n]) {
+          int ev = ev_sorted[ev_first[n] + j - 1];
+          if (sampled == 0) {
+            lp += u[ev_row[ev] - s + 1] - lse;                     // event set == state-year set
+          } else {
+            int s2 = ev_start[ev];
+            int e2 = ev_end[ev];
+            vector[e2 - s2 + 1] u2 = util_block(s2, e2, x, mu_n, sigma_x, rho, b_j, alt_target,
+                                                zg_block(Z, gamma, s2, e2, Pz), D, dcol);
+            lp += u2[ev_row[ev] - s2 + 1] - log_sum_exp(u2);
+          }
+        }
+      }
+    }
+    profile("stage1_bernoulli") {
+      lp += bernoulli_logit_lpmf(y1[sy_slice] | eta);
+    }
+    return lp;
   }
 }
 data {
@@ -67,7 +125,7 @@ data {
   int<lower=1> S;             // number of states (index space for c_i, a_i, b_j)
   int<lower=1> N1;            // state-years (stage-1 rows; each owns a choice set)
   int<lower=1> N2;            // flattened alternative rows
-  int<lower=1> E;             // initiation events
+  int<lower=0> E;             // initiation events (0 allowed for profiling runs)
   int<lower=0> P1;            // stage-1 controls W (no intercept column)
   int<lower=1> P;             // predictors of mu (initiator power changes + controls)
   int<lower=0> Pz;            // dyadic controls Z
@@ -95,12 +153,25 @@ data {
   int<lower=1, upper=3> D_mode;         // 1 = material only (dM), 2 = relational only (dR), 3 = both
   vector[P] x_ref;                      // reference X at which mu_state is reported
   real<lower=0> prior_beta_sd;
+  int<lower=1> grainsize;               // reduce_sum_static slice size over state-years (>= N1 = one serial slice)
 }
 transformed data {
   int D = (D_mode == 3) ? 2 : 1;        // targeting dimensions used in stage 2
   int dcol = (D_mode == 2) ? 2 : 1;     // which column of x when D = 1
   int Dre = 1 + D;                      // random-effect vector (c_i, a_i) length
   vector[N1] iv_corr = rep_vector(0, N1);
+  array[N1] int sy_idx;                 // 1..N1, the array reduce_sum slices over
+  array[N1] int ev_count = rep_array(0, N1);
+  array[N1] int ev_first;
+  array[E] int ev_sorted;               // event ids grouped by state-year (counting sort, original order kept within)
+  for (n in 1:N1) sy_idx[n] = n;
+  for (e in 1:E) ev_count[ev_sy[e]] += 1;
+  {
+    int pos = 1;
+    for (n in 1:N1) { ev_first[n] = pos; pos += ev_count[n]; }
+    array[N1] int fill = ev_first;
+    for (e in 1:E) { ev_sorted[fill[ev_sy[e]]] = e; fill[ev_sy[e]] += 1; }
+  }
   for (n in 1:N1) {
     if (cs_end[n] < cs_start[n]) reject("empty choice set for state-year ", n);
     if (sampled == 1) iv_corr[n] = log(n_full[n]) - log(cs_end[n] - cs_start[n] + 1);
@@ -166,53 +237,40 @@ transformed parameters {
   vector[S] b_j = sigma_b * (z_b - mean(z_b));
 }
 model {
-  // ---- priors
-  alpha0 ~ normal(0, 2.5);
-  alpha ~ normal(0, 1);
-  tau ~ normal(0, 1);
-  to_vector(beta) ~ normal(0, prior_beta_sd);
-  sigma_x ~ lognormal(0, 1);
-  sd_re ~ normal(0, 1);
-  if (D == 1) {
-    // one targeting dimension: corr(c, a) gets the same Beta(2.5, 2.5) marginal (Var 1/6) as the
-    // shared correlations in the a / b models, so m / r / a / b differ only in their restrictions
-    target += beta_lpdf((r_c_a1 + 1) / 2 | 2.5, 2.5);
-  } else if (joint == 1) {
-    L_Om_joint[1] ~ lkj_corr_cholesky(2);
-  } else {
-    // Same marginal prior on the shared correlations as LKJ(2) implies for a 3x3 matrix:
-    // (r + 1) / 2 ~ Beta(2.5, 2.5), i.e. Var(r) = 1/6, applied symmetrically to corr(c, a1)
-    // and corr(c, a2), with corr(a1, a2) = 0 and PD enforced through r2 = q sqrt(1 - r1^2)
-    // (Jacobian 0.5 * log(1 - r1^2)). So "a" differs from "b" only by the cross-dimensional
-    // restrictions (Sigma off-diagonal and corr(a1, a2)), not by the priors they share.
-    target += beta_lpdf((r_c_a1 + 1) / 2 | 2.5, 2.5) + beta_lpdf((r_c_a2 + 1) / 2 | 2.5, 2.5);
-    target += 0.5 * log1m(square(r_c_a1));
+  profile("priors") {
+    // ---- priors
+    alpha0 ~ normal(0, 2.5);
+    alpha ~ normal(0, 1);
+    tau ~ normal(0, 1);
+    to_vector(beta) ~ normal(0, prior_beta_sd);
+    sigma_x ~ lognormal(0, 1);
+    sd_re ~ normal(0, 1);
+    if (D == 1) {
+      // one targeting dimension: corr(c, a) gets the same Beta(2.5, 2.5) marginal (Var 1/6) as the
+      // shared correlations in the a / b models, so m / r / a / b differ only in their restrictions
+      target += beta_lpdf((r_c_a1 + 1) / 2 | 2.5, 2.5);
+    } else if (joint == 1) {
+      L_Om_joint[1] ~ lkj_corr_cholesky(2);
+    } else {
+      // Same marginal prior on the shared correlations as LKJ(2) implies for a 3x3 matrix:
+      // (r + 1) / 2 ~ Beta(2.5, 2.5), i.e. Var(r) = 1/6, applied symmetrically to corr(c, a1)
+      // and corr(c, a2), with corr(a1, a2) = 0 and PD enforced through r2 = q sqrt(1 - r1^2)
+      // (Jacobian 0.5 * log(1 - r1^2)). So "a" differs from "b" only by the cross-dimensional
+      // restrictions (Sigma off-diagonal and corr(a1, a2)), not by the priors they share.
+      target += beta_lpdf((r_c_a1 + 1) / 2 | 2.5, 2.5) + beta_lpdf((r_c_a2 + 1) / 2 | 2.5, 2.5);
+      target += 0.5 * log1m(square(r_c_a1));
+    }
+    to_vector(z_re) ~ std_normal();
+    sigma_b ~ normal(0, 1);
+    z_b ~ std_normal();
+    gamma ~ normal(0, 1);
   }
-  to_vector(z_re) ~ std_normal();
-  sigma_b ~ normal(0, 1);
-  z_b ~ std_normal();
-  gamma ~ normal(0, 1);
-
-  // ---- likelihood
-  {
-    matrix[N1, D] Mu = X * beta + a_i[sy_state];
-    vector[N2] zg = (Pz > 0) ? Z * gamma : rep_vector(0, N2);
-    vector[N2] util;
-    vector[N1] lse;
-    for (n in 1:N1) {
-      int s = cs_start[n];
-      int e = cs_end[n];
-      util[s:e] = util_block(n, s, e, x, Mu[n], sigma_x, rho, b_j, alt_target, zg, D, dcol);
-      lse[n] = log_sum_exp(util[s:e]);
-    }
-    if (prior_only == 0) y1 ~ bernoulli_logit(alpha0 + W * alpha + c_i[sy_state] + tau * (lse + iv_corr));
-    for (ev in 1:E) {
-      int s = ev_start[ev];
-      int e = ev_end[ev];
-      if (sampled == 1)   // event rows are separate from the IV rows: compute their utilities
-        util[s:e] = util_block(ev_sy[ev], s, e, x, Mu[ev_sy[ev]], sigma_x, rho, b_j, alt_target, zg, D, dcol);
-      if (prior_only == 0) target += util[ev_row[ev]] - log_sum_exp(util[s:e]);
-    }
+  // ---- likelihood: stage 1 + stage 2, sliced over state-years
+  if (prior_only == 0) {
+    target += reduce_sum_static(sy_partial_sum, sy_idx, grainsize,
+                                y1, sy_state, W, X, cs_start, cs_end, iv_corr, x, alt_target, Z, Pz,
+                                ev_first, ev_count, ev_sorted, ev_row, ev_start, ev_end, sampled, D, dcol,
+                                alpha0, alpha, tau, beta, a_i, c_i, sigma_x, rho, b_j, gamma);
   }
 }
 generated quantities {
@@ -225,13 +283,12 @@ generated quantities {
   corr_matrix[Dre] R_Om;      // correlation of (c, a_1[, a_2])
   {
     matrix[N1, D] Mu = X * beta + a_i[sy_state];
-    vector[N2] zg = (Pz > 0) ? Z * gamma : rep_vector(0, N2);
     vector[N2] util;
     vector[N1] lse;
     for (n in 1:N1) {
       int s = cs_start[n];
       int e = cs_end[n];
-      util[s:e] = util_block(n, s, e, x, Mu[n], sigma_x, rho, b_j, alt_target, zg, D, dcol);
+      util[s:e] = util_block(s, e, x, Mu[n], sigma_x, rho, b_j, alt_target, zg_block(Z, gamma, s, e, Pz), D, dcol);
       lse[n] = log_sum_exp(util[s:e]);
     }
     vector[N1] eta1 = alpha0 + W * alpha + c_i[sy_state] + tau * (lse + iv_corr);
@@ -240,7 +297,7 @@ generated quantities {
       int s = ev_start[ev];
       int e = ev_end[ev];
       if (sampled == 1)
-        util[s:e] = util_block(ev_sy[ev], s, e, x, Mu[ev_sy[ev]], sigma_x, rho, b_j, alt_target, zg, D, dcol);
+        util[s:e] = util_block(s, e, x, Mu[ev_sy[ev]], sigma_x, rho, b_j, alt_target, zg_block(Z, gamma, s, e, Pz), D, dcol);
       log_lik_stage2[ev] = util[ev_row[ev]] - log_sum_exp(util[s:e]);
       mu_event[ev] = Mu[ev_sy[ev]];
     }

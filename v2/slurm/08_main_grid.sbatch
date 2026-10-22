@@ -4,13 +4,15 @@
 #SBATCH --partition=basic
 #SBATCH --requeue
 #SBATCH --time=7-00:00:00    # PLACEHOLDER: set from the Roar pilot (04_pilot.sbatch) before the real run
-#SBATCH --nodes=1 --ntasks=1 --cpus-per-task=4
-#SBATCH --mem=16G
+#SBATCH --nodes=1 --ntasks=1 --cpus-per-task=32   # = chains (4) x threads_per_chain (8)
+#SBATCH --mem=128G                                 # basic bills 4 GB per core: 32 cores x 4 GB
 #SBATCH --array=0-95
 #SBATCH --output=%x_%A_%a.out
 # MAIN-RESULTS GRID: sample {mid, fmid, war} x model {M1m, M1r, M1a, M1b, M2m, M2r, M2a, M2b} x lag {1, 3, 5, 10}
 # = 96 cells, full all-states choice set (variant=all, sampled_m=0), PageRank centrality, K = 2 for M2,
-# 4 chains x 2000 iterations (1000 warmup), seed 123.
+# 4 chains x 2000 iterations (1000 warmup), seed 123, within-chain parallelism via reduce_sum with
+# THREADS_PER_CHAIN threads per chain (default 8 -> 32 cpus; override with --export=ALL,THREADS_PER_CHAIN=k
+# together with --cpus-per-task=4k and --mem=<16k>G).
 #
 # Real run      : sbatch v2/slurm/08_main_grid.sbatch
 # Roar DRY RUN  : sbatch --export=ALL,DRY_RUN=TRUE --time=00:30:00 --mem=16G --cpus-per-task=1 v2/slurm/08_main_grid.sbatch
@@ -122,6 +124,8 @@ case $i in
   *) echo "array index $i out of range 0-95" >&2; exit 1 ;;
 esac
 DRY=${DRY_RUN:-FALSE}
-echo "task $i -> sample=$s model=$m lag=$l variant=all sampled_m=0 centrality=pr K=2 dry_run=$DRY"
+THR=${THREADS_PER_CHAIN:-8}
+echo "task $i -> sample=$s model=$m lag=$l variant=all sampled_m=0 centrality=pr K=2 chains=4 threads_per_chain=$THR cpus=${SLURM_CPUS_PER_TASK:-?} dry_run=$DRY"
 Rscript v2/R/02_fit_model.R --sample=$s --lag=$l --variant=all --model=$m --centrality=pr \
-  --K=2 --chains=4 --iter=2000 --warmup=1000 --adapt_delta=0.9 --max_treedepth=10 --dry_run=$DRY
+  --K=2 --chains=4 --iter=2000 --warmup=1000 --adapt_delta=0.9 --max_treedepth=10 --dry_run=$DRY \
+  --threads_per_chain=$THR

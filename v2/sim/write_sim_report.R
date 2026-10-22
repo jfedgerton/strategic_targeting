@@ -66,6 +66,15 @@ if (!is.null(ml)) {
       "### Systematic measurement error (R inflated by delta for states that initiated in t−1; joint model refit)", "", md_table(me), "")
   if (!is.null(bm)) add("### Benchmarks on the simulated frames (brms)", "", md_table(bm |> select(model, term, Estimate, Q2.5, Q97.5)), "")
 }
+pb <- rd("profile_breakdown.csv"); tt <- rd("threads_timing.csv"); rf <- rd("refit_M1b_M1b_reduce_sum.csv")
+if (!is.null(pb)) {
+  add("## Gradient-time profile and within-chain parallelism (reduce_sum)", "",
+      "Breakdown of one gradient evaluation on the 40-state cell (N1 = 1000 state-years, N2 = 39,000 alternative rows), measured with `log_prob` on the full data, on the same data with the events removed, and with `prior_only = 1`. Stan `profile()` sections (priors, stage2_utility, stage1_iv, stage2_events, stage1_bernoulli) are in both programs but rstan cannot read them; CmdStan would.", "",
+      md_table(pb |> select(model, ms_full, ms_stage1_and_iv_utilities, ms_stage2_events, ms_priors_and_transforms, share_stage1_iv_utilities, share_stage2_events, share_priors), 2), "")
+  if (!is.null(tt)) add("Sampling time for 1 chain, fixed seed, by `threads_per_chain` (reduce_sum_static over state-years; grainsize = N1 for 1 thread, about N1 / (4 threads) otherwise). This container has 2 cores, so 4 threads is oversubscribed; the real speed-up curve must be read from the Roar pilot (04_pilot.sbatch with THREADS_PER_CHAIN = 1 vs 8).", "",
+                        md_table(tt |> select(model, threads_per_chain, grainsize, cores_available, oversubscribed, iterations, elapsed_s, s_per_iteration, ms_per_gradient), 2), "")
+  if (!is.null(rf)) add(sprintf("Refit of M1b on M1b data with the reduce_sum program (threads = 2) against the earlier serial fit: %d parameters, max |z| = %.2f, share |z| < 2 = %.2f, max |mean difference| / posterior SD = %.2f (z uses MC standard errors sd / sqrt(n_eff) of both runs).", nrow(rf), max(abs(rf$z)), mean(abs(rf$z) < 2), max(rf$abs_diff_in_sd)), "")
+}
 add("## What failed or is fragile", "",
     "* Chains and iterations are far below the Roar settings; R-hat and ESS in the convergence table are the honest state of these short runs, not of the production fits.",
     "* Ω is recovered as the covariance of a type mixture; its coverage reflects the MVN approximation to planted clusters.",
