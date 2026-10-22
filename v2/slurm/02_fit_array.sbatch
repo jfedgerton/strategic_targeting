@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name=v2_fit
 #SBATCH --account=open
-#SBATCH --partition=open
+#SBATCH --partition=basic   # the open partition no longer exists; --account=open bills the free READ credits
 #SBATCH --requeue
 #SBATCH --time=47:00:00
 #SBATCH --nodes=1 --ntasks=1 --cpus-per-task=4
