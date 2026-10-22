@@ -14,7 +14,8 @@
 # (~1.7M rows) goes through 03_fit_all_variant.sbatch on jfe4_cr_default/basic.
 #
 # Index layout: 3 samples x 4 lags x 4 models x 2 centralities = 96 cells
-source "$(dirname "$0")/00_env.sh"
+# Slurm runs a spooled copy of this script, so locate the repo via the submit dir (submit from the repo root).
+source "${SLURM_SUBMIT_DIR:?submit from the repo root}/v2/slurm/00_env.sh" || exit 1
 cd "$V2_ROOT/.." || exit 1
 SAMPLES=(mid fmid war); LAGS=(1 3 5 10); MODELS=(M1a M1b M2a M2b); CENTS=(pr eig)
 i=$SLURM_ARRAY_TASK_ID

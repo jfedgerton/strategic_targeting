@@ -61,7 +61,7 @@ Cell naming: `<sample>_lag<h>_<variant>_<centrality>_<model>[_K<K>][_noCH][_samp
 ## Running on Roar
 
 ```
-cd /storage/group/LiberalArts/default/jfe4_collab/strategic_targeting
+cd /storage/group/LiberalArts/default/jfe4_collab/strategic_targeting_v2   # separate clone; the old pipeline folder stays untouched
 git checkout v2-rebuild
 sbatch v2/slurm/01_build_data.sbatch        # compiles Stan, builds all data (open, ~minutes)
 sbatch v2/slurm/04_pilot.sbatch             # 60-iteration timing pilots (open) -> read "sampling finished in" lines

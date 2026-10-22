@@ -10,7 +10,8 @@
 #SBATCH --output=%x_%A_%a.out
 # Refit-based measurement tests (temporal holdout, permutation, measurement-error inflation)
 # on the main cell, for M1 and M2 and for two holdout cutoffs. Needs the a/b fits of the cell.
-source "$(dirname "$0")/00_env.sh"
+# Slurm runs a spooled copy of this script, so locate the repo via the submit dir (submit from the repo root).
+source "${SLURM_SUBMIT_DIR:?submit from the repo root}/v2/slurm/00_env.sh" || exit 1
 cd "$V2_ROOT/.." || exit 1
 FAMS=(m1 m2); CUTS=(1990 2000)
 i=$SLURM_ARRAY_TASK_ID; fam=${FAMS[$(( i % 2 ))]}; cut=${CUTS[$(( i / 2 ))]}

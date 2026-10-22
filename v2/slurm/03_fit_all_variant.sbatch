@@ -11,7 +11,8 @@
 # Cells: 4 models x 4 lags for the main sample (mid, PageRank). Run 04_pilot.sbatch FIRST to get the
 # per-iteration time on Roar hardware and adjust --time (or switch to --sampled_m=50, which cuts the
 # alternative rows ~5x and is consistent under uniform sampling; see README).
-source "$(dirname "$0")/00_env.sh"
+# Slurm runs a spooled copy of this script, so locate the repo via the submit dir (submit from the repo root).
+source "${SLURM_SUBMIT_DIR:?submit from the repo root}/v2/slurm/00_env.sh" || exit 1
 cd "$V2_ROOT/.." || exit 1
 LAGS=(1 3 5 10); MODELS=(M1a M1b M2a M2b)
 i=$SLURM_ARRAY_TASK_ID

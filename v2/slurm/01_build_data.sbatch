@@ -8,7 +8,8 @@
 #SBATCH --mem=24G
 #SBATCH --output=%x_%j.out
 # Builds every v2 data file (v2/data/*.rds + manifest.csv). ~3 min locally; 2 h is generous.
-source "$(dirname "$0")/00_env.sh"
+# Slurm runs a spooled copy of this script, so locate the repo via the submit dir (submit from the repo root).
+source "${SLURM_SUBMIT_DIR:?submit from the repo root}/v2/slurm/00_env.sh" || exit 1
 cd "$V2_ROOT/.." || exit 1
 Rscript v2/R/compile_models.R
 Rscript v2/R/01_build_data.R
