@@ -55,7 +55,7 @@ Cell naming: `<sample>_lag<h>_<variant>_<centrality>_<model>[_K<K>][_noCH][_samp
 * The "a" model fixes corr(a_i1, a_i2) = 0 but keeps corr(c, a1) and corr(c, a2), parameterised so Ω is always PD (r2 = q·√(1−r1²)).
 * AME: V column-centred (a column constant cancels in the softmax); the anchor block of U (K states with most initiations) is lower-triangular with positive diagonal; U/V scale is fixed by N(0,1) priors only. Procrustes alignment across chains in `03_extract.R` is a safety net and its rotation deviation is logged.
 * Priors: β ~ N(0, 1) per element (`prior_beta_sd` is data), σ_x ~ lognormal(0, 1), sd of random effects ~ half-N(0, 1), LKJ(2) on correlations, γ, α ~ N(0, 1), τ ~ N(0, 1), α0 ~ N(0, 2.5).
-* Sampled alternatives (`--sampled_m=m`): chosen target(s) plus m uniform draws; consistent for the conditional logit; IV uses the log(n_full/n_sub) correction (approximation, documented in the Stan file).
+* Full choice sets are the main specification and the default everywhere (`--sampled_m=0`). Sampled alternatives (`--sampled_m=m`) are an option with two outcome-separated samples. (a) IV rows, for every state-year, m alternatives drawn uniformly without replacement, ignoring outcomes, with IV = log-sum-exp + log(n_full/m); this estimate of the log partition sum is downward biased by Jensen's inequality, equally for initiating and non-initiating rows, and the bias shrinks with m. (b) Event rows, each event gets its own set of its chosen target plus m uniform others, independently per event, so the conditional-logit score is unbiased (McFadden 1978). Unit tests in `tests/testthat/test_sampled_alternatives.R` reproduce the review cases.
 * Seed 123 everywhere.
 
 ## Running on Roar

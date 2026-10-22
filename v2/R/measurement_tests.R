@@ -63,8 +63,17 @@ extract_draws <- function(fit, n_use = 100, seed = V2_SEED) {
   lapply(dr, function(a) if (is.null(dim(a))) a[idx] else if (length(dim(a)) == 2) a[idx, , drop = FALSE] else a[idx, , , drop = FALSE])
 }
 stage2_scores <- function(dat, draws) {
+  ## owner state-year of every row: IV rows first, then (if sampled) the per-event blocks
   alt_sy <- rep(seq_len(dat$N1), times = dat$cs_end - dat$cs_start + 1)
+  ev_block <- rep(0L, length(alt_sy))                       # 0 = IV row, e = row of event e's own set
+  if (dat$sampled == 1) {
+    alt_sy <- c(alt_sy, rep(dat$ev_sy, times = dat$ev_end - dat$ev_start + 1))
+    ev_block <- c(ev_block, rep(seq_len(dat$E), times = dat$ev_end - dat$ev_start + 1))
+  }
   stopifnot(length(alt_sy) == dat$N2)
+  ## group id for the softmax: state-year for IV rows, N1 + e for event blocks (full sets: the state-year)
+  grp <- ifelse(ev_block > 0L, dat$N1 + ev_block, alt_sy)
+  ev_grp <- if (dat$sampled == 1) dat$N1 + seq_len(dat$E) else dat$ev_sy
   n_d <- length(draws$rho); E <- dat$E
   p_sum <- numeric(E); rank_sum <- numeric(E)
   zg0 <- if (dat$Pz > 0) dat$Z else NULL
@@ -79,17 +88,18 @@ stage2_scores <- function(dat, draws) {
       U <- matrix(draws$U[d, , ], dat$S); V <- matrix(draws$V[d, , ], dat$S)
       util <- util + rowSums(U[dat$sy_state[alt_sy], , drop = FALSE] * V[dat$alt_target, , drop = FALSE])
     }
-    mx <- ave(util, alt_sy, FUN = max)
-    lse_g <- log(as.numeric(rowsum(exp(util - mx), alt_sy))) + as.numeric(tapply(mx, alt_sy, function(v) v[1]))
-    logp <- util - lse_g[alt_sy]
+    mx <- ave(util, grp, FUN = max)
+    lse_tab <- log(as.numeric(rowsum(exp(util - mx), grp))) + as.numeric(tapply(mx, grp, function(v) v[1]))
+    names(lse_tab) <- sort(unique(grp))
+    logp <- util - lse_tab[as.character(grp)]
     p_sum <- p_sum + exp(logp[dat$ev_row])
-    ## rank of the chosen target within its choice set (1 = best) for this draw
-    rk <- ave(-util, alt_sy, FUN = rank)
+    ## rank of the chosen target within its own choice set (1 = best) for this draw
+    rk <- ave(-util, grp, FUN = rank)
     rank_sum <- rank_sum + rk[dat$ev_row]
   }
   p <- p_sum / n_d
   data.frame(event = seq_len(E), p_chosen = p, log_p_chosen = log(p), mean_rank = rank_sum / n_d,
-             set_size = (dat$cs_end - dat$cs_start + 1)[dat$ev_sy],
+             set_size = dat$ev_end - dat$ev_start + 1,
              hit1 = (rank_sum / n_d) <= 1.5, hit5 = (rank_sum / n_d) <= 5.5)
 }
 

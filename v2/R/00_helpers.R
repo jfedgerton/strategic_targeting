@@ -88,11 +88,22 @@ build_stan_data <- function(sy, alts, ev, W_cols, X_cols, Z_cols, joint, sampled
                             n_full = NULL, x_ref = NULL, K = NULL, anchor = NULL,
                             prior_beta_sd = 1, allow_orphan_initiations = FALSE, S = NULL) {
   stopifnot(is.data.frame(sy), is.data.frame(alts), is.data.frame(ev))
-  stopifnot(all(diff(alts$sy_row) >= 0))                       # sorted by state-year
-  stopifnot(setequal(unique(alts$sy_row), seq_len(nrow(sy))))  # every state-year has a choice set
+  sampled <- as.integer(sampled)
+  if (sampled == 1) {
+    ## alts = IV rows (first n_iv, sorted by sy_row) followed by per-event blocks; ev carries ev_start/ev_end
+    stopifnot(all(c("ev_start", "ev_end") %in% names(ev)), !is.null(n_full))
+    n_iv <- min(ev$ev_start) - 1L
+    iv_rows <- seq_len(n_iv)
+    stopifnot(all(diff(alts$sy_row[iv_rows]) >= 0), all(ev$ev_start > n_iv), all(ev$ev_end <= nrow(alts)),
+              all(ev$alt_row >= ev$ev_start & ev$alt_row <= ev$ev_end))
+  } else {
+    n_iv <- nrow(alts); iv_rows <- seq_len(n_iv)
+    stopifnot(all(diff(alts$sy_row) >= 0))                     # sorted by state-year
+  }
+  stopifnot(setequal(unique(alts$sy_row[iv_rows]), seq_len(nrow(sy))))  # every state-year has an IV set
   stopifnot(all(sy$y1 %in% c(0L, 1L)))
   stopifnot(all(ev$sy_row %in% seq_len(nrow(sy))), all(ev$alt_row %in% seq_len(nrow(alts))))
-  stopifnot(all(alts$sy_row[ev$alt_row] == ev$sy_row))         # chosen target inside own set
+  stopifnot(all(alts$sy_row[ev$alt_row] == ev$sy_row))         # chosen target belongs to the event's state-year
   stopifnot(all(sy$y1[ev$sy_row] == 1L))                        # every event sits in an initiating state-year
   n_orphan <- sum(sy$y1[setdiff(seq_len(nrow(sy)), ev$sy_row)] == 1L)
   ## y1 == 1 without a stage-2 event happens in real data when the only target lacks positions;
@@ -100,11 +111,14 @@ build_stan_data <- function(sy, alts, ev, W_cols, X_cols, Z_cols, joint, sampled
   if (n_orphan > 0 && !allow_orphan_initiations) stop(n_orphan, " state-years have y1 = 1 but no event")
   S_data <- max(c(sy$state_idx, alts$target_idx))
   if (is.null(S)) S <- S_data else stopifnot(S >= S_data)   # override keeps one index space across subsets
-  cs <- alts |> mutate(row = row_number()) |> group_by(sy_row) |>
+  cs <- alts[iv_rows, , drop = FALSE] |> mutate(row = row_number()) |> group_by(sy_row) |>
     summarise(s = min(row), e = max(row), n = n(), .groups = "drop") |> arrange(sy_row)
   stopifnot(all(cs$e - cs$s + 1 == cs$n))
   if (is.null(n_full)) n_full <- cs$n
   stopifnot(length(n_full) == nrow(sy), all(n_full >= cs$n))
+  if (sampled == 1) { ev_start <- as.integer(ev$ev_start); ev_end <- as.integer(ev$ev_end) }
+  else { ev_start <- as.integer(cs$s[ev$sy_row]); ev_end <- as.integer(cs$e[ev$sy_row]) }
+  stopifnot(all(ev$alt_row >= ev_start & ev$alt_row <= ev_end))  # chosen target inside the event's own set
   if (is.null(x_ref)) x_ref <- colMeans(as.matrix(sy[, X_cols, drop = FALSE]))
   W <- as.matrix(sy[, W_cols, drop = FALSE]); X <- as.matrix(sy[, X_cols, drop = FALSE])
   Z <- as.matrix(alts[, Z_cols, drop = FALSE])
@@ -116,8 +130,8 @@ build_stan_data <- function(sy, alts, ev, W_cols, X_cols, Z_cols, joint, sampled
               W = W, X = X,
               cs_start = as.integer(cs$s), cs_end = as.integer(cs$e), n_full = as.integer(n_full),
               alt_target = as.integer(alts$target_idx), x = cbind(alts$dM, alts$dR), Z = Z,
-              ev_sy = as.integer(ev$sy_row), ev_row = as.integer(ev$alt_row),
-              joint = as.integer(joint), sampled = as.integer(sampled),
+              ev_sy = as.integer(ev$sy_row), ev_row = as.integer(ev$alt_row), ev_start = ev_start, ev_end = ev_end,
+              joint = as.integer(joint), sampled = sampled,
               x_ref = as.numeric(x_ref), prior_beta_sd = prior_beta_sd)
   dimnames(dat$W) <- NULL; dimnames(dat$X) <- NULL; dimnames(dat$Z) <- NULL
   if (!is.null(K)) {
@@ -138,23 +152,46 @@ choose_anchors <- function(sy, ev, K, S = max(sy$state_idx)) {
 }
 
 ## ---- sampled alternatives --------------------------------------------------------------
-## Keep the chosen target(s) of each state-year plus `m` uniformly sampled other alternatives.
-## Returns a new alts data frame (sorted by sy_row) and remapped ev$alt_row, plus n_full.
+## Two outcome-separated samples (fixes the Codex review items 3 and 4):
+##   IV rows    : for EVERY state-year, m alternatives drawn uniformly without replacement from
+##                its full set, ignoring outcomes (chosen targets are NOT forced in, so the IV
+##                estimate has the same distribution for initiating and non-initiating rows).
+##   event rows : EACH event gets its own set = its chosen target + m alternatives drawn
+##                uniformly from the remaining alternatives, independently per event (so two
+##                events of one state-year never share an outcome-dependent set).
+## Returns list(alts = IV rows then event rows (sorted), ev with alt_row / ev_start / ev_end into
+## the event block, n_full per state-year, n_iv = number of IV rows).
+## Full choice sets (m = 0 / sampled = 0) are the main specification; this is an option only.
 sample_alternatives <- function(alts, ev, m, seed = V2_SEED) {
+  stopifnot(m >= 1, all(diff(alts$sy_row) >= 0))
   set.seed(seed)
   alts <- alts |> mutate(.row = row_number())
-  chosen <- unique(ev$alt_row)
-  keep <- alts |> group_by(sy_row) |>
-    mutate(.chosen = .row %in% chosen,
-           .u = runif(n()),
-           .rank = rank(ifelse(.chosen, -Inf, .u), ties.method = "first")) |>
-    filter(.chosen | .rank <= m + sum(.chosen)) |>   # chosen plus m others
-    ungroup() |> arrange(sy_row, .row)
+  ## (i) IV rows: uniform m per state-year, outcome-blind
+  iv <- alts |> group_by(sy_row) |> mutate(.u = runif(n()), .rank = rank(.u, ties.method = "first")) |>
+    filter(.rank <= m) |> ungroup() |> arrange(sy_row, .row) |> select(-.u, -.rank)
   n_full <- alts |> count(sy_row) |> arrange(sy_row) |> pull(n)
-  map <- match(ev$alt_row, keep$.row)
-  stopifnot(!anyNA(map))
-  ev2 <- ev; ev2$alt_row <- map
-  list(alts = keep |> select(-.row, -.chosen, -.u, -.rank), ev = ev2, n_full = n_full)
+  stopifnot(length(n_full) == length(unique(alts$sy_row)))
+  ## (ii) event rows: per event, chosen + m others from the same state-year's full set
+  ev_blocks <- vector("list", nrow(ev))
+  for (e in seq_len(nrow(ev))) {
+    rows_n <- alts$.row[alts$sy_row == ev$sy_row[e]]
+    others <- setdiff(rows_n, ev$alt_row[e])
+    pick <- if (length(others) > m) sample(others, m) else others
+    blk <- alts[c(ev$alt_row[e], sort(pick)), , drop = FALSE]
+    blk$.event <- e
+    ev_blocks[[e]] <- blk
+  }
+  evrows <- bind_rows(ev_blocks)
+  n_iv <- nrow(iv)
+  out_alts <- bind_rows(iv |> mutate(.event = 0L), evrows)
+  ev2 <- ev
+  ev2$ev_start <- n_iv + match(seq_len(nrow(ev)), evrows$.event)                 # first row of each block (the chosen target)
+  ev2$ev_end   <- n_iv + nrow(evrows) + 1L - match(seq_len(nrow(ev)), rev(evrows$.event))
+  ev2$alt_row  <- ev2$ev_start                                                     # chosen target is the block's first row
+  stopifnot(all(out_alts$sy_row[ev2$alt_row] == ev2$sy_row),
+            all(out_alts$.row[ev2$alt_row] == alts$.row[ev$alt_row]),            # same chosen target as before
+            all(ev2$ev_end >= ev2$ev_start), all(ev2$ev_start > n_iv))
+  list(alts = out_alts |> select(-.row, -.event), ev = ev2, n_full = n_full, n_iv = n_iv)
 }
 
 ## ---- brute-force stage-2 likelihood in R (used by tests and the Fixed_param check) -----
@@ -165,17 +202,24 @@ stage2_loglik_R <- function(dat, pars) {
   util <- numeric(dat$N2); lse <- numeric(dat$N1)
   Sinv <- solve(matrix(c(pars$sigma_x[1]^2, pars$rho * prod(pars$sigma_x),
                          pars$rho * prod(pars$sigma_x), pars$sigma_x[2]^2), 2))
+  one_util <- function(r, n) {
+    d <- dat$x[r, ] - Mu[n, ]
+    u <- -0.5 * as.numeric(t(d) %*% Sinv %*% d) + pars$b_j[dat$alt_target[r]] + zg[r]
+    if (!is.null(pars$U)) u <- u + sum(pars$U[dat$sy_state[n], ] * pars$V[dat$alt_target[r], ])
+    u
+  }
   for (n in seq_len(dat$N1)) {
     rows <- dat$cs_start[n]:dat$cs_end[n]
-    for (r in rows) {
-      d <- dat$x[r, ] - Mu[n, ]
-      u <- -0.5 * as.numeric(t(d) %*% Sinv %*% d) + pars$b_j[dat$alt_target[r]] + zg[r]
-      if (!is.null(pars$U)) u <- u + sum(pars$U[dat$sy_state[n], ] * pars$V[dat$alt_target[r], ])
-      util[r] <- u
-    }
+    for (r in rows) util[r] <- one_util(r, n)
     lse[n] <- log(sum(exp(util[rows])))
   }
-  list(loglik = util[dat$ev_row] - lse[dat$ev_sy], lse = lse, util = util)
+  loglik <- numeric(dat$E)
+  for (e in seq_len(dat$E)) {
+    rows <- dat$ev_start[e]:dat$ev_end[e]
+    if (dat$sampled == 1) for (r in rows) util[r] <- one_util(r, dat$ev_sy[e])
+    loglik[e] <- util[dat$ev_row[e]] - log(sum(exp(util[rows])))
+  }
+  list(loglik = loglik, lse = lse, util = util)
 }
 
 ## ---- Procrustes alignment of U/V draws across chains ---------------------------------

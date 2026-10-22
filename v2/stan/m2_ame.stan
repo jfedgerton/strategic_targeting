@@ -54,7 +54,9 @@ data {
   matrix[N2, 2] x;
   matrix[N2, Pz] Z;
   array[E] int<lower=1, upper=N1> ev_sy;
-  array[E] int<lower=1, upper=N2> ev_row;
+  array[E] int<lower=1, upper=N2> ev_row;      // chosen alternative's row
+  array[E] int<lower=1, upper=N2> ev_start;    // the event's OWN choice-set rows
+  array[E] int<lower=1, upper=N2> ev_end;
   int<lower=0, upper=1> joint;
   int<lower=0, upper=1> sampled;
   vector[P] x_ref;
@@ -71,9 +73,13 @@ transformed data {
     if (sampled == 1) iv_corr[n] = log(n_full[n]) - log(cs_end[n] - cs_start[n] + 1);
   }
   for (e in 1:E) {
-    if (ev_row[e] < cs_start[ev_sy[e]] || ev_row[e] > cs_end[ev_sy[e]])
-      reject("event ", e, " chosen row outside its state-year choice set");
+    if (ev_row[e] < ev_start[e] || ev_row[e] > ev_end[e])
+      reject("event ", e, " chosen row outside its own choice set");
     if (y1[ev_sy[e]] != 1) reject("event ", e, " belongs to a state-year with y1 == 0");
+    if (sampled == 0 && (ev_start[e] != cs_start[ev_sy[e]] || ev_end[e] != cs_end[ev_sy[e]]))
+      reject("event ", e, ": with full choice sets the event set must be the state-year set");
+    if (sampled == 1 && ev_start[e] <= cs_end[N1])
+      reject("event ", e, ": sampled event rows must follow the state-year (IV) rows");
   }
   if (K > S - 1) reject("K must be <= S - 1");
   {
@@ -173,7 +179,14 @@ model {
       lse[n] = log_sum_exp(util[s:e]);
     }
     y1 ~ bernoulli_logit(alpha0 + W * alpha + c_i[sy_state] + tau * (lse + iv_corr));
-    for (ev in 1:E) target += util[ev_row[ev]] - lse[ev_sy[ev]];
+    for (ev in 1:E) {
+      int s = ev_start[ev];
+      int e = ev_end[ev];
+      if (sampled == 1)
+        util[s:e] = util_block(ev_sy[ev], s, e, x, Mu[ev_sy[ev]], sigma_x, rho, b_j, alt_target, zg,
+                               U[sy_state[ev_sy[ev]]], V);
+      target += util[ev_row[ev]] - log_sum_exp(util[s:e]);
+    }
   }
 }
 generated quantities {
@@ -199,7 +212,12 @@ generated quantities {
     vector[N1] eta1 = alpha0 + W * alpha + c_i[sy_state] + tau * (lse + iv_corr);
     for (n in 1:N1) log_lik_stage1[n] = bernoulli_logit_lpmf(y1[n] | eta1[n]);
     for (ev in 1:E) {
-      log_lik_stage2[ev] = util[ev_row[ev]] - lse[ev_sy[ev]];
+      int s = ev_start[ev];
+      int e = ev_end[ev];
+      if (sampled == 1)
+        util[s:e] = util_block(ev_sy[ev], s, e, x, Mu[ev_sy[ev]], sigma_x, rho, b_j, alt_target, zg,
+                               U[sy_state[ev_sy[ev]]], V);
+      log_lik_stage2[ev] = util[ev_row[ev]] - log_sum_exp(util[s:e]);
       mu_event[ev] = Mu[ev_sy[ev]];
     }
     for (s in 1:S) mu_state[s] = x_ref' * beta + a_i[s];
