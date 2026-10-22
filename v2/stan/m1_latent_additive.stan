@@ -84,6 +84,7 @@ data {
   // ---- flags and reference point
   int<lower=0, upper=1> joint;
   int<lower=0, upper=1> sampled;
+  int<lower=0, upper=1> prior_only;     // 1 = skip both likelihoods (prior checks)
   vector[P] x_ref;                      // reference X at which mu_state is reported
   real<lower=0> prior_beta_sd;
 }
@@ -122,15 +123,21 @@ parameters {
 transformed parameters {
   matrix[3, 3] L_Om;
   real rho;
+  real r_c_a1;                 // corr(c, a1), shared by the "a" and "b" models
+  real r_c_a2;                 // corr(c, a2)
   if (joint == 1) {
     L_Om = L_Om_joint[1];
     rho = rho_x[1];
+    r_c_a1 = L_Om[2, 1] * L_Om[1, 1];
+    r_c_a2 = L_Om[3, 1] * L_Om[1, 1];
   } else {
     real r1 = r_ca1[1];
-    real r2 = q_ca2[1] * sqrt(1 - r1 * r1);
+    real r2 = q_ca2[1] * sqrt(1 - r1 * r1);        // guarantees r1^2 + r2^2 < 1 (PD)
     matrix[3, 3] R_a = [[1, r1, r2], [r1, 1, 0], [r2, 0, 1]];
     L_Om = cholesky_decompose(R_a);
     rho = 0;
+    r_c_a1 = r1;
+    r_c_a2 = r2;
   }
   matrix[S, 3] re = (diag_pre_multiply(sd_re, L_Om) * z_re)';
   vector[S] c_i = col(re, 1);
@@ -145,8 +152,17 @@ model {
   to_vector(beta) ~ normal(0, prior_beta_sd);
   sigma_x ~ lognormal(0, 1);
   sd_re ~ normal(0, 1);
-  if (joint == 1) L_Om_joint[1] ~ lkj_corr_cholesky(2);
-  // r_ca1, q_ca2: implicit uniform(-1, 1)
+  if (joint == 1) {
+    L_Om_joint[1] ~ lkj_corr_cholesky(2);
+  } else {
+    // Same marginal prior on the shared correlations as LKJ(2) implies for a 3x3 matrix:
+    // (r + 1) / 2 ~ Beta(2.5, 2.5), i.e. Var(r) = 1/6, applied symmetrically to corr(c, a1)
+    // and corr(c, a2), with corr(a1, a2) = 0 and PD enforced through r2 = q sqrt(1 - r1^2)
+    // (Jacobian 0.5 * log(1 - r1^2)). So "a" differs from "b" only by the cross-dimensional
+    // restrictions (Sigma off-diagonal and corr(a1, a2)), not by the priors they share.
+    target += beta_lpdf((r_c_a1 + 1) / 2 | 2.5, 2.5) + beta_lpdf((r_c_a2 + 1) / 2 | 2.5, 2.5);
+    target += 0.5 * log1m(square(r_c_a1));
+  }
   to_vector(z_re) ~ std_normal();
   sigma_b ~ normal(0, 1);
   z_b ~ std_normal();
@@ -164,13 +180,13 @@ model {
       util[s:e] = util_block(n, s, e, x, Mu[n], sigma_x, rho, b_j, alt_target, zg);
       lse[n] = log_sum_exp(util[s:e]);
     }
-    y1 ~ bernoulli_logit(alpha0 + W * alpha + c_i[sy_state] + tau * (lse + iv_corr));
+    if (prior_only == 0) y1 ~ bernoulli_logit(alpha0 + W * alpha + c_i[sy_state] + tau * (lse + iv_corr));
     for (ev in 1:E) {
       int s = ev_start[ev];
       int e = ev_end[ev];
       if (sampled == 1)   // event rows are separate from the IV rows: compute their utilities
         util[s:e] = util_block(ev_sy[ev], s, e, x, Mu[ev_sy[ev]], sigma_x, rho, b_j, alt_target, zg);
-      target += util[ev_row[ev]] - log_sum_exp(util[s:e]);
+      if (prior_only == 0) target += util[ev_row[ev]] - log_sum_exp(util[s:e]);
     }
   }
 }

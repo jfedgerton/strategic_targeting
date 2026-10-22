@@ -86,7 +86,7 @@ assert_matches_manifest <- function(path, manifest_path) {
 ## alts must be sorted by sy_row; every sy row must own >= 1 alternative.
 build_stan_data <- function(sy, alts, ev, W_cols, X_cols, Z_cols, joint, sampled = 0L,
                             n_full = NULL, x_ref = NULL, K = NULL, anchor = NULL,
-                            prior_beta_sd = 1, allow_orphan_initiations = FALSE, S = NULL) {
+                            prior_beta_sd = 1, allow_orphan_initiations = FALSE, S = NULL, prior_only = 0L) {
   stopifnot(is.data.frame(sy), is.data.frame(alts), is.data.frame(ev))
   sampled <- as.integer(sampled)
   if (sampled == 1) {
@@ -132,7 +132,7 @@ build_stan_data <- function(sy, alts, ev, W_cols, X_cols, Z_cols, joint, sampled
               alt_target = as.integer(alts$target_idx), x = cbind(alts$dM, alts$dR), Z = Z,
               ev_sy = as.integer(ev$sy_row), ev_row = as.integer(ev$alt_row), ev_start = ev_start, ev_end = ev_end,
               joint = as.integer(joint), sampled = sampled,
-              x_ref = as.numeric(x_ref), prior_beta_sd = prior_beta_sd)
+              x_ref = as.numeric(x_ref), prior_beta_sd = prior_beta_sd, prior_only = as.integer(prior_only))
   dimnames(dat$W) <- NULL; dimnames(dat$X) <- NULL; dimnames(dat$Z) <- NULL
   if (!is.null(K)) {
     stopifnot(K >= 1, K <= S - 1)
