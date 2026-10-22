@@ -1,0 +1,7 @@
+v2/stan/build/
+v2/data/
+v2/logs/
+v2/sim/fits/
+*.rds
+*.Rout
+.Rhistory

@@ -1,0 +1,211 @@
+// ============================================================================
+// m2_ame.stan  -- v2 strategic targeting, model family M2 (bespoke AME)
+//
+// Identical to m1_latent_additive.stan plus a multiplicative initiator x target
+// term u_i' v_j with K latent dimensions in the stage-2 utility:
+//
+//   U[r] = -1/2 (x[r] - mu[n])' Sigma^{-1} (x[r] - mu[n]) + b_j + Z[r] gamma + u_i' v_j
+//
+// U and V are transformed parameters and are saved; u_i'v_j is recomputed in R
+// (an S x S generated quantity would be too large for real-data S).
+// Identification of U (S x K) and V (S x K):
+//   * V is column-centred (a column constant in V adds u_i' c, constant across
+//     alternatives for a given initiator, so it cancels in the softmax).
+//   * The K rows of U belonging to the `anchor` states form a lower-triangular
+//     block with a positive diagonal (fixes rotation and reflection). Anchors must
+//     be supplied by the data: v2 uses the K states with the MOST initiations in
+//     the estimation sample (audit F6: the old code anchored on whichever ccodes
+//     sorted first as strings). Non-anchor rows of U are free.
+//   * Scale between U and V (u_k -> c u_k, v_k -> v_k / c) is fixed only by the
+//     N(0,1) priors on both; this is standard for AME-type models.
+//   * Post-hoc: 03_extract.R applies an orthogonal Procrustes alignment of each
+//     chain's U/V draws to a reference chain before pooling (safety net; with the
+//     anchor block the rotation should already be identified).
+// K must be >= 1 and <= S - 1. Works for K = 1, 2, 3.
+// ============================================================================
+functions {
+  vector util_block(int n, int s, int e, matrix x, row_vector mu_n, vector sigma_x,
+                    real rho, vector b_j, array[] int alt_target, vector zg,
+                    row_vector u_i, matrix V) {
+    int L = e - s + 1;
+    vector[L] d1 = (segment(col(x, 1), s, L) - mu_n[1]) / sigma_x[1];
+    vector[L] d2 = (segment(col(x, 2), s, L) - mu_n[2]) / sigma_x[2];
+    vector[L] q = (d1 .* d1 - 2 * rho * (d1 .* d2) + d2 .* d2) / (1 - rho * rho);
+    array[L] int tg = segment(alt_target, s, L);
+    return -0.5 * q + b_j[tg] + segment(zg, s, L) + V[tg] * u_i';
+  }
+}
+data {
+  int<lower=1> S;
+  int<lower=1> N1;
+  int<lower=1> N2;
+  int<lower=1> E;
+  int<lower=0> P1;
+  int<lower=1> P;
+  int<lower=0> Pz;
+  array[N1] int<lower=0, upper=1> y1;
+  array[N1] int<lower=1, upper=S> sy_state;
+  matrix[N1, P1] W;
+  matrix[N1, P] X;
+  array[N1] int<lower=1, upper=N2> cs_start;
+  array[N1] int<lower=1, upper=N2> cs_end;
+  array[N1] int<lower=1> n_full;
+  array[N2] int<lower=1, upper=S> alt_target;
+  matrix[N2, 2] x;
+  matrix[N2, Pz] Z;
+  array[E] int<lower=1, upper=N1> ev_sy;
+  array[E] int<lower=1, upper=N2> ev_row;
+  int<lower=0, upper=1> joint;
+  int<lower=0, upper=1> sampled;
+  vector[P] x_ref;
+  real<lower=0> prior_beta_sd;
+  // ---- AME
+  int<lower=1> K;
+  array[K] int<lower=1, upper=S> anchor;   // distinct state indices
+}
+transformed data {
+  vector[N1] iv_corr = rep_vector(0, N1);
+  array[S - K] int nonanchor;              // state indices that are not anchors
+  for (n in 1:N1) {
+    if (cs_end[n] < cs_start[n]) reject("empty choice set for state-year ", n);
+    if (sampled == 1) iv_corr[n] = log(n_full[n]) - log(cs_end[n] - cs_start[n] + 1);
+  }
+  for (e in 1:E) {
+    if (ev_row[e] < cs_start[ev_sy[e]] || ev_row[e] > cs_end[ev_sy[e]])
+      reject("event ", e, " chosen row outside its state-year choice set");
+    if (y1[ev_sy[e]] != 1) reject("event ", e, " belongs to a state-year with y1 == 0");
+  }
+  if (K > S - 1) reject("K must be <= S - 1");
+  {
+    int idx = 1;
+    for (s in 1:S) {
+      int is_anchor = 0;
+      for (k in 1:K) if (anchor[k] == s) is_anchor += 1;
+      if (is_anchor > 1) reject("duplicate anchor state ", s);
+      if (is_anchor == 0) {
+        nonanchor[idx] = s;
+        idx += 1;
+      }
+    }
+    if (idx != S - K + 1) reject("anchor bookkeeping failed");
+  }
+}
+parameters {
+  real alpha0;
+  vector[P1] alpha;
+  real tau;
+  matrix[P, 2] beta;
+  vector<lower=0>[2] sigma_x;
+  array[joint] real<lower=-1, upper=1> rho_x;
+  vector<lower=0>[3] sd_re;
+  array[joint] cholesky_factor_corr[3] L_Om_joint;
+  array[1 - joint] real<lower=-1, upper=1> r_ca1;
+  array[1 - joint] real<lower=-1, upper=1> q_ca2;
+  matrix[3, S] z_re;
+  real<lower=0> sigma_b;
+  vector[S] z_b;
+  vector[Pz] gamma;
+  // ---- AME
+  vector<lower=0>[K] u_diag;               // positive diagonal of the anchor block
+  vector[K * (K - 1) / 2] u_lower;         // strictly lower-triangular anchor entries
+  matrix[S - K, K] U_free;                 // rows for non-anchor states
+  matrix[S, K] V_raw;
+}
+transformed parameters {
+  matrix[3, 3] L_Om;
+  real rho;
+  if (joint == 1) {
+    L_Om = L_Om_joint[1];
+    rho = rho_x[1];
+  } else {
+    real r1 = r_ca1[1];
+    real r2 = q_ca2[1] * sqrt(1 - r1 * r1);
+    matrix[3, 3] R_a = [[1, r1, r2], [r1, 1, 0], [r2, 0, 1]];
+    L_Om = cholesky_decompose(R_a);
+    rho = 0;
+  }
+  matrix[S, 3] re = (diag_pre_multiply(sd_re, L_Om) * z_re)';
+  vector[S] c_i = col(re, 1);
+  matrix[S, 2] a_i = re[, 2:3];
+  vector[S] b_j = sigma_b * (z_b - mean(z_b));
+  // ---- assemble U with the anchor block lower-triangular, positive diagonal
+  matrix[S, K] U;
+  matrix[S, K] V;
+  {
+    int idx = 1;
+    for (k in 1:K) {
+      for (l in 1:K) {
+        if (l == k) U[anchor[k], l] = u_diag[k];
+        else if (l < k) { U[anchor[k], l] = u_lower[idx]; idx += 1; }
+        else U[anchor[k], l] = 0;
+      }
+    }
+    if (S > K) U[nonanchor] = U_free;
+    for (k in 1:K) V[, k] = V_raw[, k] - mean(V_raw[, k]);
+  }
+}
+model {
+  alpha0 ~ normal(0, 2.5);
+  alpha ~ normal(0, 1);
+  tau ~ normal(0, 1);
+  to_vector(beta) ~ normal(0, prior_beta_sd);
+  sigma_x ~ lognormal(0, 1);
+  sd_re ~ normal(0, 1);
+  if (joint == 1) L_Om_joint[1] ~ lkj_corr_cholesky(2);
+  to_vector(z_re) ~ std_normal();
+  sigma_b ~ normal(0, 1);
+  z_b ~ std_normal();
+  gamma ~ normal(0, 1);
+  u_diag ~ normal(0, 1);
+  u_lower ~ normal(0, 1);
+  to_vector(U_free) ~ normal(0, 1);
+  to_vector(V_raw) ~ normal(0, 1);
+  {
+    matrix[N1, 2] Mu = X * beta + a_i[sy_state];
+    vector[N2] zg = (Pz > 0) ? Z * gamma : rep_vector(0, N2);
+    vector[N2] util;
+    vector[N1] lse;
+    for (n in 1:N1) {
+      int s = cs_start[n];
+      int e = cs_end[n];
+      util[s:e] = util_block(n, s, e, x, Mu[n], sigma_x, rho, b_j, alt_target, zg,
+                             U[sy_state[n]], V);
+      lse[n] = log_sum_exp(util[s:e]);
+    }
+    y1 ~ bernoulli_logit(alpha0 + W * alpha + c_i[sy_state] + tau * (lse + iv_corr));
+    for (ev in 1:E) target += util[ev_row[ev]] - lse[ev_sy[ev]];
+  }
+}
+generated quantities {
+  vector[E] log_lik_stage2;
+  vector[N1] log_lik_stage1;
+  matrix[S, 2] mu_state;
+  matrix[E, 2] mu_event;
+  matrix[2, 2] Sigma;
+  matrix[3, 3] Omega;
+  corr_matrix[3] R_Om;
+  {
+    matrix[N1, 2] Mu = X * beta + a_i[sy_state];
+    vector[N2] zg = (Pz > 0) ? Z * gamma : rep_vector(0, N2);
+    vector[N2] util;
+    vector[N1] lse;
+    for (n in 1:N1) {
+      int s = cs_start[n];
+      int e = cs_end[n];
+      util[s:e] = util_block(n, s, e, x, Mu[n], sigma_x, rho, b_j, alt_target, zg,
+                             U[sy_state[n]], V);
+      lse[n] = log_sum_exp(util[s:e]);
+    }
+    vector[N1] eta1 = alpha0 + W * alpha + c_i[sy_state] + tau * (lse + iv_corr);
+    for (n in 1:N1) log_lik_stage1[n] = bernoulli_logit_lpmf(y1[n] | eta1[n]);
+    for (ev in 1:E) {
+      log_lik_stage2[ev] = util[ev_row[ev]] - lse[ev_sy[ev]];
+      mu_event[ev] = Mu[ev_sy[ev]];
+    }
+    for (s in 1:S) mu_state[s] = x_ref' * beta + a_i[s];
+    Sigma = [[sigma_x[1]^2, rho * sigma_x[1] * sigma_x[2]],
+             [rho * sigma_x[1] * sigma_x[2], sigma_x[2]^2]];
+    R_Om = multiply_lower_tri_self_transpose(L_Om);
+    Omega = quad_form_diag(R_Om, sd_re);
+  }
+}

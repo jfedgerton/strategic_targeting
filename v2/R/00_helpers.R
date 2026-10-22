@@ -1,0 +1,197 @@
+## ============================================================================
+## 00_helpers.R -- small shared helpers for the v2 pipeline
+## Sourced by every script. Keep this file small and concrete.
+## ============================================================================
+suppressPackageStartupMessages({
+  library(dplyr)
+  library(tidyr)
+})
+
+V2_SEED <- 123L
+
+## ---- paths -----------------------------------------------------------------
+v2_root <- function() {
+  root <- Sys.getenv("V2_ROOT", unset = "")
+  if (root == "") {
+    ## fall back: directory that contains this file's parent (v2/)
+    args <- commandArgs(trailingOnly = FALSE)
+    fa <- sub("^--file=", "", args[grepl("^--file=", args)])
+    if (length(fa) == 1) root <- normalizePath(file.path(dirname(fa), ".."))
+    else root <- normalizePath("v2", mustWork = FALSE)
+  }
+  root
+}
+
+## ---- logging -----------------------------------------------------------------
+.v2_log_file <- NULL
+log_open <- function(name) {
+  dir.create(file.path(v2_root(), "logs"), showWarnings = FALSE, recursive = TRUE)
+  .v2_log_file <<- file.path(v2_root(), "logs",
+                             paste0(name, "_", format(Sys.time(), "%Y%m%d_%H%M%S"), ".log"))
+  cat("", file = .v2_log_file)
+  logf("log opened: %s", .v2_log_file)
+  invisible(.v2_log_file)
+}
+logf <- function(fmt, ...) {
+  msg <- sprintf(paste0("[", format(Sys.time(), "%H:%M:%S"), "] ", fmt), ...)
+  cat(msg, "\n", sep = "")
+  if (!is.null(.v2_log_file)) cat(msg, "\n", sep = "", file = .v2_log_file, append = TRUE)
+  invisible(msg)
+}
+
+## ---- assertions ------------------------------------------------------------------
+assert_no_dup_keys <- function(df, keys, what = "data") {
+  n_dup <- nrow(df) - nrow(distinct(df[, keys, drop = FALSE]))
+  if (n_dup != 0) stop(sprintf("%s: %d duplicate rows on keys (%s)", what, n_dup, paste(keys, collapse = ", ")))
+  invisible(TRUE)
+}
+assert_no_na <- function(df, cols, what = "data") {
+  bad <- cols[vapply(cols, function(cc) anyNA(df[[cc]]), logical(1))]
+  if (length(bad) > 0) stop(sprintf("%s: NA present in model columns: %s", what, paste(bad, collapse = ", ")))
+  invisible(TRUE)
+}
+assert_standardized <- function(df, col, by = "year", tol = 1e-6, what = "data") {
+  chk <- df |> group_by(across(all_of(by))) |>
+    summarise(m = mean(.data[[col]]), s = sd(.data[[col]]), n = n(), .groups = "drop") |>
+    filter(n > 1)
+  if (any(abs(chk$m) > tol) || any(abs(chk$s - 1) > 1e-3))
+    stop(sprintf("%s: %s is not standardized within %s (max |mean| = %.2e, sd range [%.4f, %.4f])",
+                 what, col, by, max(abs(chk$m)), min(chk$s), max(chk$s)))
+  invisible(TRUE)
+}
+
+## ---- manifest / digests ------------------------------------------------------------
+file_digest <- function(path) digest::digest(path, algo = "sha256", file = TRUE)
+write_manifest <- function(entries, path) {
+  ## entries: list of data.frames with file, nrow, ncol, sha256, note
+  man <- bind_rows(entries) |> mutate(built = format(Sys.time(), "%Y-%m-%d %H:%M:%S"))
+  write.csv(man, path, row.names = FALSE)
+  invisible(man)
+}
+assert_matches_manifest <- function(path, manifest_path) {
+  man <- read.csv(manifest_path, stringsAsFactors = FALSE)
+  row <- man[man$file == basename(path), , drop = FALSE]
+  if (nrow(row) != 1) stop("file not in manifest: ", basename(path))
+  obj <- readRDS(path)
+  if (nrow(obj) != row$nrow) stop(sprintf("%s: nrow %d != manifest %d", basename(path), nrow(obj), row$nrow))
+  if (file_digest(path) != row$sha256) stop(sprintf("%s: sha256 digest does not match manifest", basename(path)))
+  obj
+}
+
+## ---- Stan data assembly ----------------------------------------------------------------
+## Builds the Stan data list from three data frames:
+##   sy:   state-years, one row per (state_idx, year); columns y1, state_idx, W cols, X cols
+##   alts: alternative rows, one row per (sy_row, target_idx); columns sy_row, target_idx, dM, dR, Z cols
+##   ev:   events, columns sy_row, alt_row (index into alts after ordering by sy_row)
+## alts must be sorted by sy_row; every sy row must own >= 1 alternative.
+build_stan_data <- function(sy, alts, ev, W_cols, X_cols, Z_cols, joint, sampled = 0L,
+                            n_full = NULL, x_ref = NULL, K = NULL, anchor = NULL,
+                            prior_beta_sd = 1) {
+  stopifnot(is.data.frame(sy), is.data.frame(alts), is.data.frame(ev))
+  stopifnot(all(diff(alts$sy_row) >= 0))                       # sorted by state-year
+  stopifnot(setequal(unique(alts$sy_row), seq_len(nrow(sy))))  # every state-year has a choice set
+  stopifnot(all(sy$y1 %in% c(0L, 1L)))
+  stopifnot(all(ev$sy_row %in% seq_len(nrow(sy))), all(ev$alt_row %in% seq_len(nrow(alts))))
+  stopifnot(all(alts$sy_row[ev$alt_row] == ev$sy_row))         # chosen target inside own set
+  stopifnot(all(sy$y1[ev$sy_row] == 1L))
+  stopifnot(all(sy$y1[setdiff(seq_len(nrow(sy)), ev$sy_row)] == 0L))  # y1 == 1 iff >= 1 event
+  S <- max(c(sy$state_idx, alts$target_idx))
+  cs <- alts |> mutate(row = row_number()) |> group_by(sy_row) |>
+    summarise(s = min(row), e = max(row), n = n(), .groups = "drop") |> arrange(sy_row)
+  stopifnot(all(cs$e - cs$s + 1 == cs$n))
+  if (is.null(n_full)) n_full <- cs$n
+  stopifnot(length(n_full) == nrow(sy), all(n_full >= cs$n))
+  if (is.null(x_ref)) x_ref <- colMeans(as.matrix(sy[, X_cols, drop = FALSE]))
+  W <- as.matrix(sy[, W_cols, drop = FALSE]); X <- as.matrix(sy[, X_cols, drop = FALSE])
+  Z <- as.matrix(alts[, Z_cols, drop = FALSE])
+  assert_no_na(sy, c("y1", "state_idx", W_cols, X_cols), "stage-1 panel")
+  assert_no_na(alts, c("sy_row", "target_idx", "dM", "dR", Z_cols), "alternatives")
+  dat <- list(S = S, N1 = nrow(sy), N2 = nrow(alts), E = nrow(ev),
+              P1 = ncol(W), P = ncol(X), Pz = ncol(Z),
+              y1 = as.integer(sy$y1), sy_state = as.integer(sy$state_idx),
+              W = W, X = X,
+              cs_start = as.integer(cs$s), cs_end = as.integer(cs$e), n_full = as.integer(n_full),
+              alt_target = as.integer(alts$target_idx), x = cbind(alts$dM, alts$dR), Z = Z,
+              ev_sy = as.integer(ev$sy_row), ev_row = as.integer(ev$alt_row),
+              joint = as.integer(joint), sampled = as.integer(sampled),
+              x_ref = as.numeric(x_ref), prior_beta_sd = prior_beta_sd)
+  dimnames(dat$W) <- NULL; dimnames(dat$X) <- NULL; dimnames(dat$Z) <- NULL
+  if (!is.null(K)) {
+    stopifnot(K >= 1, K <= S - 1)
+    if (is.null(anchor)) anchor <- choose_anchors(sy, ev, K)
+    stopifnot(length(anchor) == K, !anyDuplicated(anchor), all(anchor %in% seq_len(S)))
+    dat$K <- as.integer(K); dat$anchor <- as.integer(anchor)
+  }
+  dat
+}
+
+## Anchor states for AME identification: the K states with the most initiation events.
+## Ties broken by state index (deterministic). NOT string-sorted ccodes (audit F6).
+choose_anchors <- function(sy, ev, K) {
+  cnt <- tabulate(sy$state_idx[ev$sy_row], nbins = max(sy$state_idx))
+  ord <- order(-cnt, seq_along(cnt))
+  ord[seq_len(K)]
+}
+
+## ---- sampled alternatives --------------------------------------------------------------
+## Keep the chosen target(s) of each state-year plus `m` uniformly sampled other alternatives.
+## Returns a new alts data frame (sorted by sy_row) and remapped ev$alt_row, plus n_full.
+sample_alternatives <- function(alts, ev, m, seed = V2_SEED) {
+  set.seed(seed)
+  alts <- alts |> mutate(.row = row_number())
+  chosen <- unique(ev$alt_row)
+  keep <- alts |> group_by(sy_row) |>
+    mutate(.chosen = .row %in% chosen,
+           .u = runif(n()),
+           .rank = rank(ifelse(.chosen, -Inf, .u), ties.method = "first")) |>
+    filter(.chosen | .rank <= m + sum(.chosen)) |>   # chosen plus m others
+    ungroup() |> arrange(sy_row, .row)
+  n_full <- alts |> count(sy_row) |> arrange(sy_row) |> pull(n)
+  map <- match(ev$alt_row, keep$.row)
+  stopifnot(!anyNA(map))
+  ev2 <- ev; ev2$alt_row <- map
+  list(alts = keep |> select(-.row, -.chosen, -.u, -.rank), ev = ev2, n_full = n_full)
+}
+
+## ---- brute-force stage-2 likelihood in R (used by tests and the Fixed_param check) -----
+## pars: list(beta (P x 2), a_i (S x 2), b_j (S), gamma (Pz), sigma_x (2), rho, U (S x K) or NULL, V)
+stage2_loglik_R <- function(dat, pars) {
+  Mu <- dat$X %*% pars$beta + pars$a_i[dat$sy_state, , drop = FALSE]
+  zg <- if (dat$Pz > 0) as.numeric(dat$Z %*% pars$gamma) else rep(0, dat$N2)
+  util <- numeric(dat$N2); lse <- numeric(dat$N1)
+  Sinv <- solve(matrix(c(pars$sigma_x[1]^2, pars$rho * prod(pars$sigma_x),
+                         pars$rho * prod(pars$sigma_x), pars$sigma_x[2]^2), 2))
+  for (n in seq_len(dat$N1)) {
+    rows <- dat$cs_start[n]:dat$cs_end[n]
+    for (r in rows) {
+      d <- dat$x[r, ] - Mu[n, ]
+      u <- -0.5 * as.numeric(t(d) %*% Sinv %*% d) + pars$b_j[dat$alt_target[r]] + zg[r]
+      if (!is.null(pars$U)) u <- u + sum(pars$U[dat$sy_state[n], ] * pars$V[dat$alt_target[r], ])
+      util[r] <- u
+    }
+    lse[n] <- log(sum(exp(util[rows])))
+  }
+  list(loglik = util[dat$ev_row] - lse[dat$ev_sy], lse = lse, util = util)
+}
+
+## ---- Procrustes alignment of U/V draws across chains ---------------------------------
+## U_draws: array [iter, chain, S, K]. Rotates each chain's draws (U R, V R) to align the
+## chain-mean U with the reference chain's mean U via orthogonal Procrustes (R = W V' from
+## the SVD of U_c' U_ref). u_i'v_j is invariant to R, so the likelihood is unchanged.
+procrustes_align <- function(U_draws, V_draws, ref_chain = 1) {
+  stopifnot(length(dim(U_draws)) == 4, all(dim(U_draws) == dim(V_draws)))
+  n_iter <- dim(U_draws)[1]; n_chain <- dim(U_draws)[2]; K <- dim(U_draws)[4]
+  U_ref <- apply(U_draws[, ref_chain, , , drop = FALSE], c(3, 4), mean)
+  rotations <- vector("list", n_chain)
+  for (ch in seq_len(n_chain)) {
+    U_c <- apply(U_draws[, ch, , , drop = FALSE], c(3, 4), mean)
+    sv <- svd(t(U_c) %*% U_ref)
+    R <- sv$u %*% t(sv$v)                       # K x K orthogonal
+    rotations[[ch]] <- R
+    for (it in seq_len(n_iter)) {
+      U_draws[it, ch, , ] <- matrix(U_draws[it, ch, , ], ncol = K) %*% R
+      V_draws[it, ch, , ] <- matrix(V_draws[it, ch, , ], ncol = K) %*% R
+    }
+  }
+  list(U = U_draws, V = V_draws, rotations = rotations)
+}
