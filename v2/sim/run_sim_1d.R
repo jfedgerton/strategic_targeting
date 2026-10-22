@@ -42,8 +42,9 @@ for (nm in names(specs)) {
   add("tau", post$tau, tr$tau)
   D <- if (sp$D_mode == 3L) 2L else 1L
   if (D == 1L) {
-    for (p in 1:4) add(sprintf("beta[%d,1]", p), post$beta[, p], if (sp$D_mode == 1L) tr$beta[p, 1] else NA)
-    add("Sigma[1,1]", post$Sigma, if (sp$D_mode == 1L) tr$sigma_x[1]^2 else NA)
+    b1 <- matrix(post$beta, nrow = dim(post$beta)[1])          # rstan keeps a [draws, P, 1] array for matrix[P, 1]
+    for (p in 1:4) add(sprintf("beta[%d,1]", p), b1[, p], if (sp$D_mode == 1L) tr$beta[p, 1] else NA)
+    add("Sigma[1,1]", as.numeric(post$Sigma), if (sp$D_mode == 1L) tr$sigma_x[1]^2 else NA)
     add("Omega[1,1] (c)", post$Omega[, 1, 1], tr$Omega[1, 1]); add("Omega[2,2] (a)", post$Omega[, 2, 2], if (sp$D_mode == 1L) tr$Omega[2, 2] else NA)
     add("Omega[1,2] (c,a)", post$Omega[, 1, 2], if (sp$D_mode == 1L) tr$Omega[1, 2] else NA)
   } else {

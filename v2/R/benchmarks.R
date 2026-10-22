@@ -20,8 +20,11 @@
 ## ============================================================================
 suppressPackageStartupMessages({ library(brms); library(dplyr) })
 this_file <- sub("^--file=", "", grep("^--file=", commandArgs(FALSE), value = TRUE))
-source(file.path(dirname(this_file), "00_helpers.R"))
-Sys.setenv(V2_ROOT = normalizePath(file.path(dirname(this_file), "..")))
+## when sourced from another script (v2/sim/run_measurement_tests.R) the helpers are already loaded
+if (!exists("build_stan_data")) {
+  source(file.path(dirname(this_file), "00_helpers.R"))
+  Sys.setenv(V2_ROOT = normalizePath(file.path(dirname(this_file), "..")))
+}
 
 ## ---- assembly functions (also used by the sim test) -------------------------------------------------
 ## alts: alternative rows with dM, dR, Z columns, ccode1/ccode2/year (or state_idx/target_idx/year);

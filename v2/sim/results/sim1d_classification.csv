@@ -1,0 +1,4 @@
+"model","axis","accuracy_3level","mean_abs_err_mu"
+"M1m","material",0.933333333333333,0.267523021400341
+"M1r","relational",NA,NA
+"M1b","both",0.6,0.310815750276898
