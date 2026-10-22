@@ -1,7 +1,9 @@
 ## ============================================================================
 ## run_sim.R -- fit M1a, M1b, M2a, M2b (K = 2) to data simulated from M1b and M2b
 ##
-## Usage: Rscript v2/sim/run_sim.R [chains] [iter] [warmup]
+## Usage: Rscript v2/sim/run_sim.R [chains] [iter] [warmup] [only]
+##   only = comma-separated "truth:model" cells to (re)fit, e.g. "M1b:M1a,M2b:M2b"; cells not listed
+##   reuse their saved fit in v2/sim/fits/ when present (results are recomputed from it) and are skipped otherwise.
 ## Defaults are sized for a 2-core / 8 GB container: chains = 2, iter = 700, warmup = 350.
 ## On Roar use chains = 4, iter = 2000, warmup = 1000.
 ## Writes: v2/sim/fits/<truth>_<model>.rds (gitignored), v2/sim/results/*.csv
@@ -46,19 +48,27 @@ for (truth_family in c("M1b", "M2b")) {
   for (k in seq_len(nrow(specs))) {
     sp <- specs[k, ]
     tag <- paste0(truth_family, ":", sp$model)
-    if (!is.null(ONLY) && !(tag %in% ONLY)) next
+    fit_path <- file.path(sim_dir, "fits", paste0(truth_family, "_", sp$model, ".rds"))
     dat <- build_stan_data(sim$sy, sim$alts, sim$ev, W_cols, X_cols, Z_cols, joint = sp$joint,
                            x_ref = rep(0, 4), K = if (sp$family == "m2") 2L else NULL)
-    logf("fitting %s on %s data (chains=%d iter=%d warmup=%d)", sp$model, truth_family, CHAINS, ITER, WARMUP)
-    t0 <- Sys.time()
-    fit <- sampling(models[[sp$family]], data = dat, chains = CHAINS, iter = ITER, warmup = WARMUP,
-                    seed = V2_SEED, refresh = max(1L, ITER %/% 10L),
-                    control = list(adapt_delta = 0.9, max_treedepth = 10),
-                    pars = c("z_re", "z_b", "V_raw", "U_free", "L_Om_joint", "L_Om", "re"), include = FALSE)
-    el <- as.numeric(difftime(Sys.time(), t0, units = "mins"))
-    logf("  done in %.1f min", el)
-    saveRDS(list(fit = fit, dat = dat, spec = sp, truth_family = truth_family, elapsed_min = el),
-            file.path(sim_dir, "fits", paste0(truth_family, "_", sp$model, ".rds")))
+    reused <- FALSE
+    if (!is.null(ONLY) && !(tag %in% ONLY)) {
+      ## not selected for (re)fitting: reuse the saved fit if one exists (its results are recomputed below)
+      if (!file.exists(fit_path)) next
+      saved <- readRDS(fit_path); fit <- saved$fit; el <- saved$elapsed_min; reused <- TRUE
+      logf("reusing saved fit %s (%s)", tag, format(file.mtime(fit_path), "%Y-%m-%d %H:%M"))
+    } else {
+      logf("fitting %s on %s data (chains=%d iter=%d warmup=%d)", sp$model, truth_family, CHAINS, ITER, WARMUP)
+      t0 <- Sys.time()
+      fit <- sampling(models[[sp$family]], data = dat, chains = CHAINS, iter = ITER, warmup = WARMUP,
+                      seed = V2_SEED, refresh = max(1L, ITER %/% 10L),
+                      control = list(adapt_delta = 0.9, max_treedepth = 10),
+                      pars = c("z_re", "z_b", "V_raw", "U_free", "L_Om_joint", "L_Om", "re"), include = FALSE)
+      el <- as.numeric(difftime(Sys.time(), t0, units = "mins"))
+      logf("  done in %.1f min", el)
+      saveRDS(list(fit = fit, dat = dat, spec = sp, truth_family = truth_family, elapsed_min = el, fitted_at = Sys.time()),
+              fit_path)
+    }
 
     ## ---- convergence ------------------------------------------------------------------
     sdiag <- get_sampler_params(fit, inc_warmup = FALSE)
@@ -67,7 +77,7 @@ for (truth_family in c("M1b", "M2b")) {
     sm <- summary(fit, pars = c("alpha0", "alpha", "tau", "beta", "sigma_x", "sd_re", "sigma_b", "gamma",
                                 "Sigma", "Omega", "R_Om", "mu_state", if (sp$family == "m2") c("U", "V")))$summary
     sm <- sm[is.finite(sm[, "Rhat"]), , drop = FALSE]     # structural zeros in U anchor block -> NA
-    conv_rows[[tag]] <- data.frame(truth = truth_family, model = sp$model, elapsed_min = round(el, 1),
+    conv_rows[[tag]] <- data.frame(truth = truth_family, model = sp$model, reused_saved_fit = reused, elapsed_min = round(el, 1),
                                    divergences = n_div, max_treedepth_hits = n_maxtd,
                                    worst_rhat = max(sm[, "Rhat"]), min_ess_bulk = min(sm[, "n_eff"]),
                                    frac_rhat_gt_1.05 = mean(sm[, "Rhat"] > 1.05))
