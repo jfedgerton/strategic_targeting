@@ -14,7 +14,7 @@ skip_if_no_build <- function(m) {
 
 tiny_data <- function(family, joint, K = NULL) {
   set.seed(123)
-  sim <- simulate_targeting(family, S = 6L, Tt = 4L, K = 2L, seed = 123L, target_rate = 0.6)
+  sim <- simulate_targeting(family, S = 6L, Tt = 4L, K = if (is.null(K)) 2L else K, seed = 123L, target_rate = 0.6)
   build_stan_data(sim$sy, sim$alts, sim$ev, c("W1", "W2"), paste0("X", 1:4), c("Z1", "Z2"),
                   joint = joint, x_ref = rep(0, 4), K = K)
 }
@@ -52,7 +52,7 @@ stan_inits <- function(dat, p) {
     K <- dat$K; anchor <- dat$anchor
     ## force the anchor block of the supplied U to be lower-triangular with positive diagonal
     for (k in seq_len(K)) { for (l in seq_len(K)) { if (l > k) p$U[anchor[k], l] <- 0 }; p$U[anchor[k], k] <- abs(p$U[anchor[k], k]) + 0.1 }
-    init$u_diag <- sapply(seq_len(K), function(k) p$U[anchor[k], k])
+    init$u_diag <- array(sapply(seq_len(K), function(k) p$U[anchor[k], k]), dim = K)
     init$u_lower <- array(if (K > 1) unlist(lapply(2:K, function(k) p$U[anchor[k], 1:(k - 1)])) else numeric(0),
                           dim = K * (K - 1) / 2)
     init$U_free <- p$U[setdiff(seq_len(S), anchor), , drop = FALSE]
@@ -61,9 +61,9 @@ stan_inits <- function(dat, p) {
   list(init = init, pars = p)
 }
 
-check_model <- function(model_name, family, joint, with_uv) {
+check_model <- function(model_name, family, joint, with_uv, K = 2L) {
   sm <- skip_if_no_build(model_name)
-  dat <- tiny_data(family, joint, K = if (with_uv) 2L else NULL)
+  dat <- tiny_data(family, joint, K = if (with_uv) K else NULL)
   p <- make_pars(dat, with_uv)
   st <- stan_inits(dat, p)
   fit <- sampling(sm, data = dat, algorithm = "Fixed_param", chains = 1, iter = 1, warmup = 0,
@@ -92,6 +92,8 @@ test_that("M1 joint: Stan stage-2 log-lik equals brute-force R", check_model("m1
 test_that("M1 independent: Stan stage-2 log-lik equals brute-force R", check_model("m1_latent_additive", "M1b", 0L, FALSE))
 test_that("M2 joint (K=2): Stan stage-2 log-lik equals brute-force R", check_model("m2_ame", "M2b", 1L, TRUE))
 test_that("M2 independent (K=2): Stan stage-2 log-lik equals brute-force R", check_model("m2_ame", "M2b", 0L, TRUE))
+test_that("M2 joint (K=1): Stan stage-2 log-lik equals brute-force R", check_model("m2_ame", "M2b", 1L, TRUE, K = 1L))
+test_that("M2 joint (K=3): Stan stage-2 log-lik equals brute-force R", check_model("m2_ame", "M2b", 1L, TRUE, K = 3L))
 
 test_that("softmax probabilities sum to one within each choice set (R reference)", {
   dat <- tiny_data("M1b", 1L)

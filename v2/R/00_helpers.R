@@ -124,7 +124,7 @@ build_stan_data <- function(sy, alts, ev, W_cols, X_cols, Z_cols, joint, sampled
     stopifnot(K >= 1, K <= S - 1)
     if (is.null(anchor)) anchor <- choose_anchors(sy, ev, K, S)
     stopifnot(length(anchor) == K, !anyDuplicated(anchor), all(anchor %in% seq_len(S)))
-    dat$K <- as.integer(K); dat$anchor <- as.integer(anchor)
+    dat$K <- as.integer(K); dat$anchor <- array(as.integer(anchor), dim = K)   # array so K = 1 is a 1-d array for Stan
   }
   dat
 }
