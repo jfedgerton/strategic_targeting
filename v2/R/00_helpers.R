@@ -86,7 +86,7 @@ assert_matches_manifest <- function(path, manifest_path) {
 ## alts must be sorted by sy_row; every sy row must own >= 1 alternative.
 build_stan_data <- function(sy, alts, ev, W_cols, X_cols, Z_cols, joint, sampled = 0L,
                             n_full = NULL, x_ref = NULL, K = NULL, anchor = NULL,
-                            prior_beta_sd = 1, allow_orphan_initiations = FALSE) {
+                            prior_beta_sd = 1, allow_orphan_initiations = FALSE, S = NULL) {
   stopifnot(is.data.frame(sy), is.data.frame(alts), is.data.frame(ev))
   stopifnot(all(diff(alts$sy_row) >= 0))                       # sorted by state-year
   stopifnot(setequal(unique(alts$sy_row), seq_len(nrow(sy))))  # every state-year has a choice set
@@ -98,7 +98,8 @@ build_stan_data <- function(sy, alts, ev, W_cols, X_cols, Z_cols, joint, sampled
   ## y1 == 1 without a stage-2 event happens in real data when the only target lacks positions;
   ## the simulator never produces it, so it is an error unless explicitly allowed.
   if (n_orphan > 0 && !allow_orphan_initiations) stop(n_orphan, " state-years have y1 = 1 but no event")
-  S <- max(c(sy$state_idx, alts$target_idx))
+  S_data <- max(c(sy$state_idx, alts$target_idx))
+  if (is.null(S)) S <- S_data else stopifnot(S >= S_data)   # override keeps one index space across subsets
   cs <- alts |> mutate(row = row_number()) |> group_by(sy_row) |>
     summarise(s = min(row), e = max(row), n = n(), .groups = "drop") |> arrange(sy_row)
   stopifnot(all(cs$e - cs$s + 1 == cs$n))
@@ -121,7 +122,7 @@ build_stan_data <- function(sy, alts, ev, W_cols, X_cols, Z_cols, joint, sampled
   dimnames(dat$W) <- NULL; dimnames(dat$X) <- NULL; dimnames(dat$Z) <- NULL
   if (!is.null(K)) {
     stopifnot(K >= 1, K <= S - 1)
-    if (is.null(anchor)) anchor <- choose_anchors(sy, ev, K)
+    if (is.null(anchor)) anchor <- choose_anchors(sy, ev, K, S)
     stopifnot(length(anchor) == K, !anyDuplicated(anchor), all(anchor %in% seq_len(S)))
     dat$K <- as.integer(K); dat$anchor <- as.integer(anchor)
   }
@@ -130,8 +131,8 @@ build_stan_data <- function(sy, alts, ev, W_cols, X_cols, Z_cols, joint, sampled
 
 ## Anchor states for AME identification: the K states with the most initiation events.
 ## Ties broken by state index (deterministic). NOT string-sorted ccodes (audit F6).
-choose_anchors <- function(sy, ev, K) {
-  cnt <- tabulate(sy$state_idx[ev$sy_row], nbins = max(sy$state_idx))
+choose_anchors <- function(sy, ev, K, S = max(sy$state_idx)) {
+  cnt <- tabulate(sy$state_idx[ev$sy_row], nbins = S)
   ord <- order(-cnt, seq_along(cnt))
   ord[seq_len(K)]
 }
