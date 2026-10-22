@@ -4,15 +4,20 @@
 ## Usage:
 ##   Rscript v2/R/02_fit_model.R --sample=mid --lag=5 --variant=all --model=M1b \
 ##          [--centrality=pr|eig] [--K=2] [--chains=4] [--iter=2000] [--warmup=1000] \
-##          [--sampled_m=0] [--conflict_history=TRUE] [--adapt_delta=0.9] [--max_treedepth=10] [--pilot=FALSE] [--dry_run=FALSE]
+##          [--sampled_m=0] [--conflict_history=TRUE] [--distance=FALSE] [--contiguity=TRUE]
+##          [--adapt_delta=0.9] [--max_treedepth=10] [--pilot=FALSE] [--dry_run=FALSE]
 ##
 ##   sample    : mid (all MIDs) | fmid (fatal MIDs) | war (hostility level 5)
 ##   lag       : 1 | 3 | 5 | 10         change-window length h
 ##   variant   : all | polrel            choice set: all system members | politically relevant
-##   model     : M1a | M1b | M2a | M2b   (a = independent dims, b = joint); M2 = AME with K factors
+##   model     : M1m | M1r | M1a | M1b | M2m | M2r | M2a | M2b
+##               m = material only, r = relational only, a = both independent, b = both joint; M2 = AME with K factors
 ##   centrality: pr (IGO PageRank, main) | eig (eigenvector, robustness)
 ##   sampled_m : 0 = full choice sets; m > 0 = chosen target(s) plus m uniformly sampled alternatives
 ##   conflict_history: TRUE = include conflict-history controls in W, X and Z (main spec); FALSE = drop them
+##   distance  : FALSE (main) | TRUE adds log1p(capital-to-capital km) to Z; cell name gets "_dist"
+##   contiguity: TRUE (main) | FALSE drops land contiguity from Z; cell name gets "_nocontig"
+##   Main specification: --variant=all --sampled_m=0 (full all-states choice sets), the defaults.
 ##
 ## Every input file is checked against v2/data/manifest.csv (nrow + sha256) before use
 ## (audit F3/F8/F9: no silent dependence on which file happens to be on disk).
@@ -41,12 +46,18 @@ CHAINS <- as.integer(get_arg("chains", 4)); ITER <- as.integer(get_arg("iter", 2
 SAMPLED_M <- as.integer(get_arg("sampled_m", 0)); CONFLICT_HISTORY <- get_arg("conflict_history", TRUE)
 ADAPT_DELTA <- get_arg("adapt_delta", 0.9); MAX_TD <- as.integer(get_arg("max_treedepth", 10)); PILOT <- get_arg("pilot", FALSE)
 DRY_RUN <- get_arg("dry_run", FALSE)      # TRUE = assemble and validate the Stan data, write it, do NOT sample
+DISTANCE <- get_arg("distance", FALSE)    # TRUE = add log1p(capital distance km) to Z (alternative spec, not main)
+CONTIGUITY <- get_arg("contiguity", TRUE) # FALSE = drop land contiguity from Z (robustness option)
 stopifnot(SAMPLE %in% c("mid", "fmid", "war"), LAG %in% c(1L, 3L, 5L, 10L), VARIANT %in% c("all", "polrel"),
-          MODEL %in% c("M1a", "M1b", "M2a", "M2b"), CENT %in% c("pr", "eig"), K >= 1)
+          MODEL %in% c("M1m", "M1r", "M1a", "M1b", "M2m", "M2r", "M2a", "M2b"), CENT %in% c("pr", "eig"), K >= 1)
+## model code: M1 / M2 = family; m = material only (D_mode 1), r = relational only (D_mode 2),
+## a = both dimensions independent (D_mode 3, joint 0), b = both dimensions joint (D_mode 3, joint 1)
+D_MODE <- switch(substr(MODEL, 3, 3), m = 1L, r = 2L, a = 3L, b = 3L)
 cell <- sprintf("%s_lag%d_%s_%s_%s%s%s%s", SAMPLE, LAG, VARIANT, CENT, MODEL,
                 if (grepl("^M2", MODEL)) sprintf("_K%d", K) else "",
                 if (!CONFLICT_HISTORY) "_noCH" else "",
                 if (SAMPLED_M > 0) sprintf("_samp%d", SAMPLED_M) else "")
+cell <- paste0(cell, if (DISTANCE) "_dist" else "", if (!CONTIGUITY) "_nocontig" else "")
 log_open(paste0("02_fit_", cell))
 logf("cell = %s", cell)
 set.seed(V2_SEED)
@@ -56,16 +67,18 @@ data_dir <- file.path(v2_root(), "data"); out_dir <- file.path(v2_root(), "outpu
 manifest_path <- file.path(data_dir, "manifest.csv")
 
 source(file.path(dirname(this_file), "assemble_cell.R"))
-A <- assemble_cell(SAMPLE, LAG, VARIANT, CENT, CONFLICT_HISTORY, SAMPLED_M, data_dir = data_dir)
+A <- assemble_cell(SAMPLE, LAG, VARIANT, CENT, CONFLICT_HISTORY, SAMPLED_M, DISTANCE = DISTANCE, CONTIGUITY = CONTIGUITY, data_dir = data_dir)
 sy <- A$sy; alts <- A$alts; ev <- A$ev; W_cols <- A$W_cols; X_cols <- A$X_cols; Z_cols <- A$Z_cols
 state_codes <- A$state_codes; x_ref <- A$x_ref; n_full <- A$n_full; sampled <- A$sampled
 
 ## ---- Stan data ---------------------------------------------------------------------------------------------
 joint <- as.integer(grepl("b$", MODEL)); family <- if (grepl("^M1", MODEL)) "m1_latent_additive" else "m2_ame"
 dat <- build_stan_data(sy, alts, ev, W_cols, X_cols, Z_cols, joint = joint, sampled = sampled, n_full = n_full,
-                       x_ref = x_ref, K = if (family == "m2_ame") K else NULL, allow_orphan_initiations = TRUE)
+                       x_ref = x_ref, K = if (family == "m2_ame") K else NULL, allow_orphan_initiations = TRUE,
+                       D_mode = D_MODE)
+logf("D_mode = %d (%s)", D_MODE, c("material only", "relational only", "both dimensions")[D_MODE])
 if (family == "m2_ame") logf("AME anchors (most initiations first): ccodes %s", paste(state_codes[dat$anchor], collapse = ", "))
-logf("Stan data: S=%d N1=%d N2=%d E=%d P1=%d P=%d Pz=%d joint=%d sampled=%d", dat$S, dat$N1, dat$N2, dat$E, dat$P1, dat$P, dat$Pz, dat$joint, dat$sampled)
+logf("Stan data: S=%d N1=%d N2=%d E=%d P1=%d P=%d Pz=%d joint=%d sampled=%d D_mode=%d", dat$S, dat$N1, dat$N2, dat$E, dat$P1, dat$P, dat$Pz, dat$joint, dat$sampled, dat$D_mode)
 if (DRY_RUN) {
   saveRDS(list(dat = dat, cell = cell, state_codes = state_codes, W_cols = W_cols, X_cols = X_cols, Z_cols = Z_cols),
           file.path(out_dir, paste0("standata_", cell, ".rds")))
@@ -95,6 +108,7 @@ saveRDS(list(fit = fit, dat = dat, cell = cell, state_codes = state_codes, W_col
              sy_keys = sy |> select(ccode, year, state_idx, y1), ev = ev, x_ref = x_ref, elapsed_min = elapsed,
              manifest = man[man$file %in% c(sprintf("stage1_panel_lag%d.rds", LAG), sprintf("alts_lag%d_%s.rds", LAG, VARIANT), "events.rds"), ],
              args = list(sample = SAMPLE, lag = LAG, variant = VARIANT, model = MODEL, centrality = CENT, K = K, chains = CHAINS,
-                         iter = ITER, warmup = WARMUP, sampled_m = SAMPLED_M, conflict_history = CONFLICT_HISTORY, seed = V2_SEED)),
+                         iter = ITER, warmup = WARMUP, sampled_m = SAMPLED_M, conflict_history = CONFLICT_HISTORY,
+                         distance = DISTANCE, contiguity = CONTIGUITY, D_mode = D_MODE, seed = V2_SEED)),
         file.path(out_dir, paste0("fit_", cell, ".rds")))
 logf("saved %s", file.path(out_dir, paste0("fit_", cell, ".rds")))

@@ -35,8 +35,10 @@ n_init <- tabulate(obj$dat$sy_state[obj$dat$ev_sy], nbins = obj$dat$S)
 cls$n_events_as_initiator <- n_init
 cls$r0 <- r0
 write.csv(cls, file.path(out_dir, paste0("typology_", cell, ".csv")), row.names = FALSE)
-write.csv(cls |> select(state, mu1_mean, mu1_lo, mu1_hi, mu2_mean, mu2_lo, mu2_hi, n_events_as_initiator),
+mu_cols <- intersect(c("mu1_mean", "mu1_lo", "mu1_hi", "mu2_mean", "mu2_lo", "mu2_hi", "mu_mean", "mu_lo", "mu_hi"), names(cls))
+write.csv(cls |> select(state, all_of(mu_cols), n_events_as_initiator),
           file.path(out_dir, paste0("mu_state_", cell, ".csv")), row.names = FALSE)
+logf("targeting dimensions D = %d (%s)", dim(mu)[3], if (dim(mu)[3] == 1) "one-axis typology: weaker / peer / stronger" else "bully / peer / challenger / hybrids")
 print(typology_summary(cls |> filter(n_events_as_initiator > 0)))
 logf("typology written; %d states with >= 1 initiation", sum(n_init > 0))
 

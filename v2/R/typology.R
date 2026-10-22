@@ -18,6 +18,11 @@
 ## collapsed a 1 x N x K slice to a scalar).
 ## ============================================================================
 TYPE_LEVELS <- c("bully", "peer", "challenger", "hybrid_pm", "hybrid_mp")
+## One-dimensional models (D_mode 1 or 2): mu_i is a scalar on the single axis.
+##   weaker   : mu >  r0   (prefers targets weaker than itself on that axis, x = own - target > 0)
+##   peer     : |mu| <= r0
+##   stronger : mu < -r0
+TYPE_LEVELS_1D <- c("weaker", "peer", "stronger")
 
 ## mu_draws: numeric array [n_draws, S, 2]
 ## allow_identical_entities: per-event draws legitimately repeat when several events share one
@@ -25,7 +30,8 @@ TYPE_LEVELS <- c("bully", "peer", "challenger", "hybrid_pm", "hybrid_mp")
 ## the F1 failure mode (one vector recycled to every entity).
 classify_types <- function(mu_draws, r0, state_labels = NULL, allow_identical_entities = FALSE) {
   stopifnot(is.numeric(r0), length(r0) == 1, r0 > 0)
-  stopifnot(is.array(mu_draws), is.numeric(mu_draws), length(dim(mu_draws)) == 3, dim(mu_draws)[3] == 2)
+  stopifnot(is.array(mu_draws), is.numeric(mu_draws), length(dim(mu_draws)) == 3, dim(mu_draws)[3] %in% 1:2)
+  if (dim(mu_draws)[3] == 1) return(classify_types_1d(mu_draws, r0, state_labels, allow_identical_entities))
   n_draws <- dim(mu_draws)[1]; S <- dim(mu_draws)[2]
   stopifnot(n_draws > 1, S >= 1, !anyNA(mu_draws))
   if (is.null(state_labels)) state_labels <- as.character(seq_len(S))
@@ -75,14 +81,16 @@ classify_types <- function(mu_draws, r0, state_labels = NULL, allow_identical_en
 ## Extract mu_state draws from an rstan fit as [n_draws, S, 2]
 mu_state_draws <- function(fit) {
   arr <- rstan::extract(fit, pars = "mu_state")$mu_state
-  stopifnot(length(dim(arr)) == 3, dim(arr)[3] == 2)
+  if (length(dim(arr)) == 2) arr <- array(arr, c(dim(arr), 1L))     # D = 1: rstan drops the unit dimension
+  stopifnot(length(dim(arr)) == 3, dim(arr)[3] %in% 1:2)
   arr
 }
 
 ## Per-event classification (mu at the event's own X): same shape contract.
 mu_event_draws <- function(fit) {
   arr <- rstan::extract(fit, pars = "mu_event")$mu_event
-  stopifnot(length(dim(arr)) == 3, dim(arr)[3] == 2)
+  if (length(dim(arr)) == 2) arr <- array(arr, c(dim(arr), 1L))
+  stopifnot(length(dim(arr)) == 3, dim(arr)[3] %in% 1:2)
   arr
 }
 
@@ -92,4 +100,32 @@ typology_summary <- function(cls) {
   cls |> dplyr::count(map_type, name = "n_states") |>
     dplyr::left_join(cls |> dplyr::group_by(map_type) |> dplyr::summarise(mean_map_prob = mean(map_prob), .groups = "drop"),
                      by = "map_type")
+}
+
+## ---- one-dimensional classification: mu_draws is [n_draws, S, 1] ---------------------------
+classify_types_1d <- function(mu_draws, r0, state_labels = NULL, allow_identical_entities = FALSE) {
+  stopifnot(is.array(mu_draws), length(dim(mu_draws)) == 3, dim(mu_draws)[3] == 1, !anyNA(mu_draws))
+  n_draws <- dim(mu_draws)[1]; S <- dim(mu_draws)[2]
+  stopifnot(n_draws > 1, S >= 1)
+  if (is.null(state_labels)) state_labels <- as.character(seq_len(S))
+  stopifnot(length(state_labels) == S, !anyDuplicated(state_labels))
+  m <- matrix(mu_draws[, , 1], n_draws, S)
+  if (S > 1 && !allow_identical_entities) {
+    all_same <- all(vapply(2:S, function(s) isTRUE(all.equal(m[, s], m[, 1])), logical(1)))
+    if (all_same) stop("classify_types_1d: every entity has identical draws; the input looks recycled (audit F1)")
+  }
+  region <- matrix("peer", n_draws, S)
+  region[m > r0] <- "weaker"; region[m < -r0] <- "stronger"
+  probs <- t(sapply(seq_len(S), function(s) as.numeric(table(factor(region[, s], levels = TYPE_LEVELS_1D)) / n_draws)))
+  if (S == 1) probs <- matrix(probs, nrow = 1)
+  colnames(probs) <- paste0("p_", TYPE_LEVELS_1D)
+  stopifnot(identical(dim(probs), c(S, 3L)), all(abs(rowSums(probs) - 1) < 1e-8))
+  out <- data.frame(state = state_labels, mu_mean = colMeans(m),
+                    mu_lo = apply(m, 2, quantile, 0.05), mu_hi = apply(m, 2, quantile, 0.95),
+                    r_mean = colMeans(abs(m)), probs, stringsAsFactors = FALSE)
+  out$map_type <- TYPE_LEVELS_1D[apply(probs, 1, which.max)]
+  out$map_prob <- apply(probs, 1, max)
+  rownames(out) <- NULL
+  stopifnot(nrow(out) == S)
+  out
 }

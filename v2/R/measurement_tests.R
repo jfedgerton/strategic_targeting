@@ -77,12 +77,20 @@ stage2_scores <- function(dat, draws) {
   n_d <- length(draws$rho); E <- dat$E
   p_sum <- numeric(E); rank_sum <- numeric(E)
   zg0 <- if (dat$Pz > 0) dat$Z else NULL
+  D <- if (dat$D_mode == 3L) 2L else 1L
   for (d in seq_len(n_d)) {
-    beta <- matrix(draws$beta[d, , ], dat$P, 2)
-    Mu <- dat$X %*% beta + draws$a_i[d, dat$sy_state, ]
-    sx <- draws$sigma_x[d, ]; rho <- draws$rho[d]
-    d1 <- (dat$x[, 1] - Mu[alt_sy, 1]) / sx[1]; d2 <- (dat$x[, 2] - Mu[alt_sy, 2]) / sx[2]
-    util <- -0.5 * (d1^2 - 2 * rho * d1 * d2 + d2^2) / (1 - rho^2) + draws$b_j[d, dat$alt_target]
+    beta <- matrix(if (D == 2L) draws$beta[d, , ] else draws$beta[d, ], dat$P, D)
+    a_d <- matrix(if (D == 2L) draws$a_i[d, , ] else draws$a_i[d, ], dat$S, D)
+    Mu <- dat$X %*% beta + a_d[dat$sy_state, , drop = FALSE]
+    sx <- matrix(draws$sigma_x, ncol = D)[d, ]; rho <- draws$rho[d]
+    if (D == 2L) {
+      d1 <- (dat$x[, 1] - Mu[alt_sy, 1]) / sx[1]; d2 <- (dat$x[, 2] - Mu[alt_sy, 2]) / sx[2]
+      util <- -0.5 * (d1^2 - 2 * rho * d1 * d2 + d2^2) / (1 - rho^2)
+    } else {
+      d1 <- (dat$x[, dat$D_mode] - Mu[alt_sy, 1]) / sx[1]
+      util <- -0.5 * d1^2
+    }
+    util <- util + draws$b_j[d, dat$alt_target]
     if (!is.null(zg0)) util <- util + as.numeric(zg0 %*% draws$gamma[d, ])
     if (!is.null(draws$U)) {
       U <- matrix(draws$U[d, , ], dat$S); V <- matrix(draws$V[d, , ], dat$S)

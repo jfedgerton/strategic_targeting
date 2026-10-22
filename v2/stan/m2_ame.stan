@@ -31,13 +31,20 @@
 // K must be >= 1 and <= S - 1. Works for K = 1, 2, 3.
 // ============================================================================
 functions {
+  // D = 2: quadratic form in (dM, dR); D = 1: squared distance on column dcol only.
   vector util_block(int n, int s, int e, matrix x, row_vector mu_n, vector sigma_x,
                     real rho, vector b_j, array[] int alt_target, vector zg,
-                    row_vector u_i, matrix V) {
+                    row_vector u_i, matrix V, int D, int dcol) {
     int L = e - s + 1;
-    vector[L] d1 = (segment(col(x, 1), s, L) - mu_n[1]) / sigma_x[1];
-    vector[L] d2 = (segment(col(x, 2), s, L) - mu_n[2]) / sigma_x[2];
-    vector[L] q = (d1 .* d1 - 2 * rho * (d1 .* d2) + d2 .* d2) / (1 - rho * rho);
+    vector[L] q;
+    if (D == 2) {
+      vector[L] d1 = (segment(col(x, 1), s, L) - mu_n[1]) / sigma_x[1];
+      vector[L] d2 = (segment(col(x, 2), s, L) - mu_n[2]) / sigma_x[2];
+      q = (d1 .* d1 - 2 * rho * (d1 .* d2) + d2 .* d2) / (1 - rho * rho);
+    } else {
+      vector[L] d1 = (segment(col(x, dcol), s, L) - mu_n[1]) / sigma_x[1];
+      q = d1 .* d1;
+    }
     array[L] int tg = segment(alt_target, s, L);
     return -0.5 * q + b_j[tg] + segment(zg, s, L) + V[tg] * u_i';
   }
@@ -67,6 +74,7 @@ data {
   int<lower=0, upper=1> joint;
   int<lower=0, upper=1> sampled;
   int<lower=0, upper=1> prior_only;     // 1 = skip both likelihoods (prior checks)
+  int<lower=1, upper=3> D_mode;         // 1 = material only (dM), 2 = relational only (dR), 3 = both
   vector[P] x_ref;
   real<lower=0> prior_beta_sd;
   // ---- AME
@@ -74,6 +82,9 @@ data {
   array[K] int<lower=1, upper=S> anchor;   // distinct state indices
 }
 transformed data {
+  int D = (D_mode == 3) ? 2 : 1;        // targeting dimensions used in stage 2
+  int dcol = (D_mode == 2) ? 2 : 1;     // which column of x when D = 1
+  int Dre = 1 + D;                      // random-effect vector (c_i, a_i) length
   vector[N1] iv_corr = rep_vector(0, N1);
   array[S - K] int nonanchor;              // state indices that are not anchors
   for (n in 1:N1) {
@@ -108,14 +119,15 @@ parameters {
   real alpha0;
   vector[P1] alpha;
   real tau;
-  matrix[P, 2] beta;
-  vector<lower=0>[2] sigma_x;
-  array[joint] real<lower=-1, upper=1> rho_x;
-  vector<lower=0>[3] sd_re;
-  array[joint] cholesky_factor_corr[3] L_Om_joint;
-  array[1 - joint] real<lower=-1, upper=1> r_ca1;
-  array[1 - joint] real<lower=-1, upper=1> q_ca2;
-  matrix[3, S] z_re;
+  matrix[P, D] beta;
+  vector<lower=0>[D] sigma_x;
+  array[joint * (D - 1)] real<lower=-1, upper=1> rho_x;          // D = 2, joint only
+  vector<lower=0>[Dre] sd_re;                                    // sd of (c, a_1[, a_2])
+  array[joint * (D - 1)] cholesky_factor_corr[3] L_Om_joint;     // D = 2, joint only
+  array[(1 - joint) * (D - 1)] real<lower=-1, upper=1> r_ca1;    // D = 2, independent only
+  array[(1 - joint) * (D - 1)] real<lower=-1, upper=1> q_ca2;
+  array[2 - D] real<lower=-1, upper=1> r_ca_1d;                  // D = 1: corr(c, a)
+  matrix[Dre, S] z_re;
   real<lower=0> sigma_b;
   vector[S] z_b;
   vector[Pz] gamma;
@@ -126,27 +138,36 @@ parameters {
   matrix[S, K] V_raw;
 }
 transformed parameters {
-  matrix[3, 3] L_Om;
+  matrix[Dre, Dre] L_Om;
   real rho;
-  real r_c_a1;                 // corr(c, a1), shared by the "a" and "b" models
-  real r_c_a2;                 // corr(c, a2)
-  if (joint == 1) {
-    L_Om = L_Om_joint[1];
-    rho = rho_x[1];
-    r_c_a1 = L_Om[2, 1] * L_Om[1, 1];
-    r_c_a2 = L_Om[3, 1] * L_Om[1, 1];
+  real r_c_a1;                 // corr(c, a1), shared by the "a" and "b" models (corr(c, a) when D = 1)
+  real r_c_a2;                 // corr(c, a2) (0 when D = 1)
+  if (D == 2) {
+    if (joint == 1) {
+      L_Om = L_Om_joint[1];
+      rho = rho_x[1];
+      r_c_a1 = L_Om[2, 1] * L_Om[1, 1];
+      r_c_a2 = L_Om[3, 1] * L_Om[1, 1];
+    } else {
+      real r1 = r_ca1[1];
+      real r2 = q_ca2[1] * sqrt(1 - r1 * r1);        // guarantees r1^2 + r2^2 < 1 (PD)
+      matrix[3, 3] R_a = [[1, r1, r2], [r1, 1, 0], [r2, 0, 1]];
+      L_Om = cholesky_decompose(R_a);
+      rho = 0;
+      r_c_a1 = r1;
+      r_c_a2 = r2;
+    }
   } else {
-    real r1 = r_ca1[1];
-    real r2 = q_ca2[1] * sqrt(1 - r1 * r1);        // guarantees r1^2 + r2^2 < 1 (PD)
-    matrix[3, 3] R_a = [[1, r1, r2], [r1, 1, 0], [r2, 0, 1]];
-    L_Om = cholesky_decompose(R_a);
+    real r1 = r_ca_1d[1];
+    matrix[2, 2] R_1 = [[1, r1], [r1, 1]];
+    L_Om = cholesky_decompose(R_1);
     rho = 0;
     r_c_a1 = r1;
-    r_c_a2 = r2;
+    r_c_a2 = 0;
   }
-  matrix[S, 3] re = (diag_pre_multiply(sd_re, L_Om) * z_re)';
+  matrix[S, Dre] re = (diag_pre_multiply(sd_re, L_Om) * z_re)';
   vector[S] c_i = col(re, 1);
-  matrix[S, 2] a_i = re[, 2:3];
+  matrix[S, D] a_i = re[, 2:Dre];
   vector[S] b_j = sigma_b * (z_b - mean(z_b));
   // ---- assemble U with the anchor block lower-triangular, positive diagonal
   matrix[S, K] U;
@@ -173,7 +194,11 @@ model {
   to_vector(beta) ~ normal(0, prior_beta_sd);
   sigma_x ~ lognormal(0, 1);
   sd_re ~ normal(0, 1);
-  if (joint == 1) {
+  if (D == 1) {
+    // one targeting dimension: corr(c, a) gets the same Beta(2.5, 2.5) marginal (Var 1/6) as the
+    // shared correlations in the a / b models, so m / r / a / b differ only in their restrictions
+    target += beta_lpdf((r_c_a1 + 1) / 2 | 2.5, 2.5);
+  } else if (joint == 1) {
     L_Om_joint[1] ~ lkj_corr_cholesky(2);
   } else {
     // Same marginal prior on the shared correlations as LKJ(2) implies for a 3x3 matrix:
@@ -193,7 +218,7 @@ model {
   to_vector(U[nonanchor]) ~ normal(0, 1);  // all non-anchor rows, including the determined one
   to_vector(V_raw) ~ normal(0, 1);
   {
-    matrix[N1, 2] Mu = X * beta + a_i[sy_state];
+    matrix[N1, D] Mu = X * beta + a_i[sy_state];
     vector[N2] zg = (Pz > 0) ? Z * gamma : rep_vector(0, N2);
     vector[N2] util;
     vector[N1] lse;
@@ -201,7 +226,7 @@ model {
       int s = cs_start[n];
       int e = cs_end[n];
       util[s:e] = util_block(n, s, e, x, Mu[n], sigma_x, rho, b_j, alt_target, zg,
-                             U[sy_state[n]], V);
+                             U[sy_state[n]], V, D, dcol);
       lse[n] = log_sum_exp(util[s:e]);
     }
     if (prior_only == 0) y1 ~ bernoulli_logit(alpha0 + W * alpha + c_i[sy_state] + tau * (lse + iv_corr));
@@ -210,7 +235,7 @@ model {
       int e = ev_end[ev];
       if (sampled == 1)
         util[s:e] = util_block(ev_sy[ev], s, e, x, Mu[ev_sy[ev]], sigma_x, rho, b_j, alt_target, zg,
-                               U[sy_state[ev_sy[ev]]], V);
+                               U[sy_state[ev_sy[ev]]], V, D, dcol);
       if (prior_only == 0) target += util[ev_row[ev]] - log_sum_exp(util[s:e]);
     }
   }
@@ -218,13 +243,13 @@ model {
 generated quantities {
   vector[E] log_lik_stage2;
   vector[N1] log_lik_stage1;
-  matrix[S, 2] mu_state;
-  matrix[E, 2] mu_event;
-  matrix[2, 2] Sigma;
-  matrix[3, 3] Omega;
-  corr_matrix[3] R_Om;
+  matrix[S, D] mu_state;      // mu_i at x_ref: x_ref' beta + a_i   (D columns)
+  matrix[E, D] mu_event;      // mu at the event's own X: X[ev_sy] beta + a_i
+  matrix[D, D] Sigma;
+  matrix[Dre, Dre] Omega;     // covariance of (c, a_1[, a_2])
+  corr_matrix[Dre] R_Om;      // correlation of (c, a_1[, a_2])
   {
-    matrix[N1, 2] Mu = X * beta + a_i[sy_state];
+    matrix[N1, D] Mu = X * beta + a_i[sy_state];
     vector[N2] zg = (Pz > 0) ? Z * gamma : rep_vector(0, N2);
     vector[N2] util;
     vector[N1] lse;
@@ -232,7 +257,7 @@ generated quantities {
       int s = cs_start[n];
       int e = cs_end[n];
       util[s:e] = util_block(n, s, e, x, Mu[n], sigma_x, rho, b_j, alt_target, zg,
-                             U[sy_state[n]], V);
+                             U[sy_state[n]], V, D, dcol);
       lse[n] = log_sum_exp(util[s:e]);
     }
     vector[N1] eta1 = alpha0 + W * alpha + c_i[sy_state] + tau * (lse + iv_corr);
@@ -242,13 +267,14 @@ generated quantities {
       int e = ev_end[ev];
       if (sampled == 1)
         util[s:e] = util_block(ev_sy[ev], s, e, x, Mu[ev_sy[ev]], sigma_x, rho, b_j, alt_target, zg,
-                               U[sy_state[ev_sy[ev]]], V);
+                               U[sy_state[ev_sy[ev]]], V, D, dcol);
       log_lik_stage2[ev] = util[ev_row[ev]] - log_sum_exp(util[s:e]);
       mu_event[ev] = Mu[ev_sy[ev]];
     }
     for (s in 1:S) mu_state[s] = x_ref' * beta + a_i[s];
-    Sigma = [[sigma_x[1]^2, rho * sigma_x[1] * sigma_x[2]],
-             [rho * sigma_x[1] * sigma_x[2], sigma_x[2]^2]];
+    if (D == 2) Sigma = [[sigma_x[1]^2, rho * sigma_x[1] * sigma_x[2]],
+                         [rho * sigma_x[1] * sigma_x[2], sigma_x[2]^2]];
+    else Sigma = [[sigma_x[1]^2]];
     R_Om = multiply_lower_tri_self_transpose(L_Om);
     Omega = quad_form_diag(R_Om, sd_re);
   }

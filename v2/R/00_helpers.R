@@ -86,7 +86,8 @@ assert_matches_manifest <- function(path, manifest_path) {
 ## alts must be sorted by sy_row; every sy row must own >= 1 alternative.
 build_stan_data <- function(sy, alts, ev, W_cols, X_cols, Z_cols, joint, sampled = 0L,
                             n_full = NULL, x_ref = NULL, K = NULL, anchor = NULL,
-                            prior_beta_sd = 1, allow_orphan_initiations = FALSE, S = NULL, prior_only = 0L) {
+                            prior_beta_sd = 1, allow_orphan_initiations = FALSE, S = NULL, prior_only = 0L,
+                            D_mode = 3L) {
   stopifnot(is.data.frame(sy), is.data.frame(alts), is.data.frame(ev))
   sampled <- as.integer(sampled)
   if (sampled == 1) {
@@ -132,7 +133,9 @@ build_stan_data <- function(sy, alts, ev, W_cols, X_cols, Z_cols, joint, sampled
               alt_target = as.integer(alts$target_idx), x = cbind(alts$dM, alts$dR), Z = Z,
               ev_sy = as.integer(ev$sy_row), ev_row = as.integer(ev$alt_row), ev_start = ev_start, ev_end = ev_end,
               joint = as.integer(joint), sampled = sampled,
-              x_ref = as.numeric(x_ref), prior_beta_sd = prior_beta_sd, prior_only = as.integer(prior_only))
+              x_ref = as.numeric(x_ref), prior_beta_sd = prior_beta_sd, prior_only = as.integer(prior_only),
+              D_mode = as.integer(D_mode))
+  stopifnot(dat$D_mode %in% 1:3)
   dimnames(dat$W) <- NULL; dimnames(dat$X) <- NULL; dimnames(dat$Z) <- NULL
   if (!is.null(K)) {
     stopifnot(K >= 1, K <= S - 1)
@@ -195,15 +198,19 @@ sample_alternatives <- function(alts, ev, m, seed = V2_SEED) {
 }
 
 ## ---- brute-force stage-2 likelihood in R (used by tests and the Fixed_param check) -----
-## pars: list(beta (P x 2), a_i (S x 2), b_j (S), gamma (Pz), sigma_x (2), rho, U (S x K) or NULL, V)
+## pars: list(beta (P x D), a_i (S x D), b_j (S), gamma (Pz), sigma_x (D), rho, U (S x K) or NULL, V)
+## D = 2 when dat$D_mode == 3; D = 1 uses column dat$D_mode of x (1 = dM, 2 = dR).
 stage2_loglik_R <- function(dat, pars) {
-  Mu <- dat$X %*% pars$beta + pars$a_i[dat$sy_state, , drop = FALSE]
+  D <- if (dat$D_mode == 3L) 2L else 1L
+  xcols <- if (D == 2L) 1:2 else dat$D_mode
+  Mu <- dat$X %*% matrix(pars$beta, ncol = D) + matrix(pars$a_i, ncol = D)[dat$sy_state, , drop = FALSE]
   zg <- if (dat$Pz > 0) as.numeric(dat$Z %*% pars$gamma) else rep(0, dat$N2)
   util <- numeric(dat$N2); lse <- numeric(dat$N1)
-  Sinv <- solve(matrix(c(pars$sigma_x[1]^2, pars$rho * prod(pars$sigma_x),
-                         pars$rho * prod(pars$sigma_x), pars$sigma_x[2]^2), 2))
+  Sinv <- if (D == 2L) solve(matrix(c(pars$sigma_x[1]^2, pars$rho * prod(pars$sigma_x),
+                                      pars$rho * prod(pars$sigma_x), pars$sigma_x[2]^2), 2))
+          else matrix(1 / pars$sigma_x[1]^2, 1, 1)
   one_util <- function(r, n) {
-    d <- dat$x[r, ] - Mu[n, ]
+    d <- dat$x[r, xcols] - Mu[n, ]
     u <- -0.5 * as.numeric(t(d) %*% Sinv %*% d) + pars$b_j[dat$alt_target[r]] + zg[r]
     if (!is.null(pars$U)) u <- u + sum(pars$U[dat$sy_state[n], ] * pars$V[dat$alt_target[r], ])
     u
