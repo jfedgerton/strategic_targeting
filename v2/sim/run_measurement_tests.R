@@ -3,7 +3,7 @@
 ##
 ## Usage: Rscript v2/sim/run_measurement_tests.R [chains] [iter] [warmup]
 ## Uses a smaller simulated world (S = 30, Tt = 12, truth = M1b) so that the six refits fit in
-## a 2-core container. Results -> v2/sim/results/measurement_*.csv ; summarised in SIM_REPORT.md.
+## a 2-core container. Benchmarks: run_benchmarks_sim.R. Results -> v2/sim/results/measurement_*.csv ; summarised in SIM_REPORT.md.
 ## ============================================================================
 suppressPackageStartupMessages({ library(rstan); library(loo); library(dplyr); library(brms) })
 args <- commandArgs(trailingOnly = TRUE)
@@ -73,22 +73,6 @@ logf("measurement-error refits in %.1f min", as.numeric(difftime(Sys.time(), t0,
 me$baseline_accuracy <- mean(cls_b$map_type == sim$types)
 print(me); write.csv(me, file.path(res_dir, "measurement_error_inflation.csv"), row.names = FALSE)
 
-## ---- 6. benchmarks on the simulated frames (assembly + short brms fits) ---------------------------------------------
-ev_keys <- data.frame(state_idx = alts$state_idx[ev$alt_row], target_idx = alts$target_idx[ev$alt_row], year = alts$year[ev$alt_row])
-d1 <- assemble_dyad_logit(alts, ev_keys, id_cols = c("state_idx", "target_idx", "year"), z_cols = Z_cols)
-stopifnot(sum(d1$y) == nrow(ev))
-d1$off <- 0
-t0 <- Sys.time()
-b1 <- brm(y ~ cinc_ratio + dR + Z1 + Z2 + offset(off) + (1 | state_idx) + (1 | target_idx), data = d1, family = bernoulli(),
-          prior = c(set_prior("normal(0, 1)", class = "b"), set_prior("student_t(3, 0, 1.5)", class = "sd")),
-          chains = CHAINS, cores = CHAINS, iter = ITER, warmup = WARMUP, seed = V2_SEED, refresh = 0)
-d2 <- assemble_gap_regression(sy, alts, ev, X_cols)
-b2 <- brm(gap_formula(X_cols), data = d2, prior = set_prior("normal(0, 1)", class = "b"),
-          chains = CHAINS, cores = CHAINS, iter = ITER, warmup = WARMUP, seed = V2_SEED, refresh = 0)
-logf("benchmarks fitted in %.1f min", as.numeric(difftime(Sys.time(), t0, units = "mins")))
-fe1 <- as.data.frame(fixef(b1)); fe1$model <- "dyad_logit"; fe1$term <- rownames(fe1)
-fe2 <- as.data.frame(fixef(b2)); fe2$model <- "gap_mvbind"; fe2$term <- rownames(fe2)
-write.csv(bind_rows(fe1, fe2), file.path(res_dir, "benchmarks_sim.csv"), row.names = FALSE)
-## truth for the gap regression's dM ~ X1 slope is NOT beta[1,1]: the realised target position is a
-## softmax draw around mu, so the slope recovers beta only up to shrinkage; recorded for the report.
+## Benchmarks on the simulated frames are in run_benchmarks_sim.R (separate R session: the brms compile
+## needs ~4 GB and was OOM-killed here alongside the six fits).
 logf("run_measurement_tests finished")
