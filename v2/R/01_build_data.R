@@ -6,7 +6,7 @@
 ##         COW-MID 5.0 directed dispute-years, ATOP, COW contiguity, COW IGO v3).
 ##         No download_extdata() call is needed for the columns used here.
 ## Outputs (v2/data/, all gitignored; manifest.csv records nrow + sha256 per file):
-##   sy_positions.rds              state-year positions M (CINC share, std within year),
+##   sy_positions.rds              state-year positions M (LOG CINC share, std within year),
 ##                                 R_pr / R_eig (IGO PageRank / eigenvector, std within year)
 ##   events.rds                    one row per (dispnum, initiator, target) directed event
 ##                                 with sample flags in_mid / in_fmid / in_war
@@ -116,13 +116,27 @@ if (IGO_FILL == "drop") {
   pos <- pos |> inner_join(cand, by = c("ccode", "year"))
   blog("IGO_FILL = locf: max staleness %d years", max(pos$year - pos$igo_src_year))
 } else stop("unknown IGO_FILL")
+## Material position M = LOG CINC share, standardised within year (PI decision 2026-10-22). A zero or NA
+## share has no log; the build stops and lists the offending state-years so the PI can decide (no silent floor).
+bad_cinc <- pos |> filter(is.na(cinc_share) | cinc_share <= 0)
+if (nrow(bad_cinc) > 0) {
+  blog("cinc_share <= 0 or NA in %d state-years: %s", nrow(bad_cinc),
+       paste(sprintf("%d-%d", bad_cinc$ccode, bad_cinc$year), collapse = " "))
+  stop(sprintf("%d state-years have cinc_share <= 0 or NA (see build_log.txt); log(CINC share) undefined. PI decision needed.", nrow(bad_cinc)))
+}
+pos <- pos |> mutate(log_cinc_share = log(cinc_share))
 pos <- pos |> group_by(year) |> filter(n() > 2) |>
-  mutate(M = as.numeric(scale(cinc_share)),
+  mutate(M = as.numeric(scale(log_cinc_share)),
          R_pr = as.numeric(scale(pagerank)),
          R_eig = if (sd(eigen) > 0) as.numeric(scale(eigen)) else 0) |> ungroup()
 assert_no_dup_keys(pos, c("ccode", "year"), "positions")
 assert_no_na(pos, c("M", "R_pr", "R_eig"), "positions")
 assert_standardized(pos, "M"); assert_standardized(pos, "R_pr")
+stopifnot(all(is.finite(pos$log_cinc_share)))
+m_skew <- mean((pos$M - mean(pos$M))^3) / sd(pos$M)^3
+raw <- as.numeric(unlist(tapply(pos$cinc_share, pos$year, scale)))
+blog("M = log CINC share std within year: skewness %.3f (raw-share version would be %.3f); share of state-years with M < 0: %.3f",
+     m_skew, mean((raw - mean(raw))^3) / sd(raw)^3, mean(pos$M < 0))
 dropped_years <- setdiff(unique(states$year), unique(pos$year))
 blog("positions: %d state-years over %d years; %d calendar years have NO positions (IGO or CINC missing)",
      nrow(pos), n_distinct(pos$year), length(dropped_years))

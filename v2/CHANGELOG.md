@@ -34,3 +34,5 @@ External Codex review of the first v2 commits (seven correctness items), each fi
 | 7 | Typology F1 guard is a shape / identity check (dims, unique ids, non-recycled draws) instead of a radius-inequality test. |
 
 PI additions after the review: one-dimensional targeting models (M1m, M1r, M2m, M2r via `D_mode`), capital-distance Z option (`--distance`, `--contiguity`), main specification = full all-states choice set, the 96-cell main grid with a Roar dry-run mode, per-group cross-model comparison, and the appendix typology outputs (9-cell classification, reach, focus).
+
+Later on Oct 22: within-chain parallelism (reduce_sum_static over state-years, `--threads_per_chain`, cpus = chains × threads in the sbatch scripts, equivalence tests, gradient profile); material position changed to log CINC share standardised within year (zero/NA guard, tests); eigenvector-centrality robustness run unscheduled.

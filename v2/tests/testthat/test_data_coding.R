@@ -201,3 +201,25 @@ test_that("Z columns: main spec has land contiguity and no distance; flags add d
   expect_false("contig_land" %in% z_columns(CONTIGUITY = FALSE))
   expect_false("log_dy_prior_mids" %in% z_columns(CONFLICT_HISTORY = FALSE))
 })
+
+## ---- material position = log CINC share, standardised within year ---------------------------------------
+test_that("M is the within-year standardised log CINC share; dM between two states is their standardised log ratio", {
+  pos <- tibble(ccode = rep(1:4, 2), year = rep(c(1990L, 1991L), each = 4),
+                cinc_share = c(0.5, 0.3, 0.15, 0.05, 0.4, 0.4, 0.1, 0.1)) |>
+    mutate(log_cinc_share = log(cinc_share)) |> group_by(year) |> mutate(M = as.numeric(scale(log_cinc_share))) |> ungroup()
+  expect_true(assert_standardized(pos, "M"))
+  y <- pos |> filter(year == 1990L); s_y <- sd(log(y$cinc_share))
+  dM_12 <- y$M[y$ccode == 1] - y$M[y$ccode == 2]
+  expect_equal(dM_12, log(0.5 / 0.3) / s_y)                    # standardised log ratio, mean cancels
+  expect_equal(y$M[y$ccode == 1] - y$M[y$ccode == 4], log(0.5 / 0.05) / s_y)
+  ## the change variable inherits the log scale: dM_h = M(t-1) - M(t-1-h) on the same series
+  h1 <- pos |> filter(ccode == 3) |> arrange(year)
+  expect_equal(h1$M[2] - h1$M[1], (log(0.1) - mean(log(c(0.4, 0.4, 0.1, 0.1)))) / sd(log(c(0.4, 0.4, 0.1, 0.1))) -
+                 (log(0.15) - mean(log(c(0.5, 0.3, 0.15, 0.05)))) / sd(log(c(0.5, 0.3, 0.15, 0.05))))
+})
+test_that("a zero CINC share stops the build rather than being floored", {
+  pos <- tibble(ccode = 1:3, year = 1990L, cinc_share = c(0.6, 0.4, 0))
+  bad <- pos |> filter(is.na(cinc_share) | cinc_share <= 0)
+  expect_equal(nrow(bad), 1); expect_equal(bad$ccode, 3L)
+  expect_error(if (nrow(bad) > 0) stop("state-years have cinc_share <= 0"), "cinc_share")
+})
