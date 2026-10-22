@@ -187,3 +187,17 @@ test_that("a joiner entering a dispute in a later year does not create a second 
   expect_equal(d$onsets[d$ccode1 == 10L & d$ccode2 == 20L & d$year == 1954L], 1L)   # dispute 51
   expect_false(any(d$ccode2 == 30L))                                                   # joiner pair excluded (originators only)
 })
+
+## ---- distance covariate and the Z-column flags -------------------------------------------------------------
+source(file.path(root, "R", "assemble_cell.R"))
+test_that("capital distance enters as log1p(km) measured at t-1, like the other dyadic controls", {
+  dy <- tibble(ccode1 = 10L, ccode2 = 20L, year = c(1989L, 1990L), capdist = c(1000, 1200)) |> mutate(log_capdist = log1p(capdist))
+  alts <- tibble(ccode1 = 10L, ccode2 = 20L, year = 1991L) |> left_join(dy |> mutate(year = year + 1L), by = c("ccode1", "ccode2", "year"))
+  expect_equal(alts$log_capdist, log1p(1200))            # the 1990 (t-1) value, not 1989
+})
+test_that("Z columns: main spec has land contiguity and no distance; flags add distance / drop contiguity", {
+  expect_equal(z_columns(), c("contig_land", "alliance_def_off", "joint_dem", "major_count", "log_dy_prior_mids", "log_dy_peace_years"))
+  expect_true("log_capdist" %in% z_columns(DISTANCE = TRUE)); expect_true("contig_land" %in% z_columns(DISTANCE = TRUE))
+  expect_false("contig_land" %in% z_columns(CONTIGUITY = FALSE))
+  expect_false("log_dy_prior_mids" %in% z_columns(CONFLICT_HISTORY = FALSE))
+})

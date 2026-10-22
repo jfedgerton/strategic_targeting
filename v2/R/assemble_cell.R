@@ -4,8 +4,16 @@
 ## consumer sees the SAME rows (audit F3/F8: one assembly path, manifest-checked inputs).
 ## Returns list(sy, alts, ev, W_cols, X_cols, Z_cols, state_codes, x_ref, n_full, sampled, log lines)
 ## ============================================================================
+## Dyadic control columns. Main Z = land contiguity, alliance, joint democracy, major-power count
+## (+ conflict history). DISTANCE = TRUE adds log1p(capital distance km) (alternative specification,
+## not the main spec); CONTIGUITY = FALSE drops contig_land (robustness option).
+z_columns <- function(CONFLICT_HISTORY = TRUE, DISTANCE = FALSE, CONTIGUITY = TRUE) {
+  c(if (CONTIGUITY) "contig_land", "alliance_def_off", "joint_dem", "major_count",
+    if (CONFLICT_HISTORY) c("log_dy_prior_mids", "log_dy_peace_years"),
+    if (DISTANCE) "log_capdist")
+}
 assemble_cell <- function(SAMPLE, LAG, VARIANT, CENT = "pr", CONFLICT_HISTORY = TRUE, SAMPLED_M = 0L,
-                          data_dir = file.path(v2_root(), "data")) {
+                          DISTANCE = FALSE, CONTIGUITY = TRUE, data_dir = file.path(v2_root(), "data")) {
   stopifnot(SAMPLE %in% c("mid", "fmid", "war"), LAG %in% c(1L, 3L, 5L, 10L), VARIANT %in% c("all", "polrel"), CENT %in% c("pr", "eig"))
   manifest_path <- file.path(data_dir, "manifest.csv")
   stopifnot(file.exists(manifest_path))
@@ -42,9 +50,12 @@ assemble_cell <- function(SAMPLE, LAG, VARIANT, CENT = "pr", CONFLICT_HISTORY = 
     mutate(state_idx = match(ccode1, state_codes), target_idx = match(ccode2, state_codes), dR = .data[[dRalt_col]],
            log_dy_prior_mids = log1p(dy_prior_mids_h), log_dy_peace_years = log1p(dy_peace_years_h))
   stopifnot(!anyNA(alts$target_idx), !anyNA(alts$sy_row))
-  Z_cols <- c("contig_land", "alliance_def_off", "joint_dem", "major_count",
-              if (CONFLICT_HISTORY) c("log_dy_prior_mids", "log_dy_peace_years"))
-  for (cc in intersect(Z_cols, c("log_dy_prior_mids", "log_dy_peace_years"))) alts[[cc]] <- alts[[cc]] - mean(alts[[cc]])
+  Z_cols <- z_columns(CONFLICT_HISTORY, DISTANCE, CONTIGUITY)
+  if (DISTANCE) {
+    n_na <- sum(is.na(alts$log_capdist))
+    if (n_na > 0) { logf("--distance: dropping %d alternatives without a capital distance", n_na); alts <- alts |> filter(!is.na(log_capdist)) }
+  }
+  for (cc in intersect(Z_cols, c("log_dy_prior_mids", "log_dy_peace_years", "log_capdist"))) alts[[cc]] <- alts[[cc]] - mean(alts[[cc]])
   
   ## ---- events in this sample -------------------------------------------------------------------------
   ev_all <- events |> filter(.data[[ev_flag]]) |> transmute(ccode1 = initiator, ccode2 = target, year, dispnum)

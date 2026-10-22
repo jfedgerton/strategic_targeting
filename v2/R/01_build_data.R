@@ -11,7 +11,8 @@
 ##   events.rds                    one row per (dispnum, initiator, target) directed event
 ##                                 with sample flags in_mid / in_fmid / in_war
 ##   stage1_panel_lag{h}.rds       state-year panel for h in LAGS: y1_{mid,fmid,war}, W, X
-##   alts_lag{h}_{all,polrel}.rds  flattened choice sets (one row per state-year x alternative)
+##   alts_lag{h}_{all,polrel}.rds  flattened choice sets (one row per state-year x alternative);
+##                                 includes log_capdist = log1p(capital distance km) for the --distance option
 ##   build_log.txt                 dropped years / rows and why
 ##   manifest.csv
 ##
@@ -239,7 +240,9 @@ cum_lookup <- function(cum_tbl, keys, ref_year_col, out_col, query) {
 ## ============================================================================
 dyads <- create_dyadyears(system = "cow", directed = TRUE, mry = FALSE, subset_years = FIRST_YEAR:LAST_YEAR) |>
   add_contiguity() |> add_cow_majors() |> add_atop_alliance() |> add_democracy() |>
+  add_capital_distance() |>                     # bundled cow_capitals; no download_extdata() needed
   mutate(across(c(ccode1, ccode2, year), as.integer))
+stopifnot(!anyNA(dyads$capdist), all(dyads$capdist >= 0))
 assert_no_dup_keys(dyads, c("ccode1", "ccode2", "year"), "directed dyad-years")
 dyads <- dyads |> transmute(
   ccode1, ccode2, year,
@@ -249,7 +252,8 @@ dyads <- dyads |> transmute(
   alliance_def_off = as.integer(coalesce(atop_defense, 0) == 1 | coalesce(atop_offense, 0) == 1),
   alliance_missing = as.integer(is.na(atop_defense)),
   dem1 = as.integer(coalesce(polity21 >= POLITY_DEM_CUT, FALSE)), dem2 = as.integer(coalesce(polity22 >= POLITY_DEM_CUT, FALSE)),
-  dem1_missing = as.integer(is.na(polity21)), dem2_missing = as.integer(is.na(polity22)))
+  dem1_missing = as.integer(is.na(polity21)), dem2_missing = as.integer(is.na(polity22)),
+  log_capdist = log1p(capdist))                 # capital-to-capital great-circle distance, km (alternative Z, flag --distance)
 blog("directed dyad-years: %d rows; ATOP missing %d; polity1 missing %d", nrow(dyads), sum(dyads$alliance_missing), sum(dyads$dem1_missing))
 ## dyadic ongoing-MID spell table on the directed dyad-year grid
 dy_hist <- dyads |> select(ccode1, ccode2, year) |>
@@ -326,6 +330,7 @@ for (h in LAGS) {
     left_join(dyads |> mutate(year = year + 1L), by = c("ccode1", "ccode2", "year"))
   n_ctrl_na <- sum(is.na(alts$contig_any))
   if (n_ctrl_na) blog("  alternatives with no dyad-year control row at t-1 (filled 0): %d", n_ctrl_na)
+  stopifnot(n_ctrl_na == 0 || all(is.na(alts$log_capdist[is.na(alts$contig_any)])))
   alts <- alts |> mutate(across(c(contig_land, contig_any, major1, major2, alliance_def_off, alliance_missing,
                                   dem1, dem2, dem1_missing, dem2_missing), ~ coalesce(.x, 0L)),
                          major_count = major1 + major2, joint_dem = dem1 * dem2,
@@ -347,6 +352,7 @@ for (h in LAGS) {
   blog("  events whose target is NOT in the choice set (target lacks positions at t-1): %d", n_ev_target_lost)
   alts <- alts |> arrange(year, ccode1, ccode2) |> mutate(h = h)
   assert_no_dup_keys(alts, c("ccode1", "ccode2", "year"), sprintf("alternatives h=%d", h))
+  if (anyNA(alts$log_capdist)) blog("  alternatives without a capital distance at t-1: %d (NA kept; --distance runs drop them)", sum(is.na(alts$log_capdist)))
   assert_no_na(alts, c("dM", "dR_pr", "dR_eig", "contig_land", "contig_any", "alliance_def_off", "joint_dem",
                        "major_count", "dy_prior_mids_h", "dy_peace_years_h", "polrel"), "alternatives")
   ## directedness check: wherever (j,i,t) is also a row, dM(i,j) = -dM(j,i). The reverse row
