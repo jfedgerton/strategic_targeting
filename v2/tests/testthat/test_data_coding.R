@@ -152,3 +152,38 @@ test_that("manifest assertion catches a changed file", {
   saveRDS(data.frame(a = 1:4), tmp)
   expect_error(assert_matches_manifest(tmp, man))
 })
+
+## ---- conflict-history counting: one count per state-dispute (and dyad-dispute) at the first onset year
+count_mon <- function(dd) {
+  mon_first <- dd |> filter(orig1 == 1L) |> group_by(ccode = ccode1, dispnum) |> summarise(year = min(year), .groups = "drop") |>
+    count(ccode, year, name = "onsets")
+  mon_first
+}
+count_dy <- function(dd) {
+  dd |> filter(orig1 == 1L & orig2 == 1L) |> group_by(ccode1, ccode2, dispnum) |> summarise(year = min(year), .groups = "drop") |>
+    count(ccode1, ccode2, year, name = "onsets")
+}
+test_that("a joiner entering a dispute in a later year does not create a second onset for the originator", {
+  ## dispute 50: 10 vs 20 starts 1953; 30 joins side B in 1954 (disponset = 1 for the new pair 10-30 in 1954)
+  dd <- tribble(
+    ~dispnum, ~ccode1, ~ccode2, ~year, ~disponset, ~dispongoing, ~sidea1, ~sidea2, ~orig1, ~orig2,
+    50L, 10L, 20L, 1953L, 1L, 1L, 1L, 0L, 1L, 1L,
+    50L, 10L, 20L, 1954L, 0L, 1L, 1L, 0L, 1L, 1L,
+    50L, 10L, 30L, 1954L, 1L, 1L, 1L, 0L, 1L, 0L,
+    50L, 20L, 10L, 1953L, 1L, 1L, 0L, 1L, 1L, 1L,
+    50L, 20L, 10L, 1954L, 0L, 1L, 0L, 1L, 1L, 1L,
+    50L, 30L, 10L, 1954L, 1L, 1L, 0L, 1L, 0L, 1L,
+    51L, 10L, 20L, 1954L, 1L, 1L, 1L, 0L, 1L, 1L,
+    51L, 20L, 10L, 1954L, 1L, 1L, 0L, 1L, 1L, 1L)
+  m <- count_mon(dd)
+  expect_equal(m$onsets[m$ccode == 10L & m$year == 1953L], 1L)   # dispute 50 once, in 1953
+  expect_equal(m$onsets[m$ccode == 10L & m$year == 1954L], 1L)   # dispute 51 only; NOT dispute 50 again
+  expect_equal(sum(m$onsets[m$ccode == 10L]), 2L)                 # two distinct disputes in total
+  ## the naive per-year n_distinct(dispnum[disponset == 1]) rule would give 2 for 1954
+  naive <- dd |> filter(orig1 == 1L, ccode1 == 10L, year == 1954L) |> summarise(n = n_distinct(dispnum[disponset == 1L]))
+  expect_equal(naive$n, 2L)
+  d <- count_dy(dd)
+  expect_equal(d$onsets[d$ccode1 == 10L & d$ccode2 == 20L & d$year == 1953L], 1L)
+  expect_equal(d$onsets[d$ccode1 == 10L & d$ccode2 == 20L & d$year == 1954L], 1L)   # dispute 51
+  expect_false(any(d$ccode2 == 30L))                                                   # joiner pair excluded (originators only)
+})

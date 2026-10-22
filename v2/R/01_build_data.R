@@ -168,9 +168,17 @@ saveRDS(events, file.path(out_dir, "events.rds"))
 ## 5. Conflict-history building blocks (calendar-indexed, cumulative)
 ## ============================================================================
 ## monadic: distinct MID onsets per (state, year) as an originator on either side; ongoing flag
-mon_disp <- dd |> filter(orig1 == 1L | INCLUDE_JOINERS) |>
-  group_by(ccode = ccode1, year) |>
-  summarise(onsets = n_distinct(dispnum[disponset == 1L]), ongoing = as.integer(any(dispongoing == 1L)), .groups = "drop")
+## Each state-dispute is counted ONCE, at the state's first year in the dispute. (disponset == 1 is
+## set per directed pair, so a state would otherwise get another "onset" whenever a later opponent
+## joins the same dispute.) Ongoing flags are unaffected.
+mon_first <- dd |> filter(orig1 == 1L | INCLUDE_JOINERS) |>
+  group_by(ccode = ccode1, dispnum) |> summarise(year = min(year), .groups = "drop") |>
+  count(ccode, year, name = "onsets")
+mon_ongoing <- dd |> filter(orig1 == 1L | INCLUDE_JOINERS) |>
+  group_by(ccode = ccode1, year) |> summarise(ongoing = as.integer(any(dispongoing == 1L)), .groups = "drop")
+mon_disp <- full_join(mon_first, mon_ongoing, by = c("ccode", "year")) |>
+  mutate(onsets = coalesce(onsets, 0L), ongoing = coalesce(ongoing, 0L))
+assert_no_dup_keys(mon_disp, c("ccode", "year"), "monadic MID history")
 mon_hist <- states |> select(ccode, year) |> left_join(mon_disp, by = c("ccode", "year")) |>
   mutate(onsets = coalesce(onsets, 0L), ongoing = coalesce(ongoing, 0L)) |>
   arrange(ccode, year) |> group_by(ccode) |>
@@ -184,9 +192,15 @@ stopifnot(all(mon_hist$mon_peace_years >= 1))
 ## has a gap, and year - last_mid_year is still a calendar difference, so no row-lag artefact.
 
 ## dyadic (undirected key, both directions written): onsets and ongoing between i and j
-dy_disp <- dd |> filter((orig1 == 1L & orig2 == 1L) | INCLUDE_JOINERS) |>
-  group_by(ccode1, ccode2, year) |>
-  summarise(onsets = n_distinct(dispnum[disponset == 1L]), ongoing = as.integer(any(dispongoing == 1L)), .groups = "drop")
+## dyad-dispute counted once, at the pair's first year in the dispute
+dy_first <- dd |> filter((orig1 == 1L & orig2 == 1L) | INCLUDE_JOINERS) |>
+  group_by(ccode1, ccode2, dispnum) |> summarise(year = min(year), .groups = "drop") |>
+  count(ccode1, ccode2, year, name = "onsets")
+dy_ongoing <- dd |> filter((orig1 == 1L & orig2 == 1L) | INCLUDE_JOINERS) |>
+  group_by(ccode1, ccode2, year) |> summarise(ongoing = as.integer(any(dispongoing == 1L)), .groups = "drop")
+dy_disp <- full_join(dy_first, dy_ongoing, by = c("ccode1", "ccode2", "year")) |>
+  mutate(onsets = coalesce(onsets, 0L), ongoing = coalesce(ongoing, 0L))
+assert_no_dup_keys(dy_disp, c("ccode1", "ccode2", "year"), "dyadic MID history")
 blog("dyadic MID history rows: %d", nrow(dy_disp))
 
 ## cumulative onsets for a (key, year) table -> helper used below via calendar joins
