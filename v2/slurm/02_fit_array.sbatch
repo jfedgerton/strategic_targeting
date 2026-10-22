@@ -8,10 +8,10 @@
 #SBATCH --mem=32G
 #SBATCH --array=0-95
 #SBATCH --output=%x_%A_%a.out
-# Job array over sample x lag x model (x variant) for the OPEN partition (< 48 h).
-# Default cells here use the politically relevant choice set (variant=polrel, ~220k alternative
-# rows) which fits comfortably in 48 h at 4 chains x 2000 iterations. The "all" variant
-# (~1.7M rows) goes through 03_fit_all_variant.sbatch on jfe4_cr_default/basic.
+# ROBUSTNESS array (politically relevant choice set, both centralities) on the free account (< 48 h).
+# The MAIN specification is the full all-states choice set (variant=all, sampled_m=0, the defaults of
+# 02_fit_model.R) and is run by 08_main_grid.sbatch on jfe4_cr_default. This array uses variant=polrel
+# (~220k alternative rows) which fits in 48 h at 4 chains x 2000 iterations.
 #
 # Index layout: 3 samples x 4 lags x 4 models x 2 centralities = 96 cells
 # Slurm runs a spooled copy of this script, so locate the repo via the submit dir (submit from the repo root).

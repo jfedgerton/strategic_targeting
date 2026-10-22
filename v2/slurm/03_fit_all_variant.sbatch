@@ -7,7 +7,8 @@
 #SBATCH --mem=48G
 #SBATCH --array=0-15
 #SBATCH --output=%x_%A_%a.out
-# Full choice set (variant=all, ~1.7M alternative rows per lag): expected > 48 h, so paid account.
+# Full choice set (variant=all, ~1.7M alternative rows per lag) for the a/b models only: expected > 48 h, so paid account.
+# Superseded for the main results by 08_main_grid.sbatch (all eight models x four lags); kept for ad hoc reruns.
 # Cells: 4 models x 4 lags for the main sample (mid, PageRank). Run 04_pilot.sbatch FIRST to get the
 # per-iteration time on Roar hardware and adjust --time (or switch to --sampled_m=50, which cuts the
 # alternative rows ~5x and is consistent under uniform sampling; see README).
