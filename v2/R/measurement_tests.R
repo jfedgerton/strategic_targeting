@@ -12,7 +12,9 @@
 ##   measurement_error_check(...)                 inflate R for states with recent conflict by
 ##                                                delta, refit, track how classification changes
 ##
-## All refits use seed 123. Functions take the sy / alts / ev frames used by build_stan_data()
+## All refits use seed 123. Every build_stan_data() call passes allow_orphan_initiations = TRUE,
+## matching 02_fit_model.R: a state-year can have y1 = 1 with no usable stage-2 event when its
+## only target lacks positions at t-1 (108 such rows in mid / lag 5 / polrel / cutoff 1990). Functions take the sy / alts / ev frames used by build_stan_data()
 ## so they run unchanged on simulated data (v2/sim/run_measurement_tests.R) and on the real
 ## frames assembled by 02_fit_model.R.
 ## ============================================================================
@@ -114,11 +116,11 @@ temporal_holdout <- function(sy, alts, ev, W_cols, X_cols, Z_cols, cutoff, famil
   out <- list()
   for (joint in c(0L, 1L)) {
     dat_tr <- build_stan_data(tr$sy, tr$alts, tr$ev, W_cols, X_cols, Z_cols, joint = joint, x_ref = x_ref,
-                              K = if (family == "m2") K else NULL, S = S_all)
+                              K = if (family == "m2") K else NULL, S = S_all, allow_orphan_initiations = TRUE)
     fit <- sampling(stan_models[[family]], data = dat_tr, chains = chains, iter = iter, warmup = warmup, seed = V2_SEED,
                     refresh = 0, control = list(adapt_delta = 0.9), pars = c("z_re", "z_b", "V_raw", "U_free", "L_Om_joint", "L_Om", "re"), include = FALSE)
     dat_te <- build_stan_data(te$sy, te$alts, te$ev, W_cols, X_cols, Z_cols, joint = joint, x_ref = x_ref,
-                              K = if (family == "m2") K else NULL, S = S_all, anchor = dat_tr$anchor)
+                              K = if (family == "m2") K else NULL, S = S_all, anchor = dat_tr$anchor, allow_orphan_initiations = TRUE)
     sc <- stage2_scores(dat_te, extract_draws(fit, n_draws))
     out[[if (joint == 1) "b" else "a"]] <- list(fit = fit, scores = sc,
       summary = data.frame(spec = if (joint == 1) "b_joint" else "a_independent", cutoff = cutoff,
@@ -145,16 +147,16 @@ permutation_test <- function(sy, alts, ev, W_cols, X_cols, Z_cols, fit_a, fit_b,
   mode <- match.arg(mode)
   if (is.null(x_ref)) x_ref <- rep(0, length(X_cols))
   Kk <- if (family == "m2") K else NULL
-  dat_a <- build_stan_data(sy, alts, ev, W_cols, X_cols, Z_cols, joint = 0L, x_ref = x_ref, K = Kk)
-  dat_b <- build_stan_data(sy, alts, ev, W_cols, X_cols, Z_cols, joint = 1L, x_ref = x_ref, K = Kk, anchor = dat_a$anchor)
+  dat_a <- build_stan_data(sy, alts, ev, W_cols, X_cols, Z_cols, joint = 0L, x_ref = x_ref, K = Kk, allow_orphan_initiations = TRUE)
+  dat_b <- build_stan_data(sy, alts, ev, W_cols, X_cols, Z_cols, joint = 1L, x_ref = x_ref, K = Kk, anchor = dat_a$anchor, allow_orphan_initiations = TRUE)
   dr_a <- extract_draws(fit_a, n_draws); dr_b <- extract_draws(fit_b, n_draws)
   obs_a <- sum(stage2_scores(dat_a, dr_a)$log_p_chosen); obs_b <- sum(stage2_scores(dat_b, dr_b)$log_p_chosen)
   observed_adv <- obs_b - obs_a
   perm_adv <- numeric(n_perm); perm_a <- numeric(n_perm); perm_b <- numeric(n_perm)
   for (p in seq_len(n_perm)) {
     alts_p <- permute_dR(alts, seed = V2_SEED + p)
-    da <- build_stan_data(sy, alts_p, ev, W_cols, X_cols, Z_cols, joint = 0L, x_ref = x_ref, K = Kk, anchor = dat_a$anchor)
-    db <- build_stan_data(sy, alts_p, ev, W_cols, X_cols, Z_cols, joint = 1L, x_ref = x_ref, K = Kk, anchor = dat_a$anchor)
+    da <- build_stan_data(sy, alts_p, ev, W_cols, X_cols, Z_cols, joint = 0L, x_ref = x_ref, K = Kk, anchor = dat_a$anchor, allow_orphan_initiations = TRUE)
+    db <- build_stan_data(sy, alts_p, ev, W_cols, X_cols, Z_cols, joint = 1L, x_ref = x_ref, K = Kk, anchor = dat_a$anchor, allow_orphan_initiations = TRUE)
     if (mode == "refit") {
       fa <- sampling(stan_models[[family]], data = da, chains = chains, iter = iter, warmup = warmup, seed = V2_SEED, refresh = 0,
                      pars = c("z_re", "z_b", "V_raw", "U_free", "L_Om_joint", "L_Om", "re"), include = FALSE)
@@ -199,7 +201,7 @@ measurement_error_check <- function(sy, alts, ev, W_cols, X_cols, Z_cols, recent
       sy2 <- sy2 |> left_join(recent |> transmute(state_idx, year, rec_i = recent), by = c("state_idx", "year")) |>
         mutate(rec_i = coalesce(rec_i, 0)); sy2[[dR_in_X]] <- sy2[[dR_in_X]] + delta * sy2$rec_i; sy2$rec_i <- NULL
     }
-    dat <- build_stan_data(sy2, a2, ev, W_cols, X_cols, Z_cols, joint = joint, x_ref = x_ref, K = Kk)
+    dat <- build_stan_data(sy2, a2, ev, W_cols, X_cols, Z_cols, joint = joint, x_ref = x_ref, K = Kk, allow_orphan_initiations = TRUE)
     fit <- sampling(stan_models[[family]], data = dat, chains = chains, iter = iter, warmup = warmup, seed = V2_SEED, refresh = 0,
                     control = list(adapt_delta = 0.9), pars = c("z_re", "z_b", "V_raw", "U_free", "L_Om_joint", "L_Om", "re"), include = FALSE)
     cls <- classify_types(mu_state_draws(fit), r0 = r0)
