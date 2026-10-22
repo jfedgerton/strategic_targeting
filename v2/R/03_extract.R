@@ -55,6 +55,9 @@ if (!is.null(obj$dat$K)) {
   S <- obj$dat$S; K <- obj$dat$K
   Ud <- rstan::extract(fit, pars = "U", permuted = FALSE); Vd <- rstan::extract(fit, pars = "V", permuted = FALSE)
   U4 <- array(Ud, c(dim(Ud)[1], dim(Ud)[2], S, K)); V4 <- array(Vd, c(dim(Vd)[1], dim(Vd)[2], S, K))
+  ## identification check before exporting u'v: U and V columns are centred in the Stan program
+  ## (translation freedom U[,k] + h, b_j - h V[j,k] removed), so every draw's column means must be ~0
+  stopifnot(max(abs(apply(U4, c(1, 2, 4), mean))) < 1e-8, max(abs(apply(V4, c(1, 2, 4), mean))) < 1e-8)
   al <- procrustes_align(U4, V4, ref_chain = 1)
   for (ch in seq_along(al$rotations)) logf("chain %d Procrustes rotation max |R - I| = %.3f", ch, max(abs(al$rotations[[ch]] - diag(K))))
   U_mean <- apply(al$U, c(3, 4), mean); V_mean <- apply(al$V, c(3, 4), mean)

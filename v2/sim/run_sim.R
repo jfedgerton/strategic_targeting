@@ -115,6 +115,7 @@ for (truth_family in c("M1b", "M2b")) {
       Vd <- rstan::extract(fit, pars = "V", permuted = FALSE)
       S <- dat$S; K <- dat$K
       U4 <- array(Ud, c(dim(Ud)[1], dim(Ud)[2], S, K)); V4 <- array(Vd, c(dim(Vd)[1], dim(Vd)[2], S, K))
+      stopifnot(max(abs(apply(U4, c(1, 2, 4), mean))) < 1e-8, max(abs(apply(V4, c(1, 2, 4), mean))) < 1e-8)  # centred U, V
       al <- procrustes_align(U4, V4)
       rot_dev <- max(sapply(al$rotations, function(Rm) max(abs(Rm - diag(K)))))
       UV_draws <- array(NA_real_, c(dim(U4)[1] * dim(U4)[2], S, S)); ii <- 0
@@ -124,10 +125,12 @@ for (truth_family in c("M1b", "M2b")) {
       UV_mean <- apply(UV_draws, c(2, 3), mean)
       off <- row(UV_mean) != col(UV_mean)
       if (!is.null(tr$UV)) {
-        cor_uv <- cor(UV_mean[off], tr$UV[off])
+        ## the identified quantity is the doubly-centred u'v (column means of U and V removed; the
+        ## U-mean part is absorbed by b_j in the likelihood), so compare with that version of the truth
+        UV_true <- sweep(tr$U, 2, colMeans(tr$U)) %*% t(sweep(tr$V, 2, colMeans(tr$V)))
+        cor_uv <- cor(UV_mean[off], UV_true[off])
         lo <- apply(UV_draws, c(2, 3), quantile, 0.05); hi <- apply(UV_draws, c(2, 3), quantile, 0.95)
-        cov_uv <- mean((tr$UV >= lo & tr$UV <= hi)[off])
-        ## alternative: u'v recovered only up to the b_j / a_i decomposition; also report sender-centred version
+        cov_uv <- mean((UV_true >= lo & UV_true <= hi)[off])
       } else { cor_uv <- NA; cov_uv <- NA }
       ame_rows[[tag]] <- data.frame(truth = truth_family, model = sp$model, cor_UV_offdiag = cor_uv,
                                     coverage90_UV_offdiag = cov_uv, sd_UV_posterior_mean = sd(UV_mean[off]),

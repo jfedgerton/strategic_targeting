@@ -55,7 +55,11 @@ stan_inits <- function(dat, p) {
     init$u_diag <- array(sapply(seq_len(K), function(k) p$U[anchor[k], k]), dim = K)
     init$u_lower <- array(if (K > 1) unlist(lapply(2:K, function(k) p$U[anchor[k], 1:(k - 1)])) else numeric(0),
                           dim = K * (K - 1) / 2)
-    init$U_free <- p$U[setdiff(seq_len(S), anchor), , drop = FALSE]
+    ## U columns sum to zero: the last non-anchor row is determined by the others
+    nonanchor <- setdiff(seq_len(S), anchor)
+    last <- nonanchor[length(nonanchor)]
+    p$U[last, ] <- -colSums(p$U[-last, , drop = FALSE])
+    init$U_free <- p$U[nonanchor[-length(nonanchor)], , drop = FALSE]
     init$V_raw <- p$V
   }
   list(init = init, pars = p)

@@ -11,6 +11,13 @@
 // Identification of U (S x K) and V (S x K):
 //   * V is column-centred (a column constant in V adds u_i' c, constant across
 //     alternatives for a given initiator, so it cancels in the softmax).
+//   * U is column-centred too: adding h to U[, k] and replacing b_j by b_j - h V[j, k]
+//     leaves the likelihood unchanged, so without it u_i'v_j would be identified only up
+//     to a target-specific shift absorbed by b_j. The centring is a hard constraint: the
+//     entry of the LAST non-anchor state in each column equals minus the sum of the other
+//     entries, so the anchor block (zeros above the diagonal, positive diagonal) is intact.
+//     With both U and V centred and the anchor block, u_i'v_j is identified up to the
+//     rotation handled by the anchors and the Procrustes step.
 //   * The K rows of U belonging to the `anchor` states form a lower-triangular
 //     block with a positive diagonal (fixes rotation and reflection). Anchors must
 //     be supplied by the data: v2 uses the K states with the MOST initiations in
@@ -114,7 +121,7 @@ parameters {
   // ---- AME
   vector<lower=0>[K] u_diag;               // positive diagonal of the anchor block
   vector[K * (K - 1) / 2] u_lower;         // strictly lower-triangular anchor entries
-  matrix[S - K, K] U_free;                 // rows for non-anchor states
+  matrix[S - K - 1, K] U_free;             // rows for non-anchor states except the last (determined by centring)
   matrix[S, K] V_raw;
 }
 transformed parameters {
@@ -146,7 +153,9 @@ transformed parameters {
         else U[anchor[k], l] = 0;
       }
     }
-    if (S > K) U[nonanchor] = U_free;
+    if (S - K > 1) U[nonanchor[1:(S - K - 1)]] = U_free;
+    U[nonanchor[S - K]] = rep_row_vector(0, K);
+    for (k in 1:K) U[nonanchor[S - K], k] = -sum(col(U, k));   // hard column sum-to-zero
     for (k in 1:K) V[, k] = V_raw[, k] - mean(V_raw[, k]);
   }
 }
@@ -164,7 +173,7 @@ model {
   gamma ~ normal(0, 1);
   u_diag ~ normal(0, 1);
   u_lower ~ normal(0, 1);
-  to_vector(U_free) ~ normal(0, 1);
+  to_vector(U[nonanchor]) ~ normal(0, 1);  // all non-anchor rows, including the determined one
   to_vector(V_raw) ~ normal(0, 1);
   {
     matrix[N1, 2] Mu = X * beta + a_i[sy_state];
