@@ -33,7 +33,7 @@ assemble_cell <- function(SAMPLE, LAG, VARIANT, CENT = "pr", CONFLICT_HISTORY = 
   ctrl_sy <- c("cowmaj_tm1", "dem_tm1", if (CONFLICT_HISTORY) c("log_prior_mids", "log_peace_years"))
   ## centre the continuous controls so x_ref (below) and the intercept are interpretable
   for (cc in intersect(ctrl_sy, c("log_prior_mids", "log_peace_years"))) sy[[cc]] <- sy[[cc]] - mean(sy[[cc]])
-  W_cols <- ctrl_sy
+  W_cols <- c("dM_i", "dR_i", ctrl_sy)      # PI decision 2026-10-22: initiator power changes also enter stage 1 directly
   X_cols <- c("dM_i", "dR_i", ctrl_sy)      # power changes + the same controls (documented in README)
   
   ## ---- alternatives -----------------------------------------------------------------------------

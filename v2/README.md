@@ -46,7 +46,7 @@ Cell naming: `<sample>_lag<h>_<variant>_<centrality>_<model>[_K<K>][_noCH][_samp
 * Conflict history: monadic and dyadic MID onset counts in the 10 years before the window starts, dyadic and monadic peace years as of window start. Main spec includes them (`--conflict_history=TRUE` in `02_fit_model.R`); counts enter as `log1p()` and are centred.
 * Democracy and alliance NA → 0 with `*_missing` indicator columns kept in the data (not in the default spec).
 * Choice sets: `all` = every other system member at t with positions at t−1; `polrel` = contiguous (conttype 1–5) or either state a COW major power. Events whose target is outside the choice set are dropped from stage 2 (logged; the initiator's y1 stays 1).
-* W (stage 1) = major power, democracy, log1p prior MIDs, log1p peace years; X (for μ) = (dM_h, dR_h) + the same controls; Z (dyadic) = contiguity (land), alliance, joint democracy, major-power count, log1p dyadic prior MIDs, log1p dyadic peace years. `x_ref` for `mu_state` = mean X over initiating state-years in the sample.
+* W (stage 1) = initiator power changes (dM_h, dR_h), major power, democracy, log1p prior MIDs, log1p peace years (power changes added 2026-10-22 so system change can shift whether a state initiates, not only whom it targets); X (for μ) = (dM_h, dR_h) + the same controls; Z (dyadic) = contiguity (land), alliance, joint democracy, major-power count, log1p dyadic prior MIDs, log1p dyadic peace years. `x_ref` for `mu_state` = mean X over initiating state-years in the sample.
 * Panel: 1816–2014 (COW-MID 5.0 end). State index = all states appearing as initiators or targets (S = 217).
 
 ## Identification and estimation decisions
