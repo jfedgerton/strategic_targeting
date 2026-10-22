@@ -18,3 +18,19 @@ Audit source: `REFERENCE_roar_and_audit.md` (Oct 22, 2026). The old pipeline is 
 | F12 | Floating modulo thinning in plot code | No plotting code in v2 yet; draw thinning in `extract_draws()` uses `sample.int()` on integer indices with the fixed seed. |
 
 Auditor's note on additive AME effects reproducing dM = M_i − M_j: v2 does not model (dM, dR) as an outcome. The outcome is the chosen target; dM and dR are covariates inside a quadratic utility, so sender and receiver effects (a_i, b_j) cannot reproduce the outcome algebraically.
+
+
+## Post-review changes (Oct 22, 2026)
+
+External Codex review of the first v2 commits (seven correctness items), each fixed in its own commit.
+
+| item | fix |
+|---|---|
+| 1 | Conflict-history counts: each state-dispute and dyad-dispute counted once, at its first onset year (joiners entering later no longer create extra onsets). Unit test with a later joiner. |
+| 2 | `measurement_tests.R` builds Stan data with `allow_orphan_initiations = TRUE` everywhere, as the fit path does. |
+| 3, 4 | Sampled alternatives: each event gets its own sampled set (chosen + m uniform others); the IV sample is drawn uniformly and outcome-blind for every state-year with the log(n_full/m) correction (Jensen downward bias documented); full choice sets are the default everywhere. Monte Carlo tests reproduce the review cases. |
+| 5 | U columns centred as well as V (hard constraint, compatible with the anchor block); u'v identified up to rotation (anchors + Procrustes); extraction asserts the centring. |
+| 6 | The "a" model puts the LKJ(2)-matched Beta(2.5, 2.5) marginal on corr(c, a1) and corr(c, a2) with PD enforced; prior-only check Var ≈ 1/6 in both a and b. `prior_only` data flag added. |
+| 7 | Typology F1 guard is a shape / identity check (dims, unique ids, non-recycled draws) instead of a radius-inequality test. |
+
+PI additions after the review: one-dimensional targeting models (M1m, M1r, M2m, M2r via `D_mode`), capital-distance Z option (`--distance`, `--contiguity`), main specification = full all-states choice set, the 96-cell main grid with a Roar dry-run mode, per-group cross-model comparison, and the appendix typology outputs (9-cell classification, reach, focus).
