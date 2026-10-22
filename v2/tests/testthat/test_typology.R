@@ -83,3 +83,51 @@ test_that("shape / identity guard: recycled draws and duplicate ids are rejected
   cls <- classify_types(recycled, r0 = 0.5, state_labels = c("e1", "e2", "e3"), allow_identical_entities = TRUE)
   expect_equal(nrow(cls), 3); expect_true(all(cls$map_type == "bully"))
 })
+
+## ---- appendix: 9-cell classification, per-axis bands, reach ---------------------------------------
+test_that("planted points in all nine cells classify correctly", {
+  set.seed(9)
+  centres <- rbind(bully = c(2, 2), challenger = c(-2, -2), peer = c(0, 0),
+                   mat_opportunist = c(2, 0), rel_opportunist = c(0, 2), mat_challenger = c(-2, 0), rel_challenger = c(0, -2),
+                   compensator_A = c(2, -2), compensator_B = c(-2, 2))
+  mu <- array(NA_real_, c(400, 9, 2))
+  for (s in 1:9) { mu[, s, 1] <- centres[s, 1] + rnorm(400, 0, 0.1); mu[, s, 2] <- centres[s, 2] + rnorm(400, 0, 0.1) }
+  c9 <- classify_cells9(mu, band_M = 0.5, band_R = 0.5, state_labels = rownames(centres))
+  expect_equal(c9$modal_cell, rownames(centres))
+  expect_true(all(c9$modal_prob > 0.95))
+  expect_equal(c9$modal_cell_label[c9$state == "compensator_A"], "compensator A")
+  expect_true(all(abs(rowSums(c9[, paste0("p_", names(CELL9_LABELS))]) - 1) < 1e-8))
+  ## direction convention: "down" = mu > band (targets below the initiator on that axis)
+  expect_equal(c9$p_M_down[c9$state == "bully"], 1); expect_equal(c9$p_R_up[c9$state == "challenger"], 1)
+})
+
+test_that("per-axis bands work independently", {
+  mu <- array(0, c(50, 1, 2)); mu[, 1, 1] <- 0.8; mu[, 1, 2] <- 0.3       # M clearly down, R small
+  expect_equal(classify_cells9(mu, band_M = 0.5, band_R = 0.5)$modal_cell, "mat_opportunist")
+  expect_equal(classify_cells9(mu, band_M = 0.5, band_R = 0.2)$modal_cell, "bully")          # narrower R band
+  expect_equal(classify_cells9(mu, band_M = 1.0, band_R = 0.5)$modal_cell, "peer")           # wider M band
+  expect_error(classify_cells9(mu, band_M = 0.5, band_R = -1))
+})
+
+test_that("reach summaries are computed correctly on a known array", {
+  mu <- array(0, c(4, 2, 2))
+  mu[, 1, 1] <- c(3, 3, 3, 3); mu[, 1, 2] <- c(4, 4, 4, 4)          # r = 5 exactly
+  mu[, 2, 1] <- c(-1, 1, -1, 1); mu[, 2, 2] <- c(0, 0, 0, 0)        # r = 1, |mu1| = 1, |mu2| = 0
+  rc <- reach_summary(mu, state_labels = c("A", "B"))
+  expect_equal(rc$r_mean, c(5, 1)); expect_equal(rc$absmu1_mean, c(3, 1)); expect_equal(rc$absmu2_mean, c(4, 0))
+  expect_equal(rc$r_lo, c(5, 1)); expect_equal(rc$r_hi, c(5, 1))
+  rc1 <- reach_summary(array(c(-2, 2, -2, 2), c(4, 1, 1)))
+  expect_equal(rc1$r_mean, 2)
+})
+
+test_that("focus: pooled Sigma summary and per-state dispersion with the < 5 events flag", {
+  sig <- array(0, c(3, 2, 2)); sig[, 1, 1] <- 4; sig[, 2, 2] <- 1; sig[, 1, 2] <- sig[, 2, 1] <- 1
+  fs <- focus_sigma(sig)
+  expect_equal(fs$mean[fs$quantity == "sd_M"], 2); expect_equal(fs$mean[fs$quantity == "corr"], 0.5)
+  x <- rbind(c(1, 1), c(3, 1), c(2, 3), c(2, -1), c(2, 1), c(0, 0), c(1, 1))
+  mu_ev <- rbind(matrix(2, 5, 2), matrix(0, 2, 2)); mu_ev[1:5, 2] <- 1
+  st <- c(1, 1, 1, 1, 1, 2, 2)
+  f <- focus_states(x, mu_ev, st, state_labels = c("A", "B"))
+  expect_equal(f$n_events, c(5, 2)); expect_equal(f$unreliable_lt_min_events, c(FALSE, TRUE))
+  expect_equal(f$sd_M[1], sd(c(-1, 1, 0, 0, 0))); expect_equal(f$sd_R[1], sd(c(0, 0, 2, -2, 0)))
+})

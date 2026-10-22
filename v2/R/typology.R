@@ -129,3 +129,114 @@ classify_types_1d <- function(mu_draws, r0, state_labels = NULL, allow_identical
   stopifnot(nrow(out) == S)
   out
 }
+
+## ============================================================================
+## APPENDIX OUTPUTS (added at the PI's request; the 5-bin typology above stays the main output)
+## ============================================================================
+
+## ---- 9-cell classification with a peer band on EACH axis ----------------------------------------
+## Direction convention (same as the 5-bin typology): mu_d = preferred (own - target) position on axis d,
+## so mu_d > band  means the state targets others positioned BELOW itself on that axis ("down"),
+##    mu_d < -band means it targets others ABOVE itself ("up"), and |mu_d| <= band is "peer".
+## band_M and band_R are per-axis thresholds (SD units); the default for both is the 5-bin r0.
+CELL9_LABELS <- c(bully = "bully", challenger = "challenger", peer = "peer",
+                  mat_opportunist = "material opportunist", rel_opportunist = "relational opportunist",
+                  mat_challenger = "material challenger", rel_challenger = "relational challenger",
+                  compensator_A = "compensator A", compensator_B = "compensator B")
+cell9_of <- function(axM, axR) {
+  ## axM, axR in {"down", "peer", "up"}; vectorised
+  key <- paste(axM, axR)
+  out <- c("down down" = "bully", "up up" = "challenger", "peer peer" = "peer",
+           "down peer" = "mat_opportunist", "peer down" = "rel_opportunist",
+           "up peer" = "mat_challenger", "peer up" = "rel_challenger",
+           "down up" = "compensator_A", "up down" = "compensator_B")[key]
+  stopifnot(!anyNA(out))
+  unname(out)
+}
+axis_level <- function(m, band) ifelse(m > band, "down", ifelse(m < -band, "up", "peer"))
+classify_cells9 <- function(mu_draws, band_M, band_R = band_M, state_labels = NULL, allow_identical_entities = FALSE) {
+  stopifnot(is.numeric(band_M), length(band_M) == 1, band_M > 0, is.numeric(band_R), length(band_R) == 1, band_R > 0)
+  stopifnot(is.array(mu_draws), length(dim(mu_draws)) == 3, dim(mu_draws)[3] == 2, !anyNA(mu_draws))
+  n_draws <- dim(mu_draws)[1]; S <- dim(mu_draws)[2]
+  if (is.null(state_labels)) state_labels <- as.character(seq_len(S))
+  stopifnot(length(state_labels) == S, !anyDuplicated(state_labels))
+  m1 <- matrix(mu_draws[, , 1], n_draws, S); m2 <- matrix(mu_draws[, , 2], n_draws, S)
+  if (S > 1 && !allow_identical_entities) {
+    all_same <- all(vapply(2:S, function(s) isTRUE(all.equal(cbind(m1[, s], m2[, s]), cbind(m1[, 1], m2[, 1]))), logical(1)))
+    if (all_same) stop("classify_cells9: every entity has identical draws; the input looks recycled (audit F1)")
+  }
+  cell <- matrix(cell9_of(axis_level(m1, band_M), axis_level(m2, band_R)), n_draws, S)
+  probs <- t(sapply(seq_len(S), function(s) as.numeric(table(factor(cell[, s], levels = names(CELL9_LABELS))) / n_draws)))
+  if (S == 1) probs <- matrix(probs, nrow = 1)
+  colnames(probs) <- paste0("p_", names(CELL9_LABELS))
+  stopifnot(identical(dim(probs), c(S, 9L)), all(abs(rowSums(probs) - 1) < 1e-8))
+  out <- data.frame(state = state_labels, band_M = band_M, band_R = band_R,
+                    p_M_down = colMeans(m1 > band_M), p_M_peer = colMeans(abs(m1) <= band_M), p_M_up = colMeans(m1 < -band_M),
+                    p_R_down = colMeans(m2 > band_R), p_R_peer = colMeans(abs(m2) <= band_R), p_R_up = colMeans(m2 < -band_R),
+                    probs, stringsAsFactors = FALSE)
+  out$modal_cell <- names(CELL9_LABELS)[apply(probs, 1, which.max)]
+  out$modal_cell_label <- unname(CELL9_LABELS[out$modal_cell])
+  out$modal_prob <- apply(probs, 1, max)
+  rownames(out) <- NULL
+  stopifnot(nrow(out) == S)
+  out
+}
+
+## ---- REACH: posterior summaries of r_i = ||mu_i|| and the per-axis distances |mu_i1|, |mu_i2| -----
+reach_summary <- function(mu_draws, state_labels = NULL) {
+  stopifnot(is.array(mu_draws), length(dim(mu_draws)) == 3, dim(mu_draws)[3] %in% 1:2, !anyNA(mu_draws))
+  n_draws <- dim(mu_draws)[1]; S <- dim(mu_draws)[2]; D <- dim(mu_draws)[3]
+  if (is.null(state_labels)) state_labels <- as.character(seq_len(S))
+  stopifnot(length(state_labels) == S)
+  q <- function(mat) data.frame(mean = colMeans(mat), lo = apply(mat, 2, quantile, 0.05), hi = apply(mat, 2, quantile, 0.95))
+  if (D == 2) {
+    m1 <- matrix(mu_draws[, , 1], n_draws, S); m2 <- matrix(mu_draws[, , 2], n_draws, S)
+    r <- sqrt(m1^2 + m2^2)
+    out <- cbind(data.frame(state = state_labels), setNames(q(r), paste0("r_", c("mean", "lo", "hi"))),
+                 setNames(q(abs(m1)), paste0("absmu1_", c("mean", "lo", "hi"))), setNames(q(abs(m2)), paste0("absmu2_", c("mean", "lo", "hi"))))
+  } else {
+    m <- matrix(mu_draws[, , 1], n_draws, S)
+    out <- cbind(data.frame(state = state_labels), setNames(q(abs(m)), paste0("r_", c("mean", "lo", "hi"))))
+  }
+  rownames(out) <- NULL
+  stopifnot(nrow(out) == S, all(out$r_mean >= 0))
+  out
+}
+
+## ---- FOCUS (descriptive only; the model has ONE pooled Sigma) -------------------------------------
+## focus_sigma(): posterior summary of the pooled Sigma (SDs and correlation).
+## focus_states(): per state, the empirical dispersion of its observed chosen-target positions x_ij
+## around the posterior mean of mu at that event (mu_event): SD on each axis, correlation, n_events;
+## states with fewer than 5 events are flagged unreliable. A state-varying Sigma_i would be a model
+## change for the PI to decide on (see README); nothing here enters the likelihood.
+focus_sigma <- function(sigma_draws) {
+  ## sigma_draws: array [n_draws, D, D] of Sigma
+  stopifnot(is.array(sigma_draws), length(dim(sigma_draws)) == 3)
+  D <- dim(sigma_draws)[2]
+  sm <- function(v) c(mean = mean(v), lo = unname(quantile(v, 0.05)), hi = unname(quantile(v, 0.95)))
+  rows <- list(data.frame(quantity = "sd_M", t(sm(sqrt(sigma_draws[, 1, 1])))))
+  if (D == 2) {
+    rows[[2]] <- data.frame(quantity = "sd_R", t(sm(sqrt(sigma_draws[, 2, 2]))))
+    rows[[3]] <- data.frame(quantity = "corr", t(sm(sigma_draws[, 1, 2] / sqrt(sigma_draws[, 1, 1] * sigma_draws[, 2, 2]))))
+  }
+  dplyr::bind_rows(rows)
+}
+focus_states <- function(x_chosen, mu_event_mean, state_of_event, state_labels, min_events = 5L) {
+  ## x_chosen: E x D positions of the chosen targets; mu_event_mean: E x D posterior mean of mu at the event;
+  ## state_of_event: integer state index per event; state_labels: labels for 1..S
+  x_chosen <- as.matrix(x_chosen); mu_event_mean <- as.matrix(mu_event_mean)
+  stopifnot(identical(dim(x_chosen), dim(mu_event_mean)), nrow(x_chosen) == length(state_of_event))
+  D <- ncol(x_chosen); resid <- x_chosen - mu_event_mean
+  rows <- lapply(sort(unique(state_of_event)), function(s) {
+    idx <- which(state_of_event == s); n <- length(idx)
+    r <- resid[idx, , drop = FALSE]
+    data.frame(state = state_labels[s], n_events = n,
+               sd_M = if (n > 1) sd(r[, 1]) else NA_real_,
+               sd_R = if (D == 2 && n > 1) sd(r[, 2]) else NA_real_,
+               corr = if (D == 2 && n > 2) suppressWarnings(cor(r[, 1], r[, 2])) else NA_real_,
+               unreliable_lt_min_events = n < min_events, stringsAsFactors = FALSE)
+  })
+  out <- dplyr::bind_rows(rows); rownames(out) <- NULL
+  stopifnot(sum(out$n_events) == nrow(x_chosen))
+  out
+}

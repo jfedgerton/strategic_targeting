@@ -1,13 +1,17 @@
 ## ============================================================================
 ## 03_extract.R -- post-process one fit: typology from posterior mu_i, AME alignment
 ##
-## Usage: Rscript v2/R/03_extract.R --fit=v2/output/fit_<cell>.rds [--r0=0.5]
+## Usage: Rscript v2/R/03_extract.R --fit=v2/output/fit_<cell>.rds [--r0=0.5] [--band_M=r0] [--band_R=r0]
 ## Writes next to the fit:
 ##   typology_<cell>.csv   per-state posterior type probabilities, MAP type, r / theta summaries
 ##   mu_state_<cell>.csv   posterior mean and 90% interval of mu_i at x_ref
 ##   mu_event_<cell>.csv   per-event mu (initiator at its own X) with MAP type
 ##   ame_U_<cell>.csv / ame_V_<cell>.csv   (M2 only) Procrustes-aligned posterior means
 ##   ame_pairs_<cell>.csv  (M2 only) initiator x target u_i'v_j posterior mean, strongest 200 pairs
+##   typology9_<cell>.csv  (appendix, D = 2) 9-cell classification with per-axis peer bands band_M / band_R
+##   reach_<cell>.csv      (appendix) posterior mean / 90% interval of r_i = ||mu_i||, |mu_i1|, |mu_i2|
+##   focus_sigma_<cell>.csv, focus_states_<cell>.csv  (appendix, descriptive) pooled Sigma summary and per-state
+##                         empirical dispersion of chosen-target positions around mean mu_event (n < 5 flagged)
 ## r0 (peer radius, SD units of the within-year standardised positions) is a documented
 ## argument; 0.5 is the v2 default and a PI decision to confirm.
 ## ============================================================================
@@ -51,6 +55,28 @@ ev_tab <- data.frame(event = seq_len(dim(mue)[2]), sy_row = obj$dat$ev_sy,
                      year = if (!is.null(obj$sy_keys)) obj$sy_keys$year[obj$dat$ev_sy] else NA,
                      ev_cls |> select(-state))
 write.csv(ev_tab, file.path(out_dir, paste0("mu_event_", cell, ".csv")), row.names = FALSE)
+
+## ---- APPENDIX: 9-cell classification (D = 2 only), reach, focus -----------------------------------------
+band <- r0                                   # per-axis bands default to r0; override with --band_M / --band_R
+band_M <- as.numeric(sub("^--band_M=", "", c(grep("^--band_M=", args, value = TRUE), paste0("--band_M=", band))[1]))
+band_R <- as.numeric(sub("^--band_R=", "", c(grep("^--band_R=", args, value = TRUE), paste0("--band_R=", band))[1]))
+if (dim(mu)[3] == 2) {
+  c9 <- classify_cells9(mu, band_M = band_M, band_R = band_R, state_labels = labels)
+  c9$n_events_as_initiator <- n_init
+  write.csv(c9, file.path(out_dir, paste0("typology9_", cell, ".csv")), row.names = FALSE)
+  logf("9-cell classification written (band_M = %.2f, band_R = %.2f)", band_M, band_R)
+} else logf("D = 1: the single-axis 3-level classification in typology_%s.csv is the only typology output", cell)
+rch <- reach_summary(mu, state_labels = labels); rch$n_events_as_initiator <- n_init
+write.csv(rch, file.path(out_dir, paste0("reach_", cell, ".csv")), row.names = FALSE)
+sig <- rstan::extract(fit, pars = "Sigma")$Sigma
+if (length(dim(sig)) == 1) sig <- array(sig, c(length(sig), 1, 1))
+write.csv(focus_sigma(sig), file.path(out_dir, paste0("focus_sigma_", cell, ".csv")), row.names = FALSE)
+D <- dim(mu)[3]; xcols <- if (D == 2) 1:2 else obj$dat$D_mode
+x_chosen <- obj$dat$x[obj$dat$ev_row, xcols, drop = FALSE]
+mu_ev_mean <- apply(mue, c(2, 3), mean)
+fs <- focus_states(x_chosen, mu_ev_mean, obj$dat$sy_state[obj$dat$ev_sy], labels)
+write.csv(fs, file.path(out_dir, paste0("focus_states_", cell, ".csv")), row.names = FALSE)
+logf("reach and focus (descriptive; pooled Sigma) written; %d initiating states have < 5 events", sum(fs$unreliable_lt_min_events))
 
 ## ---- AME: Procrustes alignment across chains, then pool -------------------------------------------------
 if (!is.null(obj$dat$K)) {
