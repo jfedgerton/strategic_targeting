@@ -1,0 +1,44 @@
+## The vectorised posterior-predictive scorer used by the holdout and permutation tests must agree
+## with the brute-force stage-2 likelihood, and permute_dR must be a within-choice-set permutation.
+suppressPackageStartupMessages({ library(testthat); library(dplyr) })
+root <- Sys.getenv("V2_ROOT"); if (root == "") root <- normalizePath(file.path(getwd(), "v2"), mustWork = FALSE)
+source(file.path(root, "R", "00_helpers.R")); source(file.path(root, "R", "typology.R"))
+source(file.path(root, "R", "measurement_tests.R")); source(file.path(root, "sim", "simulate.R"))
+
+sim <- simulate_targeting("M2b", S = 7L, Tt = 4L, K = 2L, seed = 123L, target_rate = 0.6)
+dat <- build_stan_data(sim$sy, sim$alts, sim$ev, c("W1", "W2"), paste0("X", 1:4), c("Z1", "Z2"), joint = 1L, x_ref = rep(0, 4), K = 2L)
+set.seed(5)
+S <- dat$S
+pars <- list(beta = matrix(rnorm(8, 0, 0.3), 4, 2), a_i = matrix(rnorm(S * 2), S, 2), b_j = rnorm(S), gamma = c(0.4, -0.2),
+             sigma_x = c(0.9, 1.1), rho = 0.3, U = matrix(rnorm(S * 2), S, 2), V = matrix(rnorm(S * 2), S, 2))
+## two identical "draws" so the posterior mean equals the single-draw probability
+draws <- list(beta = array(rep(pars$beta, each = 2), c(2, 4, 2)), a_i = array(rep(pars$a_i, each = 2), c(2, S, 2)),
+              b_j = rbind(pars$b_j, pars$b_j), sigma_x = rbind(pars$sigma_x, pars$sigma_x), rho = c(0.3, 0.3),
+              gamma = rbind(pars$gamma, pars$gamma), U = array(rep(pars$U, each = 2), c(2, S, 2)), V = array(rep(pars$V, each = 2), c(2, S, 2)))
+
+test_that("stage2_scores matches brute-force log-likelihood and ranks", {
+  sc <- stage2_scores(dat, draws)
+  bf <- stage2_loglik_R(dat, pars)
+  expect_equal(sc$log_p_chosen, bf$loglik, tolerance = 1e-8)
+  expect_equal(nrow(sc), dat$E)
+  ## rank of chosen target from brute-force utilities
+  rk <- sapply(seq_len(dat$E), function(e) { rows <- dat$cs_start[dat$ev_sy[e]]:dat$cs_end[dat$ev_sy[e]]; rank(-bf$util[rows])[match(dat$ev_row[e], rows)] })
+  expect_equal(sc$mean_rank, as.numeric(rk))
+  expect_true(all(sc$set_size == S - 1))
+})
+
+test_that("permute_dR shuffles within each choice set and keeps everything else", {
+  p <- permute_dR(sim$alts, seed = 1)
+  expect_equal(p$dM, sim$alts$dM); expect_equal(p$target_idx, sim$alts$target_idx)
+  for (n in unique(sim$alts$sy_row)) expect_equal(sort(p$dR[p$sy_row == n]), sort(sim$alts$dR[sim$alts$sy_row == n]))
+  expect_false(isTRUE(all.equal(p$dR, sim$alts$dR)))
+})
+
+test_that("misclassification helper and holdout split keep one state index space", {
+  mu <- array(rnorm(200 * S * 2), c(200, S, 2))
+  ca <- classify_types(mu, r0 = 0.5); expect_equal(nrow(ca), S)
+  ## build_stan_data with an S override larger than the data
+  d2 <- build_stan_data(sim$sy, sim$alts, sim$ev, c("W1", "W2"), paste0("X", 1:4), c("Z1", "Z2"), joint = 0L, x_ref = rep(0, 4), S = S + 3)
+  expect_equal(d2$S, S + 3)
+  expect_error(build_stan_data(sim$sy, sim$alts, sim$ev, c("W1", "W2"), paste0("X", 1:4), c("Z1", "Z2"), joint = 0L, S = 2))
+})
