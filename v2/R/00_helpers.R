@@ -86,15 +86,18 @@ assert_matches_manifest <- function(path, manifest_path) {
 ## alts must be sorted by sy_row; every sy row must own >= 1 alternative.
 build_stan_data <- function(sy, alts, ev, W_cols, X_cols, Z_cols, joint, sampled = 0L,
                             n_full = NULL, x_ref = NULL, K = NULL, anchor = NULL,
-                            prior_beta_sd = 1) {
+                            prior_beta_sd = 1, allow_orphan_initiations = FALSE) {
   stopifnot(is.data.frame(sy), is.data.frame(alts), is.data.frame(ev))
   stopifnot(all(diff(alts$sy_row) >= 0))                       # sorted by state-year
   stopifnot(setequal(unique(alts$sy_row), seq_len(nrow(sy))))  # every state-year has a choice set
   stopifnot(all(sy$y1 %in% c(0L, 1L)))
   stopifnot(all(ev$sy_row %in% seq_len(nrow(sy))), all(ev$alt_row %in% seq_len(nrow(alts))))
   stopifnot(all(alts$sy_row[ev$alt_row] == ev$sy_row))         # chosen target inside own set
-  stopifnot(all(sy$y1[ev$sy_row] == 1L))
-  stopifnot(all(sy$y1[setdiff(seq_len(nrow(sy)), ev$sy_row)] == 0L))  # y1 == 1 iff >= 1 event
+  stopifnot(all(sy$y1[ev$sy_row] == 1L))                        # every event sits in an initiating state-year
+  n_orphan <- sum(sy$y1[setdiff(seq_len(nrow(sy)), ev$sy_row)] == 1L)
+  ## y1 == 1 without a stage-2 event happens in real data when the only target lacks positions;
+  ## the simulator never produces it, so it is an error unless explicitly allowed.
+  if (n_orphan > 0 && !allow_orphan_initiations) stop(n_orphan, " state-years have y1 = 1 but no event")
   S <- max(c(sy$state_idx, alts$target_idx))
   cs <- alts |> mutate(row = row_number()) |> group_by(sy_row) |>
     summarise(s = min(row), e = max(row), n = n(), .groups = "drop") |> arrange(sy_row)
