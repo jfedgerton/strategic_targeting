@@ -62,3 +62,24 @@ test_that("anchor choice uses initiation counts, not label order", {
   expect_equal(choose_anchors(sy, ev, 2), c(3L, 2L))
   expect_equal(choose_anchors(sy, ev, 1, S = 10), 3L)
 })
+
+test_that("Codex counterexample: equal radii across entities are valid input (bully at (1,1), challenger at (-1,-1))", {
+  set.seed(2)
+  mu <- array(NA_real_, c(300, 2, 2))
+  mu[, 1, 1] <- 1 + rnorm(300, 0, 0.05); mu[, 1, 2] <- 1 + rnorm(300, 0, 0.05)
+  mu[, 2, ] <- -mu[, 1, ]                                   # exactly mirrored: identical radii, different entities
+  cls <- classify_types(mu, r0 = 0.5)
+  expect_equal(cls$map_type, c("bully", "challenger"))
+  expect_equal(cls$r_mean[1], cls$r_mean[2])
+})
+
+test_that("shape / identity guard: recycled draws and duplicate ids are rejected; shared state-year draws allowed when declared", {
+  set.seed(3)
+  one <- cbind(rnorm(100, 1, 0.1), rnorm(100, 1, 0.1))
+  recycled <- array(0, c(100, 3, 2)); for (s in 1:3) recycled[, s, ] <- one   # the F1 failure mode: one vector for every entity
+  expect_error(classify_types(recycled, r0 = 0.5), "recycled")
+  expect_error(classify_types(array(rnorm(400), c(100, 2, 2)), r0 = 0.5, state_labels = c("a", "a")))
+  ## several events of one state-year share mu draws: legitimate for mu_event
+  cls <- classify_types(recycled, r0 = 0.5, state_labels = c("e1", "e2", "e3"), allow_identical_entities = TRUE)
+  expect_equal(nrow(cls), 3); expect_true(all(cls$map_type == "bully"))
+})

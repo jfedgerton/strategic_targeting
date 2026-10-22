@@ -20,13 +20,22 @@
 TYPE_LEVELS <- c("bully", "peer", "challenger", "hybrid_pm", "hybrid_mp")
 
 ## mu_draws: numeric array [n_draws, S, 2]
-classify_types <- function(mu_draws, r0, state_labels = NULL) {
+## allow_identical_entities: per-event draws legitimately repeat when several events share one
+## state-year (mu_event), so 03_extract.R passes TRUE there; for mu_state the default FALSE catches
+## the F1 failure mode (one vector recycled to every entity).
+classify_types <- function(mu_draws, r0, state_labels = NULL, allow_identical_entities = FALSE) {
   stopifnot(is.numeric(r0), length(r0) == 1, r0 > 0)
-  stopifnot(is.array(mu_draws), length(dim(mu_draws)) == 3, dim(mu_draws)[3] == 2)
+  stopifnot(is.array(mu_draws), is.numeric(mu_draws), length(dim(mu_draws)) == 3, dim(mu_draws)[3] == 2)
   n_draws <- dim(mu_draws)[1]; S <- dim(mu_draws)[2]
-  stopifnot(n_draws > 1, S >= 1)
+  stopifnot(n_draws > 1, S >= 1, !anyNA(mu_draws))
   if (is.null(state_labels)) state_labels <- as.character(seq_len(S))
-  stopifnot(length(state_labels) == S)
+  stopifnot(length(state_labels) == S, !anyDuplicated(state_labels))    # unique entity ids
+  ## F1 guard (shape / identity, not a statistic): the draws must not be one recycled vector.
+  ## A recycled scalar or vector makes every entity's draws identical to entity 1's.
+  if (S > 1 && !allow_identical_entities) {
+    all_same <- all(vapply(2:S, function(s) isTRUE(all.equal(mu_draws[, s, ], mu_draws[, 1, ])), logical(1)))
+    if (all_same) stop("classify_types: every entity has identical draws; the input looks recycled (audit F1)")
+  }
   m1 <- mu_draws[, , 1, drop = TRUE]; m2 <- mu_draws[, , 2, drop = TRUE]
   if (S == 1) { m1 <- matrix(m1, ncol = 1); m2 <- matrix(m2, ncol = 1) }
   stopifnot(identical(dim(m1), c(n_draws, S)), identical(dim(m2), c(n_draws, S)))
@@ -59,7 +68,7 @@ classify_types <- function(mu_draws, r0, state_labels = NULL) {
   out$map_type <- TYPE_LEVELS[apply(probs, 1, which.max)]
   out$map_prob <- apply(probs, 1, max)
   rownames(out) <- NULL
-  stopifnot(nrow(out) == S, length(unique(out$r_mean)) > 1 || S == 1)   # F1 guard: not a recycled scalar
+  stopifnot(nrow(out) == S, identical(dim(r), c(n_draws, S)))            # output rows = entities, r per entity x draw
   out
 }
 

@@ -42,7 +42,7 @@ logf("typology written; %d states with >= 1 initiation", sum(n_init > 0))
 
 ## ---- per-event mu (initiator at its own X) -------------------------------------------------------
 mue <- mu_event_draws(fit)
-ev_cls <- classify_types(mue, r0 = r0, state_labels = as.character(seq_len(dim(mue)[2])))
+ev_cls <- classify_types(mue, r0 = r0, state_labels = as.character(seq_len(dim(mue)[2])), allow_identical_entities = TRUE)
 ev_tab <- data.frame(event = seq_len(dim(mue)[2]), sy_row = obj$dat$ev_sy,
                      initiator = labels[obj$dat$sy_state[obj$dat$ev_sy]],
                      target = labels[obj$dat$alt_target[obj$dat$ev_row]],
