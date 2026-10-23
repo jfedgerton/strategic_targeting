@@ -14,7 +14,7 @@ z_columns <- function(CONFLICT_HISTORY = TRUE, DISTANCE = FALSE, CONTIGUITY = TR
 }
 assemble_cell <- function(SAMPLE, LAG, VARIANT, CENT = "pr", CONFLICT_HISTORY = TRUE, SAMPLED_M = 0L,
                           DISTANCE = FALSE, CONTIGUITY = TRUE, data_dir = file.path(v2_root(), "data")) {
-  stopifnot(SAMPLE %in% c("mid", "fmid", "fmidcow", "war"), LAG %in% c(1L, 3L, 5L, 10L), VARIANT %in% c("all", "polrel"), CENT %in% c("pr", "eig"))
+  stopifnot(SAMPLE %in% c("mid", "fmid", "fmidcow", "fmidub", "war"), LAG %in% c(1L, 3L, 5L, 10L), VARIANT %in% c("all", "polrel"), CENT %in% c("pr", "eig"))
   manifest_path <- file.path(data_dir, "manifest.csv")
   stopifnot(file.exists(manifest_path))
   ## ---- load inputs, each asserted against the manifest -------------------------------------

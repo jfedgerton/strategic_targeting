@@ -8,7 +8,8 @@ source(file.path(root, "R", "00_helpers.R"))
 
 ## ---- the coding rules under test, lifted verbatim from 01_build_data.R ---------------------
 code_events <- function(dd, disp, include_joiners = FALSE,
-                        mic = tibble(dispnum = integer(), mic_fatalmin = integer())) {
+                        mic = tibble(dispnum = integer(), mic_fatalmin = integer()),
+                        gml = tibble(dispnum = integer(), initiator = integer(), target = integer(), fatal_gml = logical())) {
   pair <- dd |> group_by(dispnum, ccode1, ccode2) |>
     summarise(year = min(year), sidea1 = first(sidea1), sidea2 = first(sidea2),
               orig1 = first(orig1), orig2 = first(orig2),
@@ -26,9 +27,10 @@ code_events <- function(dd, disp, include_joiners = FALSE,
                              TRUE ~ FALSE),
            war = hostlev_disp == 5L,
            in_mid = TRUE, in_war = war %in% TRUE) |>
-    left_join(mic, by = "dispnum") |>
+    left_join(mic, by = "dispnum") |> left_join(gml, by = c("dispnum", "initiator", "target")) |>
     mutate(fatal_mic = ifelse(is.na(mic_fatalmin), NA, mic_fatalmin >= 1),
-           in_fmid = code_fatal_main(fatal, fatal_mic, war),
+           in_fmid = code_fatal_main(fatal, fatal_mic, war, fatal_gml),
+           in_fmidub = in_fmid | (is.na(fatal) & is.na(fatal_mic) & is.na(fatal_gml)),
            in_fmidcow = fatal %in% TRUE)
 }
 
@@ -86,8 +88,12 @@ test_that("fatal coding (2026-10-23): wars are fatal; MIC fills COW-missing only
   cow <- c(TRUE, FALSE, NA, NA, NA, FALSE, NA)
   mic <- c(FALSE, TRUE, TRUE, FALSE, NA, NA, NA)
   war <- c(FALSE, FALSE, FALSE, FALSE, FALSE, TRUE, TRUE)
-  expect_identical(code_fatal_main(cow, mic, war), c(TRUE, FALSE, TRUE, FALSE, FALSE, TRUE, TRUE))
-  expect_error(code_fatal_main(cow, mic[-1], war))
+  gml <- c(FALSE, TRUE, FALSE, TRUE, NA, NA, NA)
+  expect_identical(code_fatal_main(cow, mic, war, gml), c(TRUE, FALSE, TRUE, FALSE, FALSE, TRUE, TRUE))
+  ## GML fills only when COW and MIC are both missing
+  expect_identical(code_fatal_main(c(NA, NA, NA, FALSE), c(NA, NA, FALSE, NA), rep(FALSE, 4), c(TRUE, FALSE, TRUE, TRUE)),
+                   c(TRUE, FALSE, FALSE, FALSE))
+  expect_error(code_fatal_main(cow, mic[-1], war, gml))
   ## all-NA COW fatality, not a war: MIC decides
   dd3 <- toy_dd |> filter(dispnum == 1L) |> mutate(fatality1 = -9L, fatality2 = -9L)
   disp3 <- tibble(dispnum = 1L, fatality_disp = -9L, hostlev_disp = 4L)
@@ -102,6 +108,13 @@ test_that("fatal coding (2026-10-23): wars are fatal; MIC fills COW-missing only
   expect_false(ev_o$in_fmid[ev_o$dispnum == 1L])
   expect_true(all(ev_o$in_fmid[ev_o$dispnum == 2L]))   # COW fatal, MIC 0 -> stays fatal
   expect_true(all(ev_o$in_fmid[ev_o$in_war])); expect_true(all(ev_o$in_fmid[ev_o$in_fmidcow]))
+  ## GML third: all-missing COW, not in MIC -> GML decides; upper bound counts only events no source codes
+  g <- function(f) tibble(dispnum = 1L, initiator = 10L, target = 20L, fatal_gml = f)
+  ev_g <- code_events(dd3, disp3, gml = g(TRUE)); expect_true(ev_g$in_fmid); expect_true(ev_g$in_fmidub)
+  ev_g0 <- code_events(dd3, disp3, gml = g(FALSE)); expect_false(ev_g0$in_fmid); expect_false(ev_g0$in_fmidub)
+  ev_none <- code_events(dd3, disp3); expect_false(ev_none$in_fmid); expect_true(ev_none$in_fmidub)
+  ## MIC beats GML when both present
+  expect_false(code_events(dd3, disp3, mic = tibble(dispnum = 1L, mic_fatalmin = 0L), gml = g(TRUE))$in_fmid)
 })
 
 test_that("F5: calendar-year lags via joins, never row lag()", {

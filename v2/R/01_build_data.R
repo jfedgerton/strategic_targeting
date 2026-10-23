@@ -9,8 +9,8 @@
 ##   sy_positions.rds              state-year positions M (LOG CINC share, std within year),
 ##                                 R_pr / R_eig (IGO PageRank / eigenvector, std within year)
 ##   events.rds                    one row per (dispnum, initiator, target) directed event
-##                                 with sample flags in_mid / in_fmid / in_fmidcow / in_war (+ fatal_source)
-##   stage1_panel_lag{h}.rds       state-year panel for h in LAGS: y1_{mid,fmid,fmidcow,war}, W, X
+##                                 with sample flags in_mid / in_fmid / in_fmidcow / in_fmidub / in_war (+ fatal_source)
+##   stage1_panel_lag{h}.rds       state-year panel for h in LAGS: y1_{mid,fmid,fmidcow,fmidub,war}, W, X
 ##   alts_lag{h}_{all,polrel}.rds  flattened choice sets (one row per state-year x alternative);
 ##                                 includes log_capdist = log1p(capital distance km) for the --distance option
 ##   build_log.txt                 dropped years / rows and why
@@ -183,18 +183,35 @@ if (file_digest(mic_path) != MIC_CONF_SHA256) stop("data_raw/mic-conf-1.0.csv sh
 mic <- read.csv(mic_path) |> transmute(dispnum = as.integer(micnum), mic_fatalmin = as.integer(fatalmin))
 assert_no_dup_keys(mic, "dispnum", "MIC confrontations"); assert_no_na(mic, "mic_fatalmin", "MIC confrontations")
 stopifnot(nrow(mic) == 1881L, all(mic$mic_fatalmin >= 0))
+## GML MID (Gibler, Miller and Little 2016; peacesciencer gml_mid_ddydisps, v2.2.1) is the third source, used only
+## when COW and MIC are both missing. Same rule as COW: per-event max over dispute-years of each side's fatality
+## and the dispute fatality; negative codes -> NA; fatal if any >= 1; NA if all NA. Joined on (dispnum, initiator, target).
+stopifnot(exists("gml_mid_ddydisps"))
+gml <- gml_mid_ddydisps |> mutate(across(c(dispnum, ccode1, ccode2), as.integer)) |>
+  group_by(dispnum, initiator = ccode1, target = ccode2) |>
+  summarise(g1 = max(fatality1), g2 = max(fatality2), gd = max(fatality), .groups = "drop") |>
+  mutate(g1 = ifelse(g1 < 0, NA, g1 >= 1), g2 = ifelse(g2 < 0, NA, g2 >= 1), gd = ifelse(gd < 0, NA, gd >= 1),
+         fatal_gml = case_when(g1 %in% TRUE | g2 %in% TRUE | gd %in% TRUE ~ TRUE,
+                               is.na(g1) & is.na(g2) & is.na(gd) ~ NA,
+                               TRUE ~ FALSE)) |>
+  select(dispnum, initiator, target, fatal_gml)
+assert_no_dup_keys(gml, c("dispnum", "initiator", "target"), "GML directed pairs")
 n_ev_before <- nrow(events)
-events <- events |> left_join(mic, by = "dispnum") |>
+events <- events |> left_join(mic, by = "dispnum") |> left_join(gml, by = c("dispnum", "initiator", "target")) |>
   mutate(fatal_mic = ifelse(is.na(mic_fatalmin), NA, mic_fatalmin >= 1),
-         in_fmid = code_fatal_main(fatal, fatal_mic, war),
+         in_fmid = code_fatal_main(fatal, fatal_mic, war, fatal_gml),
          in_fmidcow = fatal %in% TRUE,
+         in_fmidub = in_fmid | (is.na(fatal) & is.na(fatal_mic) & is.na(fatal_gml)),   # upper bound: uncoded -> fatal
          fatal_source = case_when(war %in% TRUE & !(fatal %in% TRUE) ~ "war_rule",
                                   !is.na(fatal) ~ "cow",
                                   !is.na(fatal_mic) ~ "mic_fill",
+                                  !is.na(fatal_gml) ~ "gml_fill",
                                   TRUE ~ "missing_nonfatal"))
 stopifnot(nrow(events) == n_ev_before, !anyNA(events$in_fmid),
           all(events$in_fmid[events$in_war]),          # war is a subset of fmid
-          all(events$in_fmid[events$in_fmidcow]))      # COW-only coding is a subset of the main coding
+          all(events$in_fmid[events$in_fmidcow]),      # COW-only coding is a subset of the main coding
+          all(events$in_fmidub[events$in_fmid]),       # main coding is a subset of the upper bound
+          sum(events$in_fmidub & !events$in_fmid) == sum(events$fatal_source == "missing_nonfatal"))
 cow_na <- is.na(events$fatal)
 blog("fatal coding: COW fatality missing for %d events; of these %d disputes in MIC (MIC fatal %d, MIC non-fatal %d), %d not in MIC",
      sum(cow_na), sum(cow_na & !is.na(events$fatal_mic)), sum(cow_na & events$fatal_mic %in% TRUE),
@@ -202,6 +219,9 @@ blog("fatal coding: COW fatality missing for %d events; of these %d disputes in 
 blog("fatal coding: wars added to fmid by the war rule %d; fmid (main) %d vs fmidcow (COW only) %d; fatal_source counts: %s",
      sum(events$fatal_source == "war_rule"), sum(events$in_fmid), sum(events$in_fmidcow),
      paste(names(table(events$fatal_source)), table(events$fatal_source), sep = "=", collapse = ", "))
+blog("fatal coding: COW and MIC both missing for %d non-war events; GML codes %d of them (GML fatal %d); %d stay uncoded (non-fatal)",
+     sum(cow_na & is.na(events$fatal_mic) & !events$in_war), sum(events$fatal_source == "gml_fill"),
+     sum(events$fatal_source == "gml_fill" & events$in_fmid), sum(events$fatal_source == "missing_nonfatal"))
 blog("fatal coding (info only, not used): events in MIC %d of %d; where both code fatality, COW and MIC disagree on %d events",
      sum(!is.na(events$fatal_mic)), nrow(events), sum(!is.na(events$fatal) & !is.na(events$fatal_mic) & events$fatal != events$fatal_mic))
 ## one direction per dispute pair: no (dispnum, j, i) when (dispnum, i, j) exists
@@ -354,16 +374,18 @@ for (h in LAGS) {
   stopifnot(all(panel$mon_prior_mids_h >= 0))
   ## initiation indicators per sample
   ev_sy <- events |> group_by(ccode = initiator, year) |>
-    summarise(n_ev_mid = n(), n_ev_fmid = sum(in_fmid), n_ev_fmidcow = sum(in_fmidcow), n_ev_war = sum(in_war), .groups = "drop")
+    summarise(n_ev_mid = n(), n_ev_fmid = sum(in_fmid), n_ev_fmidcow = sum(in_fmidcow), n_ev_fmidub = sum(in_fmidub),
+              n_ev_war = sum(in_war), .groups = "drop")
   panel <- panel |> left_join(ev_sy, by = c("ccode", "year")) |>
-    mutate(across(c(n_ev_mid, n_ev_fmid, n_ev_fmidcow, n_ev_war), ~ coalesce(.x, 0L)),
+    mutate(across(c(n_ev_mid, n_ev_fmid, n_ev_fmidcow, n_ev_fmidub, n_ev_war), ~ coalesce(.x, 0L)),
            y1_mid = as.integer(n_ev_mid > 0), y1_fmid = as.integer(n_ev_fmid > 0),
-           y1_fmidcow = as.integer(n_ev_fmidcow > 0), y1_war = as.integer(n_ev_war > 0),
+           y1_fmidcow = as.integer(n_ev_fmidcow > 0),
+           y1_fmidub = as.integer(n_ev_fmidub > 0), y1_war = as.integer(n_ev_war > 0),
            log_n_system_tm1 = log(n_system_tm1)) |>
     arrange(year, ccode)
   assert_no_dup_keys(panel, c("ccode", "year"), sprintf("stage-1 panel h=%d", h))
   assert_no_na(panel, c("dM_h", "dRpr_h", "dReig_h", "M_tm1", "Rpr_tm1", "cowmaj_tm1", "dem_tm1",
-                        "mon_prior_mids_h", "mon_peace_years_h", "y1_mid", "y1_fmid", "y1_fmidcow", "y1_war"), "stage-1 panel")
+                        "mon_prior_mids_h", "mon_peace_years_h", "y1_mid", "y1_fmid", "y1_fmidcow", "y1_fmidub", "y1_war"), "stage-1 panel")
   blog("panel h=%d: %d state-years, years %d-%d (%d distinct), initiations mid/fmid/fmidcow/war = %d/%d/%d/%d",
        h, nrow(panel), min(panel$year), max(panel$year), n_distinct(panel$year), sum(panel$y1_mid), sum(panel$y1_fmid), sum(panel$y1_fmidcow), sum(panel$y1_war))
   ev_lost <- events |> anti_join(panel, by = c("initiator" = "ccode", "year"))

@@ -52,3 +52,12 @@ Later on Oct 22: within-chain parallelism (reduce_sum_static over state-years, `
 | Tests | `test_data_coding.R`: truth table for `code_fatal_main()`, MIC-fill, war-rule and no-override cases. |
 
 Logged but not used. Where both COW and MIC code fatality they disagree on 120 events. MIC omits 700 of the 2,770 COW events and recodes Side A in some disputes. Switching the event base or sides to MIC is a separate PI decision.
+
+### Addendum (Oct 23, 2026): GML as third source and an upper-bound sample
+
+| change | detail |
+|---|---|
+| GML fill | When COW and MIC are both missing, `fmid` takes the GML MID 2.2.1 coding of the same directed pair (peacesciencer `gml_mid_ddydisps`, same rule as COW). Codes 11 of the 33 remaining events (5 fatal). 22 stay uncoded and non-fatal. Order of precedence is war rule, COW, MIC, GML; no source overrides an earlier coded value. |
+| `fmidub` sample | Upper bound for the appendix: `fmid` plus the 22 uncoded events as fatal (654 events). `02_fit_model.R --sample=fmidub`; not in the main grid. |
+| Counts | fatal events 632 (COW only 495); lag-3 stage-1 fatal initiations 539 (COW only 431). `mid`, `war` and `fmidcow` data unchanged. |
+| Tests | `code_fatal_main()` now takes `fatal_gml`; tests cover GML-only fill, MIC beating GML, and the upper bound. 437 expectations pass. |

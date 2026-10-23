@@ -7,7 +7,7 @@
 ##          [--sampled_m=0] [--conflict_history=TRUE] [--distance=FALSE] [--contiguity=TRUE]
 ##          [--adapt_delta=0.9] [--max_treedepth=10] [--pilot=FALSE] [--dry_run=FALSE] [--threads_per_chain=1]
 ##
-##   sample    : mid (all MIDs) | fmid (fatal MIDs, main coding) | fmidcow (fatal MIDs, COW-only coding; appendix) | war (hostility level 5)
+##   sample    : mid (all MIDs) | fmid (fatal MIDs, main coding) | fmidcow (fatal MIDs, COW-only coding; appendix) | fmidub (upper bound: uncoded fatality -> fatal; appendix) | war (hostility level 5)
 ##   lag       : 1 | 3 | 5 | 10         change-window length h
 ##   variant   : all | polrel            choice set: all system members | politically relevant
 ##   model     : M1m | M1r | M1a | M1b | M2m | M2r | M2a | M2b
@@ -51,7 +51,7 @@ DRY_RUN <- get_arg("dry_run", FALSE)      # TRUE = assemble and validate the Sta
 THREADS <- as.integer(get_arg("threads_per_chain", 1))   # within-chain parallelism (reduce_sum); cpus = chains x threads
 DISTANCE <- get_arg("distance", FALSE)    # TRUE = add log1p(capital distance km) to Z (alternative spec, not main)
 CONTIGUITY <- get_arg("contiguity", TRUE) # FALSE = drop land contiguity from Z (robustness option)
-stopifnot(SAMPLE %in% c("mid", "fmid", "fmidcow", "war"), LAG %in% c(1L, 3L, 5L, 10L), VARIANT %in% c("all", "polrel"),
+stopifnot(SAMPLE %in% c("mid", "fmid", "fmidcow", "fmidub", "war"), LAG %in% c(1L, 3L, 5L, 10L), VARIANT %in% c("all", "polrel"),
           MODEL %in% c("M1m", "M1r", "M1a", "M1b", "M2m", "M2r", "M2a", "M2b"), CENT %in% c("pr", "eig"), K >= 1)
 ## model code: M1 / M2 = family; m = material only (D_mode 1), r = relational only (D_mode 2),
 ## a = both dimensions independent (D_mode 3, joint 0), b = both dimensions joint (D_mode 3, joint 1)

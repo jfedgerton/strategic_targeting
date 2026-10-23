@@ -64,11 +64,16 @@ assert_standardized <- function(df, col, by = "year", tol = 1e-6, what = "data")
 ## fatal_cow : COW coding (TRUE / FALSE / NA when every COW fatality code is missing)
 ## fatal_mic : MIC 1.0 confrontation fatalmin >= 1 (NA when the dispute is not in MIC)
 ## war       : COW dispute hostility level 5
-## Main fmid = war (fatal by definition) OR COW fatal OR (COW missing AND MIC fatal).
-## MIC only fills COW-missing cases; it never overrides a COW code. Returns logical, never NA.
-code_fatal_main <- function(fatal_cow, fatal_mic, war) {
-  stopifnot(length(fatal_cow) == length(fatal_mic), length(fatal_cow) == length(war))
-  (war %in% TRUE) | (fatal_cow %in% TRUE) | (is.na(fatal_cow) & fatal_mic %in% TRUE)
+## fatal_gml : GML MID 2.2.1 coding of the same directed pair (NA when missing or not in GML)
+## Main fmid = war (fatal by definition) OR COW fatal OR (COW missing AND MIC fatal)
+##             OR (COW missing AND MIC missing AND GML fatal).
+## Each source only fills cases the earlier ones leave missing; none overrides a coded value.
+## Returns logical, never NA.
+code_fatal_main <- function(fatal_cow, fatal_mic, war, fatal_gml) {
+  n <- length(fatal_cow)
+  stopifnot(length(fatal_mic) == n, length(war) == n, length(fatal_gml) == n)
+  (war %in% TRUE) | (fatal_cow %in% TRUE) | (is.na(fatal_cow) & fatal_mic %in% TRUE) |
+    (is.na(fatal_cow) & is.na(fatal_mic) & fatal_gml %in% TRUE)
 }
 MIC_CONF_SHA256 <- "41cef02d0dcb23f91658b2367864b018a517e13d5b0278394dc12775fa5a5ee0"   # mic-conf-1.0.csv
 

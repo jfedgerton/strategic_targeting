@@ -6,4 +6,8 @@
 - sha256 41cef02d0dcb23f91658b2367864b018a517e13d5b0278394dc12775fa5a5ee0 (checked by `01_build_data.R` against `MIC_CONF_SHA256` in `R/00_helpers.R`).
 - 1,881 confrontations, 1816-2014. `micnum` keeps the COW MID dispute number; `fatalmin` has no missing values.
 - Codebook: https://internationalconflict.ua.edu/wp-content/uploads/2023/07/MICcodebook.pdf
-- Used only to fill COW fatality where every COW fatality code is missing (see README, Samples). Cite MIC when reporting `fmid`.
+- Second fatality source, used only where every COW fatality code is missing (see README, Samples). Cite MIC when reporting `fmid`.
+
+## GML MID 2.2.1 (not stored here)
+- Read from the bundled peacesciencer data `gml_mid_ddydisps` (Gibler, Miller and Little 2016, "An Analysis of the Militarized Interstate Dispute (MID) Dataset, 1816-2001", International Studies Quarterly 60(4)). Version 2.2.1, 1816-2010.
+- Third fatality source, used only when COW and MIC are both missing. Cite GML when reporting `fmid`.
