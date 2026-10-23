@@ -122,12 +122,27 @@ test_that("reach summaries are computed correctly on a known array", {
 
 test_that("focus: pooled Sigma summary and per-state dispersion with the < 5 events flag", {
   sig <- array(0, c(3, 2, 2)); sig[, 1, 1] <- 4; sig[, 2, 2] <- 1; sig[, 1, 2] <- sig[, 2, 1] <- 1
-  fs <- focus_sigma(sig)
+  fs <- focus_sigma(sig, D_mode = 3L)
   expect_equal(fs$mean[fs$quantity == "sd_M"], 2); expect_equal(fs$mean[fs$quantity == "corr"], 0.5)
   x <- rbind(c(1, 1), c(3, 1), c(2, 3), c(2, -1), c(2, 1), c(0, 0), c(1, 1))
   mu_ev <- rbind(matrix(2, 5, 2), matrix(0, 2, 2)); mu_ev[1:5, 2] <- 1
   st <- c(1, 1, 1, 1, 1, 2, 2)
-  f <- focus_states(x, mu_ev, st, state_labels = c("A", "B"))
+  f <- focus_states(x, mu_ev, st, state_labels = c("A", "B"), D_mode = 3L)
   expect_equal(f$n_events, c(5, 2)); expect_equal(f$unreliable_lt_min_events, c(FALSE, TRUE))
   expect_equal(f$sd_M[1], sd(c(-1, 1, 0, 0, 0))); expect_equal(f$sd_R[1], sd(c(0, 0, 2, -2, 0)))
+})
+
+test_that("focus: one-dimensional models are labelled by their own axis (Codex review of 36c0f7b)", {
+  sig1 <- array(0.81, c(3, 1, 1))                      # sigma_R = 0.9 in a relational-only model
+  fr <- focus_sigma(sig1, D_mode = 2L)
+  expect_equal(fr$quantity, "sd_R"); expect_equal(fr$mean, 0.9)
+  fm <- focus_sigma(sig1, D_mode = 1L)
+  expect_equal(fm$quantity, "sd_M")
+  x <- matrix(c(1, 3, 2, 2, 2), ncol = 1); mu_ev <- matrix(2, 5, 1); st <- rep(1, 5)
+  f_r <- focus_states(x, mu_ev, st, state_labels = "A", D_mode = 2L)
+  expect_true(is.na(f_r$sd_M)); expect_equal(f_r$sd_R, sd(c(-1, 1, 0, 0, 0)))
+  f_m <- focus_states(x, mu_ev, st, state_labels = "A", D_mode = 1L)
+  expect_true(is.na(f_m$sd_R)); expect_equal(f_m$sd_M, sd(c(-1, 1, 0, 0, 0)))
+  expect_error(focus_sigma(sig1))                       # D_mode is required
+  expect_error(focus_sigma(sig1, D_mode = 3L))          # D = 1 array cannot be a both-dimensions model
 })

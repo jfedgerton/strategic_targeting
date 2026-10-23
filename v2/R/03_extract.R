@@ -70,11 +70,11 @@ rch <- reach_summary(mu, state_labels = labels); rch$n_events_as_initiator <- n_
 write.csv(rch, file.path(out_dir, paste0("reach_", cell, ".csv")), row.names = FALSE)
 sig <- rstan::extract(fit, pars = "Sigma")$Sigma
 if (length(dim(sig)) == 1) sig <- array(sig, c(length(sig), 1, 1))
-write.csv(focus_sigma(sig), file.path(out_dir, paste0("focus_sigma_", cell, ".csv")), row.names = FALSE)
+write.csv(focus_sigma(sig, D_mode = obj$dat$D_mode), file.path(out_dir, paste0("focus_sigma_", cell, ".csv")), row.names = FALSE)
 D <- dim(mu)[3]; xcols <- if (D == 2) 1:2 else obj$dat$D_mode
 x_chosen <- obj$dat$x[obj$dat$ev_row, xcols, drop = FALSE]
 mu_ev_mean <- apply(mue, c(2, 3), mean)
-fs <- focus_states(x_chosen, mu_ev_mean, obj$dat$sy_state[obj$dat$ev_sy], labels)
+fs <- focus_states(x_chosen, mu_ev_mean, obj$dat$sy_state[obj$dat$ev_sy], labels, D_mode = obj$dat$D_mode)
 write.csv(fs, file.path(out_dir, paste0("focus_states_", cell, ".csv")), row.names = FALSE)
 logf("reach and focus (descriptive; pooled Sigma) written; %d initiating states have < 5 events", sum(fs$unreliable_lt_min_events))
 

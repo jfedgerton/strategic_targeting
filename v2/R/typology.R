@@ -209,30 +209,41 @@ reach_summary <- function(mu_draws, state_labels = NULL) {
 ## around the posterior mean of mu at that event (mu_event): SD on each axis, correlation, n_events;
 ## states with fewer than 5 events are flagged unreliable. A state-varying Sigma_i would be a model
 ## change for the PI to decide on (see README); nothing here enters the likelihood.
-focus_sigma <- function(sigma_draws) {
+## D_mode is REQUIRED (1 = material only, 2 = relational only, 3 = both) so a one-dimensional
+## relational model is labelled sd_R, never sd_M (Codex review of 36c0f7b, typology.R:217/234).
+focus_axis_labels <- function(D_mode, D) {
+  stopifnot(length(D_mode) == 1, D_mode %in% 1:3)
+  labs <- if (D_mode == 3L) c("M", "R") else c("M", "R")[D_mode]
+  stopifnot(length(labs) == D)
+  labs
+}
+focus_sigma <- function(sigma_draws, D_mode) {
   ## sigma_draws: array [n_draws, D, D] of Sigma
   stopifnot(is.array(sigma_draws), length(dim(sigma_draws)) == 3)
   D <- dim(sigma_draws)[2]
+  labs <- focus_axis_labels(D_mode, D)
   sm <- function(v) c(mean = mean(v), lo = unname(quantile(v, 0.05)), hi = unname(quantile(v, 0.95)))
-  rows <- list(data.frame(quantity = "sd_M", t(sm(sqrt(sigma_draws[, 1, 1])))))
+  rows <- list(data.frame(quantity = paste0("sd_", labs[1]), t(sm(sqrt(sigma_draws[, 1, 1])))))
   if (D == 2) {
     rows[[2]] <- data.frame(quantity = "sd_R", t(sm(sqrt(sigma_draws[, 2, 2]))))
     rows[[3]] <- data.frame(quantity = "corr", t(sm(sigma_draws[, 1, 2] / sqrt(sigma_draws[, 1, 1] * sigma_draws[, 2, 2]))))
   }
   dplyr::bind_rows(rows)
 }
-focus_states <- function(x_chosen, mu_event_mean, state_of_event, state_labels, min_events = 5L) {
+focus_states <- function(x_chosen, mu_event_mean, state_of_event, state_labels, D_mode, min_events = 5L) {
   ## x_chosen: E x D positions of the chosen targets; mu_event_mean: E x D posterior mean of mu at the event;
   ## state_of_event: integer state index per event; state_labels: labels for 1..S
   x_chosen <- as.matrix(x_chosen); mu_event_mean <- as.matrix(mu_event_mean)
   stopifnot(identical(dim(x_chosen), dim(mu_event_mean)), nrow(x_chosen) == length(state_of_event))
   D <- ncol(x_chosen); resid <- x_chosen - mu_event_mean
+  labs <- focus_axis_labels(D_mode, D)
   rows <- lapply(sort(unique(state_of_event)), function(s) {
     idx <- which(state_of_event == s); n <- length(idx)
     r <- resid[idx, , drop = FALSE]
+    sd_ax <- function(k) if (n > 1) sd(r[, k]) else NA_real_
     data.frame(state = state_labels[s], n_events = n,
-               sd_M = if (n > 1) sd(r[, 1]) else NA_real_,
-               sd_R = if (D == 2 && n > 1) sd(r[, 2]) else NA_real_,
+               sd_M = if ("M" %in% labs) sd_ax(match("M", labs)) else NA_real_,
+               sd_R = if ("R" %in% labs) sd_ax(match("R", labs)) else NA_real_,
                corr = if (D == 2 && n > 2) suppressWarnings(cor(r[, 1], r[, 2])) else NA_real_,
                unreliable_lt_min_events = n < min_events, stringsAsFactors = FALSE)
   })
