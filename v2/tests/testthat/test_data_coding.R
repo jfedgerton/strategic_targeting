@@ -7,7 +7,8 @@ root <- Sys.getenv("V2_ROOT"); if (root == "") root <- normalizePath(file.path(g
 source(file.path(root, "R", "00_helpers.R"))
 
 ## ---- the coding rules under test, lifted verbatim from 01_build_data.R ---------------------
-code_events <- function(dd, disp, include_joiners = FALSE) {
+code_events <- function(dd, disp, include_joiners = FALSE,
+                        mic = tibble(dispnum = integer(), mic_fatalmin = integer())) {
   pair <- dd |> group_by(dispnum, ccode1, ccode2) |>
     summarise(year = min(year), sidea1 = first(sidea1), sidea2 = first(sidea2),
               orig1 = first(orig1), orig2 = first(orig2),
@@ -24,7 +25,11 @@ code_events <- function(dd, disp, include_joiners = FALSE) {
                              is.na(fatal1) & is.na(fatal2) & is.na(fatal_disp) ~ NA,
                              TRUE ~ FALSE),
            war = hostlev_disp == 5L,
-           in_mid = TRUE, in_fmid = fatal %in% TRUE, in_war = war %in% TRUE)
+           in_mid = TRUE, in_war = war %in% TRUE) |>
+    left_join(mic, by = "dispnum") |>
+    mutate(fatal_mic = ifelse(is.na(mic_fatalmin), NA, mic_fatalmin >= 1),
+           in_fmid = code_fatal_main(fatal, fatal_mic, war),
+           in_fmidcow = fatal %in% TRUE)
 }
 
 ## toy directed dispute-years: dispute 1 is bilateral A=10 vs B=20 (both originators), 1950-1951;
@@ -73,7 +78,30 @@ test_that("fatal / war samples: negative fatality codes -> NA, fatal if either s
   ## all-NA fatality -> NA, not FALSE
   dd3 <- toy_dd |> filter(dispnum == 1L) |> mutate(fatality1 = -9L, fatality2 = -9L)
   ev3 <- code_events(dd3, tibble(dispnum = 1L, fatality_disp = -9L, hostlev_disp = 4L))
-  expect_true(is.na(ev3$fatal)); expect_false(ev3$in_fmid)
+  expect_true(is.na(ev3$fatal)); expect_false(ev3$in_fmid); expect_false(ev3$in_fmidcow)
+})
+
+test_that("fatal coding (2026-10-23): wars are fatal; MIC fills COW-missing only; fmidcow = COW only", {
+  ## truth table of the helper
+  cow <- c(TRUE, FALSE, NA, NA, NA, FALSE, NA)
+  mic <- c(FALSE, TRUE, TRUE, FALSE, NA, NA, NA)
+  war <- c(FALSE, FALSE, FALSE, FALSE, FALSE, TRUE, TRUE)
+  expect_identical(code_fatal_main(cow, mic, war), c(TRUE, FALSE, TRUE, FALSE, FALSE, TRUE, TRUE))
+  expect_error(code_fatal_main(cow, mic[-1], war))
+  ## all-NA COW fatality, not a war: MIC decides
+  dd3 <- toy_dd |> filter(dispnum == 1L) |> mutate(fatality1 = -9L, fatality2 = -9L)
+  disp3 <- tibble(dispnum = 1L, fatality_disp = -9L, hostlev_disp = 4L)
+  expect_true(code_events(dd3, disp3, mic = tibble(dispnum = 1L, mic_fatalmin = 30L))$in_fmid)
+  expect_false(code_events(dd3, disp3, mic = tibble(dispnum = 1L, mic_fatalmin = 0L))$in_fmid)
+  expect_false(code_events(dd3, disp3, mic = tibble(dispnum = 1L, mic_fatalmin = 30L))$in_fmidcow)
+  ## all-NA COW fatality, a war, not in MIC: fatal by the war rule; COW-only coding drops it
+  ev_w <- code_events(dd3, tibble(dispnum = 1L, fatality_disp = -9L, hostlev_disp = 5L))
+  expect_true(ev_w$in_war); expect_true(ev_w$in_fmid); expect_false(ev_w$in_fmidcow)
+  ## MIC never overrides a COW code: dispute 1 is COW non-fatal, MIC says fatal -> stays non-fatal
+  ev_o <- code_events(toy_dd, toy_disp, mic = tibble(dispnum = c(1L, 2L), mic_fatalmin = c(5L, 0L)))
+  expect_false(ev_o$in_fmid[ev_o$dispnum == 1L])
+  expect_true(all(ev_o$in_fmid[ev_o$dispnum == 2L]))   # COW fatal, MIC 0 -> stays fatal
+  expect_true(all(ev_o$in_fmid[ev_o$in_war])); expect_true(all(ev_o$in_fmid[ev_o$in_fmidcow]))
 })
 
 test_that("F5: calendar-year lags via joins, never row lag()", {

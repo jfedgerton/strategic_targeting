@@ -9,8 +9,8 @@
 ##   sy_positions.rds              state-year positions M (LOG CINC share, std within year),
 ##                                 R_pr / R_eig (IGO PageRank / eigenvector, std within year)
 ##   events.rds                    one row per (dispnum, initiator, target) directed event
-##                                 with sample flags in_mid / in_fmid / in_war
-##   stage1_panel_lag{h}.rds       state-year panel for h in LAGS: y1_{mid,fmid,war}, W, X
+##                                 with sample flags in_mid / in_fmid / in_fmidcow / in_war (+ fatal_source)
+##   stage1_panel_lag{h}.rds       state-year panel for h in LAGS: y1_{mid,fmid,fmidcow,war}, W, X
 ##   alts_lag{h}_{all,polrel}.rds  flattened choice sets (one row per state-year x alternative);
 ##                                 includes log_capdist = log1p(capital distance km) for the --distance option
 ##   build_log.txt                 dropped years / rows and why
@@ -172,7 +172,38 @@ events <- events |> rename(initiator = ccode1, target = ccode2) |>
                            is.na(fatal1) & is.na(fatal2) & is.na(fatal_disp) ~ NA,
                            TRUE ~ FALSE),
          war = hostlev_disp == 5L,
-         in_mid = TRUE, in_fmid = fatal %in% TRUE, in_war = war %in% TRUE)
+         in_mid = TRUE, in_war = war %in% TRUE)
+## fatal-MID coding (PI decision 2026-10-23). Main fmid: wars are fatal by definition (COW wars need
+## 1,000+ battle deaths); events whose COW fatality codes are all missing are filled from MIC 1.0
+## (Gibler et al., confrontation-level fatalmin >= 1; micnum = COW dispnum). MIC never overrides a
+## COW code. fmidcow = the original COW-only coding (missing -> not fatal), kept for the appendix.
+mic_path <- file.path(v2_root(), "data_raw", "mic-conf-1.0.csv")
+stopifnot(file.exists(mic_path))
+if (file_digest(mic_path) != MIC_CONF_SHA256) stop("data_raw/mic-conf-1.0.csv sha256 does not match MIC_CONF_SHA256 in 00_helpers.R")
+mic <- read.csv(mic_path) |> transmute(dispnum = as.integer(micnum), mic_fatalmin = as.integer(fatalmin))
+assert_no_dup_keys(mic, "dispnum", "MIC confrontations"); assert_no_na(mic, "mic_fatalmin", "MIC confrontations")
+stopifnot(nrow(mic) == 1881L, all(mic$mic_fatalmin >= 0))
+n_ev_before <- nrow(events)
+events <- events |> left_join(mic, by = "dispnum") |>
+  mutate(fatal_mic = ifelse(is.na(mic_fatalmin), NA, mic_fatalmin >= 1),
+         in_fmid = code_fatal_main(fatal, fatal_mic, war),
+         in_fmidcow = fatal %in% TRUE,
+         fatal_source = case_when(war %in% TRUE & !(fatal %in% TRUE) ~ "war_rule",
+                                  !is.na(fatal) ~ "cow",
+                                  !is.na(fatal_mic) ~ "mic_fill",
+                                  TRUE ~ "missing_nonfatal"))
+stopifnot(nrow(events) == n_ev_before, !anyNA(events$in_fmid),
+          all(events$in_fmid[events$in_war]),          # war is a subset of fmid
+          all(events$in_fmid[events$in_fmidcow]))      # COW-only coding is a subset of the main coding
+cow_na <- is.na(events$fatal)
+blog("fatal coding: COW fatality missing for %d events; of these %d disputes in MIC (MIC fatal %d, MIC non-fatal %d), %d not in MIC",
+     sum(cow_na), sum(cow_na & !is.na(events$fatal_mic)), sum(cow_na & events$fatal_mic %in% TRUE),
+     sum(cow_na & events$fatal_mic %in% FALSE), sum(cow_na & is.na(events$fatal_mic)))
+blog("fatal coding: wars added to fmid by the war rule %d; fmid (main) %d vs fmidcow (COW only) %d; fatal_source counts: %s",
+     sum(events$fatal_source == "war_rule"), sum(events$in_fmid), sum(events$in_fmidcow),
+     paste(names(table(events$fatal_source)), table(events$fatal_source), sep = "=", collapse = ", "))
+blog("fatal coding (info only, not used): events in MIC %d of %d; where both code fatality, COW and MIC disagree on %d events",
+     sum(!is.na(events$fatal_mic)), nrow(events), sum(!is.na(events$fatal) & !is.na(events$fatal_mic) & events$fatal != events$fatal_mic))
 ## one direction per dispute pair: no (dispnum, j, i) when (dispnum, i, j) exists
 rev_key <- paste(events$dispnum, events$target, events$initiator)
 stopifnot(!any(rev_key %in% paste(events$dispnum, events$initiator, events$target)))
@@ -323,17 +354,18 @@ for (h in LAGS) {
   stopifnot(all(panel$mon_prior_mids_h >= 0))
   ## initiation indicators per sample
   ev_sy <- events |> group_by(ccode = initiator, year) |>
-    summarise(n_ev_mid = n(), n_ev_fmid = sum(in_fmid), n_ev_war = sum(in_war), .groups = "drop")
+    summarise(n_ev_mid = n(), n_ev_fmid = sum(in_fmid), n_ev_fmidcow = sum(in_fmidcow), n_ev_war = sum(in_war), .groups = "drop")
   panel <- panel |> left_join(ev_sy, by = c("ccode", "year")) |>
-    mutate(across(c(n_ev_mid, n_ev_fmid, n_ev_war), ~ coalesce(.x, 0L)),
-           y1_mid = as.integer(n_ev_mid > 0), y1_fmid = as.integer(n_ev_fmid > 0), y1_war = as.integer(n_ev_war > 0),
+    mutate(across(c(n_ev_mid, n_ev_fmid, n_ev_fmidcow, n_ev_war), ~ coalesce(.x, 0L)),
+           y1_mid = as.integer(n_ev_mid > 0), y1_fmid = as.integer(n_ev_fmid > 0),
+           y1_fmidcow = as.integer(n_ev_fmidcow > 0), y1_war = as.integer(n_ev_war > 0),
            log_n_system_tm1 = log(n_system_tm1)) |>
     arrange(year, ccode)
   assert_no_dup_keys(panel, c("ccode", "year"), sprintf("stage-1 panel h=%d", h))
   assert_no_na(panel, c("dM_h", "dRpr_h", "dReig_h", "M_tm1", "Rpr_tm1", "cowmaj_tm1", "dem_tm1",
-                        "mon_prior_mids_h", "mon_peace_years_h", "y1_mid", "y1_fmid", "y1_war"), "stage-1 panel")
-  blog("panel h=%d: %d state-years, years %d-%d (%d distinct), initiations mid/fmid/war = %d/%d/%d",
-       h, nrow(panel), min(panel$year), max(panel$year), n_distinct(panel$year), sum(panel$y1_mid), sum(panel$y1_fmid), sum(panel$y1_war))
+                        "mon_prior_mids_h", "mon_peace_years_h", "y1_mid", "y1_fmid", "y1_fmidcow", "y1_war"), "stage-1 panel")
+  blog("panel h=%d: %d state-years, years %d-%d (%d distinct), initiations mid/fmid/fmidcow/war = %d/%d/%d/%d",
+       h, nrow(panel), min(panel$year), max(panel$year), n_distinct(panel$year), sum(panel$y1_mid), sum(panel$y1_fmid), sum(panel$y1_fmidcow), sum(panel$y1_war))
   ev_lost <- events |> anti_join(panel, by = c("initiator" = "ccode", "year"))
   blog("  events whose initiator state-year is NOT in the panel (no positions at t-1 / t-1-h): %d of %d", nrow(ev_lost), nrow(events))
   add_manifest(panel, sprintf("stage1_panel_lag%d.rds", h), sprintf("stage-1 panel, h=%d", h))

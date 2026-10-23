@@ -40,3 +40,15 @@ Later on Oct 22: within-chain parallelism (reduce_sum_static over state-years, `
 ## Codex review of 36c0f7b (2026-10-22)
 - P2 typology: `focus_sigma()` / `focus_states()` now take a required `D_mode`, so relational-only (M1r/M2r) focus output is labelled `sd_R` (was mislabelled `sd_M`). Test added.
 - P2 data build: the zero/NA CINC-share check now runs on the full state-year panel before any filtering (previously NA rows were dropped first, so a missing share silently removed the state). Real data unaffected (0 NA, 0 zero); build re-run and complete. Test added.
+
+## Fatal-MID coding (Oct 23, 2026; PI decision after the final independent audit, finding 3)
+
+| change | detail |
+|---|---|
+| Wars are fatal | `fmid` now contains every war (hostility level 5). COW wars require 1,000+ battle deaths, so a non-fatal war is a coding gap. Adds 20 events (14 with all COW fatality codes missing, mostly WWI/WWII pairs; 6 coded non-fatal by COW). |
+| MIC fill | Events whose COW fatality codes are all missing take MIC 1.0 confrontation `fatalmin` ≥ 1 (`v2/data_raw/mic-conf-1.0.csv`, sha256-checked). Fills 182 of the 229 missing events (112 fatal, 70 non-fatal); 33 are neither wars nor in MIC and stay non-fatal. MIC never overrides a coded COW value. |
+| `fmidcow` sample | The previous coding is kept as sample `fmidcow` (appendix) and reproduces the old `y1_fmid` exactly. `02_fit_model.R --sample=fmidcow` runs it; it is not in the main grid. |
+| Counts | fatal events 627 (was 495); lag-3 stage-1 fatal initiations 534 (was 431). `mid` and `war` data are byte-for-byte unchanged apart from the new columns (`mic_fatalmin`, `fatal_mic`, `in_fmidcow`, `fatal_source`, `y1_fmidcow`, `n_ev_fmidcow`). |
+| Tests | `test_data_coding.R`: truth table for `code_fatal_main()`, MIC-fill, war-rule and no-override cases. |
+
+Logged but not used. Where both COW and MIC code fatality they disagree on 120 events. MIC omits 700 of the 2,770 COW events and recodes Side A in some disputes. Switching the event base or sides to MIC is a separate PI decision.

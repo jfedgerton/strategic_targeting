@@ -60,6 +60,18 @@ assert_standardized <- function(df, col, by = "year", tol = 1e-6, what = "data")
   invisible(TRUE)
 }
 
+## ---- fatal-MID coding (PI decision 2026-10-23; see README "Samples") -----------------
+## fatal_cow : COW coding (TRUE / FALSE / NA when every COW fatality code is missing)
+## fatal_mic : MIC 1.0 confrontation fatalmin >= 1 (NA when the dispute is not in MIC)
+## war       : COW dispute hostility level 5
+## Main fmid = war (fatal by definition) OR COW fatal OR (COW missing AND MIC fatal).
+## MIC only fills COW-missing cases; it never overrides a COW code. Returns logical, never NA.
+code_fatal_main <- function(fatal_cow, fatal_mic, war) {
+  stopifnot(length(fatal_cow) == length(fatal_mic), length(fatal_cow) == length(war))
+  (war %in% TRUE) | (fatal_cow %in% TRUE) | (is.na(fatal_cow) & fatal_mic %in% TRUE)
+}
+MIC_CONF_SHA256 <- "41cef02d0dcb23f91658b2367864b018a517e13d5b0278394dc12775fa5a5ee0"   # mic-conf-1.0.csv
+
 ## ---- manifest / digests ------------------------------------------------------------
 file_digest <- function(path) digest::digest(path, algo = "sha256", file = TRUE)
 write_manifest <- function(entries, path) {
