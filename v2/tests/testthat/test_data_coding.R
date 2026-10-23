@@ -223,3 +223,16 @@ test_that("a zero CINC share stops the build rather than being floored", {
   expect_equal(nrow(bad), 1); expect_equal(bad$ccode, 3L)
   expect_error(if (nrow(bad) > 0) stop("state-years have cinc_share <= 0"), "cinc_share")
 })
+
+test_that("a missing CINC share stops the build check before any filtering (Codex review of 36c0f7b)", {
+  ## mirrors 01_build_data.R section 3: the zero/NA check runs on the full panel, before filter()
+  pos <- tibble::tibble(ccode = 1:4, year = 1990L, cinc_share = c(0.6, 0.3, 0.1, NA))
+  bad <- pos |> dplyr::filter(is.na(cinc_share) | cinc_share <= 0)
+  expect_equal(nrow(bad), 1L)
+  expect_error(if (nrow(bad) > 0) stop("state-years have cinc_share <= 0 or NA"), "cinc_share")
+  src <- readLines(file.path(v2_root(), "R", "01_build_data.R"))
+  i_check <- grep("bad_cinc <- pos", src, fixed = TRUE)[1]
+  i_filter <- grep("filter(!is.na(cinc_share))", src, fixed = TRUE)
+  expect_true(!is.na(i_check))
+  expect_true(length(i_filter) == 0 || all(i_filter > i_check))   # no NA filter ahead of the check
+})

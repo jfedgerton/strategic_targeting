@@ -105,7 +105,16 @@ blog("centrality computed for %d IGO years (%d-%d)", length(igo_years), min(igo_
 ## ============================================================================
 ## 3. Positions: M = CINC share std within year; R = centrality std within year
 ## ============================================================================
-pos <- states |> select(ccode, year, cinc_share, n_system) |> filter(!is.na(cinc_share))
+pos <- states |> select(ccode, year, cinc_share, n_system)
+## Material position M = LOG CINC share. A zero or NA share has no log: check on the FULL state-year panel,
+## BEFORE any filtering (Codex review of 36c0f7b: the old check ran after NA rows were already dropped, so a
+## missing share silently removed the state from positions and choice sets). Stop and list the state-years.
+bad_cinc <- pos |> filter(is.na(cinc_share) | cinc_share <= 0)
+if (nrow(bad_cinc) > 0) {
+  blog("cinc_share <= 0 or NA in %d state-years: %s", nrow(bad_cinc),
+       paste(sprintf("%d-%d", bad_cinc$ccode, bad_cinc$year), collapse = " "))
+  stop(sprintf("%d state-years have cinc_share <= 0 or NA (see build_log.txt); log(CINC share) undefined. PI decision needed.", nrow(bad_cinc)))
+}
 if (IGO_FILL == "drop") {
   pos <- pos |> inner_join(cent |> mutate(igo_src_year = year), by = c("ccode", "year"))
 } else if (IGO_FILL == "locf") {
@@ -116,14 +125,9 @@ if (IGO_FILL == "drop") {
   pos <- pos |> inner_join(cand, by = c("ccode", "year"))
   blog("IGO_FILL = locf: max staleness %d years", max(pos$year - pos$igo_src_year))
 } else stop("unknown IGO_FILL")
-## Material position M = LOG CINC share, standardised within year (PI decision 2026-10-22). A zero or NA
-## share has no log; the build stops and lists the offending state-years so the PI can decide (no silent floor).
-bad_cinc <- pos |> filter(is.na(cinc_share) | cinc_share <= 0)
-if (nrow(bad_cinc) > 0) {
-  blog("cinc_share <= 0 or NA in %d state-years: %s", nrow(bad_cinc),
-       paste(sprintf("%d-%d", bad_cinc$ccode, bad_cinc$year), collapse = " "))
-  stop(sprintf("%d state-years have cinc_share <= 0 or NA (see build_log.txt); log(CINC share) undefined. PI decision needed.", nrow(bad_cinc)))
-}
+## Material position M = LOG CINC share, standardised within year (PI decision 2026-10-22); zero/NA shares
+## were already rejected above, before any filtering.
+stopifnot(!anyNA(pos$cinc_share), all(pos$cinc_share > 0))
 pos <- pos |> mutate(log_cinc_share = log(cinc_share))
 pos <- pos |> group_by(year) |> filter(n() > 2) |>
   mutate(M = as.numeric(scale(log_cinc_share)),

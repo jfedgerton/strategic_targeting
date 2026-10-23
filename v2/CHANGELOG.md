@@ -36,3 +36,7 @@ External Codex review of the first v2 commits (seven correctness items), each fi
 PI additions after the review: one-dimensional targeting models (M1m, M1r, M2m, M2r via `D_mode`), capital-distance Z option (`--distance`, `--contiguity`), main specification = full all-states choice set, the 96-cell main grid with a Roar dry-run mode, per-group cross-model comparison, and the appendix typology outputs (9-cell classification, reach, focus).
 
 Later on Oct 22: within-chain parallelism (reduce_sum_static over state-years, `--threads_per_chain`, cpus = chains × threads in the sbatch scripts, equivalence tests, gradient profile); material position changed to log CINC share standardised within year (zero/NA guard, tests); eigenvector-centrality robustness run unscheduled.
+
+## Codex review of 36c0f7b (2026-10-22)
+- P2 typology: `focus_sigma()` / `focus_states()` now take a required `D_mode`, so relational-only (M1r/M2r) focus output is labelled `sd_R` (was mislabelled `sd_M`). Test added.
+- P2 data build: the zero/NA CINC-share check now runs on the full state-year panel before any filtering (previously NA rows were dropped first, so a missing share silently removed the state). Real data unaffected (0 NA, 0 zero); build re-run and complete. Test added.
