@@ -136,6 +136,17 @@ gap_scale <- function(v, yr) {
   out
 }
 
+## ---- fit provenance (audit 2026-10-23): a fit must have been made from the CURRENT data files ----------------
+## obj$manifest holds the manifest rows (file, sha256) of the data the fit used; compare with the current manifest.
+assert_fit_current <- function(obj, manifest_path) {
+  stopifnot(!is.null(obj$manifest), nrow(obj$manifest) > 0, file.exists(manifest_path))
+  cur <- read.csv(manifest_path, stringsAsFactors = FALSE)
+  m <- merge(obj$manifest[, c("file", "sha256")], cur[, c("file", "sha256")], by = "file", all.x = TRUE, suffixes = c("_fit", "_now"))
+  bad <- m$file[is.na(m$sha256_now) | m$sha256_fit != m$sha256_now]
+  if (length(bad)) stop(sprintf("fit %s was made from data that no longer match the current build (%s); refit or rebuild", obj$cell, paste(bad, collapse = ", ")))
+  invisible(TRUE)
+}
+
 ## ---- manifest / digests ------------------------------------------------------------
 file_digest <- function(path) digest::digest(path, algo = "sha256", file = TRUE)
 write_manifest <- function(entries, path) {

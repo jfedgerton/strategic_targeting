@@ -29,7 +29,7 @@ fits <- list(); loos <- list(); rows <- list()
 for (m in MODELS) {
   f <- file.path(out_dir, sprintf("fit_%s_%s%s.rds", group, m, if (grepl("^M2", m)) sprintf("_K%d", K) else ""))
   if (!file.exists(f)) { logf("missing fit: %s", basename(f)); next }
-  obj <- readRDS(f); fits[[m]] <- obj
+  obj <- readRDS(f); assert_fit_current(obj, file.path(v2_root(), "data", "manifest.csv")); fits[[m]] <- obj
   l2 <- loo_from_fit(obj$fit, "log_lik_stage2"); l1 <- loo_from_fit(obj$fit, "log_lik_stage1")
   loos[[m]] <- list(l2 = l2, l1 = l1)
   rows[[m]] <- data.frame(model = m, D_mode = obj$dat$D_mode, joint = obj$dat$joint, E = obj$dat$E, N1 = obj$dat$N1,

@@ -5,3 +5,4 @@ v2/sim/fits/
 *.rds
 *.Rout
 .Rhistory
+v2/output/

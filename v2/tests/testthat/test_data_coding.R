@@ -406,3 +406,14 @@ test_that("gap scale (2026-10-23): one constant per axis equals the SD of within
   expect_equal(gap_scale(d2$v, d2$year), gap_scale(d$v, d$year), tolerance = 1e-12)
   expect_error(gap_scale(c(1, NA), c(1L, 1L)))
 })
+
+test_that("assert_fit_current (2026-10-23): a fit made from older data files is rejected", {
+  td <- tempfile(); dir.create(td); mp <- file.path(td, "manifest.csv")
+  write.csv(data.frame(file = c("events.rds", "alts_lag3_all.rds"), nrow = 1, ncol = 1, sha256 = c("aaa", "bbb"), note = ""), mp, row.names = FALSE)
+  ok <- list(cell = "x", manifest = data.frame(file = c("events.rds", "alts_lag3_all.rds"), sha256 = c("aaa", "bbb")))
+  stale <- list(cell = "x", manifest = data.frame(file = c("events.rds", "alts_lag3_all.rds"), sha256 = c("aaa", "OLD")))
+  gone <- list(cell = "x", manifest = data.frame(file = "stage1_panel_lag9.rds", sha256 = "ccc"))
+  expect_true(assert_fit_current(ok, mp))
+  expect_error(assert_fit_current(stale, mp), "alts_lag3_all.rds")
+  expect_error(assert_fit_current(gone, mp), "stage1_panel_lag9.rds")
+})

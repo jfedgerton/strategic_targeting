@@ -25,6 +25,7 @@ fit_path <- sub("^--fit=", "", grep("^--fit=", args, value = TRUE))
 r0 <- as.numeric(sub("^--r0=", "", c(grep("^--r0=", args, value = TRUE), "--r0=0.5")[1]))
 stopifnot(length(fit_path) == 1, file.exists(fit_path), is.finite(r0), r0 > 0)
 obj <- readRDS(fit_path); fit <- obj$fit; cell <- obj$cell
+assert_fit_current(obj, file.path(v2_root(), "data", "manifest.csv"))
 out_dir <- dirname(fit_path)
 log_open(paste0("03_extract_", cell))
 logf("fit %s; r0 = %.2f", cell, r0)
