@@ -236,27 +236,142 @@ test_that("capital distance enters as log1p(km) measured at t-1, like the other 
   alts <- tibble(ccode1 = 10L, ccode2 = 20L, year = 1991L) |> left_join(dy |> mutate(year = year + 1L), by = c("ccode1", "ccode2", "year"))
   expect_equal(alts$log_capdist, log1p(1200))            # the 1990 (t-1) value, not 1989
 })
-test_that("Z columns: main spec has land contiguity and no distance; flags add distance / drop contiguity", {
-  expect_equal(z_columns(), c("contig_land", "alliance_def_off", "joint_dem", "major_count", "log_dy_prior_mids", "log_dy_peace_years"))
+test_that("Z columns: main spec has land contiguity, the target power changes and no distance; flags add distance / drop contiguity / add the missing indicator", {
+  expect_equal(z_columns(), c("contig_land", "alliance_def_off", "joint_dem", "major_count", "log_dy_prior_mids", "log_dy_peace_years",
+                              "dM_j_h", "dRpr_j_h"))
   expect_true("log_capdist" %in% z_columns(DISTANCE = TRUE)); expect_true("contig_land" %in% z_columns(DISTANCE = TRUE))
   expect_false("contig_land" %in% z_columns(CONTIGUITY = FALSE))
   expect_false("log_dy_prior_mids" %in% z_columns(CONFLICT_HISTORY = FALSE))
+  ## the target changes are in every specification, including the one the 1-D models use (z_columns is model-agnostic)
+  for (ch in c(TRUE, FALSE)) for (di in c(TRUE, FALSE)) for (co in c(TRUE, FALSE))
+    expect_true(all(c("dM_j_h", "dRpr_j_h") %in% z_columns(ch, di, co)))
+  expect_false("dch_j_missing" %in% z_columns())
+  expect_equal(tail(z_columns(TARGET_MISSING = TRUE), 1), "dch_j_missing")
+  expect_true(all(c("dM_j_h", "dRpr_j_h") %in% Z_CENTRED)); expect_false("dch_j_missing" %in% Z_CENTRED)
 })
 
-## ---- material position = log CINC share, standardised within year ---------------------------------------
-test_that("M is the within-year standardised log CINC share; dM between two states is their standardised log ratio", {
+## ---- positions = raw log shares (PI decision 2026-10-23); gaps are log ratios --------------------------------------
+test_that("M = log CINC share and R_pr = log PageRank without within-year standardisation; gaps are log ratios", {
   pos <- tibble(ccode = rep(1:4, 2), year = rep(c(1990L, 1991L), each = 4),
-                cinc_share = c(0.5, 0.3, 0.15, 0.05, 0.4, 0.4, 0.1, 0.1)) |>
-    mutate(log_cinc_share = log(cinc_share)) |> group_by(year) |> mutate(M = as.numeric(scale(log_cinc_share))) |> ungroup()
-  expect_true(assert_standardized(pos, "M"))
-  y <- pos |> filter(year == 1990L); s_y <- sd(log(y$cinc_share))
-  dM_12 <- y$M[y$ccode == 1] - y$M[y$ccode == 2]
-  expect_equal(dM_12, log(0.5 / 0.3) / s_y)                    # standardised log ratio, mean cancels
-  expect_equal(y$M[y$ccode == 1] - y$M[y$ccode == 4], log(0.5 / 0.05) / s_y)
-  ## the change variable inherits the log scale: dM_h = M(t-1) - M(t-1-h) on the same series
+                cinc_share = c(0.5, 0.3, 0.15, 0.05, 0.4, 0.4, 0.1, 0.1),
+                pagerank = c(0.4, 0.3, 0.2, 0.1, 0.25, 0.25, 0.25, 0.25)) |>
+    mutate(M = log(cinc_share), R_pr = log(pagerank))      # the build's mutate
+  expect_equal(pos$M, log(pos$cinc_share)); expect_equal(pos$R_pr, log(pos$pagerank))
+  expect_error(assert_standardized(pos, "M"))              # deliberately NOT standardised within year
+  expect_true(assert_finite(pos, c("M", "R_pr")))
+  y <- pos |> filter(year == 1990L)
+  expect_equal(y$M[y$ccode == 1] - y$M[y$ccode == 2], log(0.5 / 0.3))            # log ratio, no year scale
+  expect_equal(y$M[y$ccode == 1] - y$M[y$ccode == 4], log(0.5 / 0.05))
+  expect_equal(y$R_pr[y$ccode == 1] - y$R_pr[y$ccode == 4], log(0.4 / 0.1))
+  ## an equal-share year gives identical R_pr for every state (a within-year z-score would be undefined / 0 here)
+  expect_equal(sd(pos$R_pr[pos$year == 1991L]), 0)
+  ## the raw change of state 3 is the log ratio of its own share across the window
   h1 <- pos |> filter(ccode == 3) |> arrange(year)
-  expect_equal(h1$M[2] - h1$M[1], (log(0.1) - mean(log(c(0.4, 0.4, 0.1, 0.1)))) / sd(log(c(0.4, 0.4, 0.1, 0.1))) -
-                 (log(0.15) - mean(log(c(0.5, 0.3, 0.15, 0.05)))) / sd(log(c(0.5, 0.3, 0.15, 0.05))))
+  expect_equal(h1$M[2] - h1$M[1], log(0.1 / 0.15))
+})
+
+test_that("a zero, NA or non-finite PageRank stops the build like a zero CINC share", {
+  pos <- tibble(ccode = 1:4, year = 1990L, pagerank = c(0.5, 0, NA, Inf))
+  bad <- pos |> filter(!is.finite(pagerank) | pagerank <= 0)
+  expect_equal(sort(bad$ccode), 2:4)
+  expect_error(if (nrow(bad) > 0) stop("state-years have pagerank <= 0 or non-finite"), "pagerank")
+  src <- readLines(file.path(v2_root(), "R", "01_build_data.R"))
+  expect_true(any(grepl("bad_pr <- pos", src, fixed = TRUE)))
+  expect_false(any(grepl("assert_standardized(pos, \"M\")", src, fixed = TRUE)))     # no z-score assertion on M / R_pr any more
+  expect_false(any(grepl("assert_standardized(pos, \"R_pr\")", src, fixed = TRUE)))
+})
+
+## ---- power changes: one table per lag, year-centred, one pooled SD (build_change_table in 00_helpers.R) ----------
+## toy levels (log units): states 10 and 40 have every year 1988-1994; state 20 has no level in 1992 (gap);
+## state 30 enters in 1992. The state-year panel adds 20 in 1992 (in the system, no position that year).
+toy_pos <- tribble(
+  ~ccode, ~year, ~M,   ~R_pr,
+  10L, 1988L, -0.3, -1.2,   10L, 1989L, -0.1, -1.1,   10L, 1990L, 0.0, -1.0,   10L, 1991L, 0.2, -0.9,
+  10L, 1992L, 0.5, -0.7,    10L, 1993L, 0.4, -0.6,    10L, 1994L, 0.9, -0.2,
+  40L, 1988L, 1.0, 0.4,     40L, 1989L, 1.1, 0.3,     40L, 1990L, 0.9, 0.2,    40L, 1991L, 1.2, 0.0,
+  40L, 1992L, 1.0, 0.1,     40L, 1993L, 1.3, 0.2,     40L, 1994L, 1.1, 0.6,
+  20L, 1990L, -1.0, 0.0,    20L, 1991L, -1.4, 0.1,    20L, 1993L, -1.1, 0.3,   20L, 1994L, -1.0, 0.5,
+  30L, 1992L, 2.0, 1.0,     30L, 1993L, 2.5, 1.4,     30L, 1994L, 2.2, 1.1)
+toy_states <- toy_pos |> select(ccode, year) |> bind_rows(tibble(ccode = 20L, year = 1992L))
+
+test_that("change table: raw change is level(t-1) - level(t-1-h) by calendar join; rows without both levels are dropped", {
+  tb <- build_change_table(toy_pos, toy_states, h = 1L)$tbl
+  expect_equal(unique(tb$h), 1L)
+  ## state 10: change at t needs levels at t-1 and t-2 -> t = 1990..1994
+  expect_equal(tb$year[tb$ccode == 10L], 1990:1994)
+  expect_equal(tb$dM_raw_h[tb$ccode == 10L & tb$year == 1993L], 0.5 - 0.2)             # M(1992) - M(1991)
+  expect_equal(tb$dRpr_raw_h[tb$ccode == 10L & tb$year == 1994L], -0.6 - (-0.7))      # R(1993) - R(1992)
+  ## state 20 (no 1992 level): t = 1992 uses 1991 and 1990 (present); t = 1993 and 1994 need 1992 -> dropped, never bridged
+  expect_equal(tb$year[tb$ccode == 20L], 1992L)
+  expect_equal(tb$dM_raw_h[tb$ccode == 20L], -1.4 - (-1.0))
+  ## state 30 entered 1992: its first change is at t = 1994 (levels 1993 and 1992)
+  expect_equal(tb$year[tb$ccode == 30L], 1994L)
+  expect_equal(tb$dM_raw_h[tb$ccode == 30L], 2.5 - 2.0)
+  ## a row-lag version would have bridged state 20's gap (1993 - 1991); the calendar join does not
+  rowlag <- toy_pos |> filter(ccode == 20L) |> arrange(year) |> mutate(d = M - lag(M))
+  expect_equal(rowlag$d[3], -1.1 - (-1.4))
+  expect_false(any(tb$ccode == 20L & tb$year == 1994L))
+  ## h = 3: t needs t-1 and t-4; state 20 qualifies at t = 1994 (levels 1993 and 1990), 30 never does
+  tb3 <- build_change_table(toy_pos, toy_states, h = 3L)$tbl
+  expect_equal(tb3$dM_raw_h[tb3$ccode == 10L & tb3$year == 1994L], 0.4 - 0.0)
+  expect_equal(tb3$year[tb3$ccode == 20L], 1994L); expect_equal(tb3$dRpr_raw_h[tb3$ccode == 20L], 0.3 - 0.0)
+  expect_false(30L %in% tb3$ccode)
+  expect_equal(unique(tb3$h), 3L)
+})
+
+test_that("change table: centred within year (mean of all states with a change that year), then ONE pooled SD per lag and variable", {
+  ch <- build_change_table(toy_pos, toy_states, h = 1L)
+  tb <- ch$tbl
+  ## within-year mean of the transformed change is 0 in every year
+  yr <- tb |> group_by(year) |> summarise(mM = mean(dM_h), mR = mean(dRpr_h), n = n(), .groups = "drop")
+  expect_true(all(abs(yr$mM) < 1e-12)); expect_true(all(abs(yr$mR) < 1e-12))
+  ## the year mean is taken over the states that HAVE a change that year: 1992 has 10, 40 and 20 (not 30)
+  expect_equal(yr$n[yr$year == 1992L], 3L)
+  ## pooled SD after scaling is exactly 1 for each variable, and the constants are the SDs of the year-centred raw change
+  expect_equal(sd(tb$dM_h), 1); expect_equal(sd(tb$dRpr_h), 1)
+  cM <- tb |> group_by(year) |> mutate(c = dM_raw_h - mean(dM_raw_h)) |> ungroup()
+  expect_equal(ch$scale$pooled_sd[ch$scale$variable == "dM_h"], sd(cM$c))
+  cR <- tb |> group_by(year) |> mutate(c = dRpr_raw_h - mean(dRpr_raw_h)) |> ungroup()
+  expect_equal(ch$scale$pooled_sd[ch$scale$variable == "dRpr_h"], sd(cR$c))
+  ## ONE constant: the ratio (transformed / centred raw) is the same number on every row (no per-year scaling)
+  ratio <- tb$dM_h / cM$c
+  expect_true(all(abs(ratio[is.finite(ratio)] - 1 / sd(cM$c)) < 1e-12))
+  ## hand check one row: state 10 at t = 1993: raw 0.3; the other 1993 changes are 40: 1.0 - 1.2 = -0.2 (20 and 30 have none)
+  expect_equal(tb$dM_h[tb$ccode == 10L & tb$year == 1993L], (0.3 - mean(c(0.3, -0.2))) / sd(cM$c))
+  ## scale frame shape and the raw columns are kept
+  expect_equal(ch$scale$h, c(1L, 1L)); expect_equal(ch$scale$variable, c("dM_h", "dRpr_h")); expect_equal(unique(ch$scale$n_rows), nrow(tb))
+  expect_true(all(c("dM_raw_h", "dRpr_raw_h", "dM_h", "dRpr_h") %in% names(tb)))
+  ## the year-centring removes any variable that is constant within a year, e.g. system growth: cor is exactly 0
+  g <- c(`1990` = 0.05, `1991` = 0.10, `1992` = 0.00, `1993` = 0.20, `1994` = -0.02)[as.character(tb$year)]
+  expect_true(abs(cor(tb$dM_h, g)) < 1e-10); expect_true(abs(cor(tb$dRpr_h, g)) < 1e-10)
+  ## fail loudly: a non-finite level, a duplicate key, or too few rows
+  expect_error(build_change_table(toy_pos |> mutate(M = ifelse(ccode == 10L & year == 1990L, NA, M)), toy_states, 1L), "non-finite")
+  expect_error(build_change_table(bind_rows(toy_pos, toy_pos[1, ]), toy_states, 1L), "duplicate")
+  expect_error(build_change_table(toy_pos, tibble(ccode = 10L, year = 1990L), 1L), "only 1 state-years")
+})
+
+test_that("target changes join from the same table; a target with no change value gets 0 and dch_j_missing = 1", {
+  h <- 1L
+  ch <- build_change_table(toy_pos, toy_states, h)
+  panel <- ch$tbl                                               # initiator rows = the change table rows
+  ## choice set at t = 1993: initiators 10 and 40 (20 has no change at 1993, 30 neither); targets = every other state at t
+  alts <- panel |> filter(year == 1993L) |> select(ccode1 = ccode, year) |>
+    inner_join(toy_states |> rename(ccode2 = ccode), by = "year", relationship = "many-to-many") |> filter(ccode1 != ccode2) |>
+    left_join(ch$tbl |> transmute(ccode2 = ccode, year, dM_j_h = dM_h, dRpr_j_h = dRpr_h), by = c("ccode2", "year"))
+  expect_true(all(is.na(alts$dM_j_h) == is.na(alts$dRpr_j_h)))
+  alts <- alts |> mutate(dch_j_missing = as.integer(is.na(dM_j_h)), dM_j_h = coalesce(dM_j_h, 0), dRpr_j_h = coalesce(dRpr_j_h, 0))
+  expect_equal(sort(alts$ccode2[alts$ccode1 == 10L]), c(20L, 30L, 40L))
+  ## targets 20 and 30 have no change at 1993 -> 0 and indicator 1; target 40 gets ITS OWN transformed change (same table, same key)
+  expect_equal(alts$dch_j_missing[alts$ccode1 == 10L & alts$ccode2 %in% c(20L, 30L)], c(1L, 1L))
+  expect_equal(alts$dM_j_h[alts$ccode1 == 10L & alts$ccode2 == 20L], 0); expect_equal(alts$dRpr_j_h[alts$ccode1 == 10L & alts$ccode2 == 30L], 0)
+  expect_equal(alts$dch_j_missing[alts$ccode1 == 10L & alts$ccode2 == 40L], 0L)
+  expect_equal(alts$dM_j_h[alts$ccode1 == 10L & alts$ccode2 == 40L], panel$dM_h[panel$ccode == 40L & panel$year == 1993L])
+  expect_equal(alts$dM_j_h[alts$ccode1 == 40L & alts$ccode2 == 10L], panel$dM_h[panel$ccode == 10L & panel$year == 1993L])
+  ## the indicator decision used by assemble_cell(): in Z only when non-constant in the assembled cell
+  n_miss <- sum(alts$dch_j_missing); target_missing <- n_miss > 0 && n_miss < nrow(alts)
+  expect_true(target_missing); expect_true("dch_j_missing" %in% z_columns(TARGET_MISSING = target_missing))
+  alts_all_ok <- alts |> filter(dch_j_missing == 0L); n0 <- sum(alts_all_ok$dch_j_missing)
+  expect_false(n0 > 0 && n0 < nrow(alts_all_ok)); expect_false("dch_j_missing" %in% z_columns(TARGET_MISSING = n0 > 0 && n0 < nrow(alts_all_ok)))
 })
 test_that("a zero CINC share stops the build rather than being floored", {
   pos <- tibble(ccode = 1:3, year = 1990L, cinc_share = c(0.6, 0.4, 0))

@@ -50,6 +50,11 @@ assert_no_na <- function(df, cols, what = "data") {
   if (length(bad) > 0) stop(sprintf("%s: NA present in model columns: %s", what, paste(bad, collapse = ", ")))
   invisible(TRUE)
 }
+assert_finite <- function(df, cols, what = "data") {
+  bad <- cols[vapply(cols, function(cc) !all(is.finite(df[[cc]])), logical(1))]
+  if (length(bad) > 0) stop(sprintf("%s: non-finite values (NA / NaN / Inf) in columns: %s", what, paste(bad, collapse = ", ")))
+  invisible(TRUE)
+}
 assert_standardized <- function(df, col, by = "year", tol = 1e-6, what = "data") {
   chk <- df |> group_by(across(all_of(by))) |>
     summarise(m = mean(.data[[col]]), s = sd(.data[[col]]), n = n(), .groups = "drop") |>
@@ -58,6 +63,49 @@ assert_standardized <- function(df, col, by = "year", tol = 1e-6, what = "data")
     stop(sprintf("%s: %s is not standardized within %s (max |mean| = %.2e, sd range [%.4f, %.4f])",
                  what, col, by, max(abs(chk$m)), min(chk$s), max(chk$s)))
   invisible(TRUE)
+}
+
+## ---- power changes (PI decision 2026-10-23; see README "Positions" and "Changes") -----------
+## pos  : state-year levels with columns ccode, year, M (log CINC share), R_pr (log IGO PageRank)
+## at_t : the (ccode, year) state-years at t for which a change is wanted (the state-year panel)
+## h    : window length. The change at (ccode, t) is level(t-1) - level(t-1-h), by CALENDAR joins.
+## Returns list(tbl, scale). tbl has one row per (ccode, year) in at_t with levels at both dates:
+##   dM_raw_h, dRpr_raw_h : the raw change in log units (log ratio of the state's own share across the window)
+##   dM_h, dRpr_h         : the raw change minus the mean raw change of all states with a change in that year,
+##                          divided by ONE pooled constant per lag and variable (the SD of the year-centred change
+##                          over all rows of the table). Zero means "changed like the average state that year";
+##                          the pooled SD is 1 by construction.
+## scale is a data.frame(h, variable, pooled_sd, n_rows, n_years) with the two constants.
+## The same table serves the initiator change in stage 1 (W, X) and the target change in stage 2 (Z).
+build_change_table <- function(pos, at_t, h) {
+  stopifnot(all(c("ccode", "year", "M", "R_pr") %in% names(pos)), all(c("ccode", "year") %in% names(at_t)),
+            length(h) == 1, h >= 1)
+  h <- as.integer(h)
+  assert_no_dup_keys(pos, c("ccode", "year"), "change table: positions")
+  assert_finite(pos, c("M", "R_pr"), "change table: positions")
+  tbl <- at_t |> distinct(ccode, year) |>
+    inner_join(pos |> transmute(ccode, year = year + 1L, .M_tm1 = M, .R_tm1 = R_pr), by = c("ccode", "year")) |>
+    inner_join(pos |> transmute(ccode, year = year + 1L + h, .M_w0 = M, .R_w0 = R_pr), by = c("ccode", "year")) |>
+    mutate(dM_raw_h = .M_tm1 - .M_w0, dRpr_raw_h = .R_tm1 - .R_w0) |>
+    group_by(year) |>
+    mutate(.dM_c = dM_raw_h - mean(dM_raw_h), .dR_c = dRpr_raw_h - mean(dRpr_raw_h)) |> ungroup()
+  if (nrow(tbl) < 3) stop(sprintf("change table h=%d: only %d state-years have levels at t-1 and t-1-h", h, nrow(tbl)))
+  sd_M <- sd(tbl$.dM_c); sd_R <- sd(tbl$.dR_c)
+  if (!is.finite(sd_M) || sd_M <= 0 || !is.finite(sd_R) || sd_R <= 0)
+    stop(sprintf("change table h=%d: pooled SD of the year-centred change is not positive (M %.3g, R_pr %.3g)", h, sd_M, sd_R))
+  tbl <- tbl |> mutate(dM_h = .dM_c / sd_M, dRpr_h = .dR_c / sd_R, h = h) |>
+    select(ccode, year, h, dM_raw_h, dRpr_raw_h, dM_h, dRpr_h) |> arrange(year, ccode)
+  assert_no_dup_keys(tbl, c("ccode", "year"), sprintf("change table h=%d", h))
+  assert_finite(tbl, c("dM_raw_h", "dRpr_raw_h", "dM_h", "dRpr_h"), sprintf("change table h=%d", h))
+  ## invariants: within-year mean 0 (tolerance), pooled SD exactly 1 after scaling
+  yr <- tbl |> group_by(year) |> summarise(mM = mean(dM_h), mR = mean(dRpr_h), .groups = "drop")
+  if (any(abs(yr$mM) > 1e-8) || any(abs(yr$mR) > 1e-8))
+    stop(sprintf("change table h=%d: within-year mean of the centred change is not 0 (max |mean| M %.2e, R_pr %.2e)", h, max(abs(yr$mM)), max(abs(yr$mR))))
+  if (abs(sd(tbl$dM_h) - 1) > 1e-8 || abs(sd(tbl$dRpr_h) - 1) > 1e-8)
+    stop(sprintf("change table h=%d: pooled SD after scaling is not 1 (M %.6f, R_pr %.6f)", h, sd(tbl$dM_h), sd(tbl$dRpr_h)))
+  list(tbl = tbl,
+       scale = data.frame(h = h, variable = c("dM_h", "dRpr_h"), pooled_sd = c(sd_M, sd_R),
+                          n_rows = nrow(tbl), n_years = n_distinct(tbl$year)))
 }
 
 ## ---- fatal-MID coding (PI decision 2026-10-23; see README "Samples") -----------------
@@ -101,8 +149,9 @@ assert_matches_manifest <- function(path, manifest_path) {
 ##   alts: alternative rows, one row per (sy_row, target_idx); columns sy_row, target_idx, dM, dR, Z cols
 ##   ev:   events, columns sy_row, alt_row (index into alts after ordering by sy_row)
 ## alts must be sorted by sy_row; every sy row must own >= 1 alternative.
-## prior_mu0_sd: sd of the normal(0, .) prior on the mu intercept mu0 (the population-average ideal gap, in
-## within-year SD units of the positions); 2 is the README value.
+## prior_mu0_sd: sd of the normal(0, .) prior on the mu intercept mu0 (the population-average ideal gap, in the
+## units of x; since 2026-10-23 x is a log ratio of CINC shares / PageRank, no longer within-year SD units);
+## 2 is the README value and was set when x was in SD units (flagged for PI review, not changed here).
 build_stan_data <- function(sy, alts, ev, W_cols, X_cols, Z_cols, joint, sampled = 0L,
                             n_full = NULL, x_ref = NULL, K = NULL, anchor = NULL,
                             prior_beta_sd = 1, prior_mu0_sd = 2, allow_orphan_initiations = FALSE, S = NULL, prior_only = 0L,

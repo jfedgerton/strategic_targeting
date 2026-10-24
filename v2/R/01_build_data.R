@@ -6,18 +6,25 @@
 ##         COW-MID 5.0 directed dispute-years, ATOP, COW contiguity, COW IGO v3).
 ##         No download_extdata() call is needed for the columns used here.
 ## Outputs (v2/data/, all gitignored; manifest.csv records nrow + sha256 per file):
-##   sy_positions.rds              state-year positions M (LOG CINC share, std within year),
-##                                 R_pr / R_eig (IGO PageRank / eigenvector, std within year)
+##   sy_positions.rds              state-year positions M = log CINC share, R_pr = log IGO PageRank (both raw log
+##                                 shares, NOT standardised within year; PI decision 2026-10-23), R_eig (eigenvector
+##                                 centrality, still std within year; not used in the main grid)
 ##   events.rds                    one row per (dispnum, initiator, target) directed event
 ##                                 with sample flags in_mid / in_fmid / in_fmidcow / in_fmidub / in_war (+ fatal_source)
+##   changes_lag{h}.rds            ONE state-level change table per lag (build_change_table() in 00_helpers.R):
+##                                 raw change dM_raw_h / dRpr_raw_h = level(t-1) - level(t-1-h), and the transformed
+##                                 change dM_h / dRpr_h = (raw - year mean) / one pooled SD per lag. Feeds BOTH the
+##                                 initiator change in stage 1 and the target change in stage 2.
+##   change_scale.csv              the pooled SD constants per lag and variable
 ##   stage1_panel_lag{h}.rds       state-year panel for h in LAGS: y1_{mid,fmid,fmidcow,fmidub,war}, W, X
-##   alts_lag{h}_{all,polrel}.rds  flattened choice sets (one row per state-year x alternative);
-##                                 includes log_capdist = log1p(capital distance km) for the --distance option
+##   alts_lag{h}_{all,polrel}.rds  flattened choice sets (one row per state-year x alternative); gaps dM / dR_pr are
+##                                 log ratios; target changes dM_j_h / dRpr_j_h (+ dch_j_missing when the target has
+##                                 no change value); log_capdist = log1p(capital distance km) for the --distance option
 ##   build_log.txt                 dropped years / rows and why
 ##   manifest.csv
 ##
 ## Timing conventions (audit F5): event onset year = t. Positions x_ij = (M_i - M_j, R_i - R_j)
-## are measured at t-1. Initiator power changes dM_h = M(t-1) - M(t-1-h), h in LAGS.
+## are measured at t-1. Power changes (initiator AND target) are level(t-1) - level(t-1-h), h in LAGS.
 ## ALL lags are calendar-year joins on (ccode, year - h); never row lag().
 ##
 ## Initiation coding (audit F4): initiator = Side A ORIGINATOR (sidea == 1, orig == 1);
@@ -103,7 +110,8 @@ assert_no_dup_keys(cent, c("ccode", "year"), "centrality")
 blog("centrality computed for %d IGO years (%d-%d)", length(igo_years), min(igo_years), max(igo_years))
 
 ## ============================================================================
-## 3. Positions: M = CINC share std within year; R = centrality std within year
+## 3. Positions: M = log CINC share; R_pr = log IGO PageRank (raw log shares, PI decision 2026-10-23)
+##    R_eig = eigenvector centrality std within year (unchanged; not in the main grid)
 ## ============================================================================
 pos <- states |> select(ccode, year, cinc_share, n_system)
 ## Material position M = LOG CINC share. A zero or NA share has no log: check on the FULL state-year panel,
@@ -125,22 +133,38 @@ if (IGO_FILL == "drop") {
   pos <- pos |> inner_join(cand, by = c("ccode", "year"))
   blog("IGO_FILL = locf: max staleness %d years", max(pos$year - pos$igo_src_year))
 } else stop("unknown IGO_FILL")
-## Material position M = LOG CINC share, standardised within year (PI decision 2026-10-22); zero/NA shares
-## were already rejected above, before any filtering.
-stopifnot(!anyNA(pos$cinc_share), all(pos$cinc_share > 0))
-pos <- pos |> mutate(log_cinc_share = log(cinc_share))
+## PageRank has the same requirement as the CINC share: it must be finite and > 0 for log(pagerank) to exist.
+## page_rank() on a graph with every system member as a vertex gives every vertex positive mass (damping),
+## so a violation means a construction error upstream. Stop and list the state-years.
+bad_pr <- pos |> filter(!is.finite(pagerank) | pagerank <= 0)
+if (nrow(bad_pr) > 0) {
+  blog("pagerank <= 0 or non-finite in %d state-years: %s", nrow(bad_pr),
+       paste(sprintf("%d-%d", bad_pr$ccode, bad_pr$year), collapse = " "))
+  stop(sprintf("%d state-years have pagerank <= 0 or non-finite (see build_log.txt); log(PageRank) undefined. PI decision needed.", nrow(bad_pr)))
+}
+## Positions (PI decision 2026-10-23). M = log CINC share and R_pr = log PageRank, both WITHOUT within-year
+## standardisation. CINC share and PageRank each sum to 1 over the system in a year, so M and R_pr are log shares
+## of the system total (world capabilities, network centrality) and the stage-2 gaps M_i - M_j, R_pr_i - R_pr_j
+## are log ratios between the two states. Within-year standardisation (2026-10-22) made the change variables
+## move with system growth (cor with 3-year log growth in the number of states about +0.29 for M, +0.17 for R
+## at h = 3) and left them with SD 0.11 / 0.25, so per-unit priors dominated. Zero/NA shares were rejected above.
+## R_eig stays EXACTLY as before (eigenvector centrality standardised within year, with the sd = 0 guard): it is
+## not used in the main grid (the eigenvector robustness run is unscheduled) and was not part of this decision.
+stopifnot(!anyNA(pos$cinc_share), all(pos$cinc_share > 0), all(is.finite(pos$pagerank)), all(pos$pagerank > 0))
+pos <- pos |> mutate(log_cinc_share = log(cinc_share), M = log_cinc_share, R_pr = log(pagerank))
 pos <- pos |> group_by(year) |> filter(n() > 2) |>
-  mutate(M = as.numeric(scale(log_cinc_share)),
-         R_pr = as.numeric(scale(pagerank)),
-         R_eig = if (sd(eigen) > 0) as.numeric(scale(eigen)) else 0) |> ungroup()
+  mutate(R_eig = if (sd(eigen) > 0) as.numeric(scale(eigen)) else 0) |> ungroup()
 assert_no_dup_keys(pos, c("ccode", "year"), "positions")
 assert_no_na(pos, c("M", "R_pr", "R_eig"), "positions")
-assert_standardized(pos, "M"); assert_standardized(pos, "R_pr")
-stopifnot(all(is.finite(pos$log_cinc_share)))
+assert_finite(pos, c("log_cinc_share", "M", "R_pr", "R_eig"), "positions")
+stopifnot(all(abs(pos$M - log(pos$cinc_share)) < 1e-12), all(abs(pos$R_pr - log(pos$pagerank)) < 1e-12))
 m_skew <- mean((pos$M - mean(pos$M))^3) / sd(pos$M)^3
 raw <- as.numeric(unlist(tapply(pos$cinc_share, pos$year, scale)))
-blog("M = log CINC share std within year: skewness %.3f (raw-share version would be %.3f); share of state-years with M < 0: %.3f",
-     m_skew, mean((raw - mean(raw))^3) / sd(raw)^3, mean(pos$M < 0))
+within_sd <- pos |> group_by(year) |> summarise(sM = sd(M), sR = sd(R_pr), .groups = "drop")
+blog("M = log CINC share (raw log share, no within-year standardisation): pooled SD %.3f, within-year SD range [%.3f, %.3f], skewness %.3f (within-year z of the raw share would be %.3f)",
+     sd(pos$M), min(within_sd$sM), max(within_sd$sM), m_skew, mean((raw - mean(raw))^3) / sd(raw)^3)
+blog("R_pr = log IGO PageRank (raw log share, no within-year standardisation): pooled SD %.3f, within-year SD range [%.3f, %.3f]; R_eig unchanged (eigenvector, std within year)",
+     sd(pos$R_pr), min(within_sd$sR), max(within_sd$sR))
 dropped_years <- setdiff(unique(states$year), unique(pos$year))
 blog("positions: %d state-years over %d years; %d calendar years have NO positions (IGO or CINC missing)",
      nrow(pos), n_distinct(pos$year), length(dropped_years))
@@ -349,20 +373,43 @@ add_manifest <- function(obj, fname, note) {
   manifest[[fname]] <<- data.frame(file = fname, nrow = nrow(obj), ncol = ncol(obj), sha256 = file_digest(p), note = note)
   blog("wrote %s: %d x %d", fname, nrow(obj), ncol(obj))
 }
-add_manifest(pos, "sy_positions.rds", "state-year positions")
+add_manifest(pos, "sy_positions.rds", "state-year positions: M = log CINC share, R_pr = log PageRank (raw log shares), R_eig std within year")
 add_manifest(events, "events.rds", sprintf("directed events, joiners %s", if (INCLUDE_JOINERS) "included" else "excluded"))
+## number of system states per year, for the system-growth diagnostic on the change variables (item 4 of the
+## 2026-10-23 decision): g3 at t-1 = log n_system(t-1) - log n_system(t-4), constant within a year
+nsys_year <- states |> distinct(year, n_system) |> arrange(year)
+assert_no_dup_keys(nsys_year, "year", "system size by year")
+growth3 <- function(year_tm1) log(nsys_year$n_system[match(year_tm1, nsys_year$year)]) -
+  log(nsys_year$n_system[match(year_tm1 - 3L, nsys_year$year)])
+scale_rows <- list()
 
 for (h in LAGS) {
   blog("---- lag h = %d ----", h)
+  ## ---- power changes: ONE state-level table per lag (PI decision 2026-10-23) ---------------------------
+  ## raw change = level(t-1) - level(t-1-h) for every state in the system at t with levels at both dates;
+  ## centred within year (minus the mean raw change of all states with a change that year) and divided by one
+  ## pooled SD per lag and variable. Used for the initiator (stage 1, W and X) AND the target (stage 2, Z).
+  chg <- build_change_table(pos_k, states |> select(ccode, year), h)
+  scale_rows[[as.character(h)]] <- chg$scale
+  blog("changes h=%d: %d state-years over %d years; pooled SD of the year-centred raw change: M %.5f, R_pr %.5f (the scaling constants); raw change SD M %.4f, R_pr %.4f",
+       h, nrow(chg$tbl), n_distinct(chg$tbl$year), chg$scale$pooled_sd[1], chg$scale$pooled_sd[2], sd(chg$tbl$dM_raw_h), sd(chg$tbl$dRpr_raw_h))
+  add_manifest(chg$tbl, sprintf("changes_lag%d.rds", h),
+               sprintf("power changes h=%d: raw and (year-centred / pooled SD) transformed; pooled SD M=%.6f R_pr=%.6f", h, chg$scale$pooled_sd[1], chg$scale$pooled_sd[2]))
+
   ## ---- stage-1 panel: states in system at t with positions at t-1 and t-1-h ---------
   panel <- states |> select(ccode, year) |>
     inner_join(pos_k |> transmute(ccode, year = year + 1L, M_tm1 = M, Rpr_tm1 = R_pr, Reig_tm1 = R_eig), by = c("ccode", "year")) |>
     inner_join(pos_k |> transmute(ccode, year = year + 1L + h, M_w0 = M, Rpr_w0 = R_pr, Reig_w0 = R_eig), by = c("ccode", "year")) |>
-    mutate(dM_h = M_tm1 - M_w0, dRpr_h = Rpr_tm1 - Rpr_w0, dReig_h = Reig_tm1 - Reig_w0, h = h,
-           win_start = year - 1L - h) |>
+    mutate(dReig_h = Reig_tm1 - Reig_w0, h = h, win_start = year - 1L - h) |>     # R_eig change unchanged (z-score difference)
+    ## initiator power changes from the change table (dM_h, dRpr_h transformed; dM_raw_h, dRpr_raw_h raw)
+    inner_join(chg$tbl |> select(-h), by = c("ccode", "year")) |>
     ## controls at t-1 (calendar join)
     inner_join(sy_ctrl |> transmute(ccode, year = year + 1L, cowmaj_tm1 = cowmaj, dem_tm1 = dem, dem_missing_tm1 = dem_missing,
                                     n_system_tm1 = n_system), by = c("ccode", "year"))
+  ## the panel and the change table have the same domain; the raw change must equal the panel's own level difference
+  stopifnot(nrow(panel) == nrow(chg$tbl),
+            all(abs(panel$dM_raw_h - (panel$M_tm1 - panel$M_w0)) < 1e-10),
+            all(abs(panel$dRpr_raw_h - (panel$Rpr_tm1 - panel$Rpr_w0)) < 1e-10))
   ## monadic conflict history: onsets in [win_start - 10, win_start - 1]; peace years at win_start
   panel <- cum_lookup(mon_cum, "ccode", "win_end_hi", "cum_hi", panel |> mutate(win_end_hi = win_start - 1L))
   panel <- cum_lookup(mon_cum, "ccode", "win_end_lo", "cum_lo", panel |> mutate(win_end_lo = win_start - 1L - PREWINDOW_YEARS))
@@ -384,22 +431,55 @@ for (h in LAGS) {
            log_n_system_tm1 = log(n_system_tm1)) |>
     arrange(year, ccode)
   assert_no_dup_keys(panel, c("ccode", "year"), sprintf("stage-1 panel h=%d", h))
-  assert_no_na(panel, c("dM_h", "dRpr_h", "dReig_h", "M_tm1", "Rpr_tm1", "cowmaj_tm1", "dem_tm1",
+  assert_no_na(panel, c("dM_h", "dRpr_h", "dM_raw_h", "dRpr_raw_h", "dReig_h", "M_tm1", "Rpr_tm1", "cowmaj_tm1", "dem_tm1",
                         "mon_prior_mids_h", "mon_peace_years_h", "y1_mid", "y1_fmid", "y1_fmidcow", "y1_fmidub", "y1_war"), "stage-1 panel")
+  assert_finite(panel, c("dM_h", "dRpr_h", "dM_raw_h", "dRpr_raw_h", "M_tm1", "Rpr_tm1"), sprintf("stage-1 panel h=%d", h))
+  ## invariants of the transformed changes on the panel rows (item 4): within-year mean 0, pooled SD 1, and no
+  ## correlation with system growth (g3 is constant within a year, so the year-centring removes it by construction)
+  yr_chk <- panel |> group_by(year) |> summarise(mM = mean(dM_h), mR = mean(dRpr_h), .groups = "drop")
+  stopifnot(all(abs(yr_chk$mM) < 1e-8), all(abs(yr_chk$mR) < 1e-8),
+            abs(sd(panel$dM_h) - 1) < 1e-8, abs(sd(panel$dRpr_h) - 1) < 1e-8)
+  g3 <- growth3(panel$year - 1L)
+  ok_g <- is.finite(g3)
+  cor_g <- c(raw_M = cor(panel$dM_raw_h[ok_g], g3[ok_g]), raw_R = cor(panel$dRpr_raw_h[ok_g], g3[ok_g]),
+             new_M = cor(panel$dM_h[ok_g], g3[ok_g]), new_R = cor(panel$dRpr_h[ok_g], g3[ok_g]))
+  blog("  system-growth check h=%d (cor with log n_system(t-1) - log n_system(t-4), %d rows): raw change M %.3f, R_pr %.3f; transformed change M %.4f, R_pr %.4f (2026-10-22 z-score version was about +0.29 / +0.17 at h = 3)",
+       h, sum(ok_g), cor_g["raw_M"], cor_g["raw_R"], cor_g["new_M"], cor_g["new_R"])
+  if (!all(is.finite(cor_g)) || abs(cor_g["new_M"]) >= 0.02 || abs(cor_g["new_R"]) >= 0.02)
+    stop(sprintf("h=%d: transformed changes still correlate with system growth (M %.3f, R_pr %.3f); year-centring failed", h, cor_g["new_M"], cor_g["new_R"]))
+  blog("  changes h=%d: transformed dM_h SD %.3f, 5/50/95 pct %.3f/%.3f/%.3f; dRpr_h SD %.3f, 5/50/95 pct %.3f/%.3f/%.3f",
+       h, sd(panel$dM_h), quantile(panel$dM_h, .05), median(panel$dM_h), quantile(panel$dM_h, .95),
+       sd(panel$dRpr_h), quantile(panel$dRpr_h, .05), median(panel$dRpr_h), quantile(panel$dRpr_h, .95))
   blog("panel h=%d: %d state-years, years %d-%d (%d distinct), initiations mid/fmid/fmidcow/war = %d/%d/%d/%d",
        h, nrow(panel), min(panel$year), max(panel$year), n_distinct(panel$year), sum(panel$y1_mid), sum(panel$y1_fmid), sum(panel$y1_fmidcow), sum(panel$y1_war))
   ev_lost <- events |> anti_join(panel, by = c("initiator" = "ccode", "year"))
   blog("  events whose initiator state-year is NOT in the panel (no positions at t-1 / t-1-h): %d of %d", nrow(ev_lost), nrow(events))
-  add_manifest(panel, sprintf("stage1_panel_lag%d.rds", h), sprintf("stage-1 panel, h=%d", h))
+  add_manifest(panel, sprintf("stage1_panel_lag%d.rds", h),
+               sprintf("stage-1 panel, h=%d; dM_h / dRpr_h year-centred and scaled by pooled SD M=%.6f R_pr=%.6f", h, chg$scale$pooled_sd[1], chg$scale$pooled_sd[2]))
 
   ## ---- choice sets: panel state-year x every other system member at t with positions at t-1 ----
   alts <- panel |> select(ccode1 = ccode, year, M_i = M_tm1, Rpr_i = Rpr_tm1, Reig_i = Reig_tm1, win_start) |>
     inner_join(states |> select(ccode2 = ccode, year), by = "year", relationship = "many-to-many") |>
     filter(ccode1 != ccode2) |>
     inner_join(pos_k |> transmute(ccode2 = ccode, year = year + 1L, M_j = M, Rpr_j = R_pr, Reig_j = R_eig), by = c("ccode2", "year")) |>
+    ## gaps at t-1: log ratios of CINC share / PageRank (M, R_pr are raw log shares; NOT rescaled); dR_eig is a z-score difference
     mutate(dM = M_i - M_j, dR_pr = Rpr_i - Rpr_j, dR_eig = Reig_i - Reig_j) |>
+    ## target power changes over the same window, from the SAME change table as the initiator (stage-2 Z columns).
+    ## A target with no change value (no position at t-1-h, e.g. a recent entrant) gets 0 and dch_j_missing = 1.
+    left_join(chg$tbl |> transmute(ccode2 = ccode, year, dM_j_h = dM_h, dRpr_j_h = dRpr_h), by = c("ccode2", "year"))
+  stopifnot(all(is.na(alts$dM_j_h) == is.na(alts$dRpr_j_h)))                     # both come from the one table
+  alts <- alts |>
+    mutate(dch_j_missing = as.integer(is.na(dM_j_h)),
+           dM_j_h = coalesce(dM_j_h, 0), dRpr_j_h = coalesce(dRpr_j_h, 0)) |>
     ## dyadic controls at t-1
     left_join(dyads |> mutate(year = year + 1L), by = c("ccode1", "ccode2", "year"))
+  stopifnot(all(alts$dch_j_missing %in% c(0L, 1L)), all(alts$dM_j_h[alts$dch_j_missing == 1L] == 0), all(alts$dRpr_j_h[alts$dch_j_missing == 1L] == 0))
+  n_miss <- sum(alts$dch_j_missing); miss_tg <- alts |> filter(dch_j_missing == 1L) |> distinct(ccode2, year)
+  blog("  target change h=%d: %d of %d alternative rows have a target with NO change value (dch_j_missing = 1; changes set to 0); %d distinct target state-years, %d distinct targets",
+       h, n_miss, nrow(alts), nrow(miss_tg), n_distinct(miss_tg$ccode2))
+  blog("  gaps h=%d (log ratios): dM SD %.3f, 5/50/95 pct %.3f/%.3f/%.3f; dR_pr SD %.3f, 5/50/95 pct %.3f/%.3f/%.3f",
+       h, sd(alts$dM), quantile(alts$dM, .05), median(alts$dM), quantile(alts$dM, .95),
+       sd(alts$dR_pr), quantile(alts$dR_pr, .05), median(alts$dR_pr), quantile(alts$dR_pr, .95))
   n_ctrl_na <- sum(is.na(alts$contig_any))
   if (n_ctrl_na) blog("  alternatives with no dyad-year control row at t-1 (filled 0): %d", n_ctrl_na)
   stopifnot(n_ctrl_na == 0 || all(is.na(alts$log_capdist[is.na(alts$contig_any)])))
@@ -425,8 +505,13 @@ for (h in LAGS) {
   alts <- alts |> arrange(year, ccode1, ccode2) |> mutate(h = h)
   assert_no_dup_keys(alts, c("ccode1", "ccode2", "year"), sprintf("alternatives h=%d", h))
   if (anyNA(alts$log_capdist)) blog("  alternatives without a capital distance at t-1: %d (NA kept; --distance runs drop them)", sum(is.na(alts$log_capdist)))
-  assert_no_na(alts, c("dM", "dR_pr", "dR_eig", "contig_land", "contig_any", "alliance_def_off", "joint_dem",
+  assert_no_na(alts, c("dM", "dR_pr", "dR_eig", "dM_j_h", "dRpr_j_h", "dch_j_missing", "contig_land", "contig_any", "alliance_def_off", "joint_dem",
                        "major_count", "dy_prior_mids_h", "dy_peace_years_h", "polrel"), "alternatives")
+  assert_finite(alts, c("dM", "dR_pr", "dM_j_h", "dRpr_j_h"), sprintf("alternatives h=%d", h))
+  ## the target change must agree with the initiator change of the same state-year wherever the target is also a panel row
+  chk_j <- alts |> select(ccode2, year, dM_j_h, dRpr_j_h, dch_j_missing) |> distinct() |>
+    inner_join(panel |> select(ccode2 = ccode, year, dM_h, dRpr_h), by = c("ccode2", "year"))
+  stopifnot(nrow(chk_j) > 0, all(chk_j$dch_j_missing == 0L), all(abs(chk_j$dM_j_h - chk_j$dM_h) < 1e-12), all(abs(chk_j$dRpr_j_h - chk_j$dRpr_h) < 1e-12))
   ## directedness check: wherever (j,i,t) is also a row, dM(i,j) = -dM(j,i). The reverse row
   ## exists only when j is itself a panel state-year at t (has positions at t-1-h), so coverage < 100%.
   chk <- alts |> select(ccode1, ccode2, year, dM, dR_pr) |>
@@ -445,5 +530,10 @@ for (h in LAGS) {
   }
   rm(alts, chk); invisible(gc())
 }
+## the pooled scaling constants of the change variables, one row per (lag, variable)
+scale_tbl <- bind_rows(scale_rows)
+stopifnot(nrow(scale_tbl) == 2L * length(LAGS), all(is.finite(scale_tbl$pooled_sd)), all(scale_tbl$pooled_sd > 0))
+write.csv(scale_tbl, file.path(out_dir, "change_scale.csv"), row.names = FALSE)
+blog("change_scale.csv written: %s", paste(sprintf("h=%d %s=%.6f", scale_tbl$h, scale_tbl$variable, scale_tbl$pooled_sd), collapse = "; "))
 write_manifest(manifest, file.path(out_dir, "manifest.csv"))
 blog("manifest written with %d files; build complete", length(manifest))
