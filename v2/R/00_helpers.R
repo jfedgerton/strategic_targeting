@@ -125,6 +125,17 @@ code_fatal_main <- function(fatal_cow, fatal_mic, war, fatal_gml) {
 }
 MIC_CONF_SHA256 <- "41cef02d0dcb23f91658b2367864b018a517e13d5b0278394dc12775fa5a5ee0"   # mic-conf-1.0.csv
 
+## ---- gap scale (PI decision 2026-10-23): SD of the within-year gap v_i - v_j over all ordered pairs i != j ----
+## Exact, without forming the pairs. Per year with n values and SS = sum((v - mean(v))^2), sum over ordered pairs of
+## (v_i - v_j)^2 = 2 n SS and there are n (n - 1) pairs; the pairs' mean is exactly 0. Years with one state add nothing.
+gap_scale <- function(v, yr) {
+  stopifnot(length(v) == length(yr), !anyNA(v), all(is.finite(v)))
+  ss <- tapply(v, yr, function(z) sum((z - mean(z))^2)); n <- tapply(v, yr, length)
+  out <- sqrt(sum(2 * n * ss) / sum(n * (n - 1)))
+  stopifnot(is.finite(out), out > 0)
+  out
+}
+
 ## ---- manifest / digests ------------------------------------------------------------
 file_digest <- function(path) digest::digest(path, algo = "sha256", file = TRUE)
 write_manifest <- function(entries, path) {

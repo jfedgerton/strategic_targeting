@@ -392,3 +392,17 @@ test_that("a missing CINC share stops the build check before any filtering (Code
   expect_true(!is.na(i_check))
   expect_true(length(i_filter) == 0 || all(i_filter > i_check))   # no NA filter ahead of the check
 })
+
+test_that("gap scale (2026-10-23): one constant per axis equals the SD of within-year pair gaps", {
+  set.seed(123)
+  d <- data.frame(year = rep(c(1900L, 1950L, 2000L), times = c(4L, 7L, 12L)))
+  d$v <- rnorm(nrow(d), mean = c(0, 3, -2)[match(d$year, c(1900L, 1950L, 2000L))], sd = 1.5)
+  ## brute force over ordered pairs within year
+  pr <- do.call(rbind, lapply(split(d, d$year), function(z) { g <- outer(z$v, z$v, "-"); data.frame(g = g[row(g) != col(g)]) }))
+  expect_equal(gap_scale(d$v, d$year), sqrt(mean(pr$g^2)), tolerance = 1e-12)
+  expect_equal(mean(pr$g), 0, tolerance = 1e-12)
+  ## year means (e.g. log PageRank falling as the system grows) do not enter the constant
+  d2 <- d; d2$v <- d2$v + 10 * as.integer(factor(d2$year))
+  expect_equal(gap_scale(d2$v, d2$year), gap_scale(d$v, d$year), tolerance = 1e-12)
+  expect_error(gap_scale(c(1, NA), c(1L, 1L)))
+})

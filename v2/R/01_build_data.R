@@ -367,6 +367,21 @@ sy_ctrl <- states |> transmute(ccode, year, cowmaj = coalesce(cowmaj, 0L),
                                dem = as.integer(coalesce(polity2 >= POLITY_DEM_CUT, FALSE)),
                                dem_missing = as.integer(is.na(polity2)), n_system)
 pos_k <- pos |> select(ccode, year, M, R_pr, R_eig)
+
+## ---- gap scale (PI decision 2026-10-23, "option 1") ---------------------------------------------------------
+## The stage-2 gaps are log ratios, M_i - M_j = log(CINC_i / CINC_j) and R_pr_i - R_pr_j = log(PR_i / PR_j). The two
+## axes have very different spreads, so each gap is divided by ONE constant per axis, the same for every year, lag and
+## choice-set variant. The constant is the SD of the within-year gap over all ordered pairs of distinct states with
+## positions in the same year (the mean of these pairs is exactly 0). Exact formula per year with n states and
+## within-year sum of squares SS = sum((v - mean(v))^2), sum over ordered pairs i != j of (v_i - v_j)^2 = 2 n SS, and
+## there are n (n - 1) pairs, so the pooled variance is sum_y(2 n_y SS_y) / sum_y(n_y (n_y - 1)).
+## One unit of a scaled gap = GAP_SCALE log points, i.e. a power ratio of exp(GAP_SCALE).
+## (gap_scale() is in 00_helpers.R so it can be unit-tested.)
+GAP_SCALE_M <- gap_scale(pos$M, pos$year)
+GAP_SCALE_R <- gap_scale(pos$R_pr, pos$year)
+stopifnot(is.finite(GAP_SCALE_M), GAP_SCALE_M > 0, is.finite(GAP_SCALE_R), GAP_SCALE_R > 0)
+blog("gap scale (one constant per axis, all years): M (log CINC ratio) %.6f; R_pr (log PageRank ratio) %.6f; 1 scaled unit = power ratio %.2f (M), %.2f (R_pr)",
+     GAP_SCALE_M, GAP_SCALE_R, exp(GAP_SCALE_M), exp(GAP_SCALE_R))
 manifest <- list()
 add_manifest <- function(obj, fname, note) {
   p <- file.path(out_dir, fname); saveRDS(obj, p)
@@ -462,8 +477,10 @@ for (h in LAGS) {
     inner_join(states |> select(ccode2 = ccode, year), by = "year", relationship = "many-to-many") |>
     filter(ccode1 != ccode2) |>
     inner_join(pos_k |> transmute(ccode2 = ccode, year = year + 1L, M_j = M, Rpr_j = R_pr, Reig_j = R_eig), by = c("ccode2", "year")) |>
-    ## gaps at t-1: log ratios of CINC share / PageRank (M, R_pr are raw log shares; NOT rescaled); dR_eig is a z-score difference
-    mutate(dM = M_i - M_j, dR_pr = Rpr_i - Rpr_j, dR_eig = Reig_i - Reig_j) |>
+    ## gaps at t-1: log ratios of CINC share / PageRank, kept raw (dM_logratio, dR_pr_logratio) and, for the model,
+    ## divided by the one-per-axis constants GAP_SCALE_M / GAP_SCALE_R (see "gap scale" above); dR_eig is a z-score difference
+    mutate(dM_logratio = M_i - M_j, dR_pr_logratio = Rpr_i - Rpr_j,
+           dM = dM_logratio / GAP_SCALE_M, dR_pr = dR_pr_logratio / GAP_SCALE_R, dR_eig = Reig_i - Reig_j) |>
     ## target power changes over the same window, from the SAME change table as the initiator (stage-2 Z columns).
     ## A target with no change value (no position at t-1-h, e.g. a recent entrant) gets 0 and dch_j_missing = 1.
     left_join(chg$tbl |> transmute(ccode2 = ccode, year, dM_j_h = dM_h, dRpr_j_h = dRpr_h), by = c("ccode2", "year"))
@@ -477,7 +494,11 @@ for (h in LAGS) {
   n_miss <- sum(alts$dch_j_missing); miss_tg <- alts |> filter(dch_j_missing == 1L) |> distinct(ccode2, year)
   blog("  target change h=%d: %d of %d alternative rows have a target with NO change value (dch_j_missing = 1; changes set to 0); %d distinct target state-years, %d distinct targets",
        h, n_miss, nrow(alts), nrow(miss_tg), n_distinct(miss_tg$ccode2))
+  stopifnot(all(abs(alts$dM * GAP_SCALE_M - alts$dM_logratio) < 1e-10), all(abs(alts$dR_pr * GAP_SCALE_R - alts$dR_pr_logratio) < 1e-10))
   blog("  gaps h=%d (log ratios): dM SD %.3f, 5/50/95 pct %.3f/%.3f/%.3f; dR_pr SD %.3f, 5/50/95 pct %.3f/%.3f/%.3f",
+       h, sd(alts$dM_logratio), quantile(alts$dM_logratio, .05), median(alts$dM_logratio), quantile(alts$dM_logratio, .95),
+       sd(alts$dR_pr_logratio), quantile(alts$dR_pr_logratio, .05), median(alts$dR_pr_logratio), quantile(alts$dR_pr_logratio, .95))
+  blog("  gaps h=%d (scaled, model units): dM SD %.3f, 5/50/95 pct %.3f/%.3f/%.3f; dR_pr SD %.3f, 5/50/95 pct %.3f/%.3f/%.3f",
        h, sd(alts$dM), quantile(alts$dM, .05), median(alts$dM), quantile(alts$dM, .95),
        sd(alts$dR_pr), quantile(alts$dR_pr, .05), median(alts$dR_pr), quantile(alts$dR_pr, .95))
   n_ctrl_na <- sum(is.na(alts$contig_any))
@@ -533,6 +554,8 @@ for (h in LAGS) {
 ## the pooled scaling constants of the change variables, one row per (lag, variable)
 scale_tbl <- bind_rows(scale_rows)
 stopifnot(nrow(scale_tbl) == 2L * length(LAGS), all(is.finite(scale_tbl$pooled_sd)), all(scale_tbl$pooled_sd > 0))
+## the two gap constants (lag-independent) are stored in the same file with h = NA
+scale_tbl <- bind_rows(scale_tbl, data.frame(h = NA_integer_, variable = c("gap_M", "gap_R_pr"), pooled_sd = c(GAP_SCALE_M, GAP_SCALE_R)))
 write.csv(scale_tbl, file.path(out_dir, "change_scale.csv"), row.names = FALSE)
 blog("change_scale.csv written: %s", paste(sprintf("h=%d %s=%.6f", scale_tbl$h, scale_tbl$variable, scale_tbl$pooled_sd), collapse = "; "))
 write_manifest(manifest, file.path(out_dir, "manifest.csv"))
