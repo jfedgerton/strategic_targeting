@@ -95,7 +95,7 @@ if (PILOT) { ITER <- 60L; WARMUP <- 30L; CHAINS <- 1L; logf("PILOT run: chains=1
 ## ---- fit ------------------------------------------------------------------------------------------------------------
 sm <- readRDS(file.path(v2_root(), "stan", "build", paste0(family, ".rds")))
 ## audit 2026-10-23: rstan silently ignores unused data, so an old compiled program would run on new data without mu0.
-if (!("mu0" %in% sm@model_pars)) stop(sprintf("compiled %s.rds has no mu0 parameter: stale binary; rerun v2/R/compile_models.R", family))
+if (!grepl("row_vector[D] mu0;", sm@model_code, fixed = TRUE)) stop(sprintf("compiled %s.rds has no mu0 parameter: stale binary; rerun v2/R/compile_models.R", family))
 t0 <- Sys.time()
 fit <- sampling(sm, data = dat, chains = CHAINS, iter = ITER, warmup = WARMUP, seed = V2_SEED,
                 refresh = max(1L, ITER %/% 20L), control = list(adapt_delta = ADAPT_DELTA, max_treedepth = MAX_TD),
