@@ -78,31 +78,23 @@ functions {
       row_vector[D] mu_n = X[n] * beta + a_i[sy_state[n]];
       vector[e - s + 1] u;
       real lse;
-      profile("stage2_utility") {
-        u = util_block(s, e, x, mu_n, sigma_x, rho, b_j, alt_target, zg_block(Z, gamma, s, e, Pz), D, dcol, U[sy_state[n]], V);
-      }
-      profile("stage1_iv") {
-        lse = log_sum_exp(u);
-        eta[k] = alpha0 + W[n] * alpha + c_i[sy_state[n]] + tau * (lse + iv_corr[n]);
-      }
-      profile("stage2_events") {
-        for (j in 1:ev_count[n]) {
-          int ev = ev_sorted[ev_first[n] + j - 1];
-          if (sampled == 0) {
-            lp += u[ev_row[ev] - s + 1] - lse;                     // event set == state-year set
-          } else {
-            int s2 = ev_start[ev];
-            int e2 = ev_end[ev];
-            vector[e2 - s2 + 1] u2 = util_block(s2, e2, x, mu_n, sigma_x, rho, b_j, alt_target,
-                                                zg_block(Z, gamma, s2, e2, Pz), D, dcol, U[sy_state[n]], V);
-            lp += u2[ev_row[ev] - s2 + 1] - log_sum_exp(u2);
-          }
+      u = util_block(s, e, x, mu_n, sigma_x, rho, b_j, alt_target, zg_block(Z, gamma, s, e, Pz), D, dcol, U[sy_state[n]], V);
+      lse = log_sum_exp(u);
+      eta[k] = alpha0 + W[n] * alpha + c_i[sy_state[n]] + tau * (lse + iv_corr[n]);
+      for (j in 1:ev_count[n]) {
+        int ev = ev_sorted[ev_first[n] + j - 1];
+        if (sampled == 0) {
+          lp += u[ev_row[ev] - s + 1] - lse;                     // event set == state-year set
+        } else {
+          int s2 = ev_start[ev];
+          int e2 = ev_end[ev];
+          vector[e2 - s2 + 1] u2 = util_block(s2, e2, x, mu_n, sigma_x, rho, b_j, alt_target,
+                                              zg_block(Z, gamma, s2, e2, Pz), D, dcol, U[sy_state[n]], V);
+          lp += u2[ev_row[ev] - s2 + 1] - log_sum_exp(u2);
         }
       }
     }
-    profile("stage1_bernoulli") {
-      lp += bernoulli_logit_lpmf(y1[sy_slice] | eta);
-    }
+    lp += bernoulli_logit_lpmf(y1[sy_slice] | eta);
     return lp;
   }
 }

@@ -45,7 +45,8 @@
 // Ragged choice sets are flattened: rows cs_start[n]..cs_end[n] belong to state-year n.
 // Within-chain parallelism: the likelihood is a reduce_sum_static over state-years (grainsize is
 // data; grainsize >= N1 gives one slice, i.e. the exact serial sum). Generated quantities are serial.
-// profile() sections: priors, stage2_utility, stage1_iv, stage2_events, stage1_bernoulli.
+// profile(): only "priors" (model block). Profiles inside the reduce_sum partial sum were removed
+// 2026-10-23: Stan profiles are not thread-safe and threw "Profile already started" under threads on Roar.
 // ============================================================================
 functions {
   // Utility of the alternative rows s..e for one state-year, given its mu (row of length D),
@@ -92,31 +93,23 @@ functions {
       row_vector[D] mu_n = X[n] * beta + a_i[sy_state[n]];
       vector[e - s + 1] u;
       real lse;
-      profile("stage2_utility") {
-        u = util_block(s, e, x, mu_n, sigma_x, rho, b_j, alt_target, zg_block(Z, gamma, s, e, Pz), D, dcol);
-      }
-      profile("stage1_iv") {
-        lse = log_sum_exp(u);
-        eta[k] = alpha0 + W[n] * alpha + c_i[sy_state[n]] + tau * (lse + iv_corr[n]);
-      }
-      profile("stage2_events") {
-        for (j in 1:ev_count[n]) {
-          int ev = ev_sorted[ev_first[n] + j - 1];
-          if (sampled == 0) {
-            lp += u[ev_row[ev] - s + 1] - lse;                     // event set == state-year set
-          } else {
-            int s2 = ev_start[ev];
-            int e2 = ev_end[ev];
-            vector[e2 - s2 + 1] u2 = util_block(s2, e2, x, mu_n, sigma_x, rho, b_j, alt_target,
-                                                zg_block(Z, gamma, s2, e2, Pz), D, dcol);
-            lp += u2[ev_row[ev] - s2 + 1] - log_sum_exp(u2);
-          }
+      u = util_block(s, e, x, mu_n, sigma_x, rho, b_j, alt_target, zg_block(Z, gamma, s, e, Pz), D, dcol);
+      lse = log_sum_exp(u);
+      eta[k] = alpha0 + W[n] * alpha + c_i[sy_state[n]] + tau * (lse + iv_corr[n]);
+      for (j in 1:ev_count[n]) {
+        int ev = ev_sorted[ev_first[n] + j - 1];
+        if (sampled == 0) {
+          lp += u[ev_row[ev] - s + 1] - lse;                     // event set == state-year set
+        } else {
+          int s2 = ev_start[ev];
+          int e2 = ev_end[ev];
+          vector[e2 - s2 + 1] u2 = util_block(s2, e2, x, mu_n, sigma_x, rho, b_j, alt_target,
+                                              zg_block(Z, gamma, s2, e2, Pz), D, dcol);
+          lp += u2[ev_row[ev] - s2 + 1] - log_sum_exp(u2);
         }
       }
     }
-    profile("stage1_bernoulli") {
-      lp += bernoulli_logit_lpmf(y1[sy_slice] | eta);
-    }
+    lp += bernoulli_logit_lpmf(y1[sy_slice] | eta);
     return lp;
   }
 }
