@@ -7,7 +7,7 @@
 suppressPackageStartupMessages({ library(rstan); library(dplyr) })
 args <- commandArgs(trailingOnly = TRUE); stopifnot(length(args) >= 2)
 old <- readRDS(args[1])$fit; new <- readRDS(args[2])$fit
-pars <- c("alpha0", "alpha", "tau", "beta", "sigma_x", "sd_re", "sigma_b", "gamma", "Sigma", "Omega")
+pars <- c("alpha0", "alpha", "tau", "mu0", "beta", "sigma_x", "sd_re", "sigma_b", "gamma", "Sigma", "Omega")
 so <- summary(old, pars = pars)$summary; sn <- summary(new, pars = pars)$summary
 stopifnot(identical(rownames(so), rownames(sn)))
 keep <- is.finite(so[, "sd"]) & so[, "sd"] > 0

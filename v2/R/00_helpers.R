@@ -101,11 +101,14 @@ assert_matches_manifest <- function(path, manifest_path) {
 ##   alts: alternative rows, one row per (sy_row, target_idx); columns sy_row, target_idx, dM, dR, Z cols
 ##   ev:   events, columns sy_row, alt_row (index into alts after ordering by sy_row)
 ## alts must be sorted by sy_row; every sy row must own >= 1 alternative.
+## prior_mu0_sd: sd of the normal(0, .) prior on the mu intercept mu0 (the population-average ideal gap, in
+## within-year SD units of the positions); 2 is the README value.
 build_stan_data <- function(sy, alts, ev, W_cols, X_cols, Z_cols, joint, sampled = 0L,
                             n_full = NULL, x_ref = NULL, K = NULL, anchor = NULL,
-                            prior_beta_sd = 1, allow_orphan_initiations = FALSE, S = NULL, prior_only = 0L,
+                            prior_beta_sd = 1, prior_mu0_sd = 2, allow_orphan_initiations = FALSE, S = NULL, prior_only = 0L,
                             D_mode = 3L, grainsize = NULL) {
   stopifnot(is.data.frame(sy), is.data.frame(alts), is.data.frame(ev))
+  stopifnot(is.numeric(prior_mu0_sd), length(prior_mu0_sd) == 1, is.finite(prior_mu0_sd), prior_mu0_sd > 0)
   sampled <- as.integer(sampled)
   if (sampled == 1) {
     ## alts = IV rows (first n_iv, sorted by sy_row) followed by per-event blocks; ev carries ev_start/ev_end
@@ -150,8 +153,8 @@ build_stan_data <- function(sy, alts, ev, W_cols, X_cols, Z_cols, joint, sampled
               alt_target = as.integer(alts$target_idx), x = cbind(alts$dM, alts$dR), Z = Z,
               ev_sy = as.integer(ev$sy_row), ev_row = as.integer(ev$alt_row), ev_start = ev_start, ev_end = ev_end,
               joint = as.integer(joint), sampled = sampled,
-              x_ref = as.numeric(x_ref), prior_beta_sd = prior_beta_sd, prior_only = as.integer(prior_only),
-              D_mode = as.integer(D_mode))
+              x_ref = as.numeric(x_ref), prior_beta_sd = prior_beta_sd, prior_mu0_sd = prior_mu0_sd,
+              prior_only = as.integer(prior_only), D_mode = as.integer(D_mode))
   ## reduce_sum_static slice size over state-years: NULL -> one slice (exact serial sum, threads = 1)
   dat$grainsize <- as.integer(if (is.null(grainsize)) dat$N1 else max(1L, grainsize))
   stopifnot(dat$D_mode %in% 1:3, dat$grainsize >= 1)
@@ -217,12 +220,16 @@ sample_alternatives <- function(alts, ev, m, seed = V2_SEED) {
 }
 
 ## ---- brute-force stage-2 likelihood in R (used by tests and the Fixed_param check) -----
-## pars: list(beta (P x D), a_i (S x D), b_j (S), gamma (Pz), sigma_x (D), rho, U (S x K) or NULL, V)
+## pars: list(mu0 (D), beta (P x D), a_i (S x D), b_j (S), gamma (Pz), sigma_x (D), rho, U (S x K) or NULL, V)
 ## D = 2 when dat$D_mode == 3; D = 1 uses column dat$D_mode of x (1 = dM, 2 = dR).
+## mu = mu0 + X beta + a_i; mu0 is required (no silent zero default) so a caller that forgets it fails here.
 stage2_loglik_R <- function(dat, pars) {
   D <- if (dat$D_mode == 3L) 2L else 1L
   xcols <- if (D == 2L) 1:2 else dat$D_mode
-  Mu <- dat$X %*% matrix(pars$beta, ncol = D) + matrix(pars$a_i, ncol = D)[dat$sy_state, , drop = FALSE]
+  if (is.null(pars$mu0)) stop("stage2_loglik_R: pars$mu0 (length D intercept of mu) is missing")
+  stopifnot(length(pars$mu0) == D, all(is.finite(pars$mu0)))
+  Mu <- rep(1, dat$N1) %o% as.numeric(pars$mu0) +
+    dat$X %*% matrix(pars$beta, ncol = D) + matrix(pars$a_i, ncol = D)[dat$sy_state, , drop = FALSE]
   zg <- if (dat$Pz > 0) as.numeric(dat$Z %*% pars$gamma) else rep(0, dat$N2)
   util <- numeric(dat$N2); lse <- numeric(dat$N1)
   Sinv <- if (D == 2L) solve(matrix(c(pars$sigma_x[1]^2, pars$rho * prod(pars$sigma_x),

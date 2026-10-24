@@ -61,3 +61,16 @@ Logged but not used. Where both COW and MIC code fatality they disagree on 120 e
 | `fmidub` sample | Upper bound for the appendix: `fmid` plus the 22 uncoded events as fatal (654 events). `02_fit_model.R --sample=fmidub`; not in the main grid. |
 | Counts | fatal events 632 (COW only 495); lag-3 stage-1 fatal initiations 539 (COW only 431). `mid`, `war` and `fmidcow` data unchanged. |
 | Tests | `code_fatal_main()` now takes `fatal_gml`; tests cover GML-only fill, MIC beating GML, and the upper bound. 437 expectations pass. |
+
+## mu intercept (2026-10-23; PI-approved)
+
+Problem. In both Stan programs the ideal target position was `mu[n] = X[n] beta + a_i` with `a_i ~ MVN(0, Omega)` mean zero and no intercept column in X. The two conflict-history columns were centred but `cowmaj_tm1` and `dem_tm1` were uncentred 0/1, so the population-average ideal gap was pinned at 0 for non-major non-democracies. Since x is the initiator-minus-target gap, that intercept is the average preferred gap (bully > 0, peer about 0, challenger < 0), the paper's central quantity, and the model could only express it through the state offsets a_i, which the mean-zero prior shrinks back towards 0.
+
+| change | detail |
+|---|---|
+| Stan | `row_vector[D] mu0` added to both programs (length 1 in the m / r models through `D`). `mu = mu0 + X beta + a_i` in the reduce_sum partial sum, `Mu` in generated quantities, `mu_state` at `x_ref` and `mu_event`. Prior `mu0 ~ normal(0, prior_mu0_sd)`, `prior_mu0_sd` is data. No profile() inside the partial sum. |
+| R data | `build_stan_data(prior_mu0_sd = 2)` passes the prior sd; every caller (fit script, sim, tests, measurement tests) goes through it. `assemble_cell.R` centres `cowmaj_tm1` and `dem_tm1` like the conflict-history columns (dM_i, dR_i untouched), so mu0 is the ideal gap at zero power change and average controls; alpha0 in stage 1 is the log-odds at the same point. |
+| R reimplementations | `stage2_loglik_R()`, `measurement_tests.R::extract_draws()` / `stage2_scores()` and `sim/simulate.R` (new `mu0` argument, default 0; `truth$mu0`, `truth$mu_state_ref0 = mu0 + a_i`) include mu0 and stop if it is missing. `02_fit_model.R`, `run_sim.R`, `run_sim_1d.R`, `compare_refit.R` summarise mu0. |
+| Tests | The fixed-draw likelihood tests use a non-zero mu0 (0.7, -0.4) and also check `mu_event`; the scorer tests use (0.6, -0.3) and assert both reimplementations fail without mu0. New `test_mu0_recovery.R` fits M1b to data simulated with mu0 = (0.8, -0.5) (S = 20, 12 years) and requires the 90% interval to cover the truth. |
+
+Not changed. Other priors, data coding, sampling settings, choice sets. Existing simulation results in `sim/SIM_REPORT.md` predate mu0 and were not rerun here.

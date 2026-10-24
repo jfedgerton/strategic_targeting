@@ -74,7 +74,7 @@ for (truth_family in c("M1b", "M2b")) {
     sdiag <- get_sampler_params(fit, inc_warmup = FALSE)
     n_div <- sum(sapply(sdiag, function(m) sum(m[, "divergent__"])))
     n_maxtd <- sum(sapply(sdiag, function(m) sum(m[, "treedepth__"] >= 10)))
-    sm <- summary(fit, pars = c("alpha0", "alpha", "tau", "beta", "sigma_x", "sd_re", "sigma_b", "gamma",
+    sm <- summary(fit, pars = c("alpha0", "alpha", "tau", "mu0", "beta", "sigma_x", "sd_re", "sigma_b", "gamma",
                                 "Sigma", "Omega", "R_Om", "mu_state", if (sp$family == "m2") c("U", "V")))$summary
     sm <- sm[is.finite(sm[, "Rhat"]), , drop = FALSE]     # structural zeros in U anchor block -> NA
     conv_rows[[tag]] <- data.frame(truth = truth_family, model = sp$model, reused_saved_fit = reused, elapsed_min = round(el, 1),
@@ -83,13 +83,14 @@ for (truth_family in c("M1b", "M2b")) {
                                    frac_rhat_gt_1.05 = mean(sm[, "Rhat"] > 1.05))
     ## ---- recovery and 90% coverage ---------------------------------------------------------
     tr <- sim$truth
-    post <- rstan::extract(fit, pars = c("alpha0", "alpha", "tau", "beta", "Sigma", "Omega", "gamma", "mu_state"))
+    post <- rstan::extract(fit, pars = c("alpha0", "alpha", "tau", "mu0", "beta", "Sigma", "Omega", "gamma", "mu_state"))
     q <- function(x) c(mean = mean(x), lo = unname(quantile(x, 0.05)), hi = unname(quantile(x, 0.95)))
     rows <- list()
     add <- function(name, draws, truth) rows[[length(rows) + 1]] <<- data.frame(param = name, truth = truth, t(q(draws)))
     add("alpha0", post$alpha0, tr$alpha0)
     for (p in 1:2) add(sprintf("alpha[%d]", p), post$alpha[, p], tr$alpha[p])
     add("tau", post$tau, tr$tau)
+    for (d in 1:2) add(sprintf("mu0[%d]", d), post$mu0[, d], tr$mu0[d])
     for (p in 1:4) for (d in 1:2) add(sprintf("beta[%d,%d]", p, d), post$beta[, p, d], tr$beta[p, d])
     for (p in 1:2) add(sprintf("gamma[%d]", p), post$gamma[, p], tr$gamma[p])
     add("Sigma[1,1]", post$Sigma[, 1, 1], tr$Sigma[1, 1]); add("Sigma[2,2]", post$Sigma[, 2, 2], tr$Sigma[2, 2])
@@ -99,14 +100,14 @@ for (truth_family in c("M1b", "M2b")) {
                                       covered = truth >= lo & truth <= hi, abs_err = abs(mean - truth),
                                       fixed_zero = (model %in% c("M1a", "M2a")) & param %in% c("Sigma[1,2]", "Omega[2,3]"))
     recovery_rows[[tag]] <- rec
-    ## ---- type classification from posterior mu_state (x_ref = 0 so mu_i = a_i) --------------
+    ## ---- type classification from posterior mu_state (x_ref = 0 so mu_i = mu0 + a_i; mu0 = 0 here) ------
     cls <- classify_types(post$mu_state, r0 = 0.8)           # draws x S x 2 -> per-state table
     cls$true_type <- sim$types
     cls$state_idx <- seq_len(sim$meta$S)
     acc <- mean(cls$map_type == cls$true_type)
     class_rows[[tag]] <- data.frame(truth = truth_family, model = sp$model, accuracy = acc,
                                     n_states = sim$meta$S,
-                                    mean_abs_err_mu = mean(abs(apply(post$mu_state, c(2, 3), mean) - tr$a_i)))
+                                    mean_abs_err_mu = mean(abs(apply(post$mu_state, c(2, 3), mean) - tr$mu_state_ref0)))
     write.csv(cls, file.path(sim_dir, "results", paste0("classification_", truth_family, "_", sp$model, ".csv")), row.names = FALSE)
     ## ---- LOO, stage 1 and stage 2 kept separate ----------------------------------------------
     ll2 <- loo::extract_log_lik(fit, "log_lik_stage2", merge_chains = FALSE)

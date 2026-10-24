@@ -10,10 +10,12 @@ Stage 2 (event e by state-year n, choice set C_n of all other system members at 
 
 ```
 U_ij = −½ (x_ij − μ_n)' Σ⁻¹ (x_ij − μ_n) + b_j + z_ij'γ [+ u_i'v_j in M2]
-x_ij = (M_i − M_j, R_i − R_j) at t−1          μ_n = X_n β + a_i   (β is P × 2)
+x_ij = (M_i − M_j, R_i − R_j) at t−1          μ_n = μ0 + X_n β + a_i   (μ0 is 1 × D, β is P × D)
 P(j | n) = softmax over C_n                    IV_n = log Σ_{j∈C_n} exp U_ij
 (c_i, a_i1, a_i2) ~ MVN(0, Ω)                  b_j ~ N(0, σ_b) (soft sum-to-zero)
 ```
+
+μ0 is the intercept of the ideal target position (added 2026-10-23, PI-approved). a_i is mean zero and X has no intercept column, so without μ0 the population-average preferred gap was fixed at 0, a "peer" world by construction. Because x is the initiator-minus-target gap, μ0 is the average preferred gap itself, the paper's central quantity (bully > 0, peer ≈ 0, challenger < 0). It is a `row_vector[D]` (length 1 in the m / r models) with prior μ0 ~ N(0, `prior_mu0_sd`), `prior_mu0_sd` = 2 set in `build_stan_data()`. Every control in X and W is centred (see Data decisions), so μ0 is the ideal gap of a state with zero power change at average major-power, democracy and conflict-history values, and `mu_state` at `x_ref` = μ0 + x_ref'β + a_i.
 
 Families: `m1_latent_additive.stan` (M1) and `m2_ame.stan` (M2 = M1 + u_i'v_j, K latent dimensions, K is data). Eight model codes, two data flags.
 
@@ -42,7 +44,7 @@ Stage 1 is identical in all eight (same W, which includes dM_i and dR_i); only t
 | `R/benchmarks.R` | data files | `output/bench_dyadlogit_<cell>.*`, `output/bench_gap_<cell>.*` |
 | `sim/simulate.R`, `sim/run_sim.R` | — | `sim/results/*.csv`, `sim/fits/*.rds` (gitignored), summarised in `sim/SIM_REPORT.md` |
 | `sim/run_measurement_tests.R` | — | `sim/results/measurement_*.csv`, `sim/results/benchmarks_sim.csv` |
-| `tests/run_tests.R` | — | runs `tests/testthat/*.R` (data coding, typology shapes, Stan log-lik == brute-force R) |
+| `tests/run_tests.R` | — | runs `tests/testthat/*.R` (data coding, typology shapes, Stan log-lik == brute-force R with a non-zero μ0, μ0 recovery from simulated data) |
 | `slurm/*.sbatch` | — | Roar job templates (nothing is submitted by the code) |
 
 Cell naming: `<sample>_lag<h>_<variant>_<centrality>_<model>[_K<K>][_noCH][_samp<m>][_dist][_nocontig]`, e.g. `mid_lag5_all_pr_M2b_K2`.
@@ -62,7 +64,7 @@ Cell naming: `<sample>_lag<h>_<variant>_<centrality>_<model>[_K<K>][_noCH][_samp
 * Conflict history: monadic and dyadic MID onset counts in the 10 years before the window starts, dyadic and monadic peace years as of window start. Main spec includes them (`--conflict_history=TRUE` in `02_fit_model.R`); counts enter as `log1p()` and are centred.
 * Democracy and alliance NA → 0 with `*_missing` indicator columns kept in the data (not in the default spec).
 * Choice sets: `all` = every other system member at t with positions at t−1; `polrel` = contiguous (conttype 1–5) or either state a COW major power. Events whose target is outside the choice set are dropped from stage 2 (logged; the initiator's y1 stays 1).
-* W (stage 1) = initiator power changes (dM_h, dR_h), major power, democracy, log1p prior MIDs, log1p peace years (power changes added 2026-10-22 so system change can shift whether a state initiates, not only whom it targets); X (for μ) = (dM_h, dR_h) + the same controls; Z (dyadic, main) = land contiguity, alliance, joint democracy, major-power count, log1p dyadic prior MIDs, log1p dyadic peace years. `x_ref` for `mu_state` = mean X over initiating state-years in the sample.
+* W (stage 1) = initiator power changes (dM_h, dR_h), major power, democracy, log1p prior MIDs, log1p peace years (power changes added 2026-10-22 so system change can shift whether a state initiates, not only whom it targets); X (for μ) = (dM_h, dR_h) + the same controls; Z (dyadic, main) = land contiguity, alliance, joint democracy, major-power count, log1p dyadic prior MIDs, log1p dyadic peace years. `x_ref` for `mu_state` = mean X over initiating state-years in the sample. All four monadic controls are centred in `assemble_cell.R` (the 0/1 major-power and democracy indicators since 2026-10-23, the log1p conflict-history counts before that); dM_h and dR_h are not centred, so zero power change stays the reference. α0 (stage 1) and μ0 (stage 2) are therefore the values at zero power change and sample-average controls.
 * Alternative Z specifications (not run in the main grid): `--distance=TRUE` adds log1p(capital-to-capital distance, km; peacesciencer `add_capital_distance()`, bundled, measured at t−1) and suffixes the cell `_dist`; `--contiguity=FALSE` drops land contiguity (`_nocontig`).
 * Panel: 1816–2014 (COW-MID 5.0 end). State index = all states appearing as initiators or targets (S = 217).
 
@@ -71,7 +73,7 @@ Cell naming: `<sample>_lag<h>_<variant>_<centrality>_<model>[_K<K>][_noCH][_samp
 * Only Σ⁻¹ and Σ⁻¹μ are identified by the choice data (the −½ μ'Σ⁻¹μ term is constant across alternatives), so μ is recovered as Σ(Σ⁻¹μ); this is automatic in the parameterisation.
 * The "a" model fixes corr(a_i1, a_i2) = 0 but keeps corr(c, a1) and corr(c, a2), parameterised so Ω is always PD (r2 = q·√(1−r1²)).
 * AME: V column-centred (a column constant cancels in the softmax); the anchor block of U (K states with most initiations) is lower-triangular with positive diagonal; U/V scale is fixed by N(0,1) priors only. Procrustes alignment across chains in `03_extract.R` is a safety net and its rotation deviation is logged.
-* Priors: β ~ N(0, 1) per element (`prior_beta_sd` is data), σ_x ~ lognormal(0, 1), sd of random effects ~ half-N(0, 1), LKJ(2) on correlations, γ, α ~ N(0, 1), τ ~ N(0, 1), α0 ~ N(0, 2.5).
+* Priors: μ0 ~ N(0, 2) per element (`prior_mu0_sd` is data, 2 from `build_stan_data()`; the positions are within-year standardised, so 2 SD units is a weak prior on the average gap), β ~ N(0, 1) per element (`prior_beta_sd` is data), σ_x ~ lognormal(0, 1), sd of random effects ~ half-N(0, 1), LKJ(2) on correlations, γ, α ~ N(0, 1), τ ~ N(0, 1), α0 ~ N(0, 2.5).
 * Main specification = the full all-states choice set, `--variant=all --sampled_m=0` (the defaults of `02_fit_model.R`); `polrel` and `--sampled_m` remain options for robustness and pilots. Sampled alternatives (`--sampled_m=m`) are an option with two outcome-separated samples. (a) IV rows, for every state-year, m alternatives drawn uniformly without replacement, ignoring outcomes, with IV = log-sum-exp + log(n_full/m); this estimate of the log partition sum is downward biased by Jensen's inequality, equally for initiating and non-initiating rows, and the bias shrinks with m. (b) Event rows, each event gets its own set of its chosen target plus m uniform others, independently per event, so the conditional-logit score is unbiased (McFadden 1978). Unit tests in `tests/testthat/test_sampled_alternatives.R` reproduce the review cases.
 * Seed 123 everywhere.
 

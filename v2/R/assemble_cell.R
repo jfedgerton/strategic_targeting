@@ -39,8 +39,13 @@ assemble_cell <- function(SAMPLE, LAG, VARIANT, CENT = "pr", CONFLICT_HISTORY = 
   state_codes <- sort(unique(c(sy$ccode, alts$ccode2)))
   sy$state_idx <- match(sy$ccode, state_codes)
   ctrl_sy <- c("cowmaj_tm1", "dem_tm1", if (CONFLICT_HISTORY) c("log_prior_mids", "log_peace_years"))
-  ## centre the continuous controls so x_ref (below) and the intercept are interpretable
-  for (cc in intersect(ctrl_sy, c("log_prior_mids", "log_peace_years"))) sy[[cc]] <- sy[[cc]] - mean(sy[[cc]])
+  ## centre every stage-1 / mu control (the 0/1 major-power and democracy indicators as well as the conflict-history
+  ## counts; PI decision 2026-10-23) so that the mu intercept mu0 is the ideal gap of a state with zero power change at
+  ## average major-power, democracy and history values, and alpha0 in stage 1 is the log-odds at those averages.
+  ## dM_i and dR_i are NOT centred (zero power change is the substantive reference).
+  stopifnot(all(ctrl_sy %in% names(sy)), all(sy$cowmaj_tm1 %in% c(0, 1)), all(sy$dem_tm1 %in% c(0, 1)))
+  for (cc in ctrl_sy) sy[[cc]] <- sy[[cc]] - mean(sy[[cc]])
+  stopifnot(all(abs(colMeans(as.matrix(sy[, ctrl_sy, drop = FALSE]))) < 1e-8))
   W_cols <- c("dM_i", "dR_i", ctrl_sy)      # PI decision 2026-10-22: initiator power changes also enter stage 1 directly
   X_cols <- c("dM_i", "dR_i", ctrl_sy)      # power changes + the same controls (documented in README)
   

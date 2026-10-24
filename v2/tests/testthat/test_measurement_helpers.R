@@ -9,10 +9,11 @@ sim <- simulate_targeting("M2b", S = 7L, Tt = 4L, K = 2L, seed = 123L, target_ra
 dat <- build_stan_data(sim$sy, sim$alts, sim$ev, c("W1", "W2"), paste0("X", 1:4), c("Z1", "Z2"), joint = 1L, x_ref = rep(0, 4), K = 2L)
 set.seed(5)
 S <- dat$S
-pars <- list(beta = matrix(rnorm(8, 0, 0.3), 4, 2), a_i = matrix(rnorm(S * 2), S, 2), b_j = rnorm(S), gamma = c(0.4, -0.2),
+pars <- list(mu0 = c(0.6, -0.3), beta = matrix(rnorm(8, 0, 0.3), 4, 2), a_i = matrix(rnorm(S * 2), S, 2), b_j = rnorm(S), gamma = c(0.4, -0.2),
              sigma_x = c(0.9, 1.1), rho = 0.3, U = matrix(rnorm(S * 2), S, 2), V = matrix(rnorm(S * 2), S, 2))
-## two identical "draws" so the posterior mean equals the single-draw probability
-draws <- list(beta = array(rep(pars$beta, each = 2), c(2, 4, 2)), a_i = array(rep(pars$a_i, each = 2), c(2, S, 2)),
+## two identical "draws" so the posterior mean equals the single-draw probability (mu0 non-zero on purpose)
+draws <- list(mu0 = rbind(pars$mu0, pars$mu0),
+              beta = array(rep(pars$beta, each = 2), c(2, 4, 2)), a_i = array(rep(pars$a_i, each = 2), c(2, S, 2)),
               b_j = rbind(pars$b_j, pars$b_j), sigma_x = rbind(pars$sigma_x, pars$sigma_x), rho = c(0.3, 0.3),
               gamma = rbind(pars$gamma, pars$gamma), U = array(rep(pars$U, each = 2), c(2, S, 2)), V = array(rep(pars$V, each = 2), c(2, S, 2)))
 
@@ -25,6 +26,9 @@ test_that("stage2_scores matches brute-force log-likelihood and ranks", {
   rk <- sapply(seq_len(dat$E), function(e) { rows <- dat$cs_start[dat$ev_sy[e]]:dat$cs_end[dat$ev_sy[e]]; rank(-bf$util[rows])[match(dat$ev_row[e], rows)] })
   expect_equal(sc$mean_rank, as.numeric(rk))
   expect_true(all(sc$set_size == S - 1))
+  ## both reimplementations fail loudly without mu0
+  expect_error(stage2_scores(dat, draws[setdiff(names(draws), "mu0")]), "mu0")
+  expect_error(stage2_loglik_R(dat, pars[setdiff(names(pars), "mu0")]), "mu0")
 })
 
 test_that("permute_dR shuffles within each choice set and keeps everything else", {
@@ -51,6 +55,7 @@ test_that("extract_draws handles rstan's 1-d arrays for scalars and subsets ever
   f <- sampling(readRDS(p), data = d7, chains = 1, iter = 30, warmup = 10, seed = 123, refresh = 0)
   dr <- extract_draws(f, n_use = 5)
   expect_equal(length(dr$rho), 5); expect_equal(dim(dr$beta), c(5, 4, 2)); expect_equal(dim(dr$sigma_x), c(5, 2))
+  expect_equal(dim(dr$mu0), c(5, 2))
   sc <- stage2_scores(d7, dr)
   expect_equal(nrow(sc), d7$E); expect_true(all(is.finite(sc$log_p_chosen)))
 })

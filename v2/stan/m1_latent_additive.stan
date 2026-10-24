@@ -9,8 +9,13 @@
 // Stage 2 (dyadic choice, event e made by state-year n = ev_sy[e]):
 //   U[r] = -1/2 (x[r] - mu[n])' Sigma^{-1} (x[r] - mu[n]) + b_j + Z[r] gamma
 //   P(chosen = r) = exp(U[r]) / sum_{r' in choice set of n} exp(U[r'])
-//   mu[n] = X[n] beta + a_i                         (beta is P x 2)
+//   mu[n] = mu0 + X[n] beta + a_i                   (beta is P x D; mu0 is a row_vector[D])
 //   IV[n] = log_sum_exp_{r in choice set of n} U[r]  (+ sampling correction)
+//
+// mu0 (added 2026-10-23) is the population-average ideal position gap: a_i is mean zero and X carries
+// no intercept column, so without mu0 the average preferred gap was pinned at 0 (a "peer" world by
+// construction). x is the initiator-minus-target gap, so mu0 > 0 is a bully average, mu0 < 0 a
+// challenger average. Prior mu0 ~ normal(0, prior_mu0_sd), prior_mu0_sd is data (2 from R).
 //
 // Random effects: (c_i, a_i1, a_i2) ~ MVN(0, Omega), Omega = diag(sd_re) R diag(sd_re)
 //                 b_j = sigma_b * (z_b - mean(z_b))   (soft sum-to-zero; a constant
@@ -81,7 +86,7 @@ functions {
                       array[] int ev_first, array[] int ev_count, array[] int ev_sorted,
                       array[] int ev_row, array[] int ev_start, array[] int ev_end, int sampled,
                       int D, int dcol,
-                      real alpha0, vector alpha, real tau, matrix beta, matrix a_i, vector c_i,
+                      real alpha0, vector alpha, real tau, row_vector mu0, matrix beta, matrix a_i, vector c_i,
                       vector sigma_x, real rho, vector b_j, vector gamma) {
     int L = end - start + 1;
     vector[L] eta;
@@ -90,7 +95,7 @@ functions {
       int n = sy_slice[k];
       int s = cs_start[n];
       int e = cs_end[n];
-      row_vector[D] mu_n = X[n] * beta + a_i[sy_state[n]];
+      row_vector[D] mu_n = mu0 + X[n] * beta + a_i[sy_state[n]];
       vector[e - s + 1] u;
       real lse;
       u = util_block(s, e, x, mu_n, sigma_x, rho, b_j, alt_target, zg_block(Z, gamma, s, e, Pz), D, dcol);
@@ -146,6 +151,7 @@ data {
   int<lower=1, upper=3> D_mode;         // 1 = material only (dM), 2 = relational only (dR), 3 = both
   vector[P] x_ref;                      // reference X at which mu_state is reported
   real<lower=0> prior_beta_sd;
+  real<lower=0> prior_mu0_sd;           // sd of the normal prior on the mu intercept mu0
   int<lower=1> grainsize;               // reduce_sum_static slice size over state-years (>= N1 = one serial slice)
 }
 transformed data {
@@ -183,6 +189,7 @@ parameters {
   real alpha0;
   vector[P1] alpha;
   real tau;
+  row_vector[D] mu0;                                             // mu intercept (population-average ideal gap)
   matrix[P, D] beta;
   vector<lower=0>[D] sigma_x;
   array[joint * (D - 1)] real<lower=-1, upper=1> rho_x;          // D = 2, joint only
@@ -235,6 +242,7 @@ model {
     alpha0 ~ normal(0, 2.5);
     alpha ~ normal(0, 1);
     tau ~ normal(0, 1);
+    mu0 ~ normal(0, prior_mu0_sd);
     to_vector(beta) ~ normal(0, prior_beta_sd);
     sigma_x ~ lognormal(0, 1);
     sd_re ~ normal(0, 1);
@@ -263,19 +271,19 @@ model {
     target += reduce_sum_static(sy_partial_sum, sy_idx, grainsize,
                                 y1, sy_state, W, X, cs_start, cs_end, iv_corr, x, alt_target, Z, Pz,
                                 ev_first, ev_count, ev_sorted, ev_row, ev_start, ev_end, sampled, D, dcol,
-                                alpha0, alpha, tau, beta, a_i, c_i, sigma_x, rho, b_j, gamma);
+                                alpha0, alpha, tau, mu0, beta, a_i, c_i, sigma_x, rho, b_j, gamma);
   }
 }
 generated quantities {
   vector[E] log_lik_stage2;
   vector[N1] log_lik_stage1;
-  matrix[S, D] mu_state;      // mu_i at x_ref: x_ref' beta + a_i   (D columns)
-  matrix[E, D] mu_event;      // mu at the event's own X: X[ev_sy] beta + a_i
+  matrix[S, D] mu_state;      // mu_i at x_ref: mu0 + x_ref' beta + a_i   (D columns)
+  matrix[E, D] mu_event;      // mu at the event's own X: mu0 + X[ev_sy] beta + a_i
   matrix[D, D] Sigma;
   matrix[Dre, Dre] Omega;     // covariance of (c, a_1[, a_2])
   corr_matrix[Dre] R_Om;      // correlation of (c, a_1[, a_2])
   {
-    matrix[N1, D] Mu = X * beta + a_i[sy_state];
+    matrix[N1, D] Mu = rep_matrix(mu0, N1) + X * beta + a_i[sy_state];
     vector[N2] util;
     vector[N1] lse;
     for (n in 1:N1) {
@@ -294,7 +302,7 @@ generated quantities {
       log_lik_stage2[ev] = util[ev_row[ev]] - log_sum_exp(util[s:e]);
       mu_event[ev] = Mu[ev_sy[ev]];
     }
-    for (s in 1:S) mu_state[s] = x_ref' * beta + a_i[s];
+    for (s in 1:S) mu_state[s] = mu0 + x_ref' * beta + a_i[s];
     if (D == 2) Sigma = [[sigma_x[1]^2, rho * sigma_x[1] * sigma_x[2]],
                          [rho * sigma_x[1] * sigma_x[2], sigma_x[2]^2]];
     else Sigma = [[sigma_x[1]^2]];

@@ -1,8 +1,10 @@
 ## ============================================================================
 ## simulate.R -- generate synthetic data from the v2 two-stage spatial choice model
 ##
-## simulate_targeting(family = "M1b" | "M2b", S = 40, Tt = 25, K = 2, seed = 123)
+## simulate_targeting(family = "M1b" | "M2b", S = 40, Tt = 25, K = 2, seed = 123, mu0 = c(0, 0))
 ## returns list(sy, alts, ev, truth, types)
+##   mu0   : length-2 intercept of mu (population-average ideal gap), mu_i = mu0 + X beta + a_i; default 0 keeps
+##           the planted types centred as described below, so mu_state at X = 0 is mu0 + a_i (truth$mu_state_ref0)
 ##   sy    : state-year panel (y1, state_idx, year, W1, W2, X1..X4)
 ##   alts  : flattened choice sets, one row per (state-year, alternative)
 ##   ev    : one event per initiating state-year (sy_row, alt_row)
@@ -23,8 +25,9 @@
 ## family "M1m": one-dimensional truth -- the stage-2 utility uses only dM with scalar mu_i = X beta[,1] + a_i1
 ## and scalar variance sigma_x[1]^2 (beta[,2], a_i2, rho, dR play no role); used by run_sim_1d.R.
 simulate_targeting <- function(family = c("M1b", "M2b", "M1m"), S = 40L, Tt = 25L, K = 2L,
-                               seed = 123L, target_rate = 0.45) {
+                               seed = 123L, target_rate = 0.45, mu0 = c(0, 0)) {
   family <- match.arg(family)
+  stopifnot(is.numeric(mu0), length(mu0) == 2, all(is.finite(mu0)))
   set.seed(seed)
   ## ---- types ---------------------------------------------------------------------
   type_levels <- c("bully", "peer", "challenger", "hybrid_pm", "hybrid_mp")
@@ -84,7 +87,7 @@ simulate_targeting <- function(family = c("M1b", "M2b", "M1m"), S = 40L, Tt = 25
   sy$W1 <- major[sy$state_idx]; sy$W2 <- rnorm(nrow(sy))
   N1 <- nrow(sy)
   Xm <- as.matrix(sy[, c("X1", "X2", "X3", "X4")])
-  Mu <- Xm %*% beta + a_i[sy$state_idx, ]
+  Mu <- rep(1, N1) %o% mu0 + Xm %*% beta + a_i[sy$state_idx, ]       # mu_n = mu0 + X_n beta + a_i
   ## ---- choice sets and systematic utility ------------------------------------------------
   alts <- sy |> mutate(sy_row = row_number()) |> select(sy_row, state_idx, year) |>
     tidyr::crossing(target_idx = seq_len(S)) |> filter(target_idx != state_idx) |>
@@ -117,13 +120,14 @@ simulate_targeting <- function(family = c("M1b", "M2b", "M1m"), S = 40L, Tt = 25
   }, integer(1))
   ev <- data.frame(sy_row = ev_rows, alt_row = chosen)
   stopifnot(all(alts$sy_row[ev$alt_row] == ev$sy_row))
-  truth <- list(alpha0 = alpha0, alpha = alpha, tau = tau, beta = beta, sigma_x = sigma_x, rho = rho,
+  mu_state_ref0 <- rep(1, S) %o% mu0 + a_i                        # mu_i at X = 0 is mu0 + a_i
+  truth <- list(alpha0 = alpha0, alpha = alpha, tau = tau, mu0 = mu0, beta = beta, sigma_x = sigma_x, rho = rho,
                 Sigma = Sigma, gamma = gamma, sigma_b = sigma_b, b_j = b_j, c_i = c_i, a_i = a_i,
                 Omega = Omega_true, sd_re = sqrt(diag(Omega_true)), R_Om = cov2cor(Omega_true),
                 U = U, V = V, UV = if (!is.null(U)) U %*% t(V) else NULL, family = family, K = K,
-                mu_state_ref0 = a_i)       # mu_i at X = 0 is exactly a_i
+                mu_state_ref0 = mu_state_ref0)
   ## one-axis truth labels for the 1-D family (material axis): weaker / peer / stronger with band 0.8
-  types_1d <- ifelse(a_i[, 1] > 0.8, "weaker", ifelse(a_i[, 1] < -0.8, "stronger", "peer"))
+  types_1d <- ifelse(mu_state_ref0[, 1] > 0.8, "weaker", ifelse(mu_state_ref0[, 1] < -0.8, "stronger", "peer"))
   list(sy = sy, alts = alts, ev = ev, truth = truth, types = types, types_1d = types_1d,
        meta = list(S = S, Tt = Tt, N1 = N1, N2 = nrow(alts), E = nrow(ev), seed = seed))
 }

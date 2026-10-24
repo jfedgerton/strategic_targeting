@@ -55,7 +55,7 @@ misclassification_ab <- function(fit_a, fit_b, r0, only_states = NULL) {
 ## ---- vectorised posterior predictive scoring of stage 2 ------------------------------------------------------
 ## draws: output of extract_draws(fit); dat: Stan data list (possibly new / permuted data with the same S)
 extract_draws <- function(fit, n_use = 100, seed = V2_SEED) {
-  pars <- c("beta", "a_i", "b_j", "sigma_x", "rho", "gamma")
+  pars <- c("mu0", "beta", "a_i", "b_j", "sigma_x", "rho", "gamma")
   has_uv <- "U" %in% fit@model_pars
   if (has_uv) pars <- c(pars, "U", "V")
   dr <- rstan::extract(fit, pars = pars)
@@ -80,10 +80,13 @@ stage2_scores <- function(dat, draws) {
   p_sum <- numeric(E); rank_sum <- numeric(E)
   zg0 <- if (dat$Pz > 0) dat$Z else NULL
   D <- if (dat$D_mode == 3L) 2L else 1L
+  if (is.null(draws$mu0)) stop("stage2_scores: draws$mu0 is missing (mu = mu0 + X beta + a_i)")
+  mu0_mat <- matrix(draws$mu0, ncol = D)                     # [n_d, D]; rstan gives [n, 1] for row_vector[1]
+  stopifnot(nrow(mu0_mat) == n_d)
   for (d in seq_len(n_d)) {
     beta <- matrix(if (D == 2L) draws$beta[d, , ] else draws$beta[d, ], dat$P, D)
     a_d <- matrix(if (D == 2L) draws$a_i[d, , ] else draws$a_i[d, ], dat$S, D)
-    Mu <- dat$X %*% beta + a_d[dat$sy_state, , drop = FALSE]
+    Mu <- rep(1, dat$N1) %o% mu0_mat[d, ] + dat$X %*% beta + a_d[dat$sy_state, , drop = FALSE]
     sx <- matrix(draws$sigma_x, ncol = D)[d, ]; rho <- draws$rho[d]
     if (D == 2L) {
       d1 <- (dat$x[, 1] - Mu[alt_sy, 1]) / sx[1]; d2 <- (dat$x[, 2] - Mu[alt_sy, 2]) / sx[2]

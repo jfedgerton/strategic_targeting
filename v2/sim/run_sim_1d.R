@@ -34,20 +34,22 @@ for (nm in names(specs)) {
                   control = list(adapt_delta = 0.9), pars = excl, include = FALSE)
   el <- as.numeric(difftime(Sys.time(), t0, units = "mins")); logf("%s fitted in %.1f min", nm, el)
   sdiag <- get_sampler_params(fit, inc_warmup = FALSE)
-  smry <- summary(fit, pars = c("alpha0", "alpha", "tau", "beta", "sigma_x", "sd_re", "sigma_b", "gamma", "Omega"))$summary
+  smry <- summary(fit, pars = c("alpha0", "alpha", "tau", "mu0", "beta", "sigma_x", "sd_re", "sigma_b", "gamma", "Omega"))$summary
   conv[[nm]] <- data.frame(model = nm, elapsed_min = round(el, 1), divergences = sum(sapply(sdiag, function(m) sum(m[, "divergent__"]))),
                            worst_rhat = max(smry[, "Rhat"], na.rm = TRUE), min_ess = min(smry[, "n_eff"], na.rm = TRUE))
-  post <- rstan::extract(fit, pars = c("tau", "beta", "Sigma", "Omega", "gamma", "mu_state"))
+  post <- rstan::extract(fit, pars = c("tau", "mu0", "beta", "Sigma", "Omega", "gamma", "mu_state"))
   rows <- list(); add <- function(name, draws, truth) rows[[length(rows) + 1]] <<- data.frame(param = name, truth = truth, t(q(draws)))
   add("tau", post$tau, tr$tau)
   D <- if (sp$D_mode == 3L) 2L else 1L
   if (D == 1L) {
+    add("mu0[1]", as.numeric(post$mu0), if (sp$D_mode == 1L) tr$mu0[1] else NA)   # [draws, 1] for row_vector[1]
     b1 <- matrix(post$beta, nrow = dim(post$beta)[1])          # rstan keeps a [draws, P, 1] array for matrix[P, 1]
     for (p in 1:4) add(sprintf("beta[%d,1]", p), b1[, p], if (sp$D_mode == 1L) tr$beta[p, 1] else NA)
     add("Sigma[1,1]", as.numeric(post$Sigma), if (sp$D_mode == 1L) tr$sigma_x[1]^2 else NA)
     add("Omega[1,1] (c)", post$Omega[, 1, 1], tr$Omega[1, 1]); add("Omega[2,2] (a)", post$Omega[, 2, 2], if (sp$D_mode == 1L) tr$Omega[2, 2] else NA)
     add("Omega[1,2] (c,a)", post$Omega[, 1, 2], if (sp$D_mode == 1L) tr$Omega[1, 2] else NA)
   } else {
+    add("mu0[1]", post$mu0[, 1], tr$mu0[1])
     for (p in 1:4) add(sprintf("beta[%d,1]", p), post$beta[, p, 1], tr$beta[p, 1])
     add("Sigma[1,1]", post$Sigma[, 1, 1], tr$sigma_x[1]^2); add("Sigma[1,2]", post$Sigma[, 1, 2], 0)
     add("Omega[1,1] (c)", post$Omega[, 1, 1], tr$Omega[1, 1]); add("Omega[2,2] (a1)", post$Omega[, 2, 2], tr$Omega[2, 2]); add("Omega[1,2] (c,a1)", post$Omega[, 1, 2], tr$Omega[1, 2])
@@ -59,10 +61,10 @@ for (nm in names(specs)) {
     cls <- classify_types(mu, r0 = 0.8)
     acc <- if (sp$D_mode == 1L) mean(cls$map_type == sim$types_1d) else NA
     cls_rows[[nm]] <- data.frame(model = nm, axis = c("material", "relational")[sp$D_mode], accuracy_3level = acc,
-                                 mean_abs_err_mu = if (sp$D_mode == 1L) mean(abs(cls$mu_mean - tr$a_i[, 1])) else NA)
+                                 mean_abs_err_mu = if (sp$D_mode == 1L) mean(abs(cls$mu_mean - tr$mu_state_ref0[, 1])) else NA)
   } else {
     cls_rows[[nm]] <- data.frame(model = nm, axis = "both", accuracy_3level = mean(ifelse(cls_m <- apply(mu[, , 1], 2, mean) > 0.8, "weaker", ifelse(cls_m < -0.8, "stronger", "peer")) == sim$types_1d),
-                                 mean_abs_err_mu = mean(abs(apply(mu[, , 1], 2, mean) - tr$a_i[, 1])))
+                                 mean_abs_err_mu = mean(abs(apply(mu[, , 1], 2, mean) - tr$mu_state_ref0[, 1])))
   }
   ll2 <- loo::extract_log_lik(fit, "log_lik_stage2", merge_chains = FALSE); l2 <- loo::loo(ll2, r_eff = loo::relative_eff(exp(ll2)))
   ll1 <- loo::extract_log_lik(fit, "log_lik_stage1", merge_chains = FALSE); l1 <- loo::loo(ll1, r_eff = loo::relative_eff(exp(ll1)))

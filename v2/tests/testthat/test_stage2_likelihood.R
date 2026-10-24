@@ -21,9 +21,17 @@ check_model <- function(model_name, family, joint, with_uv, K = 2L, D_mode = 3L)
   ll1_R <- dbinom(dat$y1, 1, plogis(as.numeric(eta1)), log = TRUE)
   ll1_stan <- as.numeric(rstan::extract(fit, "log_lik_stage1")$log_lik_stage1[1, ])
   expect_equal(ll1_stan, ll1_R, tolerance = 1e-6)
-  ## mu_state at x_ref = 0 equals a_i
+  ## mu_state at x_ref = 0 equals mu0 + a_i (mu0 is non-zero in make_pars, so a missing intercept would fail here)
   mu <- rstan::extract(fit, "mu_state")$mu_state[1, , ]
-  expect_equal(unname(as.numeric(mu)), unname(as.numeric(st$pars$a_i)), tolerance = 1e-6)
+  D <- if (D_mode == 3L) 2L else 1L
+  mu_expected <- rep(1, dat$S) %o% st$pars$mu0 + matrix(st$pars$a_i, ncol = D)
+  expect_true(all(st$pars$mu0 != 0))
+  expect_equal(unname(as.numeric(mu)), unname(as.numeric(mu_expected)), tolerance = 1e-6)
+  ## mu_event equals mu0 + X[ev_sy] beta + a_i
+  mue <- matrix(rstan::extract(fit, "mu_event")$mu_event[1, , ], ncol = D)
+  mue_expected <- rep(1, dat$E) %o% st$pars$mu0 + dat$X[dat$ev_sy, , drop = FALSE] %*% st$pars$beta +
+    matrix(st$pars$a_i, ncol = D)[dat$sy_state[dat$ev_sy], , drop = FALSE]
+  expect_equal(unname(as.numeric(mue)), unname(as.numeric(mue_expected)), tolerance = 1e-6)
   ## Sigma assembled correctly
   Sg <- rstan::extract(fit, "Sigma")$Sigma[1, , ]
   if (D_mode == 3L) {

@@ -22,7 +22,9 @@ make_pars <- function(dat, with_uv) {
   S <- dat$S
   D <- if (dat$D_mode == 3L) 2L else 1L
   rho <- if (dat$joint == 1 && D == 2L) 0.4 else 0
-  list(beta = matrix(rnorm(dat$P * D, 0, 0.3), dat$P, D),
+  ## mu0 is deliberately non-zero so that any mu reimplementation that omits the intercept fails the likelihood tests
+  list(mu0 = c(0.7, -0.4)[seq_len(D)],
+       beta = matrix(rnorm(dat$P * D, 0, 0.3), dat$P, D),
        a_i = matrix(rnorm(S * D), S, D), c_i = rnorm(S, 0, 0.5),
        b_j = { z <- rnorm(S); 0.6 * (z - mean(z)) }, z_b = NULL,
        gamma = c(0.5, -0.3), sigma_x = c(0.9, 1.2)[seq_len(D)], rho = rho,
@@ -46,7 +48,7 @@ stan_inits <- function(dat, p) {
   re <- cbind(p$c_i, p$a_i)                             # S x (1 + D) desired
   z_re <- solve(diag(sd_re) %*% L) %*% t(re)            # (1 + D) x S so that (diag(sd) L z)' = re
   z_b <- p$b_j / 0.6                                    # mean-zero already, so b_j = 0.6 * (z_b - mean) = b_j
-  init <- list(alpha0 = -0.5, alpha = c(0.3, -0.2), tau = 0.4, beta = p$beta,
+  init <- list(alpha0 = -0.5, alpha = c(0.3, -0.2), tau = 0.4, mu0 = array(p$mu0, dim = D), beta = p$beta,
                sigma_x = array(p$sigma_x, dim = D), sd_re = sd_re, z_re = z_re, sigma_b = 0.6, z_b = z_b, gamma = p$gamma)
   if (D == 1L) { init$r_ca_1d <- array(0.2, 1) }
   else if (dat$joint == 1) { init$rho_x <- array(p$rho, 1); init$L_Om_joint <- array(L, c(1, 3, 3)) }
@@ -71,7 +73,7 @@ stan_inits <- function(dat, p) {
 
 ## unconstrain_pars() needs every parameter, including the zero-size ones (e.g. r_ca1 when joint = 1);
 ## sampling() accepts a partial init list, so complete it from the fit's declared dimensions
-PARAM_BLOCK <- c("alpha0", "alpha", "tau", "beta", "sigma_x", "rho_x", "sd_re", "L_Om_joint", "r_ca1", "q_ca2", "r_ca_1d",
+PARAM_BLOCK <- c("alpha0", "alpha", "tau", "mu0", "beta", "sigma_x", "rho_x", "sd_re", "L_Om_joint", "r_ca1", "q_ca2", "r_ca_1d",
                  "z_re", "sigma_b", "z_b", "gamma", "u_diag", "u_lower", "U_free", "V_raw")   # the parameters {} blocks of M1 / M2
 complete_init <- function(fit, init) {
   for (nm in intersect(PARAM_BLOCK, fit@model_pars)) if (is.null(init[[nm]])) {
