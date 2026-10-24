@@ -5,7 +5,7 @@
 ##   Rscript v2/R/02_fit_model.R --sample=mid --lag=5 --variant=all --model=M1b \
 ##          [--centrality=pr|eig] [--K=2] [--chains=4] [--iter=2000] [--warmup=1000] \
 ##          [--sampled_m=0] [--conflict_history=TRUE] [--distance=FALSE] [--contiguity=TRUE]
-##          [--dy_peace_years=FALSE] [--drop_ww2=FALSE]
+##          [--dy_peace_years=FALSE] [--drop_ww2=FALSE] [--full_controls=FALSE]
 ##          [--adapt_delta=0.9] [--max_treedepth=10] [--pilot=FALSE] [--dry_run=FALSE] [--threads_per_chain=1]
 ##
 ##   sample    : mid (all MIDs) | fmid (fatal MIDs, main coding) | fmidcow (fatal MIDs, COW-only coding; appendix) | fmidub (upper bound: uncoded fatality -> fatal; appendix) | war (hostility level 5)
@@ -15,7 +15,12 @@
 ##               m = material only, r = relational only, a = both independent, b = both joint; M2 = AME with K factors
 ##   centrality: pr (IGO PageRank, main) | eig (eigenvector, robustness)
 ##   sampled_m : 0 = full choice sets; m > 0 = chosen target(s) plus m uniformly sampled alternatives
-##   conflict_history: TRUE = include conflict-history controls in W, X and Z (main spec); FALSE = drop them
+##   conflict_history: TRUE = include the prior-MID counts in W and Z (main spec; under --full_controls also in X, with
+##               the monadic peace years); FALSE = drop them; cell name gets "_noCH"
+##   full_controls: FALSE (main, minimal controls since 2026-10-24: W = dM_i, dR_i, ongoing_tm1, log prior MIDs, dem_tm1;
+##               X = dM_i, dR_i; Z = contiguity, joint democracy, log dyadic prior MIDs, dy_mid_tm1, target changes) | TRUE
+##               restores the previous main specification (W = X with cowmaj_tm1, dem_tm1, ongoing_tm1, log prior MIDs,
+##               log peace years; Z with alliance and the major-power count as well); cell name gets "_fullctrl"
 ##   distance  : FALSE (main) | TRUE adds log1p(capital-to-capital km) to Z; cell name gets "_dist"
 ##   contiguity: TRUE (main) | FALSE drops land contiguity from Z; cell name gets "_nocontig"
 ##   dy_peace_years: FALSE (main) | TRUE restores log1p(dyadic peace years) to Z next to dy_mid_tm1; cell name gets "_dypy"
@@ -57,6 +62,7 @@ DISTANCE <- get_arg("distance", FALSE)    # TRUE = add log1p(capital distance km
 CONTIGUITY <- get_arg("contiguity", TRUE) # FALSE = drop land contiguity from Z (robustness option)
 DY_PEACE_YEARS <- get_arg("dy_peace_years", FALSE)  # TRUE = put log1p(dyadic peace years) back into Z (left the main Z 2026-10-24)
 DROP_WW2 <- get_arg("drop_ww2", FALSE)    # TRUE = appendix run without the WWII events / initiations
+FULL_CONTROLS <- get_arg("full_controls", FALSE)  # TRUE = the pre-2026-10-24 control sets (major power, alliance, peace years as well)
 stopifnot(SAMPLE %in% c("mid", "fmid", "fmidcow", "fmidub", "war"), LAG %in% c(1L, 3L, 5L, 10L), VARIANT %in% c("all", "polrel"),
           MODEL %in% c("M1m", "M1r", "M1a", "M1b", "M2m", "M2r", "M2a", "M2b"), CENT %in% c("pr", "eig"), K >= 1)
 ## model code: M1 / M2 = family; m = material only (D_mode 1), r = relational only (D_mode 2),
@@ -67,7 +73,7 @@ cell <- sprintf("%s_lag%d_%s_%s_%s%s%s%s", SAMPLE, LAG, VARIANT, CENT, MODEL,
                 if (!CONFLICT_HISTORY) "_noCH" else "",
                 if (SAMPLED_M > 0) sprintf("_samp%d", SAMPLED_M) else "")
 cell <- paste0(cell, if (DISTANCE) "_dist" else "", if (!CONTIGUITY) "_nocontig" else "",
-               if (DY_PEACE_YEARS) "_dypy" else "", if (DROP_WW2) "_noww2" else "")
+               if (DY_PEACE_YEARS) "_dypy" else "", if (DROP_WW2) "_noww2" else "", if (FULL_CONTROLS) "_fullctrl" else "")
 log_open(paste0("02_fit_", cell))
 logf("cell = %s", cell)
 set.seed(V2_SEED)
@@ -77,10 +83,29 @@ options(mc.cores = min(CHAINS, max(1L, parallel::detectCores() %/% THREADS)))
 logf("threads_per_chain = %d; mc.cores = %d", THREADS, getOption("mc.cores"))
 data_dir <- file.path(v2_root(), "data"); out_dir <- file.path(v2_root(), "output"); dir.create(out_dir, showWarnings = FALSE)
 manifest_path <- file.path(data_dir, "manifest.csv")
+## ---- provenance at LOAD time (audit 2026-10-24: a fit could be stamped with data that changed while it sampled) -------
+## The manifest digests and the git commit are read BEFORE the data are assembled and sampling starts; the manifest is
+## read again just before the fit is saved and the run stops if any digest changed in between. Slurm ids are recorded.
+stopifnot(file.exists(manifest_path))
+manifest_at_load <- read.csv(manifest_path, stringsAsFactors = FALSE)
+stopifnot(all(c("file", "nrow", "sha256") %in% names(manifest_at_load)), nrow(manifest_at_load) > 0, !anyNA(manifest_at_load$sha256))
+git_commit_at_load <- tryCatch(system2("git", c("-C", v2_root(), "rev-parse", "HEAD"), stdout = TRUE, stderr = FALSE)[1], error = function(e) NA_character_)
+if (is.null(git_commit_at_load) || length(git_commit_at_load) != 1 || is.na(git_commit_at_load) || !grepl("^[0-9a-f]{40}$", git_commit_at_load)) {
+  logf("git rev-parse HEAD unavailable at load (recorded as NA)"); git_commit_at_load <- NA_character_
+}
+git_dirty_at_load <- tryCatch(length(system2("git", c("-C", v2_root(), "status", "--porcelain", "--", "R", "stan"), stdout = TRUE, stderr = FALSE)) > 0, error = function(e) NA)
+slurm_job_id <- Sys.getenv("SLURM_JOB_ID", unset = NA_character_); slurm_task_id <- Sys.getenv("SLURM_ARRAY_TASK_ID", unset = NA_character_)
+if (!is.na(slurm_job_id) && slurm_job_id == "") slurm_job_id <- NA_character_
+if (!is.na(slurm_task_id) && slurm_task_id == "") slurm_task_id <- NA_character_
+logf("provenance at load: git commit %s (uncommitted changes under v2/R or v2/stan: %s); manifest built %s with %d files; SLURM_JOB_ID %s; SLURM_ARRAY_TASK_ID %s",
+     git_commit_at_load, git_dirty_at_load, if ("built" %in% names(manifest_at_load)) manifest_at_load$built[1] else "NA", nrow(manifest_at_load), slurm_job_id, slurm_task_id)
+cell_files <- c(sprintf("stage1_panel_lag%d.rds", LAG), sprintf("alts_lag%d_%s.rds", LAG, VARIANT), "events.rds")
+stopifnot(all(cell_files %in% manifest_at_load$file))
+manifest_cell <- manifest_at_load[manifest_at_load$file %in% cell_files, ]
 
 source(file.path(dirname(this_file), "assemble_cell.R"))
 A <- assemble_cell(SAMPLE, LAG, VARIANT, CENT, CONFLICT_HISTORY, SAMPLED_M, DISTANCE = DISTANCE, CONTIGUITY = CONTIGUITY,
-                   DY_PEACE_YEARS = DY_PEACE_YEARS, DROP_WW2 = DROP_WW2, data_dir = data_dir)
+                   DY_PEACE_YEARS = DY_PEACE_YEARS, DROP_WW2 = DROP_WW2, FULL_CONTROLS = FULL_CONTROLS, data_dir = data_dir)
 sy <- A$sy; alts <- A$alts; ev <- A$ev; W_cols <- A$W_cols; X_cols <- A$X_cols; Z_cols <- A$Z_cols
 state_codes <- A$state_codes; x_ref <- A$x_ref; n_full <- A$n_full; sampled <- A$sampled
 
@@ -96,7 +121,8 @@ logf("Stan data: S=%d N1=%d N2=%d E=%d P1=%d P=%d Pz=%d joint=%d sampled=%d D_mo
      dat$S, dat$N1, dat$N2, dat$E, dat$P1, dat$P, dat$Pz, dat$joint, dat$sampled, dat$D_mode, sum(dat$y1),
      paste(W_cols, collapse = ","), paste(Z_cols, collapse = ","))
 if (DRY_RUN) {
-  saveRDS(list(dat = dat, cell = cell, state_codes = state_codes, W_cols = W_cols, X_cols = X_cols, Z_cols = Z_cols),
+  saveRDS(list(dat = dat, cell = cell, state_codes = state_codes, W_cols = W_cols, X_cols = X_cols, Z_cols = Z_cols,
+               manifest = manifest_cell, git_commit = git_commit_at_load, full_controls = FULL_CONTROLS),
           file.path(out_dir, paste0("standata_", cell, ".rds")))
   logf("DRY RUN: Stan data assembled and saved; no sampling"); quit(save = "no", status = 0)
 }
@@ -121,16 +147,25 @@ sm_tab <- summary(fit, pars = pars_struct)$summary
 write.csv(data.frame(parameter = rownames(sm_tab), sm_tab), file.path(out_dir, paste0("summary_", cell, ".csv")), row.names = FALSE)
 logf("worst Rhat among structural parameters: %.3f; min n_eff: %.0f",
      max(sm_tab[, "Rhat"], na.rm = TRUE), min(sm_tab[, "n_eff"], na.rm = TRUE))
-man <- read.csv(manifest_path, stringsAsFactors = FALSE)
+## ---- provenance just before saving: the data files must not have changed while sampling ---------------------------
+man_now <- read.csv(manifest_path, stringsAsFactors = FALSE)
+chg <- merge(manifest_at_load[, c("file", "sha256")], man_now[, c("file", "sha256")], by = "file", all = TRUE, suffixes = c("_load", "_now"))
+chg_bad <- chg$file[is.na(chg$sha256_load) | is.na(chg$sha256_now) | chg$sha256_load != chg$sha256_now]
+if (length(chg_bad) > 0) stop(sprintf("manifest.csv changed while sampling (%s); the fit is NOT saved, rebuild and refit", paste(chg_bad, collapse = ", ")))
+for (f in cell_files) if (file_digest(file.path(data_dir, f)) != manifest_cell$sha256[manifest_cell$file == f]) stop(sprintf("%s on disk no longer matches the manifest read at load; the fit is NOT saved", f))
+git_commit_now <- tryCatch(system2("git", c("-C", v2_root(), "rev-parse", "HEAD"), stdout = TRUE, stderr = FALSE)[1], error = function(e) NA_character_)
+if (!identical(git_commit_now, git_commit_at_load)) logf("WARNING: git HEAD moved while sampling (%s -> %s); the fit records the commit at load", git_commit_at_load, git_commit_now)
 saveRDS(list(fit = fit, dat = dat, cell = cell, state_codes = state_codes, W_cols = W_cols, X_cols = X_cols, Z_cols = Z_cols,
              sy_keys = sy |> select(ccode, year, state_idx, y1), ev = ev, x_ref = x_ref, elapsed_min = elapsed,
-             manifest = man[man$file %in% c(sprintf("stage1_panel_lag%d.rds", LAG), sprintf("alts_lag%d_%s.rds", LAG, VARIANT), "events.rds"), ],
+             manifest = manifest_cell,
              args = list(sample = SAMPLE, lag = LAG, variant = VARIANT, model = MODEL, centrality = CENT, K = K, chains = CHAINS,
                          iter = ITER, warmup = WARMUP, sampled_m = SAMPLED_M, conflict_history = CONFLICT_HISTORY,
                          distance = DISTANCE, contiguity = CONTIGUITY, dy_peace_years = DY_PEACE_YEARS, drop_ww2 = DROP_WW2,
-                         D_mode = D_MODE, threads_per_chain = THREADS,
+                         full_controls = FULL_CONTROLS, D_mode = D_MODE, threads_per_chain = THREADS,
                          grainsize = dat$grainsize, seed = V2_SEED,
-                         git_commit = tryCatch(system2("git", c("-C", v2_root(), "rev-parse", "HEAD"), stdout = TRUE, stderr = FALSE)[1],
-                                               error = function(e) NA_character_))),
+                         git_commit = git_commit_at_load, git_commit_at_save = git_commit_now, git_dirty_at_load = git_dirty_at_load,
+                         manifest_built = if ("built" %in% names(manifest_at_load)) manifest_at_load$built[1] else NA_character_,
+                         slurm_job_id = slurm_job_id, slurm_array_task_id = slurm_task_id,
+                         started = format(t0, "%Y-%m-%d %H:%M:%S"), saved = format(Sys.time(), "%Y-%m-%d %H:%M:%S"))),
         file.path(out_dir, paste0("fit_", cell, ".rds")))
 logf("saved %s", file.path(out_dir, paste0("fit_", cell, ".rds")))

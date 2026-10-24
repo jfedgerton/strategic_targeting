@@ -60,7 +60,7 @@ gap_formula <- function(X_cols) {
 ## ---- CLI -------------------------------------------------------------------------------------------------
 if (sys.nframe() == 0 && length(grep("^--sample=", commandArgs(TRUE))) == 1) {
   args <- commandArgs(TRUE)
-  source(file.path(dirname(this_file), "assemble_cell.R"))   # z_columns() and SY_INDICATORS: the model's own control lists
+  source(file.path(dirname(this_file), "assemble_cell.R"))   # z_columns() and x_controls(): the model's own main control lists
   get_arg <- function(name, default) { h <- grep(paste0("^--", name, "="), args, value = TRUE); if (!length(h)) return(default)
     v <- sub(paste0("^--", name, "="), "", h[1]); if (is.logical(default)) as.logical(v) else if (is.numeric(default)) as.numeric(v) else v }
   SAMPLE <- get_arg("sample", "mid"); LAG <- as.integer(get_arg("lag", 5)); VARIANT <- get_arg("variant", "polrel"); CENT <- get_arg("centrality", "pr")
@@ -76,6 +76,7 @@ if (sys.nframe() == 0 && length(grep("^--sample=", commandArgs(TRUE))) == 1) {
   dR_alt <- if (CENT == "pr") "dR_pr" else "dR_eig"; dR_h <- if (CENT == "pr") "dRpr_h" else "dReig_h"
   alts <- alts |> mutate(dR = .data[[dR_alt]], log_dy_prior_mids = log1p(dy_prior_mids_h), log_dy_peace_years = log1p(dy_peace_years_h))
   ev_keys <- events |> filter(.data[[paste0("in_", SAMPLE)]]) |> transmute(ccode1 = initiator, ccode2 = target, year)
+  assert_no_dup_keys(ev_keys, c("ccode1", "ccode2", "year"), "benchmark events (one per initiator, target, year)")
   z_cols <- z_columns()                      # the main-spec Z (audit 2026-10-24: no separate hard-coded list here)
   stopifnot(all(z_cols %in% names(alts)))
   ## (i) directed-dyad logit
@@ -93,7 +94,7 @@ if (sys.nframe() == 0 && length(grep("^--sample=", commandArgs(TRUE))) == 1) {
   f1 <- bf(as.formula(paste("y ~ cinc_ratio + dR +", paste(z_cols, collapse = " + "), "+ offset(off) + (1 | ccode1) + (1 | ccode2)")), family = bernoulli())
   ## (ii) old gap regression on event rows (initiator X from the panel)
   sy <- panel |> mutate(state_idx = ccode, dM_i = dM_h, dR_i = .data[[dR_h]], log_prior_mids = log1p(mon_prior_mids_h), log_peace_years = log1p(mon_peace_years_h))
-  X_cols <- c("dM_i", "dR_i", SY_INDICATORS, "log_prior_mids", "log_peace_years")   # same monadic controls as the model (ongoing_tm1 included)
+  X_cols <- c("dM_i", "dR_i", x_controls())  # the model's main mu shifters (minimal controls since 2026-10-24: the power changes only)
   sy_key <- sy |> transmute(ccode1 = ccode, year, sy_row = row_number())
   alts2 <- alts |> inner_join(sy_key, by = c("ccode1", "year")) |> arrange(sy_row, ccode2) |> mutate(target_idx = ccode2)
   ev <- ev_keys |> inner_join(sy_key, by = c("ccode1", "year")) |>

@@ -9,11 +9,16 @@
 ##   sy_positions.rds              state-year positions M = log CINC share, R_pr = log IGO PageRank (both raw log
 ##                                 shares, NOT standardised within year; PI decision 2026-10-23), R_eig (eigenvector
 ##                                 centrality, still std within year; not used in the main grid)
-##   events.rds                    one row per (dispnum, initiator, target) directed event, joiners included
-##                                 (is_joiner_pair), with escalation (already fighting in another dispute; excluded
-##                                 from every sample flag and from y1), is_ww2 (appendix option --drop_ww2),
-##                                 target_has_pos_tm1, and sample flags in_mid / in_fmid / in_fmidcow / in_fmidub /
-##                                 in_war (+ fatal_source)
+##   events.rds                    one row per (initiator, target, year) directed event among the kept rows (same-year
+##                                 duplicates from different disputes collapsed; dispnum = smallest, dispnums lists all,
+##                                 n_disputes), joiners included (is_joiner_pair), plus one row per escalation event
+##                                 (escalation = TRUE under the month rule; excluded from every sample flag and from y1;
+##                                 escalation_year = the old year rule, esc_fallback when the year rule decided),
+##                                 ev_start_lo / ev_start_hi (the event's date interval, month index), fighting_at_ref
+##                                 (pair already fighting at the state-year's reference date; stage 2 only), war (pair
+##                                 level) and war_disp (dispute level), is_ww2 (appendix option --drop_ww2),
+##                                 target_has_pos_tm1, sample flags in_mid / in_fmid / in_fmidcow / in_fmidub / in_war
+##                                 (+ fatal_source)
 ##   changes_lag{h}.rds            ONE state-level change table per lag (build_change_table() in 00_helpers.R):
 ##                                 raw change dM_raw_h / dRpr_raw_h = level(t-1) - level(t-1-h), and the transformed
 ##                                 change dM_h / dRpr_h = (raw - year mean) / one pooled SD per lag. Feeds BOTH the
@@ -40,11 +45,16 @@
 ## on either side (tabulation only, not a covariate). INCLUDE_JOINERS = FALSE reproduces the originator-only
 ## event base.
 ##
-## Ongoing-dispute rule (PI decision 2026-10-24). Stage 2 is target SELECTION. An alternative (i, j, t) is
-## "already fighting" when i and j (either direction, any role) are both in a dispute active in t whose pair
-## onset is before t; such alternatives are dropped from every choice set. An event whose (i, j, t) is already
-## fighting in a DIFFERENT dispute is an escalation, kept in events.rds with escalation = TRUE but excluded
-## from every sample flag, from stage 2 and from y1 / n_ev in stage 1 (helpers in 00_helpers.R).
+## Ongoing-dispute rule (PI decision 2026-10-24, month resolution since the second round of that day). Stage 2 is
+## target SELECTION. An event is an escalation when i and j are both participants in a DIFFERENT dispute that
+## started before the event's dispute start date and had not ended by it (month resolution; dispute-level COW
+## dates from cow_mid_disps, end dates bounded from the duration because peacesciencer ships no end month; the
+## year rule decides where the month comparison is undecided and the fallback is counted). Escalations stay in
+## events.rds with escalation = TRUE but leave every sample flag, stage 2 and y1 / n_ev in stage 1. For choice
+## sets each state-year has a reference date (start of its earliest non-escalation event, else January of t);
+## alternative j is dropped when i and j are in a different dispute active at that date that started before it.
+## War is coded at the pair level (dispute war-level AND both participants at hostility level 5), and same-year
+## events of one (initiator, target) pair from different disputes collapse into one event (helpers in 00_helpers.R).
 ##
 ## Conflict-history controls (new in v2), all relative to the change window [t-1-h, t-1]:
 ##   (a) mon_prior_mids_h : # distinct MIDs the state was a participant in (either side, joiners included
@@ -214,20 +224,92 @@ events <- events |> rename(initiator = ccode1, target = ccode2) |>
          fatal = case_when(fatal1 %in% TRUE | fatal2 %in% TRUE | fatal_disp %in% TRUE ~ TRUE,
                            is.na(fatal1) & is.na(fatal2) & is.na(fatal_disp) ~ NA,
                            TRUE ~ FALSE),
-         war = hostlev_disp == 5L)
-stopifnot(all(events$initiator != events$target))
-## ---- ongoing-dispute rule (PI decision 2026-10-24) -------------------------------------------------------------
-## already-fighting directed pair-years from EVERY participant (any role, both directions): the pair is in a dispute
-## active in `year` and its onset in that dispute is before `year`. Events matching such a row in ANOTHER dispute are
-## escalations of an ongoing fight, not target selection; they stay in events.rds (escalation = TRUE) but are excluded
-## from every sample flag below, hence from stage 2 and from y1 / n_ev in stage 1.
-af_keys <- already_fighting_keys(dd)
-assert_no_dup_keys(af_keys, c("ccode1", "ccode2", "year", "dispnum"), "already-fighting keys")
-events <- flag_escalations(events, af_keys)
-blog("already-fighting directed pair-years (pair in a dispute active at t with pair onset < t): %d rows, %d distinct (i, j, t)",
-     nrow(af_keys), nrow(distinct(af_keys, ccode1, ccode2, year)))
+         ## war at the PAIR level (PI decision 2026-10-24, audit finding): the dispute is war-level AND both participants
+         ## of the pair reached hostility level 5 (participant hostlev from cow_mid_dirdisps, max over the pair's years).
+         ## war_disp is the old dispute-level coding, kept for the counts only.
+         war_disp = hostlev_disp == 5L,
+         war = hostlev_disp == 5L & hostlev1 == 5L & hostlev2 == 5L)
+stopifnot(all(events$initiator != events$target), !anyNA(events$war), !anyNA(events$war_disp), all(events$war_disp[events$war]))
+blog("war coding: dispute-level war events %d; pair-level (dispute war AND both participants hostlev 5) %d; dropped by the pair rule %d (joiner pairs %d, originator pairs %d)",
+     sum(events$war_disp), sum(events$war), sum(events$war_disp & !events$war), sum(events$war_disp & !events$war & events$is_joiner_pair),
+     sum(events$war_disp & !events$war & !events$is_joiner_pair))
+## ---- ongoing-dispute rule, month resolution (PI decision 2026-10-24; helpers and the date conventions in 00_helpers.R) --
+## An event is an escalation when i and j are both participants in a DIFFERENT dispute that started before the event's
+## dispute start date and had not ended by it, at month resolution. peacesciencer 1.2.0 gives dispute-level start month
+## and year (cow_mid_disps styear / stmon) and durations (mindur / maxdur) but no end month and no participant dates
+## (cow_mid_dirdisps has years only), so the end date is bounded from the duration and every date is dispute-level
+## (dispute_date_bounds, pair_dispute_intervals). Where the month comparison is undecided (unknown entry or exit month
+## of a late joiner / early leaver, an end bound straddling the event month) the year rule decides and the fallback is
+## counted. The year rule (already_fighting_keys / flag_escalations) is kept for the comparison below.
+disp_dates <- dispute_date_bounds(disp_full <- cow_mid_disps |> mutate(dispnum = as.integer(dispnum)), dd)
+blog("dispute dates (dispute-level; peacesciencer has no end month and no participant dates): %d disputes; start month known %d; end month exact %d, end spans 2 months %d, more %d; end bounds outside the last dispute-year (whole year used) %d",
+     nrow(disp_dates), sum(disp_dates$start_month_known), sum(disp_dates$end_lo == disp_dates$end_hi), sum(disp_dates$end_hi - disp_dates$end_lo == 1L),
+     sum(disp_dates$end_hi - disp_dates$end_lo > 1L), sum(disp_dates$end_rule == "year_only"))
+pdi <- pair_dispute_intervals(dd, disp_dates)
+blog("pair-dispute spells (both directions): %d (pairs %d, pairs with a re-entry spell %d); entry month exact %d; later entrants (entry month unknown) %d; spells ending before the dispute's last year (exit month unknown) %d",
+     nrow(pdi), nrow(distinct(pdi, dispnum, ccode1, ccode2)), sum(pdi$spell > 1L), sum(pdi$start_exact), sum(!pdi$start_exact),
+     sum(pdi$spell_last != disp_dates$y1[match(pdi$dispnum, disp_dates$dispnum)]))
+af_keys <- already_fighting_keys(dd)                           # the year rule, for the comparison
+assert_no_dup_keys(af_keys, c("ccode1", "ccode2", "year", "dispnum"), "already-fighting keys (year rule)")
+ev_year <- flag_escalations(events, af_keys)                   # year rule on the same events
+events <- flag_escalations_month(events, pdi)
+cmp <- attr(events, "comparisons")
+stopifnot(identical(events$escalation_year, ev_year$escalation))   # the year rule inside the month helper equals the old path
+blog("escalations: year rule %d; month rule %d (year TRUE & month FALSE %d; year FALSE & month TRUE %d); (event, other dispute) comparisons %d, undecided at month resolution (year fallback) %d; events whose decision rests on a fallback %d (of which escalation %d)",
+     sum(events$escalation_year), sum(events$escalation), sum(events$escalation_year & !events$escalation), sum(!events$escalation_year & events$escalation),
+     nrow(cmp), sum(cmp$fallback), sum(events$esc_fallback), sum(events$esc_fallback & events$escalation))
+fb_reason <- cmp |> filter(fallback) |>
+  mutate(reason = case_when(ev_start_lo != ev_start_hi ~ "event month unknown (pair entered its dispute after the dispute's start year)",
+                            o_start_lo != o_start_hi ~ "other dispute's pair entry month unknown (later joiner)",
+                            TRUE ~ "other dispute's end month ambiguous (duration bounds or exit month unknown)")) |> count(reason)
+for (r in seq_len(nrow(fb_reason))) blog("  fallback reason: %s = %d comparisons", fb_reason$reason[r], fb_reason$n[r])
+## examples for the PI (China -> USA 1950 first; then the first changes in each direction)
+show_ev <- function(e) sprintf("%d -> %d %d dispute %d (start %s): year rule %s, month rule %s%s", e$initiator, e$target, e$year, e$dispnum,
+                               ym_label(e$ev_start_lo), e$escalation_year, e$escalation, if (e$esc_fallback) " (fallback)" else "")
+ex_cn <- events |> filter(initiator == 710L, target == 2L, year == 1950L)
+stopifnot(nrow(ex_cn) == 1L, ex_cn$escalation_year, !ex_cn$escalation)   # the audit's example must flip
+cat("  escalation example (audit): ", show_ev(ex_cn), "\n", file = build_log, append = TRUE)
+pp <- pdi |> semi_join(cmp |> filter(initiator == 710L, target == 2L, year == 1950L, year_dec) |> transmute(dispnum = other_dispnum), by = "dispnum") |> filter(ccode1 == 710L, ccode2 == 2L)
+for (r in seq_len(nrow(pp)))
+  cat(sprintf("    other dispute %d between 710 and 2 (spell %d): pair years %d-%d, entry %s..%s, exit between %s and %s\n", pp$dispnum[r], pp$spell[r], pp$spell_first[r], pp$spell_last[r],
+              ym_label(pp$start_lo[r]), ym_label(pp$start_hi[r]), ym_label(pp$end_lo[r]), ym_label(pp$end_hi[r])), file = build_log, append = TRUE)
+ex1 <- events |> filter(escalation_year, !escalation) |> head(5); ex2 <- events |> filter(!escalation_year, escalation) |> head(5)
+for (r in seq_len(nrow(ex1))) cat("  no longer an escalation: ", show_ev(ex1[r, ]), "\n", file = build_log, append = TRUE)
+for (r in seq_len(nrow(ex2))) cat("  newly an escalation:     ", show_ev(ex2[r, ]), "\n", file = build_log, append = TRUE)
+## ---- choice-set rule at the reference date -------------------------------------------------------------------------
+## Reference date of state-year (i, t) = start of its earliest non-escalation event when it initiates, else January of t.
+## Alternative j leaves the choice set when i and j are in a different dispute active at that date that started before it
+## (month rule, year fallback). Only information up to the reference date enters. The year rule's keys are kept to count
+## the change. Because the choice set is fixed at the reference date, a later event of the same state-year whose pair was
+## still fighting at the reference date (their dispute ended between the reference date and the event) has no alternative
+## row. Such events are flagged fighting_at_ref, stay in every sample flag for y1 and leave stage 2 only (logged below);
+## the build stops if any other non-escalation event loses its row.
+ref_dates <- reference_dates(events)
+af_month <- already_fighting_keys_month(pdi, ref_dates)
+af_dir <- af_month |> filter(drop) |> distinct(ccode1, ccode2, year) |> mutate(already_fighting = 1L)
+af_dir_year <- af_keys |> distinct(ccode1, ccode2, year)
+stopifnot(identical(nrow(af_dir_year), nrow(af_month |> filter(drop_year) |> distinct(ccode1, ccode2, year))))
+blog("already-fighting directed pair-years: year rule %d distinct (i, j, t); month rule %d (in both %d; year only %d; month only %d); key-dispute comparisons %d, undecided (year fallback) %d, keys whose decision rests on a fallback %d",
+     nrow(af_dir_year), nrow(af_dir), nrow(semi_join(af_dir, af_dir_year, by = c("ccode1", "ccode2", "year"))),
+     nrow(anti_join(af_dir_year, af_dir, by = c("ccode1", "ccode2", "year"))), nrow(anti_join(af_dir, af_dir_year, by = c("ccode1", "ccode2", "year"))),
+     nrow(af_month), sum(af_month$fallback),
+     nrow(af_month |> group_by(ccode1, ccode2, year) |> summarise(fb = any(fallback) & !any(!fallback & drop), .groups = "drop") |> filter(fb)))
+events <- events |> left_join(af_dir |> transmute(initiator = ccode1, target = ccode2, year, fighting_at_ref = TRUE), by = c("initiator", "target", "year")) |>
+  mutate(fighting_at_ref = coalesce(fighting_at_ref, FALSE) & !escalation)
+far <- events |> filter(fighting_at_ref)
+if (nrow(far) > 0) {
+  ## each must be a later event of a state-year whose reference date precedes it, with a different dispute of the pair
+  ## that was active at the reference date; a state-year's earliest event can never be one (it would be an escalation)
+  chk <- far |> inner_join(ref_dates, by = c("initiator" = "ccode", "year")) |>
+    inner_join(af_month |> filter(drop) |> select(initiator = ccode1, target = ccode2, year, od = dispnum), by = c("initiator", "target", "year"), relationship = "many-to-many")
+  stopifnot(nrow(chk) >= nrow(far), all(chk$od != chk$dispnum), all(chk$ev_start_hi >= chk$ref_lo), !any(chk$ev_start_hi == chk$ref_hi & chk$ev_start_lo == chk$ref_lo & chk$ev_start_lo == chk$ev_start_hi))
+  blog("non-escalation events whose pair was already fighting at the state-year's reference date (fighting_at_ref; stage 2 only, y1 unchanged): %d (joiner pairs %d; war-level %d)",
+       nrow(far), sum(far$is_joiner_pair), sum(far$war))
+  for (r in seq_len(nrow(far))) cat(sprintf("  fighting_at_ref: %d -> %d %d dispute %d (start %s; reference date %s..%s)\n", far$initiator[r], far$target[r], far$year[r], far$dispnum[r],
+                                           ym_label(far$ev_start_lo[r]), ym_label(ref_dates$ref_lo[ref_dates$ccode == far$initiator[r] & ref_dates$year == far$year[r]]),
+                                           ym_label(ref_dates$ref_hi[ref_dates$ccode == far$initiator[r] & ref_dates$year == far$year[r]])), file = build_log, append = TRUE)
+}
 ## ---- WWII disputes (appendix option --drop_ww2; rule and list in 00_helpers.R) ------------------------------------
-disp_full <- cow_mid_disps |> mutate(dispnum = as.integer(dispnum))
 ww2_tbl <- ww2_disputes(disp_full, dd, cow_war_inter)
 events <- events |> mutate(is_ww2 = dispnum %in% WW2_DISPNUMS)
 blog("WWII disputes (is_ww2; appendix option --drop_ww2): %s", paste(sort(WW2_DISPNUMS), collapse = ", "))
@@ -237,7 +319,9 @@ for (r in seq_len(nrow(ww2_tbl)))
               ww2_tbl$hiact[r], ww2_tbl$n_dyadyears_in_war139[r], if (ww2_tbl$is_ww2[r]) "WWII" else "not WWII", ww2_tbl$reason[r]),
       file = build_log, append = TRUE)
 ## fatal-MID coding (PI decision 2026-10-23). Main fmid: wars are fatal by definition (COW wars need
-## 1,000+ battle deaths); events whose COW fatality codes are all missing are filled from MIC 1.0
+## 1,000+ battle deaths; since 2026-10-24 "war" is the PAIR-level coding above, so a peripheral participant of a
+## war-level dispute that did not itself reach hostility level 5 is not made fatal by this rule); events whose COW
+## fatality codes are all missing are filled from MIC 1.0
 ## (Gibler et al., confrontation-level fatalmin >= 1; micnum = COW dispnum). MIC never overrides a
 ## COW code. fmidcow = the original COW-only coding (missing -> not fatal), kept for the appendix.
 mic_path <- file.path(v2_root(), "data_raw", "mic-conf-1.0.csv")
@@ -313,20 +397,45 @@ stopifnot(!any(rev_key %in% paste(events$dispnum, events$initiator, events$targe
 assert_no_dup_keys(events, c("dispnum", "initiator", "target"), "events")
 stopifnot(all(events$initiator != events$target), !anyNA(events$is_joiner_pair), !anyNA(events$escalation), !anyNA(events$is_ww2))
 if (INCLUDE_JOINERS) stopifnot(sum(!events$is_joiner_pair) == 2770L)   # the originator-only event base of the builds before 2026-10-24
-blog("events (Side A -> Side B, joiners %s): %d (originator pairs %d, joiner pairs %d); escalations %d (joiner pairs %d); disputes %d; multilateral pairs %d; WWII events %d (war-level %d)",
+blog("events (Side A -> Side B, joiners %s): %d (originator pairs %d, joiner pairs %d); escalations %d (joiner pairs %d); disputes %d; multilateral pairs %d; WWII events %d (pair-level war %d, dispute-level war %d)",
      if (INCLUDE_JOINERS) "INCLUDED" else "excluded", nrow(events), sum(!events$is_joiner_pair), sum(events$is_joiner_pair),
      sum(events$escalation), sum(events$escalation & events$is_joiner_pair), n_distinct(events$dispnum), sum(duplicated(events$dispnum)),
-     sum(events$is_ww2), sum(events$is_ww2 & events$war %in% TRUE))
+     sum(events$is_ww2), sum(events$is_ww2 & events$war), sum(events$is_ww2 & events$war_disp))
 ## counts table per sample: (a) originator pairs only (the pre-2026-10-24 event base), (b) with joiners, (c) after
-## removing escalations (= the sample flag), and how many of the removed events are joiner pairs
-sample_codings <- list(mid = rep(TRUE, nrow(events)), fmid = events$fatal_main, fmidcow = events$fatal_cow, fmidub = events$fatal_ub, war = events$war %in% TRUE)
+## removing escalations under the YEAR rule (the c137995 build), (d) after removing escalations under the month rule
+## (= the sample flag before the duplicate collapse), and how many of the removed events are joiner pairs
+sample_codings <- list(mid = rep(TRUE, nrow(events)), fmid = events$fatal_main, fmidcow = events$fatal_cow, fmidub = events$fatal_ub, war = events$war)
 for (s in names(sample_codings)) {
   cs <- sample_codings[[s]]; flag <- events[[paste0("in_", s)]]
   stopifnot(identical(as.logical(flag), as.logical(cs & !events$escalation)))
-  blog("  sample %-7s: (a) originator pairs %4d; (b) with joiners %4d; (c) after removing escalations %4d; removed %3d (of which joiner pairs %3d, originator pairs %3d); WWII events in (c) %3d",
-       s, sum(cs & !events$is_joiner_pair), sum(cs), sum(flag), sum(cs & events$escalation),
-       sum(cs & events$escalation & events$is_joiner_pair), sum(cs & events$escalation & !events$is_joiner_pair), sum(flag & events$is_ww2))
+  blog("  sample %-7s: (a) originator pairs %4d; (b) with joiners %4d; (c) year-rule escalations removed %4d; (d) month-rule escalations removed %4d; removed by the month rule %3d (joiner pairs %3d, originator pairs %3d); WWII events in (d) %3d; fighting_at_ref in (d) %3d",
+       s, sum(cs & !events$is_joiner_pair), sum(cs), sum(cs & !events$escalation_year), sum(flag), sum(cs & events$escalation),
+       sum(cs & events$escalation & events$is_joiner_pair), sum(cs & events$escalation & !events$is_joiner_pair), sum(flag & events$is_ww2), sum(flag & events$fighting_at_ref))
 }
+## war at the pair level versus the dispute level, after the month-rule escalation exclusion
+blog("war sample: dispute-level coding would give %d events after escalations, the pair-level coding gives %d (removed %d, of which WWII %d); WWII share of the pair-level war sample %.1f%% (%d of %d); war rule in fatal coding now adds %d events",
+     sum(events$war_disp & !events$escalation), sum(events$in_war), sum(events$war_disp & !events$war & !events$escalation),
+     sum(events$war_disp & !events$war & !events$escalation & events$is_ww2), 100 * sum(events$in_war & events$is_ww2) / sum(events$in_war),
+     sum(events$in_war & events$is_ww2), sum(events$in_war), sum(events$fatal_source == "war_rule"))
+## ---- same-year duplicates (PI decision 2026-10-24): one event per (initiator, target, year) among the kept rows -----------
+## Two disputes between the same pair with the same onset year, neither an escalation of the other, were two chosen
+## alternatives on one row. They collapse into one event (flags ORed, dispnums listed); the likelihood then sees one chosen
+## alternative per (i, j, t), asserted in assemble_cell(). Escalation rows are untouched.
+n_pre <- nrow(events); pre_counts <- sapply(c("in_mid", "in_fmid", "in_fmidcow", "in_fmidub", "in_war"), function(cc) sum(events[[cc]]))
+dup_keys <- events |> filter(!escalation) |> count(initiator, target, year) |> filter(n > 1)
+events <- collapse_duplicate_events(events)
+post_counts <- sapply(c("in_mid", "in_fmid", "in_fmidcow", "in_fmidub", "in_war"), function(cc) sum(events[[cc]]))
+stopifnot(nrow(events) == n_pre - sum(dup_keys$n) + nrow(dup_keys), all(events$n_disputes[events$escalation] == 1L),
+          sum(events$n_disputes[!events$escalation]) == pre_counts["in_mid"], all(post_counts <= pre_counts),
+          !anyNA(events$dispnums), all(events$n_disputes >= 1L))
+assert_no_dup_keys(events |> filter(!escalation), c("initiator", "target", "year"), "non-escalation events after the collapse")
+blog("duplicate collapse: %d non-escalation rows in %d (initiator, target, year) keys collapsed into %d events; events.rds %d -> %d rows; rows with more than one dispute %d (max %d)",
+     sum(dup_keys$n), nrow(dup_keys), nrow(dup_keys), n_pre, nrow(events), sum(events$n_disputes > 1L), max(events$n_disputes))
+for (s in c("mid", "fmid", "fmidcow", "fmidub", "war"))
+  blog("  sample %-7s: events before the collapse %4d, after %4d (collapsed away %3d)", s, pre_counts[paste0("in_", s)], post_counts[paste0("in_", s)], pre_counts[paste0("in_", s)] - post_counts[paste0("in_", s)])
+blog("is_joiner_pair after the collapse: %d of %d non-escalation events (an event is a joiner pair only when every collapsed dispute pair was one)",
+     sum(events$is_joiner_pair & !events$escalation), sum(!events$escalation))
+stopifnot(!anyNA(events$fighting_at_ref), !any(events$fighting_at_ref & events$escalation))
 saveRDS(events, file.path(out_dir, "events.rds"))
 
 ## ============================================================================
@@ -371,8 +480,8 @@ blog("dyadic MID history rows: %d (joiners %s, consistent with the events)", nro
 act_state <- active_state_years(dd)            # (ccode, year): in any MID active that year -> ongoing_tm1
 act_pair  <- active_pair_years(dd)             # (ccode1, ccode2, year), both directions           -> dy_mid_tm1
 assert_no_dup_keys(act_state, c("ccode", "year"), "active state-years"); assert_no_dup_keys(act_pair, c("ccode1", "ccode2", "year"), "active pair-years")
-af_dir <- af_keys |> distinct(ccode1, ccode2, year) |> mutate(already_fighting = 1L)
-blog("active MID state-years %d; active MID pair-years (both directions) %d; already-fighting directed pair-years %d", nrow(act_state), nrow(act_pair), nrow(af_dir))
+blog("active MID state-years %d; active MID pair-years (both directions) %d; already-fighting directed pair-years at the reference date (month rule) %d, year rule %d",
+     nrow(act_state), nrow(act_pair), nrow(af_dir), nrow(af_dir_year))
 
 ## cumulative onsets for a (key, year) table -> helper used below via calendar joins
 ## prior_mids over [a, b] = cum(b) - cum(a - 1) where cum(y) = onsets in years <= y (0 before entry)
@@ -466,7 +575,7 @@ add_manifest <- function(obj, fname, note) {
   blog("wrote %s: %d x %d", fname, nrow(obj), ncol(obj))
 }
 add_manifest(pos, "sy_positions.rds", "state-year positions: M = log CINC share, R_pr = log PageRank (raw log shares), R_eig std within year")
-add_manifest(events, "events.rds", sprintf("directed events (Side A x Side B pairs), joiners %s (is_joiner_pair); escalation flag (excluded from all in_* flags); is_ww2; target_has_pos_tm1",
+add_manifest(events, "events.rds", sprintf("directed events (Side A x Side B pairs), joiners %s (is_joiner_pair); month-rule escalation flag (excluded from all in_* flags); pair-level war; same-year duplicates collapsed (dispnums); fighting_at_ref; is_ww2; target_has_pos_tm1",
                                            if (INCLUDE_JOINERS) "included" else "excluded"))
 ## number of system states per year, for the system-growth diagnostic on the change variables (item 4 of the
 ## 2026-10-23 decision): g3 at t-1 = log n_system(t-1) - log n_system(t-4), constant within a year
@@ -614,23 +723,27 @@ for (h in LAGS) {
     mutate(dy_peace_years_h = coalesce(dy_peace_years_h, pmax(win_start - pmax(entry1, entry2) + 1L, 1L))) |>
     select(-entry1, -entry2)
   stopifnot(all(alts$dy_prior_mids_h >= 0), all(alts$dy_peace_years_h >= 1))
-  ## ---- ongoing-dispute rule (PI decision 2026-10-24): drop already-fighting alternatives ------------------------
-  ## (i, j, t) with i and j in a dispute active in t whose pair onset is before t is not a selection and leaves every
-  ## choice set (both variants are cut from this table). Escalation events lose their alternative row here, which is
-  ## intended; a NON-escalation event must never lose its row, asserted below.
+  ## ---- ongoing-dispute rule at the reference date (PI decision 2026-10-24, month resolution): drop already-fighting
+  ## alternatives. (i, j, t) whose pair is in a different dispute active at the state-year's reference date (start of the
+  ## earliest non-escalation event, else January) that started before it is not a selection and leaves every choice set
+  ## (both variants are cut from this table; af_dir is lag-independent). Escalation events lose their row, which is
+  ## intended. A non-escalation event may lose its row ONLY when flagged fighting_at_ref (pair still fighting at the
+  ## reference date, dispute ended before the event); any other loss stops the build.
   n_alts_before <- nrow(alts)
   alts <- alts |> left_join(af_dir, by = c("ccode1", "ccode2", "year"))
   n_af_rows <- sum(!is.na(alts$already_fighting))
-  ev_keep <- events |> filter(!escalation) |> transmute(ccode1 = initiator, ccode2 = target, year, dispnum)
+  n_af_rows_year <- nrow(alts |> semi_join(af_dir_year, by = c("ccode1", "ccode2", "year")))
+  n_af_both <- nrow(alts |> filter(!is.na(already_fighting)) |> semi_join(af_dir_year, by = c("ccode1", "ccode2", "year")))
+  ev_keep <- events |> filter(!escalation) |> transmute(ccode1 = initiator, ccode2 = target, year, dispnum, fighting_at_ref)
   lost_af <- ev_keep |> inner_join(alts |> filter(!is.na(already_fighting)) |> select(ccode1, ccode2, year), by = c("ccode1", "ccode2", "year"))
-  if (nrow(lost_af) > 0) stop(sprintf("h=%d: %d non-escalation events sit on already-fighting alternative rows", h, nrow(lost_af)))
+  if (any(!lost_af$fighting_at_ref)) stop(sprintf("h=%d: %d non-escalation events not flagged fighting_at_ref sit on already-fighting alternative rows", h, sum(!lost_af$fighting_at_ref)))
+  stopifnot(nrow(ev_keep |> filter(fighting_at_ref) |> semi_join(alts |> filter(is.na(already_fighting)), by = c("ccode1", "ccode2", "year"))) == 0)
   esc_keys <- events |> filter(escalation) |> transmute(ccode1 = initiator, ccode2 = target, year)
   n_esc_rows <- nrow(alts |> filter(!is.na(already_fighting)) |> semi_join(esc_keys, by = c("ccode1", "ccode2", "year")))
   alts <- alts |> filter(is.na(already_fighting)) |> select(-already_fighting)
-  stopifnot(nrow(alts) == n_alts_before - n_af_rows, nrow(alts |> semi_join(af_dir, by = c("ccode1", "ccode2", "year"))) == 0,
-            nrow(alts |> semi_join(esc_keys, by = c("ccode1", "ccode2", "year"))) == 0)
-  blog("  already fighting h=%d: %d of %d alternative rows dropped (%.3f%%; %d of them were escalation events' rows); %d rows remain",
-       h, n_af_rows, n_alts_before, 100 * n_af_rows / n_alts_before, n_esc_rows, nrow(alts))
+  stopifnot(nrow(alts) == n_alts_before - n_af_rows, nrow(alts |> semi_join(af_dir, by = c("ccode1", "ccode2", "year"))) == 0)
+  blog("  already fighting h=%d (month rule at the reference date): %d of %d alternative rows dropped (%.3f%%; %d of them were escalation events' rows, %d fighting_at_ref events' rows); the year rule would drop %d (in both %d; month only %d; year only %d); %d rows remain",
+       h, n_af_rows, n_alts_before, 100 * n_af_rows / n_alts_before, n_esc_rows, nrow(lost_af), n_af_rows_year, n_af_both, n_af_rows - n_af_both, n_af_rows_year - n_af_both, nrow(alts))
   ## dyadic lagged DV (PI decision 2026-10-24): i and j both in a MID active in t-1, any role, either direction.
   ## After the already-fighting cut, a remaining alternative can have dy_mid_tm1 = 1 only when every dispute of the
   ## pair active in t-1 had ended by t (or the pair's new dispute starts in t, i.e. the row is a chosen event).
@@ -638,12 +751,16 @@ for (h in LAGS) {
     mutate(dy_mid_tm1 = coalesce(dy_mid_tm1, 0L))
   stopifnot(all(alts$dy_mid_tm1 %in% c(0L, 1L)))
   ## event flags on alternative rows: is this (i, j, t) a chosen target in each sample?
-  ev_flag <- events |> filter(in_mid) |> transmute(ccode1 = initiator, ccode2 = target, year, dispnum, in_mid, in_fmid, in_war, target_has_pos_tm1)
+  ev_flag <- events |> filter(in_mid) |> transmute(ccode1 = initiator, ccode2 = target, year, dispnum, in_mid, in_fmid, in_war, target_has_pos_tm1, fighting_at_ref)
+  assert_no_dup_keys(ev_flag, c("ccode1", "ccode2", "year"), sprintf("kept events h=%d (one chosen alternative per (i, j, t))", h))
   ev_in_panel <- ev_flag |> semi_join(panel, by = c("ccode1" = "ccode", "year"))
   ev_lost_target <- ev_in_panel |> anti_join(alts, by = c("ccode1", "ccode2", "year"))
-  blog("  events whose target is NOT in the choice set (target lacks positions at t-1 or is not a system member at t): %d", nrow(ev_lost_target))
-  ## every non-escalation event with its initiator in the panel and a target with positions at t-1 has its alternative row
-  stopifnot(all(!ev_lost_target$target_has_pos_tm1), nrow(ev_in_panel |> filter(target_has_pos_tm1) |> anti_join(alts, by = c("ccode1", "ccode2", "year"))) == 0)
+  blog("  events whose target is NOT in the choice set: %d (target lacks positions at t-1 or is not a system member at t %d; pair already fighting at the reference date %d)",
+       nrow(ev_lost_target), sum(!ev_lost_target$target_has_pos_tm1), sum(ev_lost_target$target_has_pos_tm1 & ev_lost_target$fighting_at_ref))
+  ## every non-escalation event with its initiator in the panel, a target with positions at t-1 and a pair not fighting at
+  ## the reference date has its alternative row; nothing else is ever lost
+  stopifnot(all(!ev_lost_target$target_has_pos_tm1 | ev_lost_target$fighting_at_ref),
+            nrow(ev_in_panel |> filter(target_has_pos_tm1, !fighting_at_ref) |> anti_join(alts, by = c("ccode1", "ccode2", "year"))) == 0)
   ev_rows <- ev_in_panel |> inner_join(alts |> select(ccode1, ccode2, year, dy_mid_tm1), by = c("ccode1", "ccode2", "year"))
   blog("  dy_mid_tm1 h=%d: %d of %d alternative rows = 1 (%.3f%%); chosen events (mid) with dy_mid_tm1 = 1: %d of %d; war events: %d of %d",
        h, sum(alts$dy_mid_tm1), nrow(alts), 100 * mean(alts$dy_mid_tm1), sum(ev_rows$dy_mid_tm1), nrow(ev_rows),
@@ -673,7 +790,7 @@ for (h in LAGS) {
     lost_pr <- ev_flag |> semi_join(panel, by = c("ccode1" = "ccode", "year")) |> semi_join(alts, by = c("ccode1", "ccode2", "year")) |>
       anti_join(a_v, by = c("ccode1", "ccode2", "year")) |> nrow()
     if (variant == "polrel") blog("  variant polrel: %d events have a target outside the politically relevant set (dropped from stage 2)", lost_pr)
-    add_manifest(a_v, sprintf("alts_lag%d_%s.rds", h, variant), sprintf("choice sets h=%d variant=%s; already-fighting alternatives removed; dy_mid_tm1 added", h, variant))
+    add_manifest(a_v, sprintf("alts_lag%d_%s.rds", h, variant), sprintf("choice sets h=%d variant=%s; already-fighting alternatives removed at the reference date (month rule); dy_mid_tm1", h, variant))
   }
   rm(alts, chk); invisible(gc())
 }

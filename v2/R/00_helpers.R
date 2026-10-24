@@ -168,6 +168,195 @@ active_pair_years <- function(dd) {
   bind_rows(a, a |> rename(ccode1 = ccode2, ccode2 = ccode1)) |> distinct() |> mutate(active = 1L)
 }
 
+## ---- month-level escalation rule (PI decision 2026-10-24, second round; README "Ongoing disputes") ---------------
+## The year rule above mislabels disputes that ended early in the year before a new one started (China -> USA 1950,
+## Korea, was dropped because a short 1949 incident had a 1950 row) and misses within-year re-entries. The month rule
+## works with COW dispute dates at month resolution. peacesciencer 1.2.0 supplies, in cow_mid_disps, the dispute
+## START month and year (stmon, styear) and the dispute duration in days (mindur, maxdur) but no end month and no
+## participant-level dates; cow_mid_dirdisps has only the year. So every date here is DISPUTE-level, and the end
+## date is bounded, not known: the start day is unknown, so the end lies between (first day of the start month +
+## mindur - 1) and (last day of the start month + maxdur), intersected with the dispute's last year in the directed
+## dispute-years. Every date is an interval [lo, hi] of month indices (ym_index); exact dates have lo == hi.
+## A pair that enters a dispute after the dispute's start year has an unknown entry month (interval = that whole
+## year), and a pair that leaves before the dispute's last year has an unknown exit month. Comparisons between
+## intervals are three-valued (TRUE / FALSE / NA); NA falls back to the year rule and is counted.
+ym_index <- function(year, month) {
+  stopifnot(all(month %in% 1:12))
+  as.integer(year) * 12L + as.integer(month) - 1L
+}
+ym_year <- function(ym) ym %/% 12L
+ym_label <- function(ym) sprintf("%d-%02d", ym %/% 12L, ym %% 12L + 1L)
+## "a is before b" (a < b) and "a is not before b" (a >= b) for intervals; NA when the intervals overlap
+interval_before <- function(a_lo, a_hi, b_lo, b_hi) case_when(a_hi < b_lo ~ TRUE, a_lo >= b_hi ~ FALSE, TRUE ~ NA)
+interval_not_before <- function(a_lo, a_hi, b_lo, b_hi) case_when(a_lo >= b_hi ~ TRUE, a_hi < b_lo ~ FALSE, TRUE ~ NA)
+## dispute_date_bounds(disp, dd): one row per dispute in dd with start_lo / start_hi (exact when styear equals the first
+## directed dispute-year, else the whole first year with start_month_known = FALSE), end_lo / end_hi (duration bounds
+## within the last year; the whole last year with end_rule = "year_only" when the bounds miss that year), y0, y1.
+dispute_date_bounds <- function(disp, dd) {
+  stopifnot(all(c("dispnum", "styear", "stmon", "mindur", "maxdur") %in% names(disp)), all(c("dispnum", "year") %in% names(dd)))
+  yrs <- dd |> distinct(dispnum, year) |> group_by(dispnum) |> summarise(y0 = min(year), y1 = max(year), .groups = "drop")
+  db <- disp |> transmute(dispnum = as.integer(dispnum), styear = as.integer(styear), stmon = as.integer(stmon),
+                          mindur = as.numeric(mindur), maxdur = as.numeric(maxdur)) |> inner_join(yrs, by = "dispnum")
+  if (nrow(db) != nrow(yrs)) stop(sprintf("dispute_date_bounds: %d disputes in the directed dispute-years have no dispute-level row", nrow(yrs) - nrow(db)))
+  assert_no_dup_keys(db, "dispnum", "dispute date bounds")
+  if (!all(db$stmon %in% 1:12)) stop(sprintf("dispute_date_bounds: %d disputes have a start month outside 1..12", sum(!db$stmon %in% 1:12)))
+  if (any(db$mindur < 0 | db$maxdur < db$mindur)) stop("dispute_date_bounds: negative or inverted durations")
+  first_day <- as.Date(sprintf("%d-%02d-01", db$styear, db$stmon))
+  next_first <- as.Date(sprintf("%d-%02d-01", db$styear + (db$stmon == 12L), ifelse(db$stmon == 12L, 1L, db$stmon + 1L)))
+  end_lo_d <- first_day + pmax(db$mindur - 1, 0); end_hi_d <- (next_first - 1) + db$maxdur
+  to_ym <- function(d) ym_index(as.integer(format(d, "%Y")), as.integer(format(d, "%m")))
+  db <- db |> mutate(start_month_known = styear == y0,
+                     start_lo = ifelse(start_month_known, ym_index(styear, stmon), ym_index(y0, 1L)),
+                     start_hi = ifelse(start_month_known, ym_index(styear, stmon), ym_index(y0, 12L)),
+                     end_lo = pmax(to_ym(end_lo_d), ym_index(y1, 1L)), end_hi = pmin(to_ym(end_hi_d), ym_index(y1, 12L)),
+                     end_rule = ifelse(end_lo <= end_hi, "duration", "year_only"))
+  bad <- db$end_rule == "year_only"
+  db$end_lo[bad] <- ym_index(db$y1[bad], 1L); db$end_hi[bad] <- ym_index(db$y1[bad], 12L)
+  stopifnot(all(db$start_lo <= db$start_hi), all(db$end_lo <= db$end_hi), all(db$start_lo <= db$end_hi),
+            all(ym_year(db$start_lo) == db$y0), all(ym_year(db$end_hi) == db$y1))
+  db |> select(dispnum, styear, stmon, mindur, maxdur, y0, y1, start_month_known, start_lo, start_hi, end_lo, end_hi, end_rule)
+}
+## pair_dispute_intervals(dd, db): one row per directed (dispnum, ccode1, ccode2, spell), a spell being a run of
+## consecutive years the pair is in the dispute (a pair that leaves and re-enters, e.g. France and Germany in dispute
+## 258, has two spells; most pairs have one). pair_onset / pair_last are the whole pair's first and last year (the year
+## rule's quantities), spell_first / spell_last the spell's. The spell's entry interval (start_lo / start_hi) is the
+## dispute's start when the spell begins in the dispute's first year, else the whole first year of the spell; its exit
+## interval (end_lo / end_hi) is the dispute's end bounds when the spell ends in the dispute's last year, else the whole
+## last year of the spell.
+pair_dispute_intervals <- function(dd, db) {
+  py <- pair_dispute_years(dd) |> arrange(dispnum, ccode1, ccode2, year) |> group_by(dispnum, ccode1, ccode2) |>
+    mutate(spell = cumsum(c(1L, diff(year) != 1L)), pair_onset = min(year), pair_last = max(year)) |> ungroup()
+  pdi <- py |> group_by(dispnum, ccode1, ccode2, spell, pair_onset, pair_last) |>
+    summarise(spell_first = min(year), spell_last = max(year), n_years = n(), .groups = "drop") |>
+    inner_join(db |> select(dispnum, y0, y1, d_start_lo = start_lo, d_start_hi = start_hi, d_end_lo = end_lo, d_end_hi = end_hi), by = "dispnum")
+  stopifnot(all(pdi$n_years == pdi$spell_last - pdi$spell_first + 1L), all(pdi$spell_first >= pdi$y0), all(pdi$spell_last <= pdi$y1))
+  pdi <- pdi |> mutate(start_exact = spell_first == y0 & d_start_lo == d_start_hi,
+                       start_lo = ifelse(spell_first == y0, d_start_lo, ym_index(spell_first, 1L)),
+                       start_hi = ifelse(spell_first == y0, d_start_hi, ym_index(spell_first, 12L)),
+                       end_lo = ifelse(spell_last == y1, d_end_lo, ym_index(spell_last, 1L)),
+                       end_hi = ifelse(spell_last == y1, d_end_hi, ym_index(spell_last, 12L))) |>
+    select(dispnum, ccode1, ccode2, spell, pair_onset, pair_last, spell_first, spell_last, start_exact, start_lo, start_hi, end_lo, end_hi)
+  stopifnot(all(pdi$start_lo <= pdi$start_hi), all(pdi$end_lo <= pdi$end_hi), all(pdi$start_lo <= pdi$end_hi), !anyNA(pdi$start_lo), !anyNA(pdi$end_hi),
+            all(pdi$spell_first[pdi$spell == 1L] == pdi$pair_onset[pdi$spell == 1L]))
+  assert_no_dup_keys(pdi, c("dispnum", "ccode1", "ccode2", "spell"), "pair dispute intervals")
+  pdi
+}
+## month_rule(): is the pair "already fighting" in dispute D at the reference interval [ref_lo, ref_hi]? TRUE when D's
+## pair start is before the reference and its pair end is not before it; FALSE when either fails for sure; NA otherwise,
+## in which case the caller falls back to the year rule.
+month_rule <- function(start_lo, start_hi, end_lo, end_hi, ref_lo, ref_hi) {
+  sb <- interval_before(start_lo, start_hi, ref_lo, ref_hi)
+  ne <- interval_not_before(end_lo, end_hi, ref_lo, ref_hi)
+  case_when(sb %in% FALSE | ne %in% FALSE ~ FALSE, sb %in% TRUE & ne %in% TRUE ~ TRUE, TRUE ~ NA)
+}
+## flag_escalations_month(events, pdi): events (initiator, target, year, dispnum) get
+##   ev_start_lo / ev_start_hi : the event's date = the pair's entry interval in its own dispute
+##   escalation                : TRUE when the pair is already fighting in ANOTHER dispute at that date (month rule, year
+##                               rule where the month rule is undecided)
+##   escalation_year           : the year rule alone (pair in another dispute active in `year` with pair onset before it)
+##   esc_fallback              : TRUE when the decision rests on at least one year-rule fallback (no comparison was a
+##                               certain TRUE and at least one was undecided)
+## attr(, "comparisons") holds the per-(event, other dispute) table for logging.
+flag_escalations_month <- function(events, pdi) {
+  stopifnot(all(c("initiator", "target", "year", "dispnum") %in% names(events)))
+  own <- pdi |> filter(spell == 1L) |> select(dispnum, initiator = ccode1, target = ccode2, pair_onset, ev_start_lo = start_lo, ev_start_hi = start_hi)
+  ev <- events |> select(initiator, target, year, dispnum) |> inner_join(own, by = c("dispnum", "initiator", "target"))
+  if (nrow(ev) != nrow(events)) stop("flag_escalations_month: an event has no pair-dispute interval")
+  if (any(ev$pair_onset != ev$year)) stop("flag_escalations_month: an event's year is not the pair's onset year in its dispute")
+  ## one comparison per (event, other dispute, spell of the pair in it); the year rule is the whole pair's onset and the
+  ## spell's years, so any() over spells reproduces already_fighting_keys() exactly
+  cmp <- ev |> select(-pair_onset) |>
+    inner_join(pdi |> select(initiator = ccode1, target = ccode2, other_dispnum = dispnum, o_spell = spell, o_onset = pair_onset,
+                             o_first = spell_first, o_last = spell_last, o_start_lo = start_lo, o_start_hi = start_hi, o_end_lo = end_lo, o_end_hi = end_hi),
+               by = c("initiator", "target"), relationship = "many-to-many") |>
+    filter(other_dispnum != dispnum) |>
+    mutate(month_dec = month_rule(o_start_lo, o_start_hi, o_end_lo, o_end_hi, ev_start_lo, ev_start_hi),
+           year_dec = o_onset < year & o_first <= year & o_last >= year,
+           fallback = is.na(month_dec), decision = ifelse(fallback, year_dec, month_dec))
+  stopifnot(!anyNA(cmp$decision), !anyNA(cmp$year_dec))
+  agg <- cmp |> group_by(initiator, target, year, dispnum) |>
+    summarise(escalation = any(decision), escalation_year = any(year_dec),
+              esc_fallback = !any(month_dec %in% TRUE) & any(fallback), .groups = "drop")
+  out <- events |> left_join(ev |> select(initiator, target, year, dispnum, ev_start_lo, ev_start_hi), by = c("initiator", "target", "year", "dispnum")) |>
+    left_join(agg, by = c("initiator", "target", "year", "dispnum")) |>
+    mutate(escalation = coalesce(escalation, FALSE), escalation_year = coalesce(escalation_year, FALSE), esc_fallback = coalesce(esc_fallback, FALSE))
+  stopifnot(nrow(out) == nrow(events), !anyNA(out$escalation), !anyNA(out$ev_start_lo), !anyNA(out$ev_start_hi))
+  ## the year rule here must equal the earlier already_fighting_keys() / flag_escalations() path
+  attr(out, "comparisons") <- cmp
+  out
+}
+## reference_dates(events): for every (ccode, year) that initiates (has a non-escalation event), the interval of its
+## EARLIEST non-escalation event's start (lo = min of the lower bounds, hi = min of the upper bounds). State-years absent
+## from this table use January of year t (the caller coalesces).
+reference_dates <- function(events) {
+  stopifnot(all(c("initiator", "year", "escalation", "ev_start_lo", "ev_start_hi") %in% names(events)))
+  out <- events |> filter(!escalation) |> group_by(ccode = initiator, year) |>
+    summarise(ref_lo = min(ev_start_lo), ref_hi = min(ev_start_hi), .groups = "drop")
+  stopifnot(all(out$ref_lo <= out$ref_hi), all(ym_year(out$ref_lo) == out$year))
+  out
+}
+## already_fighting_keys_month(pdi, ref): directed (ccode1, ccode2, year, dispnum) rows for every pair-dispute and
+## every year the pair is in it, with drop = TRUE when the pair is already fighting in that dispute at the state-year's
+## reference date (month rule, year fallback), drop_year = the year rule, fallback flag. The reference date of
+## (ccode1, year) is its row in ref, else January of year. No information from after the reference date is used.
+already_fighting_keys_month <- function(pdi, ref) {
+  stopifnot(all(c("ccode", "year", "ref_lo", "ref_hi") %in% names(ref)))
+  keys <- pdi |> rowwise() |> mutate(year = list(seq.int(spell_first, spell_last))) |> ungroup() |> tidyr::unnest(year) |>
+    left_join(ref |> rename(ccode1 = ccode), by = c("ccode1", "year")) |>
+    mutate(ref_lo = coalesce(ref_lo, ym_index(year, 1L)), ref_hi = coalesce(ref_hi, ym_index(year, 1L)),
+           month_dec = month_rule(start_lo, start_hi, end_lo, end_hi, ref_lo, ref_hi),
+           drop_year = year > pair_onset,
+           fallback = is.na(month_dec), drop = ifelse(fallback, drop_year, month_dec))
+  stopifnot(!anyNA(keys$drop))
+  keys |> select(ccode1, ccode2, year, dispnum, spell, ref_lo, ref_hi, drop, drop_year, fallback)
+}
+## collapse_duplicate_events(events): one event per (initiator, target, year) among the non-escalation rows (PI decision
+## 2026-10-24). Sample flags and codings are ORed, is_joiner_pair is FALSE when any collapsed row is an originator pair,
+## dispnum keeps the smallest dispute number and dispnums lists them all. Escalation rows are kept as they are. Every
+## column must be named in one of the rules below, so a new column fails loudly instead of being collapsed by accident.
+collapse_duplicate_events <- function(events) {
+  key_cols   <- c("initiator", "target", "year")
+  same_cols  <- c("sidea1", "sidea2", "target_has_pos_tm1", "fighting_at_ref")               # must agree within a key
+  or_cols    <- c("war", "war_disp", "escalation_year", "esc_fallback", "is_ww2", "fatal_main", "fatal_cow", "fatal_ub",
+                  "in_mid", "in_fmid", "in_fmidcow", "in_fmidub", "in_war")                   # never NA
+  tri_cols   <- c("fatal1", "fatal2", "fatal_disp", "fatal", "fatal_mic", "fatal_gml")          # TRUE if any TRUE, NA if all NA
+  max_cols   <- c("orig1", "orig2", "fatality1", "fatality2", "hostlev1", "hostlev2", "fatality_disp", "hostlev_disp", "mic_fatalmin")
+  min_cols   <- c("dispnum", "ev_start_lo", "ev_start_hi")
+  paste_cols <- c("fatal_source")
+  known <- c(key_cols, same_cols, or_cols, tri_cols, max_cols, min_cols, paste_cols, "is_joiner_pair", "escalation")
+  extra <- setdiff(names(events), known); missing <- setdiff(known, names(events))
+  if (length(extra)) stop("collapse_duplicate_events: unclassified columns: ", paste(extra, collapse = ", "))
+  if (length(missing)) stop("collapse_duplicate_events: expected columns absent: ", paste(missing, collapse = ", "))
+  for (cc in or_cols) if (anyNA(events[[cc]])) stop("collapse_duplicate_events: NA in ", cc)
+  esc <- events |> filter(escalation) |> mutate(dispnums = as.character(dispnum), n_disputes = 1L)
+  keep <- events |> filter(!escalation)
+  tri <- function(x) if (all(is.na(x))) NA else any(x, na.rm = TRUE)
+  mx <- function(x) if (all(is.na(x))) x[1] else max(x, na.rm = TRUE)
+  same <- function(x) { if (length(unique(x)) != 1) stop("collapse_duplicate_events: a 'same' column differs within a key"); x[1] }
+  ## dispnums and n_disputes come FIRST: inside summarise() a later expression sees the already-reduced dispnum
+  out <- keep |> group_by(across(all_of(key_cols))) |>
+    summarise(dispnums = paste(sort(dispnum), collapse = ";"), n_disputes = n(),
+              across(all_of(same_cols), same), across(all_of(or_cols), ~ any(.x)), across(all_of(tri_cols), tri),
+              across(all_of(max_cols), mx), across(all_of(min_cols), ~ min(.x)),
+              across(all_of(paste_cols), ~ paste(sort(unique(.x)), collapse = ";")),
+              is_joiner_pair = all(is_joiner_pair), escalation = FALSE, .groups = "drop")
+  stopifnot(nrow(out) == nrow(distinct(keep, initiator, target, year)), sum(out$n_disputes) == nrow(keep),
+            all(out$in_mid), !any(out$escalation),
+            all(lengths(strsplit(out$dispnums, ";", fixed = TRUE)) == out$n_disputes),
+            all(vapply(strsplit(out$dispnums, ";", fixed = TRUE), function(z) as.integer(z[1]), 1L) == out$dispnum),
+            setequal(as.integer(unlist(strsplit(out$dispnums, ";", fixed = TRUE))), keep$dispnum),
+            length(unlist(strsplit(out$dispnums, ";", fixed = TRUE))) == nrow(keep))
+  ## ORed flags are exactly "any row had the flag", checked column by column against the uncollapsed rows
+  for (cc in or_cols) {
+    chk <- keep |> group_by(across(all_of(key_cols))) |> summarise(v = any(.data[[cc]]), .groups = "drop") |> inner_join(out |> select(all_of(key_cols), w = all_of(cc)), by = key_cols)
+    stopifnot(nrow(chk) == nrow(out), all(chk$v == chk$w))
+  }
+  res <- bind_rows(out, esc |> select(all_of(names(out))))
+  assert_no_dup_keys(res |> filter(!escalation), key_cols, "collapsed events")
+  assert_no_dup_keys(res, c("dispnum", "initiator", "target"), "collapsed events (dispute keys)")
+  res
+}
+
 ## ---- WWII disputes (PI-approved appendix option --drop_ww2, 2026-10-24) -----------------------------------------
 ## COW-MID 5.0 codes the Second World War as dispute 258 (1939-03 to 1945-09, 26 states). Several other war-level
 ## (hostlev 5) disputes of 1939-1945 are the run-ups to a state's ENTRY into that war (Germany vs Norway, Italy vs
