@@ -1043,6 +1043,48 @@ test_that("P2-5: a rebuild between the manifest snapshot and the load is caught;
   expect_true(any(grepl('array[N2] int<lower=0, upper=1> in_iv;', src, fixed = TRUE)))     # second stale-binary marker
 })
 
+test_that("Codex re-check P2: Z centring uses the IV rows only, so removing a stage-2-only row changes no stage-1 IV value", {
+  td  <- write_toy_cell(tempfile("toycell"))
+  td2 <- write_toy_cell(tempfile("toycell"), alts_edit = function(a) a |> filter(!(ccode1 == 10L & ccode2 == 40L)))   # 10 -> 40 is stage-2 only, unchosen
+  A <- quiet(assemble_cell("mid", 3L, "all", data_dir = td)); B <- quiet(assemble_cell("mid", 3L, "all", data_dir = td2))
+  expect_equal(nrow(A$alts) - 1L, nrow(B$alts)); expect_equal(A$Z_cols, B$Z_cols); expect_equal(A$sy, B$sy)
+  ## centred Z values on the IV rows are identical
+  key <- c("ccode1", "ccode2", "year")
+  ia <- A$alts |> filter(in_iv == 1L) |> arrange(ccode1, ccode2); ib <- B$alts |> filter(in_iv == 1L) |> arrange(ccode1, ccode2)
+  expect_equal(ia[, c(key, A$Z_cols)], ib[, c(key, B$Z_cols)])
+  zc <- intersect(A$Z_cols, c("log_dy_prior_mids", "log_dy_peace_years", "log_capdist", "dM_j_h", "dRpr_j_h"))
+  expect_true(all(abs(colMeans(as.matrix(ia[, zc]))) < 1e-8))
+  ## stage-1 IV (lse) at fixed parameters is identical for every state-year
+  da <- build_stan_data(A$sy, A$alts, A$ev, A$W_cols, A$X_cols, A$Z_cols, joint = 1L, x_ref = A$x_ref, allow_orphan_initiations = TRUE)
+  db <- build_stan_data(B$sy, B$alts, B$ev, B$W_cols, B$X_cols, B$Z_cols, joint = 1L, x_ref = A$x_ref, allow_orphan_initiations = TRUE)
+  set.seed(11); S <- da$S
+  pars <- list(mu0 = c(0.3, -0.2), beta = matrix(rnorm(4, 0, 0.3), 2, 2), a_i = matrix(rnorm(2 * S), S, 2), c_i = rnorm(S), b_j = rnorm(S),
+               gamma = rnorm(da$Pz), sigma_x = c(1, 1.3), rho = 0.2)
+  expect_equal(stage2_loglik_R(da, pars)$lse, stage2_loglik_R(db, pars)$lse, tolerance = 1e-12)
+  ## the old rule (centring over the whole union block) would have moved them
+  old_centre <- function(a) { for (cc in zc) a[[cc]] <- a[[cc]] - mean(a[[cc]]); a }   # re-centring over all rows = the old rule
+  dao <- build_stan_data(A$sy, old_centre(A$alts), A$ev, A$W_cols, A$X_cols, A$Z_cols, joint = 1L, x_ref = A$x_ref, allow_orphan_initiations = TRUE)
+  dbo <- build_stan_data(B$sy, old_centre(B$alts), B$ev, B$W_cols, B$X_cols, B$Z_cols, joint = 1L, x_ref = A$x_ref, allow_orphan_initiations = TRUE)
+  expect_false(isTRUE(all.equal(stage2_loglik_R(dao, pars)$lse, stage2_loglik_R(dbo, pars)$lse, tolerance = 1e-12)))
+})
+
+test_that("Codex re-check P2: the manifest check hashes and loads the same bytes (file replaced after the read is not returned)", {
+  td <- write_toy_cell(tempfile("toycell"))
+  snapshot <- read.csv(file.path(td, "manifest.csv"), stringsAsFactors = FALSE)
+  p <- file.path(td, "events.rds"); ev_a <- readRDS(p)
+  ev_b <- ev_a; ev_b$rebuilt <- 1L
+  ## file A is read and hashed; the file is replaced by B right after the read: the helper returns A and passes
+  got <- assert_matches_manifest(p, snapshot, .after_read = function() saveRDS(ev_b, p))
+  expect_identical(got, ev_a); expect_false("rebuilt" %in% names(got))
+  ## now B is on disk: the same snapshot rejects it
+  expect_error(assert_matches_manifest(p, snapshot), "snapshot")
+  ## and with B read, replacing it by A after the read still returns B and fails the A digest
+  expect_error(assert_matches_manifest(p, snapshot, .after_read = function() saveRDS(ev_a, p)), "snapshot")
+  ## the digest of the in-memory bytes equals the file digest used when the manifest is written
+  b <- readBin(p, "raw", n = file.info(p)$size)
+  expect_equal(digest::digest(b, algo = "sha256", serialize = FALSE), file_digest(p))
+})
+
 test_that("assembly with --full_controls returns exactly the 8bf0ce1 column lists, in order", {
   td <- write_toy_cell(tempfile("toycell"))
   A <- quiet(assemble_cell("mid", 3L, "all", FULL_CONTROLS = TRUE, data_dir = td))

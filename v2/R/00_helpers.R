@@ -469,15 +469,27 @@ write_manifest <- function(entries, path) {
 }
 ## manifest may be the path of manifest.csv or a data.frame already read from it (a SNAPSHOT taken earlier; Codex review
 ## P2-5: 02_fit_model.R passes the manifest it read at load so that a rebuild between the snapshot and the load is caught)
-assert_matches_manifest <- function(path, manifest) {
+## The file is read ONCE into memory; the digest and the returned object both come from those same bytes (Codex re-check
+## P2, 2026-10-24: a separate readRDS() and file_digest() could see two different files if the file were replaced in
+## between). .after_read is a test hook only: it is called after the bytes are captured, so a test can replace the file at
+## that moment and confirm the returned object is the one that was hashed.
+assert_matches_manifest <- function(path, manifest, .after_read = NULL) {
   man <- if (is.data.frame(manifest)) manifest else read.csv(manifest, stringsAsFactors = FALSE)
   stopifnot(all(c("file", "nrow", "sha256") %in% names(man)))
   row <- man[man$file == basename(path), , drop = FALSE]
   if (nrow(row) != 1) stop("file not in manifest: ", basename(path))
-  obj <- readRDS(path)
+  n_bytes <- file.info(path)$size
+  if (is.na(n_bytes)) stop("file not found: ", path)
+  bytes <- readBin(path, what = "raw", n = n_bytes)
+  if (length(bytes) != n_bytes) stop(sprintf("%s: read %d of %d bytes", basename(path), length(bytes), n_bytes))
+  if (!is.null(.after_read)) .after_read()
+  tmp <- tempfile(fileext = ".rds"); on.exit(unlink(tmp), add = TRUE)
+  writeBin(bytes, tmp)
+  obj <- readRDS(tmp)
   if (nrow(obj) != row$nrow) stop(sprintf("%s: nrow %d != manifest %d", basename(path), nrow(obj), row$nrow))
-  if (file_digest(path) != row$sha256) stop(sprintf("%s: sha256 digest does not match the manifest%s", basename(path),
-                                                    if (is.data.frame(manifest)) " snapshot taken at load (data rebuilt in between?)" else ""))
+  if (digest::digest(bytes, algo = "sha256", serialize = FALSE) != row$sha256)
+    stop(sprintf("%s: sha256 digest does not match the manifest%s", basename(path),
+                 if (is.data.frame(manifest)) " snapshot taken at load (data rebuilt in between?)" else ""))
   obj
 }
 

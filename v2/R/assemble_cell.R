@@ -134,11 +134,18 @@ assemble_cell <- function(SAMPLE, LAG, VARIANT, CENT = "pr", CONFLICT_HISTORY = 
        if (target_missing) "non-constant in this cell" else "constant in this cell")
   Z_cols <- z_columns(CONFLICT_HISTORY, DISTANCE, CONTIGUITY, TARGET_MISSING = target_missing, DY_PEACE_YEARS = DY_PEACE_YEARS, FULL_CONTROLS = FULL_CONTROLS)
   stopifnot(all(Z_cols %in% names(alts)))
-  ## centre the continuous Z columns over the assembled alternative rows (as before for the conflict-history and distance
-  ## columns; the target changes are treated the same way). A constant shift of a Z column is identical for every
-  ## alternative in every choice set and cancels in the softmax, so this changes no likelihood value.
-  for (cc in intersect(Z_cols, Z_CENTRED)) alts[[cc]] <- alts[[cc]] - mean(alts[[cc]])
-  stopifnot(all(abs(colMeans(as.matrix(alts[, intersect(Z_cols, Z_CENTRED), drop = FALSE]))) < 1e-8))
+  ## centre the continuous Z columns (conflict history, distance, target changes). The centring constants are the means over
+  ## the stage-1 IV rows (in_iv = 1) ONLY (Codex re-check P2, 2026-10-24): the IV set is defined at January of t and does
+  ## not depend on year-t events, whereas the stage-2-only rows do. Centring over the whole union block let a stage-2-only
+  ## row move the means, which shifts every utility by a common constant: harmless in the stage-2 softmax but it enters
+  ## stage 1 through tau * IV. The same constant is subtracted from every row (IV and stage-2 alike), so stage-2
+  ## likelihoods are unchanged.
+  z_cent <- intersect(Z_cols, Z_CENTRED)
+  iv_rows <- alts$in_iv == 1L
+  stopifnot(any(iv_rows))
+  for (cc in z_cent) alts[[cc]] <- alts[[cc]] - mean(alts[[cc]][iv_rows])
+  stopifnot(all(abs(colMeans(as.matrix(alts[iv_rows, z_cent, drop = FALSE]))) < 1e-8))
+  logf("Z centring: %d continuous Z columns centred over the %d stage-1 IV rows (of %d assembled rows)", length(z_cent), sum(iv_rows), nrow(alts))
   ## dyadic lagged DV (PI decision 2026-10-24): 0/1, not centred, must vary within the assembled cell when it is in Z (it is
   ## not under --full_controls, whose Z is the base specification of 8bf0ce1)
   stopifnot(!anyNA(alts$dy_mid_tm1), all(alts$dy_mid_tm1 %in% c(0L, 1L)))
