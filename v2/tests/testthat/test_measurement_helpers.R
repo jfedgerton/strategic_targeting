@@ -38,6 +38,23 @@ test_that("permute_dR shuffles within each choice set and keeps everything else"
   expect_false(isTRUE(all.equal(p$dR, sim$alts$dR)))
 })
 
+test_that("permute_dR shuffles only within the stage-2 rows when IV-only rows are present", {
+  a <- sim$alts
+  set.seed(7)
+  a$in_s2 <- 1L
+  ## mark two non-chosen rows per state-year as IV-only (in_s2 = 0)
+  for (n in unique(a$sy_row)) { r <- which(a$sy_row == n); a$in_s2[r[seq_len(min(2, length(r) - 2))]] <- 0L }
+  a$in_iv <- 1L
+  p <- permute_dR(a, seed = 1)
+  expect_equal(p$dR[a$in_s2 == 0L], a$dR[a$in_s2 == 0L])
+  expect_equal(p$dM, a$dM); expect_equal(p$in_s2, a$in_s2); expect_equal(p$sy_row, a$sy_row)
+  for (n in unique(a$sy_row)) {
+    k <- a$sy_row == n & a$in_s2 == 1L
+    expect_equal(sort(p$dR[k]), sort(a$dR[k]))
+  }
+  expect_false(isTRUE(all.equal(p$dR[a$in_s2 == 1L], a$dR[a$in_s2 == 1L])))
+})
+
 test_that("misclassification helper and holdout split keep one state index space", {
   mu <- array(rnorm(200 * S * 2), c(200, S, 2))
   ca <- classify_types(mu, r0 = 0.5); expect_equal(nrow(ca), S)

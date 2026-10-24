@@ -167,12 +167,22 @@ temporal_holdout <- function(sy, alts, ev, W_cols, X_cols, Z_cols, cutoff, famil
 }
 
 ## ---- 4. permutation test --------------------------------------------------------------------------------------------
-## Shuffle dR across the alternatives of each choice set (dM, Z, targets fixed), so dR carries no
-## information about which target was chosen. mode = "rescore": rescore the ORIGINAL fits on the
-## permuted data (fast); mode = "refit": refit a and b on each permuted data set (slow).
+## Shuffle dR across the alternatives of each STAGE-2 choice set (dM, Z, targets fixed), so dR carries no
+## information about which target was chosen. Since review P1-1 a state-year's row block is the union of its
+## stage-1 IV set and its stage-2 set (flags in_iv / in_s2). The shuffle runs only over the in_s2 = 1 rows, so
+## the null distribution uses exactly the targets the stage-2 likelihood scores; IV-only rows (in_s2 = 0)
+## keep their dR. Without an in_s2 column every row is treated as in_s2 = 1 (the pre-review behaviour).
+## mode = "rescore": rescore the ORIGINAL fits on the permuted data (fast); mode = "refit": refit a and b on
+## each permuted data set (slow).
 permute_dR <- function(alts, seed) {
   set.seed(seed)
-  alts |> group_by(sy_row) |> mutate(dR = if (n() > 1) sample(dR) else dR) |> ungroup()
+  s2 <- if ("in_s2" %in% names(alts)) as.integer(alts$in_s2) else rep(1L, nrow(alts))
+  stopifnot(!anyNA(s2), all(s2 %in% 0:1))
+  out <- alts |> mutate(.s2 = s2, .row = row_number()) |> group_by(sy_row, .s2) |>
+    mutate(dR = if (.s2[1] == 1L && n() > 1) sample(dR) else dR) |> ungroup() |> arrange(.row)
+  stopifnot(nrow(out) == nrow(alts), identical(out$sy_row, alts$sy_row),
+            all(out$dR[s2 == 0L] == alts$dR[s2 == 0L]))
+  out |> select(-.s2, -.row)
 }
 permutation_test <- function(sy, alts, ev, W_cols, X_cols, Z_cols, fit_a, fit_b, n_perm = 20, mode = c("rescore", "refit"),
                              family = "m1", K = 2L, stan_models = NULL, chains = 2, iter = 500, warmup = 250, n_draws = 100, x_ref = NULL) {

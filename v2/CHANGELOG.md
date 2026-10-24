@@ -158,4 +158,6 @@ Counts for the PI (rebuilt data). Escalations 199 (217). Events after the collap
 
 Not changed. Priors, sampling settings, positions, change tables, gap constants, the fatal-source order, the WWII list, the reference-date rule for stage 2.
 
-Unimplemented suggestions. (a) `permutation_test()` shuffles dR over the whole union block of a state-year; shuffling within the stage-2 rows only would be the stricter null (one line in `permute_dR()`). (b) The 29 `fighting_at_ref` events still leave stage 2; scoring them on a per-event set at their own date remains a model-structure change. (c) The old `stage2_scores()` set_size column used the block size; it now counts the stage-2 rows, which also changes `baseline_log_score_uniform` in `temporal_holdout()` where sets differ.
+Permutation null (PI approved 2026-10-24, follow-up commit). `permute_dR()` now shuffles dR only within each state-year's stage-2 rows (`in_s2 = 1`); IV-only rows keep their dR. Without an `in_s2` column all rows count as stage-2 rows (old behaviour). Test added in `test_measurement_helpers.R`.
+
+Unimplemented suggestions. (b) The 29 `fighting_at_ref` events still leave stage 2; scoring them on a per-event set at their own date remains a model-structure change. (c) The old `stage2_scores()` set_size column used the block size; it now counts the stage-2 rows, which also changes `baseline_log_score_uniform` in `temporal_holdout()` where sets differ.
