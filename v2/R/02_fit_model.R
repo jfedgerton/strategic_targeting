@@ -19,13 +19,16 @@
 ##               the monadic peace years); FALSE = drop them; cell name gets "_noCH"
 ##   full_controls: FALSE (main, minimal controls since 2026-10-24: W = dM_i, dR_i, ongoing_tm1, log prior MIDs, dem_tm1;
 ##               X = dM_i, dR_i; Z = contiguity, joint democracy, log dyadic prior MIDs, dy_mid_tm1, target changes) | TRUE
-##               restores the previous main specification (W = X with cowmaj_tm1, dem_tm1, ongoing_tm1, log prior MIDs,
-##               log peace years; Z with alliance and the major-power count as well); cell name gets "_fullctrl"
+##               reproduces exactly the base specification of commit 8bf0ce1 (W = X = dM_i, dR_i, cowmaj_tm1, dem_tm1,
+##               log prior MIDs, log monadic peace years; Z = contiguity, alliance, joint democracy, major-power count,
+##               log dyadic prior MIDs, log dyadic peace years, target changes; no ongoing_tm1, no dy_mid_tm1); cell
+##               name gets "_fullctrl"
 ##   distance  : FALSE (main) | TRUE adds log1p(capital-to-capital km) to Z; cell name gets "_dist"
 ##   contiguity: TRUE (main) | FALSE drops land contiguity from Z; cell name gets "_nocontig"
 ##   dy_peace_years: FALSE (main) | TRUE restores log1p(dyadic peace years) to Z next to dy_mid_tm1; cell name gets "_dypy"
 ##   drop_ww2  : FALSE (main) | TRUE removes the WWII events (disputes in WW2_DISPNUMS, 00_helpers.R) from stage 2 and
-##               their initiations from stage 1 (appendix); cell name gets "_noww2"
+##               their initiations from stage 1 (appendix) using the build's in_<sample>_noww2 flags (an event collapsed
+##               from a WWII and a non-WWII dispute stays when the non-WWII dispute qualifies); cell name gets "_noww2"
 ##   threads_per_chain: within-chain parallelism via reduce_sum over state-years (default 1 = serial, exact).
 ##               Request cpus-per-task = chains x threads_per_chain in Slurm.
 ##   Main specification: --variant=all --sampled_m=0 (full all-states choice sets), the defaults.
@@ -105,8 +108,11 @@ stopifnot(all(cell_files %in% manifest_at_load$file))
 manifest_cell <- manifest_at_load[manifest_at_load$file %in% cell_files, ]
 
 source(file.path(dirname(this_file), "assemble_cell.R"))
+## the manifest SNAPSHOT read above is passed in (review P2-5): every input file's nrow and sha256 are checked against it
+## at load, so a rebuild between the snapshot and the load stops the run instead of being read silently from disk
 A <- assemble_cell(SAMPLE, LAG, VARIANT, CENT, CONFLICT_HISTORY, SAMPLED_M, DISTANCE = DISTANCE, CONTIGUITY = CONTIGUITY,
-                   DY_PEACE_YEARS = DY_PEACE_YEARS, DROP_WW2 = DROP_WW2, FULL_CONTROLS = FULL_CONTROLS, data_dir = data_dir)
+                   DY_PEACE_YEARS = DY_PEACE_YEARS, DROP_WW2 = DROP_WW2, FULL_CONTROLS = FULL_CONTROLS, data_dir = data_dir,
+                   manifest = manifest_at_load)
 sy <- A$sy; alts <- A$alts; ev <- A$ev; W_cols <- A$W_cols; X_cols <- A$X_cols; Z_cols <- A$Z_cols
 state_codes <- A$state_codes; x_ref <- A$x_ref; n_full <- A$n_full; sampled <- A$sampled
 
@@ -118,9 +124,9 @@ dat <- build_stan_data(sy, alts, ev, W_cols, X_cols, Z_cols, joint = joint, samp
 logf("reduce_sum grainsize = %d (N1 = %d)", dat$grainsize, dat$N1)
 logf("D_mode = %d (%s)", D_MODE, c("material only", "relational only", "both dimensions")[D_MODE])
 if (family == "m2_ame") logf("AME anchors (most initiations first): ccodes %s", paste(state_codes[dat$anchor], collapse = ", "))
-logf("Stan data: S=%d N1=%d N2=%d E=%d P1=%d P=%d Pz=%d joint=%d sampled=%d D_mode=%d; sum(y1)=%d; W = %s; Z = %s",
-     dat$S, dat$N1, dat$N2, dat$E, dat$P1, dat$P, dat$Pz, dat$joint, dat$sampled, dat$D_mode, sum(dat$y1),
-     paste(W_cols, collapse = ","), paste(Z_cols, collapse = ","))
+logf("Stan data: S=%d N1=%d N2=%d E=%d P1=%d P=%d Pz=%d joint=%d sampled=%d D_mode=%d; sum(y1)=%d; rows in the IV set %d, in the stage-2 set %d; W = %s; X = %s; Z = %s",
+     dat$S, dat$N1, dat$N2, dat$E, dat$P1, dat$P, dat$Pz, dat$joint, dat$sampled, dat$D_mode, sum(dat$y1), sum(dat$in_iv), sum(dat$in_s2),
+     paste(W_cols, collapse = ","), paste(X_cols, collapse = ","), paste(Z_cols, collapse = ","))
 if (DRY_RUN) {
   saveRDS(list(dat = dat, cell = cell, state_codes = state_codes, W_cols = W_cols, X_cols = X_cols, Z_cols = Z_cols,
                manifest = manifest_cell, git_commit = git_commit_at_load, full_controls = FULL_CONTROLS),
@@ -133,6 +139,9 @@ if (PILOT) { ITER <- 60L; WARMUP <- 30L; CHAINS <- 1L; logf("PILOT run: chains=1
 sm <- readRDS(file.path(v2_root(), "stan", "build", paste0(family, ".rds")))
 ## audit 2026-10-23: rstan silently ignores unused data, so an old compiled program would run on new data without mu0.
 if (!grepl("row_vector[D] mu0;", sm@model_code, fixed = TRUE)) stop(sprintf("compiled %s.rds has no mu0 parameter: stale binary; rerun v2/R/compile_models.R", family))
+## review P1-1 (2026-10-24): a program without the choice-set flags would take IV and the stage-2 softmax over the whole
+## union block and ignore in_iv / in_s2 silently; require the data declaration
+if (!grepl("array[N2] int<lower=0, upper=1> in_iv;", sm@model_code, fixed = TRUE)) stop(sprintf("compiled %s.rds has no in_iv choice-set flag: stale binary; rerun v2/R/compile_models.R", family))
 t0 <- Sys.time()
 fit <- sampling(sm, data = dat, chains = CHAINS, iter = ITER, warmup = WARMUP, seed = V2_SEED,
                 refresh = max(1L, ITER %/% 20L), control = list(adapt_delta = ADAPT_DELTA, max_treedepth = MAX_TD),

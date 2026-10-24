@@ -8,6 +8,12 @@
 //   mu[n] = mu0 + X[n] beta + a_i   (mu0 is the population-average ideal gap, added 2026-10-23;
 //                                    see m1_latent_additive.stan; prior normal(0, prior_mu0_sd))
 //
+// Choice-set flags in_iv / in_s2 (Codex review P1-1, 2026-10-24): identical to m1_latent_additive.stan.
+// A state-year's row block is the union of its stage-1 IV set (January rule, in_iv = 1) and its
+// stage-2 choice set (reference-date rule, in_s2 = 1); IV[n] is over the in_iv rows, the stage-2
+// softmax over the in_s2 rows; blocks with every row in both sets (cs_mixed = 0) take the
+// pre-review code path. With sampled = 1 every row must have in_iv = in_s2 = 1 (resolved in R).
+//
 // U and V are transformed parameters and are saved; u_i'v_j is recomputed in R
 // (an S x S generated quantity would be too large for real-data S).
 // Identification of U (S x K) and V (S x K):
@@ -60,9 +66,14 @@ functions {
   }
   // Partial log-likelihood (stage 1 + stage 2) for a slice of state-years; used by reduce_sum.
   // sy_slice holds state-year indices; events of a state-year are ev_sorted[ev_first[n] .. +ev_count[n]-1].
+  // cs_mixed[n] = 0: every row of the block is in both sets (IV = log_sum_exp(u), stage-2 softmax over u, the
+  // pre-review path). cs_mixed[n] = 1: IV over the block-local IV rows iv_loc[iv_first[n] .. +iv_count[n]-1],
+  // the stage-2 softmax over s2_loc[s2_first[n] .. +s2_count[n]-1] (sampled = 0 only).
   real sy_partial_sum(array[] int sy_slice, int start, int end,
                       array[] int y1, array[] int sy_state, matrix W, matrix X,
                       array[] int cs_start, array[] int cs_end, vector iv_corr,
+                      array[] int cs_mixed, array[] int iv_first, array[] int iv_count, array[] int iv_loc,
+                      array[] int s2_first, array[] int s2_count, array[] int s2_loc,
                       matrix x, array[] int alt_target, matrix Z, int Pz,
                       array[] int ev_first, array[] int ev_count, array[] int ev_sorted,
                       array[] int ev_row, array[] int ev_start, array[] int ev_end, int sampled,
@@ -80,13 +91,20 @@ functions {
       row_vector[D] mu_n = mu0 + X[n] * beta + a_i[sy_state[n]];
       vector[e - s + 1] u;
       real lse;
+      real lse2;
       u = util_block(s, e, x, mu_n, sigma_x, rho, b_j, alt_target, zg_block(Z, gamma, s, e, Pz), D, dcol, U[sy_state[n]], V);
-      lse = log_sum_exp(u);
+      if (cs_mixed[n] == 0) {
+        lse = log_sum_exp(u);                                    // both sets == the whole block
+        lse2 = lse;
+      } else {
+        lse = log_sum_exp(u[segment(iv_loc, iv_first[n], iv_count[n])]);
+        lse2 = (ev_count[n] > 0 && sampled == 0) ? log_sum_exp(u[segment(s2_loc, s2_first[n], s2_count[n])]) : lse;
+      }
       eta[k] = alpha0 + W[n] * alpha + c_i[sy_state[n]] + tau * (lse + iv_corr[n]);
       for (j in 1:ev_count[n]) {
         int ev = ev_sorted[ev_first[n] + j - 1];
         if (sampled == 0) {
-          lp += u[ev_row[ev] - s + 1] - lse;                     // event set == state-year set
+          lp += u[ev_row[ev] - s + 1] - lse2;                    // event set == the state-year's in_s2 rows
         } else {
           int s2 = ev_start[ev];
           int e2 = ev_end[ev];
@@ -118,6 +136,8 @@ data {
   array[N2] int<lower=1, upper=S> alt_target;
   matrix[N2, 2] x;
   matrix[N2, Pz] Z;
+  array[N2] int<lower=0, upper=1> in_iv;   // row is in its state-year's stage-1 IV set (January rule)
+  array[N2] int<lower=0, upper=1> in_s2;   // row is in its state-year's stage-2 choice set (reference-date rule)
   array[E] int<lower=1, upper=N1> ev_sy;
   array[E] int<lower=1, upper=N2> ev_row;      // chosen alternative's row
   array[E] int<lower=1, upper=N2> ev_start;    // the event's OWN choice-set rows
@@ -152,18 +172,58 @@ transformed data {
     for (e in 1:E) { ev_sorted[fill[ev_sy[e]]] = e; fill[ev_sy[e]] += 1; }
   }
   array[S - K] int nonanchor;              // state indices that are not anchors
+  // ---- choice-set flags: block-local index lists of the IV rows and the stage-2 rows per state-year
+  array[N1] int cs_mixed = rep_array(0, N1);   // 1 when some row of the block is outside the IV set or the stage-2 set
+  array[N1] int iv_count = rep_array(0, N1);
+  array[N1] int s2_count = rep_array(0, N1);
+  array[N1] int iv_first;
+  array[N1] int s2_first;
   for (n in 1:N1) {
     if (cs_end[n] < cs_start[n]) reject("empty choice set for state-year ", n);
+    for (r in cs_start[n]:cs_end[n]) {
+      if (in_iv[r] == 0 && in_s2[r] == 0) reject("row ", r, " of state-year ", n, " is in neither choice set");
+      iv_count[n] += in_iv[r];
+      s2_count[n] += in_s2[r];
+    }
+    if (iv_count[n] == 0) reject("state-year ", n, " has an EMPTY stage-1 IV set (no row with in_iv = 1)");
+    if (iv_count[n] < cs_end[n] - cs_start[n] + 1 || s2_count[n] < cs_end[n] - cs_start[n] + 1) cs_mixed[n] = 1;
+    if (sampled == 1 && cs_mixed[n] == 1) reject("state-year ", n, ": with sampled = 1 every row must have in_iv = in_s2 = 1");
     if (sampled == 1) iv_corr[n] = log(n_full[n]) - log(cs_end[n] - cs_start[n] + 1);
+  }
+  // sizes from the per-block counts: with sampled = 1 the event-block rows after the state-year blocks also carry
+  // in_iv = in_s2 = 1 and must not be counted here
+  int n_iv_rows = sum(iv_count);
+  int n_s2_rows = sum(s2_count);
+  array[n_iv_rows] int iv_loc;
+  array[n_s2_rows] int s2_loc;
+  {
+    int p_iv = 1;
+    int p_s2 = 1;
+    for (n in 1:N1) {
+      iv_first[n] = p_iv;
+      s2_first[n] = p_s2;
+      for (r in cs_start[n]:cs_end[n]) {
+        if (in_iv[r] == 1) { iv_loc[p_iv] = r - cs_start[n] + 1; p_iv += 1; }
+        if (in_s2[r] == 1) { s2_loc[p_s2] = r - cs_start[n] + 1; p_s2 += 1; }
+      }
+    }
+    if (p_iv != n_iv_rows + 1 || p_s2 != n_s2_rows + 1) reject("choice-set flag bookkeeping failed");
   }
   for (e in 1:E) {
     if (ev_row[e] < ev_start[e] || ev_row[e] > ev_end[e])
       reject("event ", e, " chosen row outside its own choice set");
+    if (in_s2[ev_row[e]] != 1) reject("event ", e, ": chosen row is not in the stage-2 set (in_s2 = 0)");
     if (y1[ev_sy[e]] != 1) reject("event ", e, " belongs to a state-year with y1 == 0");
     if (sampled == 0 && (ev_start[e] != cs_start[ev_sy[e]] || ev_end[e] != cs_end[ev_sy[e]]))
       reject("event ", e, ": with full choice sets the event set must be the state-year set");
+    if (sampled == 0 && s2_count[ev_sy[e]] < 2)
+      reject("event ", e, ": its state-year's stage-2 set is empty or holds only the chosen row");
     if (sampled == 1 && ev_start[e] <= cs_end[N1])
       reject("event ", e, ": sampled event rows must follow the state-year (IV) rows");
+    if (sampled == 1 && ev_end[e] - ev_start[e] + 1 < 2)
+      reject("event ", e, ": sampled event set holds only the chosen row");
+    if (sampled == 1) for (r in ev_start[e]:ev_end[e]) if (in_iv[r] == 0 || in_s2[r] == 0)
+      reject("event ", e, ": with sampled = 1 every event-block row must have in_iv = in_s2 = 1");
   }
   if (K > S - 1) reject("K must be <= S - 1");
   {
@@ -289,7 +349,9 @@ model {
   // ---- likelihood: stage 1 + stage 2, sliced over state-years
   if (prior_only == 0) {
     target += reduce_sum_static(sy_partial_sum, sy_idx, grainsize,
-                                y1, sy_state, W, X, cs_start, cs_end, iv_corr, x, alt_target, Z, Pz,
+                                y1, sy_state, W, X, cs_start, cs_end, iv_corr,
+                                cs_mixed, iv_first, iv_count, iv_loc, s2_first, s2_count, s2_loc,
+                                x, alt_target, Z, Pz,
                                 ev_first, ev_count, ev_sorted, ev_row, ev_start, ev_end, sampled, D, dcol,
                                 alpha0, alpha, tau, mu0, beta, a_i, c_i, sigma_x, rho, b_j, gamma, U, V);
   }
@@ -305,23 +367,34 @@ generated quantities {
   {
     matrix[N1, D] Mu = rep_matrix(mu0, N1) + X * beta + a_i[sy_state];
     vector[N2] util;
-    vector[N1] lse;
+    vector[N1] lse;       // IV: over the in_iv rows
+    vector[N1] lse_s2;    // stage-2 normaliser (sampled = 0): over the in_s2 rows
     for (n in 1:N1) {
       int s = cs_start[n];
       int e = cs_end[n];
       util[s:e] = util_block(s, e, x, Mu[n], sigma_x, rho, b_j, alt_target, zg_block(Z, gamma, s, e, Pz), D, dcol,
                              U[sy_state[n]], V);
-      lse[n] = log_sum_exp(util[s:e]);
+      if (cs_mixed[n] == 0) {
+        lse[n] = log_sum_exp(util[s:e]);
+        lse_s2[n] = lse[n];
+      } else {
+        vector[e - s + 1] u = util[s:e];
+        lse[n] = log_sum_exp(u[segment(iv_loc, iv_first[n], iv_count[n])]);
+        lse_s2[n] = (s2_count[n] > 0) ? log_sum_exp(u[segment(s2_loc, s2_first[n], s2_count[n])]) : not_a_number();
+      }
     }
     vector[N1] eta1 = alpha0 + W * alpha + c_i[sy_state] + tau * (lse + iv_corr);
     for (n in 1:N1) log_lik_stage1[n] = bernoulli_logit_lpmf(y1[n] | eta1[n]);
     for (ev in 1:E) {
       int s = ev_start[ev];
       int e = ev_end[ev];
-      if (sampled == 1)
+      if (sampled == 1) {
         util[s:e] = util_block(s, e, x, Mu[ev_sy[ev]], sigma_x, rho, b_j, alt_target, zg_block(Z, gamma, s, e, Pz), D, dcol,
                                U[sy_state[ev_sy[ev]]], V);
-      log_lik_stage2[ev] = util[ev_row[ev]] - log_sum_exp(util[s:e]);
+        log_lik_stage2[ev] = util[ev_row[ev]] - log_sum_exp(util[s:e]);
+      } else {
+        log_lik_stage2[ev] = util[ev_row[ev]] - lse_s2[ev_sy[ev]];
+      }
       mu_event[ev] = Mu[ev_sy[ev]];
     }
     for (s in 1:S) mu_state[s] = mu0 + x_ref' * beta + a_i[s];

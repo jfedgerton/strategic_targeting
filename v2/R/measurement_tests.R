@@ -76,6 +76,14 @@ stage2_scores <- function(dat, draws) {
   ## group id for the softmax: state-year for IV rows, N1 + e for event blocks (full sets: the state-year)
   grp <- ifelse(ev_block > 0L, dat$N1 + ev_block, alt_sy)
   ev_grp <- if (dat$sampled == 1) dat$N1 + seq_len(dat$E) else dat$ev_sy
+  ## choice-set flags (review P1-1): with full sets the stage-2 softmax runs over the state-year's in_s2 rows only; the
+  ## IV-only rows (in_s2 = 0) get utility -Inf, so they carry no probability mass and rank last. With sampled = 1 every
+  ## row has in_s2 = 1 (asserted by build_stan_data()).
+  if (is.null(dat$in_s2)) stop("stage2_scores: dat$in_s2 is missing (build the data with build_stan_data())")
+  stopifnot(length(dat$in_s2) == dat$N2, all(dat$in_s2[dat$ev_row] == 1L))
+  excl <- dat$sampled == 0 & dat$in_s2 == 0L
+  set_size <- if (dat$sampled == 1) dat$ev_end - dat$ev_start + 1 else as.numeric(tabulate(alt_sy[dat$in_s2 == 1L], nbins = dat$N1))[dat$ev_sy]
+  stopifnot(all(set_size >= 2))
   n_d <- length(draws$rho); E <- dat$E
   p_sum <- numeric(E); rank_sum <- numeric(E)
   zg0 <- if (dat$Pz > 0) dat$Z else NULL
@@ -101,6 +109,7 @@ stage2_scores <- function(dat, draws) {
       U <- matrix(draws$U[d, , ], dat$S); V <- matrix(draws$V[d, , ], dat$S)
       util <- util + rowSums(U[dat$sy_state[alt_sy], , drop = FALSE] * V[dat$alt_target, , drop = FALSE])
     }
+    util[excl] <- -Inf
     mx <- ave(util, grp, FUN = max)
     lse_tab <- log(as.numeric(rowsum(exp(util - mx), grp))) + as.numeric(tapply(mx, grp, function(v) v[1]))
     names(lse_tab) <- sort(unique(grp))
@@ -112,7 +121,7 @@ stage2_scores <- function(dat, draws) {
   }
   p <- p_sum / n_d
   data.frame(event = seq_len(E), p_chosen = p, log_p_chosen = log(p), mean_rank = rank_sum / n_d,
-             set_size = dat$ev_end - dat$ev_start + 1,
+             set_size = set_size,
              hit1 = (rank_sum / n_d) <= 1.5, hit5 = (rank_sum / n_d) <= 5.5)
 }
 

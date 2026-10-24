@@ -74,6 +74,11 @@ if (sys.nframe() == 0 && length(grep("^--sample=", commandArgs(TRUE))) == 1) {
   alts <- assert_matches_manifest(file.path(data_dir, sprintf("alts_lag%d_%s.rds", LAG, VARIANT)), man)
   events <- assert_matches_manifest(file.path(data_dir, "events.rds"), man)
   dR_alt <- if (CENT == "pr") "dR_pr" else "dR_eig"; dR_h <- if (CENT == "pr") "dRpr_h" else "dReig_h"
+  ## the benchmarks score target choice, so they use the STAGE-2 rows of the union block (in_s2 = 1; review P1-1), the same
+  ## rows the conditional logit in Stan sees; IV-only rows (in_s2 = 0) are not candidate targets
+  stopifnot(all(c("in_iv", "in_s2") %in% names(alts)))
+  n_union <- nrow(alts); alts <- alts |> filter(in_s2 == 1L)
+  logf("alternative rows: %d in the union block, %d in the stage-2 set (used here)", n_union, nrow(alts))
   alts <- alts |> mutate(dR = .data[[dR_alt]], log_dy_prior_mids = log1p(dy_prior_mids_h), log_dy_peace_years = log1p(dy_peace_years_h))
   ev_keys <- events |> filter(.data[[paste0("in_", SAMPLE)]]) |> transmute(ccode1 = initiator, ccode2 = target, year)
   assert_no_dup_keys(ev_keys, c("ccode1", "ccode2", "year"), "benchmark events (one per initiator, target, year)")

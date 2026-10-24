@@ -83,3 +83,43 @@ complete_init <- function(fit, init) {
   }
   init
 }
+
+## ---- two choice sets per state-year (Codex review P1-1, 2026-10-24) ------------------------------------------------------
+## mask_sets(): from a simulated cell, mark one non-chosen row of every other initiating state-year as IV only (in_s2 = 0)
+## and one non-chosen row of the remaining initiating state-years as stage-2 only (in_iv = 0); non-initiating state-years keep
+## identical sets, as in the real build. Returns the frames with flags plus the IV-only and stage-2-only sub-frames that the
+## pre-review program (whole block = both sets) needs to reproduce stage 1 and stage 2 separately.
+mask_sets <- function(sim) {
+  alts <- sim$alts |> mutate(in_iv = 1L, in_s2 = 1L, .row = row_number())
+  ev <- sim$ev
+  init_sy <- sort(unique(ev$sy_row))
+  stopifnot(length(init_sy) >= 2)
+  for (k in seq_along(init_sy)) {
+    n <- init_sy[k]
+    rows <- alts$.row[alts$sy_row == n]
+    free <- setdiff(rows, ev$alt_row[ev$sy_row == n])
+    stopifnot(length(free) >= 2)                      # keeps >= 2 stage-2 rows and >= 1 IV row
+    if (k %% 2 == 1) alts$in_s2[free[1]] <- 0L else alts$in_iv[free[1]] <- 0L
+  }
+  stopifnot(any(alts$in_iv == 0L), any(alts$in_s2 == 0L))
+  iv_only <- alts |> filter(in_iv == 1L) |> select(-in_iv, -in_s2, -.row)
+  s2_rows <- which(alts$in_s2 == 1L)
+  s2_only <- alts[s2_rows, ] |> select(-in_iv, -in_s2, -.row)
+  ev_s2 <- ev |> mutate(alt_row = match(alt_row, s2_rows))
+  stopifnot(!anyNA(ev_s2$alt_row), all(s2_only$sy_row[ev_s2$alt_row] == ev_s2$sy_row))
+  list(sy = sim$sy, alts = alts |> select(-.row), ev = ev, iv_only = iv_only, s2_only = s2_only, ev_s2 = ev_s2,
+       ev_none = ev[0, , drop = FALSE])
+}
+## log density (with Jacobian), gradient and generated log-liks at a fixed init (Fixed_param run, then log_prob)
+eval_fixed_draw <- function(sm, dat, init, threads = 1L) {
+  rstan_options(threads_per_chain = threads)
+  fit <- sampling(sm, data = dat, algorithm = "Fixed_param", chains = 1, iter = 1, warmup = 0, init = list(init), seed = 123, refresh = 0)
+  up <- unconstrain_pars(fit, complete_init(fit, init))
+  lp <- log_prob(fit, up, adjust_transform = TRUE, gradient = TRUE)
+  out <- list(lp = as.numeric(lp), grad = as.numeric(attr(lp, "gradient")),
+              ll1 = as.numeric(rstan::extract(fit, "log_lik_stage1")$log_lik_stage1[1, ]),
+              mu_state = as.numeric(rstan::extract(fit, "mu_state")$mu_state[1, , ]))
+  out$ll2 <- if (dat$E > 0) as.numeric(rstan::extract(fit, "log_lik_stage2")$log_lik_stage2[1, ]) else numeric(0)
+  rstan_options(threads_per_chain = 1)
+  out
+}

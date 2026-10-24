@@ -220,22 +220,35 @@ dispute_date_bounds <- function(disp, dd) {
 ## consecutive years the pair is in the dispute (a pair that leaves and re-enters, e.g. France and Germany in dispute
 ## 258, has two spells; most pairs have one). pair_onset / pair_last are the whole pair's first and last year (the year
 ## rule's quantities), spell_first / spell_last the spell's. The spell's entry interval (start_lo / start_hi) is the
-## dispute's start when the spell begins in the dispute's first year, else the whole first year of the spell; its exit
-## interval (end_lo / end_hi) is the dispute's end bounds when the spell ends in the dispute's last year, else the whole
-## last year of the spell.
-pair_dispute_intervals <- function(dd, db) {
+## dispute's start when the spell begins in the dispute's first year AND both members are originators (orig == 1 in the
+## directed dispute-years; Codex review P1-2, 2026-10-24). When either member is a joiner its entry date within the first
+## year is unknown, so the entry interval is [dispute start, December of y0] with start_exact = FALSE (the month rule's
+## NA then falls back to the year rule). Spells beginning after the dispute's first year get the whole first year of the
+## spell. The exit interval (end_lo / end_hi) is the dispute's end bounds when the spell ends in the dispute's last year,
+## else the whole last year of the spell. both_orig is kept in the output for logging.
+## joiner_entry_unknown = FALSE reproduces the rule before the review (joiner pairs get the exact dispute start); the build
+## uses it only to log the before / after counts.
+pair_dispute_intervals <- function(dd, db, joiner_entry_unknown = TRUE) {
+  stopifnot(all(c("orig1", "orig2") %in% names(dd)))
+  orig <- dd |> group_by(dispnum, ccode1, ccode2) |>
+    summarise(n_orig = n_distinct(orig1 == 1L & orig2 == 1L), both_orig = first(orig1 == 1L & orig2 == 1L), .groups = "drop")
+  if (any(orig$n_orig != 1L)) stop("pair_dispute_intervals: originator status of a pair differs across its dispute-years")
+  stopifnot(!anyNA(orig$both_orig))
   py <- pair_dispute_years(dd) |> arrange(dispnum, ccode1, ccode2, year) |> group_by(dispnum, ccode1, ccode2) |>
     mutate(spell = cumsum(c(1L, diff(year) != 1L)), pair_onset = min(year), pair_last = max(year)) |> ungroup()
   pdi <- py |> group_by(dispnum, ccode1, ccode2, spell, pair_onset, pair_last) |>
     summarise(spell_first = min(year), spell_last = max(year), n_years = n(), .groups = "drop") |>
-    inner_join(db |> select(dispnum, y0, y1, d_start_lo = start_lo, d_start_hi = start_hi, d_end_lo = end_lo, d_end_hi = end_hi), by = "dispnum")
-  stopifnot(all(pdi$n_years == pdi$spell_last - pdi$spell_first + 1L), all(pdi$spell_first >= pdi$y0), all(pdi$spell_last <= pdi$y1))
-  pdi <- pdi |> mutate(start_exact = spell_first == y0 & d_start_lo == d_start_hi,
+    inner_join(db |> select(dispnum, y0, y1, d_start_lo = start_lo, d_start_hi = start_hi, d_end_lo = end_lo, d_end_hi = end_hi), by = "dispnum") |>
+    inner_join(orig |> select(dispnum, ccode1, ccode2, both_orig), by = c("dispnum", "ccode1", "ccode2"))
+  stopifnot(all(pdi$n_years == pdi$spell_last - pdi$spell_first + 1L), all(pdi$spell_first >= pdi$y0), all(pdi$spell_last <= pdi$y1),
+            !anyNA(pdi$both_orig))
+  exact_entry <- if (joiner_entry_unknown) pdi$both_orig else rep(TRUE, nrow(pdi))
+  pdi <- pdi |> mutate(start_exact = spell_first == y0 & d_start_lo == d_start_hi & exact_entry,
                        start_lo = ifelse(spell_first == y0, d_start_lo, ym_index(spell_first, 1L)),
-                       start_hi = ifelse(spell_first == y0, d_start_hi, ym_index(spell_first, 12L)),
+                       start_hi = ifelse(spell_first == y0 & exact_entry, d_start_hi, ym_index(spell_first, 12L)),
                        end_lo = ifelse(spell_last == y1, d_end_lo, ym_index(spell_last, 1L)),
                        end_hi = ifelse(spell_last == y1, d_end_hi, ym_index(spell_last, 12L))) |>
-    select(dispnum, ccode1, ccode2, spell, pair_onset, pair_last, spell_first, spell_last, start_exact, start_lo, start_hi, end_lo, end_hi)
+    select(dispnum, ccode1, ccode2, spell, pair_onset, pair_last, spell_first, spell_last, both_orig, start_exact, start_lo, start_hi, end_lo, end_hi)
   stopifnot(all(pdi$start_lo <= pdi$start_hi), all(pdi$end_lo <= pdi$end_hi), all(pdi$start_lo <= pdi$end_hi), !anyNA(pdi$start_lo), !anyNA(pdi$end_hi),
             all(pdi$spell_first[pdi$spell == 1L] == pdi$pair_onset[pdi$spell == 1L]))
   assert_no_dup_keys(pdi, c("dispnum", "ccode1", "ccode2", "spell"), "pair dispute intervals")
@@ -298,8 +311,11 @@ reference_dates <- function(events) {
 ## already_fighting_keys_month(pdi, ref): directed (ccode1, ccode2, year, dispnum) rows for every pair-dispute and
 ## every year the pair is in it, with drop = TRUE when the pair is already fighting in that dispute at the state-year's
 ## reference date (month rule, year fallback), drop_year = the year rule, fallback flag. The reference date of
-## (ccode1, year) is its row in ref, else January of year. No information from after the reference date is used.
-already_fighting_keys_month <- function(pdi, ref) {
+## (ccode1, year) is its row in ref, else January of year. ref = NULL (Codex review P1-1, 2026-10-24) uses January of
+## year for EVERY state-year: this is the stage-1 IV choice set, which must not depend on the state-year's own events
+## (the reference-date set is the stage-2 set). No information from after the reference date is used.
+already_fighting_keys_month <- function(pdi, ref = NULL) {
+  if (is.null(ref)) ref <- tibble(ccode = integer(0), year = integer(0), ref_lo = integer(0), ref_hi = integer(0))
   stopifnot(all(c("ccode", "year", "ref_lo", "ref_hi") %in% names(ref)))
   keys <- pdi |> rowwise() |> mutate(year = list(seq.int(spell_first, spell_last))) |> ungroup() |> tidyr::unnest(year) |>
     left_join(ref |> rename(ccode1 = ccode), by = c("ccode1", "year")) |>
@@ -310,6 +326,27 @@ already_fighting_keys_month <- function(pdi, ref) {
   stopifnot(!anyNA(keys$drop))
   keys |> select(ccode1, ccode2, year, dispnum, spell, ref_lo, ref_hi, drop, drop_year, fallback)
 }
+## choice_set_flags(alts, af_iv, af_s2) (Codex review P1-1, PI choice "A'", 2026-10-24). alts has one row per
+## (ccode1, ccode2, year); af_iv / af_s2 are the distinct directed (ccode1, ccode2, year) keys already fighting at
+## January (stage-1 IV set) and at the state-year's reference date (stage-2 set). Returns alts with
+##   in_iv : 1 when the row is in the stage-1 IV set (not in af_iv)
+##   in_s2 : 1 when the row is in the stage-2 choice set (not in af_s2)
+## and WITHOUT the rows that are in neither set. One row block per state-year is the UNION of both sets; the Stan
+## programs take IV[n] over the in_iv rows and the stage-2 softmax over the in_s2 rows. For a non-initiating
+## state-year the two sets are identical (the reference date is January in both). in_iv never depends on af_s2.
+choice_set_flags <- function(alts, af_iv, af_s2) {
+  stopifnot(all(c("ccode1", "ccode2", "year") %in% names(alts)), all(c("ccode1", "ccode2", "year") %in% names(af_iv)),
+            all(c("ccode1", "ccode2", "year") %in% names(af_s2)), !any(c("in_iv", "in_s2") %in% names(alts)))
+  assert_no_dup_keys(alts, c("ccode1", "ccode2", "year"), "choice_set_flags: alts")
+  k_alt <- paste(alts$ccode1, alts$ccode2, alts$year)
+  k_iv <- unique(paste(af_iv$ccode1, af_iv$ccode2, af_iv$year)); k_s2 <- unique(paste(af_s2$ccode1, af_s2$ccode2, af_s2$year))
+  out <- alts |> mutate(in_iv = as.integer(!(k_alt %in% k_iv)), in_s2 = as.integer(!(k_alt %in% k_s2)))
+  n_neither <- sum(out$in_iv == 0L & out$in_s2 == 0L)
+  out <- out |> filter(in_iv == 1L | in_s2 == 1L)
+  stopifnot(nrow(out) == nrow(alts) - n_neither, all(out$in_iv %in% 0:1), all(out$in_s2 %in% 0:1), all(out$in_iv == 1L | out$in_s2 == 1L))
+  attr(out, "n_neither") <- n_neither
+  out
+}
 ## collapse_duplicate_events(events): one event per (initiator, target, year) among the non-escalation rows (PI decision
 ## 2026-10-24). Sample flags and codings are ORed, is_joiner_pair is FALSE when any collapsed row is an originator pair,
 ## dispnum keeps the smallest dispute number and dispnums lists them all. Escalation rows are kept as they are. Every
@@ -317,8 +354,11 @@ already_fighting_keys_month <- function(pdi, ref) {
 collapse_duplicate_events <- function(events) {
   key_cols   <- c("initiator", "target", "year")
   same_cols  <- c("sidea1", "sidea2", "target_has_pos_tm1", "fighting_at_ref")               # must agree within a key
+  ## the *_noww2 flags (Codex review P2-3) are the sample flags of the NON-WWII source rows only: ORing them over a key
+  ## that mixes a WWII and a non-WWII dispute keeps the event in the no-WWII sample iff a non-WWII dispute qualifies
   or_cols    <- c("war", "war_disp", "escalation_year", "esc_fallback", "is_ww2", "fatal_main", "fatal_cow", "fatal_ub",
-                  "in_mid", "in_fmid", "in_fmidcow", "in_fmidub", "in_war")                   # never NA
+                  "in_mid", "in_fmid", "in_fmidcow", "in_fmidub", "in_war",
+                  "in_mid_noww2", "in_fmid_noww2", "in_fmidcow_noww2", "in_fmidub_noww2", "in_war_noww2")   # never NA
   tri_cols   <- c("fatal1", "fatal2", "fatal_disp", "fatal", "fatal_mic", "fatal_gml")          # TRUE if any TRUE, NA if all NA
   max_cols   <- c("orig1", "orig2", "fatality1", "fatality2", "hostlev1", "hostlev2", "fatality_disp", "hostlev_disp", "mic_fatalmin")
   min_cols   <- c("dispnum", "ev_start_lo", "ev_start_hi")
@@ -427,13 +467,17 @@ write_manifest <- function(entries, path) {
   write.csv(man, path, row.names = FALSE)
   invisible(man)
 }
-assert_matches_manifest <- function(path, manifest_path) {
-  man <- read.csv(manifest_path, stringsAsFactors = FALSE)
+## manifest may be the path of manifest.csv or a data.frame already read from it (a SNAPSHOT taken earlier; Codex review
+## P2-5: 02_fit_model.R passes the manifest it read at load so that a rebuild between the snapshot and the load is caught)
+assert_matches_manifest <- function(path, manifest) {
+  man <- if (is.data.frame(manifest)) manifest else read.csv(manifest, stringsAsFactors = FALSE)
+  stopifnot(all(c("file", "nrow", "sha256") %in% names(man)))
   row <- man[man$file == basename(path), , drop = FALSE]
   if (nrow(row) != 1) stop("file not in manifest: ", basename(path))
   obj <- readRDS(path)
   if (nrow(obj) != row$nrow) stop(sprintf("%s: nrow %d != manifest %d", basename(path), nrow(obj), row$nrow))
-  if (file_digest(path) != row$sha256) stop(sprintf("%s: sha256 digest does not match manifest", basename(path)))
+  if (file_digest(path) != row$sha256) stop(sprintf("%s: sha256 digest does not match the manifest%s", basename(path),
+                                                    if (is.data.frame(manifest)) " snapshot taken at load (data rebuilt in between?)" else ""))
   obj
 }
 
@@ -443,6 +487,13 @@ assert_matches_manifest <- function(path, manifest_path) {
 ##   alts: alternative rows, one row per (sy_row, target_idx); columns sy_row, target_idx, dM, dR, Z cols
 ##   ev:   events, columns sy_row, alt_row (index into alts after ordering by sy_row)
 ## alts must be sorted by sy_row; every sy row must own >= 1 alternative.
+## Choice-set flags (Codex review P1-1, PI choice "A'", 2026-10-24). alts may carry two 0/1 columns, in_iv (the row is
+## in the state-year's stage-1 IV set, defined at January of t) and in_s2 (the row is in the stage-2 choice set, defined
+## at the state-year's reference date). A state-year's row block is the UNION of both sets; the Stan programs take
+## IV[n] over the in_iv rows and the stage-2 softmax over the in_s2 rows. Absent columns mean both sets are the whole
+## block (the simulator, the tests, every pre-review caller). Every state-year needs >= 1 in_iv row; every event's
+## chosen row needs in_s2 = 1 and its stage-2 set >= 2 rows (a chosen-only set has no information); with sampled = 1
+## the sets are resolved by sample_alternatives() and every row carries in_iv = in_s2 = 1.
 ## prior_mu0_sd: sd of the normal(0, .) prior on the mu intercept mu0 (the population-average ideal gap, in the
 ## units of x; since 2026-10-23 x is a log ratio of CINC shares / PageRank, no longer within-year SD units);
 ## 2 is the README value and was set when x was in SD units (flagged for PI review, not changed here).
@@ -453,22 +504,40 @@ build_stan_data <- function(sy, alts, ev, W_cols, X_cols, Z_cols, joint, sampled
   stopifnot(is.data.frame(sy), is.data.frame(alts), is.data.frame(ev))
   stopifnot(is.numeric(prior_mu0_sd), length(prior_mu0_sd) == 1, is.finite(prior_mu0_sd), prior_mu0_sd > 0)
   sampled <- as.integer(sampled)
+  if (!"in_iv" %in% names(alts)) alts$in_iv <- 1L
+  if (!"in_s2" %in% names(alts)) alts$in_s2 <- 1L
+  alts$in_iv <- as.integer(alts$in_iv); alts$in_s2 <- as.integer(alts$in_s2)
+  stopifnot(!anyNA(alts$in_iv), !anyNA(alts$in_s2), all(alts$in_iv %in% 0:1), all(alts$in_s2 %in% 0:1), all(alts$in_iv == 1L | alts$in_s2 == 1L))
   if (sampled == 1) {
-    ## alts = IV rows (first n_iv, sorted by sy_row) followed by per-event blocks; ev carries ev_start/ev_end
+    ## alts = IV rows (first n_iv, sorted by sy_row) followed by per-event blocks; ev carries ev_start/ev_end.
+    ## sample_alternatives() draws the IV rows from the in_iv set and the event blocks from the in_s2 set, so the flags
+    ## are resolved: every remaining row is in its own set.
     stopifnot(all(c("ev_start", "ev_end") %in% names(ev)), !is.null(n_full))
+    if (!all(alts$in_iv == 1L & alts$in_s2 == 1L)) stop("build_stan_data: with sampled = 1 every row must have in_iv = in_s2 = 1 (use sample_alternatives())")
     n_iv <- min(ev$ev_start) - 1L
     iv_rows <- seq_len(n_iv)
     stopifnot(all(diff(alts$sy_row[iv_rows]) >= 0), all(ev$ev_start > n_iv), all(ev$ev_end <= nrow(alts)),
               all(ev$alt_row >= ev$ev_start & ev$alt_row <= ev$ev_end))
+    if (any(ev$ev_end - ev$ev_start + 1L < 2L)) stop("build_stan_data: an event's sampled set holds only the chosen target")
   } else {
     n_iv <- nrow(alts); iv_rows <- seq_len(n_iv)
     stopifnot(all(diff(alts$sy_row) >= 0))                     # sorted by state-year
   }
-  stopifnot(setequal(unique(alts$sy_row[iv_rows]), seq_len(nrow(sy))))  # every state-year has an IV set
+  stopifnot(setequal(unique(alts$sy_row[iv_rows]), seq_len(nrow(sy))))  # every state-year has a row block
+  ## every state-year has a NON-EMPTY IV set (rows with in_iv = 1)
+  n_iv_sy <- tabulate(alts$sy_row[iv_rows][alts$in_iv[iv_rows] == 1L], nbins = nrow(sy))
+  if (any(n_iv_sy == 0L)) stop(sprintf("build_stan_data: %d state-years have an EMPTY stage-1 IV set (rows exist but none has in_iv = 1)", sum(n_iv_sy == 0L)))
   stopifnot(all(sy$y1 %in% c(0L, 1L)))
   stopifnot(all(ev$sy_row %in% seq_len(nrow(sy))), all(ev$alt_row %in% seq_len(nrow(alts))))
   stopifnot(all(alts$sy_row[ev$alt_row] == ev$sy_row))         # chosen target belongs to the event's state-year
   stopifnot(all(sy$y1[ev$sy_row] == 1L))                        # every event sits in an initiating state-year
+  ## the chosen row is in the stage-2 set, and that set is not the chosen row alone
+  if (any(alts$in_s2[ev$alt_row] != 1L)) stop(sprintf("build_stan_data: %d events have a chosen row outside the stage-2 set (in_s2 = 0)", sum(alts$in_s2[ev$alt_row] != 1L)))
+  if (sampled == 0) {
+    n_s2_sy <- tabulate(alts$sy_row[alts$in_s2 == 1L], nbins = nrow(sy))
+    bad_s2 <- unique(ev$sy_row[n_s2_sy[ev$sy_row] < 2L])
+    if (length(bad_s2)) stop(sprintf("build_stan_data: %d initiating state-years have an EMPTY or CHOSEN-ONLY stage-2 set (< 2 rows with in_s2 = 1)", length(bad_s2)))
+  }
   n_orphan <- sum(sy$y1[setdiff(seq_len(nrow(sy)), ev$sy_row)] == 1L)
   ## y1 == 1 without a stage-2 event happens in real data when the only target lacks positions;
   ## the simulator never produces it, so it is an error unless explicitly allowed.
@@ -476,13 +545,13 @@ build_stan_data <- function(sy, alts, ev, W_cols, X_cols, Z_cols, joint, sampled
   S_data <- max(c(sy$state_idx, alts$target_idx))
   if (is.null(S)) S <- S_data else stopifnot(S >= S_data)   # override keeps one index space across subsets
   cs <- alts[iv_rows, , drop = FALSE] |> mutate(row = row_number()) |> group_by(sy_row) |>
-    summarise(s = min(row), e = max(row), n = n(), .groups = "drop") |> arrange(sy_row)
-  stopifnot(all(cs$e - cs$s + 1 == cs$n))
-  if (is.null(n_full)) n_full <- cs$n
-  stopifnot(length(n_full) == nrow(sy), all(n_full >= cs$n))
+    summarise(s = min(row), e = max(row), n = n(), n_iv = sum(in_iv), .groups = "drop") |> arrange(sy_row)
+  stopifnot(all(cs$e - cs$s + 1 == cs$n), all(cs$n_iv >= 1L))
+  if (is.null(n_full)) n_full <- cs$n_iv                        # full IV-set size (the sampling correction's numerator)
+  stopifnot(length(n_full) == nrow(sy), all(n_full >= cs$n_iv))
   if (sampled == 1) { ev_start <- as.integer(ev$ev_start); ev_end <- as.integer(ev$ev_end) }
   else { ev_start <- as.integer(cs$s[ev$sy_row]); ev_end <- as.integer(cs$e[ev$sy_row]) }
-  stopifnot(all(ev$alt_row >= ev_start & ev$alt_row <= ev_end))  # chosen target inside the event's own set
+  stopifnot(all(ev$alt_row >= ev_start & ev$alt_row <= ev_end))  # chosen target inside the event's own block
   if (is.null(x_ref)) x_ref <- colMeans(as.matrix(sy[, X_cols, drop = FALSE]))
   W <- as.matrix(sy[, W_cols, drop = FALSE]); X <- as.matrix(sy[, X_cols, drop = FALSE])
   Z <- as.matrix(alts[, Z_cols, drop = FALSE])
@@ -494,6 +563,7 @@ build_stan_data <- function(sy, alts, ev, W_cols, X_cols, Z_cols, joint, sampled
               W = W, X = X,
               cs_start = as.integer(cs$s), cs_end = as.integer(cs$e), n_full = as.integer(n_full),
               alt_target = as.integer(alts$target_idx), x = cbind(alts$dM, alts$dR), Z = Z,
+              in_iv = as.integer(alts$in_iv), in_s2 = as.integer(alts$in_s2),
               ev_sy = as.integer(ev$sy_row), ev_row = as.integer(ev$alt_row), ev_start = ev_start, ev_end = ev_end,
               joint = as.integer(joint), sampled = sampled,
               x_ref = as.numeric(x_ref), prior_beta_sd = prior_beta_sd, prior_mu0_sd = prior_mu0_sd,
@@ -529,20 +599,27 @@ choose_anchors <- function(sy, ev, K, S = max(sy$state_idx)) {
 ##                events of one state-year never share an outcome-dependent set).
 ## Returns list(alts = IV rows then event rows (sorted), ev with alt_row / ev_start / ev_end into
 ## the event block, n_full per state-year, n_iv = number of IV rows).
+## Choice-set flags (Codex review P1-1): the IV rows are drawn from the state-year's in_iv rows (n_full counts them),
+## the event blocks from its in_s2 rows; absent flags mean the whole block. The output rows carry in_iv = in_s2 = 1
+## because every row is then in the set it was drawn for.
 ## Full choice sets (m = 0 / sampled = 0) are the main specification; this is an option only.
 sample_alternatives <- function(alts, ev, m, seed = V2_SEED) {
   stopifnot(m >= 1, all(diff(alts$sy_row) >= 0))
+  if (!"in_iv" %in% names(alts)) alts$in_iv <- 1L
+  if (!"in_s2" %in% names(alts)) alts$in_s2 <- 1L
+  stopifnot(all(alts$in_iv %in% 0:1), all(alts$in_s2 %in% 0:1), all(alts$in_iv == 1L | alts$in_s2 == 1L))
   set.seed(seed)
   alts <- alts |> mutate(.row = row_number())
-  ## (i) IV rows: uniform m per state-year, outcome-blind
-  iv <- alts |> group_by(sy_row) |> mutate(.u = runif(n()), .rank = rank(.u, ties.method = "first")) |>
+  ## (i) IV rows: uniform m per state-year from the IV set, outcome-blind
+  iv <- alts |> filter(in_iv == 1L) |> group_by(sy_row) |> mutate(.u = runif(n()), .rank = rank(.u, ties.method = "first")) |>
     filter(.rank <= m) |> ungroup() |> arrange(sy_row, .row) |> select(-.u, -.rank)
-  n_full <- alts |> count(sy_row) |> arrange(sy_row) |> pull(n)
-  stopifnot(length(n_full) == length(unique(alts$sy_row)))
-  ## (ii) event rows: per event, chosen + m others from the same state-year's full set
+  n_full <- alts |> filter(in_iv == 1L) |> count(sy_row) |> arrange(sy_row) |> pull(n)
+  stopifnot(length(n_full) == length(unique(alts$sy_row)), setequal(unique(iv$sy_row), unique(alts$sy_row)))
+  ## (ii) event rows: per event, chosen + m others from the same state-year's stage-2 set
+  if (any(alts$in_s2[ev$alt_row] != 1L)) stop("sample_alternatives: a chosen row is not in the stage-2 set (in_s2 = 0)")
   ev_blocks <- vector("list", nrow(ev))
   for (e in seq_len(nrow(ev))) {
-    rows_n <- alts$.row[alts$sy_row == ev$sy_row[e]]
+    rows_n <- alts$.row[alts$sy_row == ev$sy_row[e] & alts$in_s2 == 1L]
     others <- setdiff(rows_n, ev$alt_row[e])
     pick <- if (length(others) > m) sample(others, m) else others
     blk <- alts[c(ev$alt_row[e], sort(pick)), , drop = FALSE]
@@ -559,6 +636,7 @@ sample_alternatives <- function(alts, ev, m, seed = V2_SEED) {
   stopifnot(all(out_alts$sy_row[ev2$alt_row] == ev2$sy_row),
             all(out_alts$.row[ev2$alt_row] == alts$.row[ev$alt_row]),            # same chosen target as before
             all(ev2$ev_end >= ev2$ev_start), all(ev2$ev_start > n_iv))
+  out_alts$in_iv <- 1L; out_alts$in_s2 <- 1L                                       # resolved: every row is in the set it was drawn for
   list(alts = out_alts |> select(-.row, -.event), ev = ev2, n_full = n_full, n_iv = n_iv)
 }
 
@@ -566,11 +644,15 @@ sample_alternatives <- function(alts, ev, m, seed = V2_SEED) {
 ## pars: list(mu0 (D), beta (P x D), a_i (S x D), b_j (S), gamma (Pz), sigma_x (D), rho, U (S x K) or NULL, V)
 ## D = 2 when dat$D_mode == 3; D = 1 uses column dat$D_mode of x (1 = dM, 2 = dR).
 ## mu = mu0 + X beta + a_i; mu0 is required (no silent zero default) so a caller that forgets it fails here.
+## lse[n] is over the state-year's in_iv rows, the event softmax over its in_s2 rows (sampled = 0) or the event's own
+## block (sampled = 1); dat$in_iv / dat$in_s2 are required (build_stan_data() always writes them).
 stage2_loglik_R <- function(dat, pars) {
   D <- if (dat$D_mode == 3L) 2L else 1L
   xcols <- if (D == 2L) 1:2 else dat$D_mode
   if (is.null(pars$mu0)) stop("stage2_loglik_R: pars$mu0 (length D intercept of mu) is missing")
   stopifnot(length(pars$mu0) == D, all(is.finite(pars$mu0)))
+  if (is.null(dat$in_iv) || is.null(dat$in_s2)) stop("stage2_loglik_R: dat$in_iv / dat$in_s2 are missing (build the data with build_stan_data())")
+  stopifnot(length(dat$in_iv) == dat$N2, length(dat$in_s2) == dat$N2)
   Mu <- rep(1, dat$N1) %o% as.numeric(pars$mu0) +
     dat$X %*% matrix(pars$beta, ncol = D) + matrix(pars$a_i, ncol = D)[dat$sy_state, , drop = FALSE]
   zg <- if (dat$Pz > 0) as.numeric(dat$Z %*% pars$gamma) else rep(0, dat$N2)
@@ -587,12 +669,16 @@ stage2_loglik_R <- function(dat, pars) {
   for (n in seq_len(dat$N1)) {
     rows <- dat$cs_start[n]:dat$cs_end[n]
     for (r in rows) util[r] <- one_util(r, n)
-    lse[n] <- log(sum(exp(util[rows])))
+    rows_iv <- rows[dat$in_iv[rows] == 1L]
+    stopifnot(length(rows_iv) >= 1)
+    lse[n] <- log(sum(exp(util[rows_iv])))
   }
   loglik <- numeric(dat$E)
   for (e in seq_len(dat$E)) {
     rows <- dat$ev_start[e]:dat$ev_end[e]
     if (dat$sampled == 1) for (r in rows) util[r] <- one_util(r, dat$ev_sy[e])
+    else rows <- rows[dat$in_s2[rows] == 1L]
+    stopifnot(dat$ev_row[e] %in% rows)
     loglik[e] <- util[dat$ev_row[e]] - log(sum(exp(util[rows])))
   }
   list(loglik = loglik, lse = lse, util = util)

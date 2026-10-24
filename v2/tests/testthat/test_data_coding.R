@@ -696,16 +696,23 @@ test_that("war is pair-level: dispute war-level AND at least one participant at 
   expect_true(code_events(dd2, mk_disp(90L, 0L, 5L, 1970L, 4L, 400))$war)
 })
 
+## the extra columns the build adds after code_events() and before the collapse (so that collapse_duplicate_events() sees
+## every column it classifies): COW-only / upper-bound codings, the source string, the no-WWII sample flags (review P2-3)
+add_collapse_cols <- function(ev, ww2_disputes = integer(0)) {
+  ev |> mutate(is_ww2 = dispnum %in% ww2_disputes, fatal_cow = fatal %in% TRUE, fatal_ub = fatal_main | (is.na(fatal) & is.na(fatal_mic) & is.na(fatal_gml)),
+               fatal_source = ifelse(fatal %in% TRUE, "cow", "missing_nonfatal"), target_has_pos_tm1 = TRUE, fighting_at_ref = FALSE,
+               in_mid_noww2 = in_mid & !is_ww2, in_fmid_noww2 = in_fmid & !is_ww2, in_fmidcow_noww2 = in_fmidcow & !is_ww2,
+               in_fmidub_noww2 = in_fmidub & !is_ww2, in_war_noww2 = in_war & !is_ww2) |>
+    select(-hostlev_disp, -fatality_disp, -hostlev1, -hostlev2, -fatality1, -fatality2, hostlev1, hostlev2, fatality1, fatality2, hostlev_disp, fatality_disp)
+}
 test_that("same-year duplicates collapse into one event per (initiator, target, year) with ORed flags; escalations untouched", {
-  ## 10 -> 20 twice in 1990 (disputes 80, January, 10 days, and 81, May, 60 days); 81 is not an escalation under the month rule
-  ## (80 ended in January); one is fatal + war. 82 (June) starts while 81 is active -> escalation, kept as its own row
-  dd <- bind_rows(mk_dd(80L, 10L, 20L, 1990L), mk_dd(81L, 10L, 20L, 1990L, orig_b = 0L) |> mutate(hostlev1 = 5L, hostlev2 = 5L, fatality1 = 5L),
+  ## 10 -> 20 twice in 1990 (disputes 80, January, 10 days, a joiner pair, and 81, May, 60 days, originators); 81 is not an
+  ## escalation under the month rule (80 ended in January for sure: the joiner pair's entry is unknown within 1990 but its end is
+  ## January); one is fatal + war. 82 (June) starts while 81 is active -> escalation, kept as its own row
+  dd <- bind_rows(mk_dd(80L, 10L, 20L, 1990L, orig_b = 0L), mk_dd(81L, 10L, 20L, 1990L) |> mutate(hostlev1 = 5L, hostlev2 = 5L, fatality1 = 5L),
                   mk_dd(82L, 10L, 20L, 1990L), mk_dd(83L, 11L, 20L, 1990L))
   disp <- bind_rows(mk_disp(80L, 0L, 3L, 1990L, 1L, 10), mk_disp(81L, 5L, 5L, 1990L, 5L, 60), mk_disp(82L, 0L, 3L, 1990L, 6L, 100), mk_disp(83L, 0L, 3L, 1990L, 7L, 5))
-  ev <- code_events(dd, disp, include_joiners = TRUE) |>
-    mutate(is_ww2 = dispnum == 82L, fatal_cow = fatal %in% TRUE, fatal_ub = fatal_main | (is.na(fatal) & is.na(fatal_mic) & is.na(fatal_gml)),
-           fatal_source = ifelse(fatal %in% TRUE, "cow", "missing_nonfatal"), target_has_pos_tm1 = TRUE, fighting_at_ref = FALSE) |>
-    select(-hostlev_disp, -fatality_disp, -hostlev1, -hostlev2, -fatality1, -fatality2, hostlev1, hostlev2, fatality1, fatality2, hostlev_disp, fatality_disp)
+  ev <- code_events(dd, disp, include_joiners = TRUE) |> add_collapse_cols(ww2_disputes = 82L)
   expect_equal(nrow(ev), 4L)
   expect_true(ev$escalation[ev$dispnum == 82L])                   # 82 (June) starts while 81 (May, 60 days) is active -> escalation
   expect_false(ev$escalation[ev$dispnum == 81L])                  # 80 ended in January
@@ -714,15 +721,40 @@ test_that("same-year duplicates collapse into one event per (initiator, target, 
   k <- out |> filter(initiator == 10L, target == 20L, !escalation)
   expect_equal(nrow(k), 1L); expect_equal(k$dispnum, 80L); expect_equal(k$dispnums, "80;81"); expect_equal(k$n_disputes, 2L)
   expect_true(k$in_mid); expect_true(k$in_fmid); expect_true(k$in_war); expect_true(k$war); expect_true(k$fatal_main); expect_true(k$is_ww2 == FALSE)
-  expect_false(k$is_joiner_pair)                                  # 80 is an originator pair, 81 a joiner pair -> not a joiner pair
+  expect_false(k$is_joiner_pair)                                  # 80 is a joiner pair, 81 an originator pair -> not a joiner pair
   expect_equal(k$fatal_source, "cow;missing_nonfatal"); expect_equal(k$hostlev1, 5); expect_equal(k$ev_start_lo, ym_index(1990L, 1L))
+  expect_true(k$in_mid_noww2); expect_true(k$in_war_noww2)        # neither dispute is WWII
   esc <- out |> filter(escalation); expect_equal(esc$dispnum, 82L); expect_equal(esc$dispnums, "82"); expect_equal(esc$n_disputes, 1L); expect_true(esc$is_ww2)
   expect_equal(out$dispnums[out$initiator == 11L], "83")
   expect_error(collapse_duplicate_events(ev |> mutate(extra = 1)), "unclassified")
   expect_error(collapse_duplicate_events(ev |> select(-in_war)), "absent")
+  expect_error(collapse_duplicate_events(ev |> select(-in_war_noww2)), "absent")
   expect_error(collapse_duplicate_events(ev |> mutate(target_has_pos_tm1 = dispnum == 80L)), "differs")
   ## one chosen alternative per (i, j, t) afterwards
   expect_equal(nrow(out |> filter(!escalation) |> count(initiator, target, year) |> filter(n > 1)), 0L)
+})
+
+test_that("review P2-3: a collapsed key mixing a WWII and a non-WWII dispute keeps the no-WWII flags of the non-WWII dispute only", {
+  ## 10 -> 20 in 1990 through dispute 80 (January, 10 days, non-fatal, hostlev 3) and dispute 81 (May, war-level, fatal), 81 a WWII
+  ## dispute in this toy; 11 -> 20 through the WWII dispute 81 alone; 12 -> 20 through the non-WWII dispute 83 alone
+  dd <- bind_rows(mk_dd(80L, 10L, 20L, 1990L), mk_dd(81L, 10L, 20L, 1990L) |> mutate(hostlev1 = 5L, hostlev2 = 5L, fatality1 = 5L),
+                  mk_dd(81L, 11L, 20L, 1990L) |> mutate(hostlev1 = 5L, hostlev2 = 5L, fatality1 = 5L), mk_dd(83L, 12L, 20L, 1990L))
+  disp <- bind_rows(mk_disp(80L, 0L, 3L, 1990L, 1L, 10), mk_disp(81L, 5L, 5L, 1990L, 5L, 60), mk_disp(83L, 0L, 3L, 1990L, 7L, 5))
+  ev <- code_events(dd, disp, include_joiners = TRUE) |> add_collapse_cols(ww2_disputes = 81L)
+  expect_false(any(ev$escalation))
+  ## before the collapse the no-WWII flag is the sample flag of the non-WWII rows
+  expect_equal(ev$in_mid_noww2, !ev$is_ww2); expect_equal(ev$in_fmid_noww2[ev$dispnum == 81L], c(FALSE, FALSE))
+  out <- collapse_duplicate_events(ev)
+  k <- out |> filter(initiator == 10L)
+  expect_equal(k$dispnums, "80;81"); expect_true(k$is_ww2)                     # the ORed WWII flag marks the mixed key
+  expect_true(k$in_mid); expect_true(k$in_fmid); expect_true(k$in_war)        # the sample flags take the WWII dispute's fatal / war coding
+  expect_true(k$in_mid_noww2)                                                 # the non-WWII dispute 80 qualifies for mid ...
+  expect_false(k$in_fmid_noww2); expect_false(k$in_war_noww2)                  # ... but is neither fatal nor war: no WWII coding leaks in
+  expect_false(k$in_mid & !k$is_ww2)                                          # the old rule in_mid & !is_ww2 would have dropped the event
+  k11 <- out |> filter(initiator == 11L); expect_true(k11$in_mid); expect_false(k11$in_mid_noww2)      # pure WWII: dropped
+  k12 <- out |> filter(initiator == 12L); expect_true(k12$in_mid_noww2); expect_equal(k12$in_mid_noww2, k12$in_mid & !k12$is_ww2)   # pure non-WWII: unchanged
+  ## the flag is always a subset of the sample flag
+  for (s in c("mid", "fmid", "fmidcow", "fmidub", "war")) expect_true(all(out[[paste0("in_", s, "_noww2")]] <= out[[paste0("in_", s)]]))
 })
 
 test_that("control sets: minimal main W / X / Z, and --full_controls restores the previous specification exactly", {
@@ -732,13 +764,39 @@ test_that("control sets: minimal main W / X / Z, and --full_controls restores th
   expect_false("cowmaj_tm1" %in% w_controls()); expect_false("log_peace_years" %in% w_controls())
   expect_equal(z_columns(), c("contig_land", "joint_dem", "log_dy_prior_mids", "dy_mid_tm1", "dM_j_h", "dRpr_j_h"))
   expect_false(any(c("alliance_def_off", "major_count") %in% z_columns()))
-  ## the full set is the pre-2026-10-24 main specification
-  old_ctrl <- c("cowmaj_tm1", "dem_tm1", "ongoing_tm1", "log_prior_mids", "log_peace_years")
-  expect_equal(w_controls(FULL_CONTROLS = TRUE), old_ctrl); expect_equal(x_controls(FULL_CONTROLS = TRUE), old_ctrl)
-  expect_equal(w_controls(CONFLICT_HISTORY = FALSE, FULL_CONTROLS = TRUE), c("cowmaj_tm1", "dem_tm1", "ongoing_tm1"))
-  expect_equal(z_columns(FULL_CONTROLS = TRUE), c("contig_land", "alliance_def_off", "joint_dem", "major_count", "log_dy_prior_mids", "dy_mid_tm1", "dM_j_h", "dRpr_j_h"))
-  expect_equal(z_columns(FULL_CONTROLS = TRUE, DY_PEACE_YEARS = TRUE), c("contig_land", "alliance_def_off", "joint_dem", "major_count", "log_dy_prior_mids", "dy_mid_tm1",
-                                                                         "log_dy_peace_years", "dM_j_h", "dRpr_j_h"))
+  ## --full_controls (review P2-4) is EXACTLY the base specification of commit 8bf0ce1 (git show 8bf0ce1:v2/R/assemble_cell.R):
+  ##   ctrl_sy <- c("cowmaj_tm1", "dem_tm1", if (CONFLICT_HISTORY) c("log_prior_mids", "log_peace_years")); W_cols = X_cols = dM_i, dR_i, ctrl_sy
+  ##   z_columns: c(if (CONTIGUITY) "contig_land", "alliance_def_off", "joint_dem", "major_count",
+  ##               if (CONFLICT_HISTORY) c("log_dy_prior_mids", "log_dy_peace_years"), if (DISTANCE) "log_capdist", "dM_j_h", "dRpr_j_h", if (TARGET_MISSING) "dch_j_missing")
+  ## (no ongoing_tm1 in W / X, no dy_mid_tm1 in Z: both postdate 8bf0ce1)
+  base_ctrl <- c("cowmaj_tm1", "dem_tm1", "log_prior_mids", "log_peace_years")
+  base_z <- function(CONFLICT_HISTORY = TRUE, DISTANCE = FALSE, CONTIGUITY = TRUE, TARGET_MISSING = FALSE)
+    c(if (CONTIGUITY) "contig_land", "alliance_def_off", "joint_dem", "major_count", if (CONFLICT_HISTORY) c("log_dy_prior_mids", "log_dy_peace_years"),
+      if (DISTANCE) "log_capdist", "dM_j_h", "dRpr_j_h", if (TARGET_MISSING) "dch_j_missing")
+  expect_equal(w_controls(FULL_CONTROLS = TRUE), base_ctrl); expect_equal(x_controls(FULL_CONTROLS = TRUE), base_ctrl)
+  expect_equal(c("dM_i", "dR_i", w_controls(FULL_CONTROLS = TRUE)), c("dM_i", "dR_i", "cowmaj_tm1", "dem_tm1", "log_prior_mids", "log_peace_years"))
+  expect_equal(w_controls(CONFLICT_HISTORY = FALSE, FULL_CONTROLS = TRUE), c("cowmaj_tm1", "dem_tm1")); expect_equal(x_controls(CONFLICT_HISTORY = FALSE, FULL_CONTROLS = TRUE), c("cowmaj_tm1", "dem_tm1"))
+  expect_false("ongoing_tm1" %in% w_controls(FULL_CONTROLS = TRUE)); expect_false("dy_mid_tm1" %in% z_columns(FULL_CONTROLS = TRUE))
+  for (ch in c(TRUE, FALSE)) for (di in c(TRUE, FALSE)) for (co in c(TRUE, FALSE)) for (tm in c(TRUE, FALSE))
+    expect_equal(z_columns(ch, di, co, TARGET_MISSING = tm, FULL_CONTROLS = TRUE), base_z(ch, di, co, tm))
+  expect_equal(z_columns(FULL_CONTROLS = TRUE), c("contig_land", "alliance_def_off", "joint_dem", "major_count", "log_dy_prior_mids", "log_dy_peace_years", "dM_j_h", "dRpr_j_h"))
+  ## under the full set the dyadic peace years are already in Z when CONFLICT_HISTORY is on; --dy_peace_years adds nothing then and
+  ## restores the column at its base position when CONFLICT_HISTORY is off
+  expect_equal(z_columns(FULL_CONTROLS = TRUE, DY_PEACE_YEARS = TRUE), z_columns(FULL_CONTROLS = TRUE))
+  expect_equal(z_columns(CONFLICT_HISTORY = FALSE, FULL_CONTROLS = TRUE, DY_PEACE_YEARS = TRUE), c("contig_land", "alliance_def_off", "joint_dem", "major_count", "log_dy_peace_years", "dM_j_h", "dRpr_j_h"))
+  ## the lists against the base commit itself when the git history is available
+  src_base <- tryCatch(suppressWarnings(system2("git", c("-C", v2_root(), "show", "8bf0ce1:v2/R/assemble_cell.R"), stdout = TRUE, stderr = FALSE)), error = function(e) character(0))
+  if (length(src_base) > 10) {
+    expect_true(any(grepl('ctrl_sy <- c("cowmaj_tm1", "dem_tm1", if (CONFLICT_HISTORY) c("log_prior_mids", "log_peace_years"))', src_base, fixed = TRUE)))
+    expect_true(any(grepl('X_cols <- c("dM_i", "dR_i", ctrl_sy)', src_base, fixed = TRUE))); expect_true(any(grepl('W_cols <- c("dM_i", "dR_i", ctrl_sy)', src_base, fixed = TRUE)))
+    expect_true(any(grepl('c(if (CONTIGUITY) "contig_land", "alliance_def_off", "joint_dem", "major_count",', src_base, fixed = TRUE)))
+    expect_true(any(grepl('if (CONFLICT_HISTORY) c("log_dy_prior_mids", "log_dy_peace_years"),', src_base, fixed = TRUE)))
+    expect_false(any(grepl("ongoing_tm1", src_base, fixed = TRUE))); expect_false(any(grepl("dy_mid_tm1", src_base, fixed = TRUE)))
+    ## evaluate the base z_columns() itself and compare the full ordered list for every flag combination
+    env_base <- new.env(); eval(parse(text = src_base[grep("^z_columns <- function", src_base):grep("^}", src_base)[which(grep("^}", src_base) > grep("^z_columns <- function", src_base))[1]]]), envir = env_base)
+    for (ch in c(TRUE, FALSE)) for (di in c(TRUE, FALSE)) for (co in c(TRUE, FALSE)) for (tm in c(TRUE, FALSE))
+      expect_equal(z_columns(ch, di, co, TARGET_MISSING = tm, FULL_CONTROLS = TRUE), env_base$z_columns(ch, di, co, TARGET_MISSING = tm))
+  }   # without the git history the hard-coded base lists above are the check
   ## the option flags combine with either control set the same way
   for (fc in c(TRUE, FALSE)) {
     expect_false("contig_land" %in% z_columns(CONTIGUITY = FALSE, FULL_CONTROLS = fc))
@@ -753,4 +811,284 @@ test_that("control sets: minimal main W / X / Z, and --full_controls restores th
   expect_true(any(grepl('get_arg("full_controls", FALSE)', src, fixed = TRUE))); expect_true(any(grepl('"_fullctrl"', src, fixed = TRUE)))
   expect_true(any(grepl("manifest_at_load", src, fixed = TRUE))); expect_true(any(grepl("SLURM_ARRAY_TASK_ID", src, fixed = TRUE)))
   expect_true(any(grepl("manifest.csv changed while sampling", src, fixed = TRUE)))
+})
+
+## ---- Codex review fixes (2026-10-24): joiner entry month (P1-2), two choice sets (P1-1), no-WWII flags (P2-3), base control
+## ---- set (P2-4), manifest snapshot (P2-5), empty / chosen-only sets --------------------------------------------------------------
+test_that("P1-2 same-year joiner: a pair with a joiner entering in the dispute's first year has entry interval [dispute start, December]", {
+  ## dispute 90: 10 (A, originator) vs 20 (B, originator) from 1990-03 for 400 days (into 1991); 30 joins Side B in 1990 (orig 0)
+  ## dispute 91: 10 -> 30 in 1990-07; dispute 92: 10 -> 30 in 1991-02
+  dd <- bind_rows(mk_dd(90L, 10L, 20L, 1990:1991), mk_dd(90L, 10L, 30L, 1990:1991, orig_b = 0L), mk_dd(91L, 10L, 30L, 1990L), mk_dd(92L, 10L, 30L, 1991L))
+  disp <- bind_rows(mk_disp(90L, 0L, 3L, 1990L, 3L, 400), mk_disp(91L, 0L, 3L, 1990L, 7L, 5), mk_disp(92L, 0L, 3L, 1991L, 2L, 5))
+  db <- dispute_date_bounds(disp, dd)
+  pdi <- pair_dispute_intervals(dd, db)
+  p_orig <- pdi |> filter(dispnum == 90L, ccode1 == 10L, ccode2 == 20L); p_join <- pdi |> filter(dispnum == 90L, ccode1 == 10L, ccode2 == 30L)
+  expect_true(p_orig$both_orig); expect_true(p_orig$start_exact); expect_equal(c(p_orig$start_lo, p_orig$start_hi), rep(ym_index(1990L, 3L), 2))
+  expect_false(p_join$both_orig); expect_false(p_join$start_exact)
+  expect_equal(c(p_join$start_lo, p_join$start_hi), c(ym_index(1990L, 3L), ym_index(1990L, 12L)))   # [dispute start, December of y0]
+  expect_equal(p_join$spell_first, 1990L); expect_equal(c(p_join$end_lo, p_join$end_hi), c(p_orig$end_lo, p_orig$end_hi))   # exit bounds unchanged
+  ## both directions of the joiner pair carry the widened entry
+  p_rev <- pdi |> filter(dispnum == 90L, ccode1 == 30L, ccode2 == 10L); expect_equal(c(p_rev$start_lo, p_rev$start_hi), c(p_join$start_lo, p_join$start_hi))
+  ## the pre-review rule gave the joiner pair the exact start month
+  pdi_old <- pair_dispute_intervals(dd, db, joiner_entry_unknown = FALSE)
+  p_join_old <- pdi_old |> filter(dispnum == 90L, ccode1 == 10L, ccode2 == 30L)
+  expect_true(p_join_old$start_exact); expect_equal(c(p_join_old$start_lo, p_join_old$start_hi), rep(ym_index(1990L, 3L), 2))
+  expect_identical(pdi_old$start_lo, pdi$start_lo); expect_identical(pdi_old$end_hi, pdi$end_hi)
+  ## escalation flags follow: 91 (July 1990) against the joiner pair's dispute 90 is undecided (entry somewhere in March..December)
+  ## -> year fallback (onset 1990 is not before 1990) -> NOT an escalation, flagged as a fallback decision; the old rule called it an
+  ## escalation (March < July, still active). 92 (February 1991): the 1990 entry is certainly before and 90 is certainly active -> escalation
+  ev <- code_events(dd, disp, include_joiners = TRUE)
+  e91 <- ev |> filter(dispnum == 91L); e92 <- ev |> filter(dispnum == 92L)
+  expect_false(e91$escalation); expect_true(e91$esc_fallback); expect_false(e91$escalation_year)
+  expect_true(e92$escalation); expect_false(e92$esc_fallback)
+  ev_old <- flag_escalations_month(ev |> select(initiator, target, year, dispnum), pdi_old)
+  expect_true(ev_old$escalation[ev_old$dispnum == 91L]); expect_true(ev_old$escalation[ev_old$dispnum == 92L])
+  ## the joiner pair's own event in 90 has the widened date interval
+  e90j <- ev |> filter(dispnum == 90L, target == 30L); expect_equal(c(e90j$ev_start_lo, e90j$ev_start_hi), c(ym_index(1990L, 3L), ym_index(1990L, 12L)))
+  ## originator status must not differ across a pair's dispute-years
+  expect_error(pair_dispute_intervals(dd |> mutate(orig2 = ifelse(dispnum == 90L & ccode2 == 30L & year == 1991L, 1L, orig2)), db), "originator status")
+  expect_error(pair_dispute_intervals(dd |> select(-orig1), db))
+})
+
+## toy for the two choice sets: dispute X = 10 (A) vs 20 (B), 1989-11 for 120 days (ends 1990-02/03, so a 1990 row exists);
+## dispute Z = 40 (A) vs 10 (B), 1990-04 for 200 days (ends 1990-10/11); dispute Y = 10 (A) vs 30 (B) in 1990, start month per scenario
+two_set_toy <- function(y_month) {
+  dd <- bind_rows(mk_dd(1L, 10L, 20L, 1989:1990), mk_dd(2L, 40L, 10L, 1990L), if (!is.null(y_month)) mk_dd(3L, 10L, 30L, 1990L))
+  disp <- bind_rows(mk_disp(1L, 0L, 3L, 1989L, 11L, 120), mk_disp(2L, 0L, 3L, 1990L, 4L, 200), if (!is.null(y_month)) mk_disp(3L, 0L, 3L, 1990L, y_month, 5))
+  ev <- code_events(dd, disp, include_joiners = TRUE)
+  pdi <- pair_dispute_intervals(dd, dispute_date_bounds(disp, dd))
+  ref <- reference_dates(ev)
+  af_iv <- already_fighting_keys_month(pdi, NULL) |> filter(drop) |> distinct(ccode1, ccode2, year)
+  af_s2 <- already_fighting_keys_month(pdi, ref) |> filter(drop) |> distinct(ccode1, ccode2, year)
+  grid <- tidyr::expand_grid(ccode1 = c(10L, 20L, 40L), year = 1990L, ccode2 = c(10L, 20L, 30L, 40L)) |> filter(ccode1 != ccode2)
+  list(ev = ev, ref = ref, af_iv = af_iv, af_s2 = af_s2, alts = choice_set_flags(grid, af_iv, af_s2))
+}
+test_that("P1-1 regression: changing or adding a state-year's events never changes its stage-1 IV row set; only the stage-2 set moves", {
+  A <- two_set_toy(6L)        # 10's earliest 1990 event in June: X has ended (20 back in the stage-2 set), Z is active (40 out of it)
+  B <- two_set_toy(NULL)      # 10 has no 1990 event: reference January, both sets identical
+  C <- two_set_toy(2L)        # 10's event in February: X's end straddles February -> undecided -> year rule drops 20 from the stage-2 set too
+  iv_rows <- function(S) S$alts |> filter(ccode1 == 10L, in_iv == 1L) |> pull(ccode2) |> sort()
+  s2_rows <- function(S) S$alts |> filter(ccode1 == 10L, in_s2 == 1L) |> pull(ccode2) |> sort()
+  ## the IV set of (10, 1990) is {30, 40} in every scenario (20 is fighting 10 at January in dispute X; Z has not started)
+  expect_equal(iv_rows(A), c(30L, 40L)); expect_equal(iv_rows(B), c(30L, 40L)); expect_equal(iv_rows(C), c(30L, 40L))
+  expect_identical(A$af_iv, B$af_iv); expect_identical(A$af_iv, C$af_iv)                    # the January keys never see the events
+  ## the stage-2 set does depend on the reference date
+  expect_equal(s2_rows(A), c(20L, 30L)); expect_equal(s2_rows(B), c(30L, 40L)); expect_equal(s2_rows(C), c(30L, 40L))
+  expect_equal(A$ref$ref_lo[A$ref$ccode == 10L & A$ref$year == 1990L], ym_index(1990L, 6L)); expect_equal(nrow(B$ref |> filter(ccode == 10L, year == 1990L)), 0L)
+  ## row flags in scenario A: 20 is stage-2 only, 40 is IV only, 30 in both; in B and C the two sets coincide and 20 has no row
+  a10 <- A$alts |> filter(ccode1 == 10L) |> arrange(ccode2)
+  expect_equal(a10$ccode2, c(20L, 30L, 40L)); expect_equal(a10$in_iv, c(0L, 1L, 1L)); expect_equal(a10$in_s2, c(1L, 1L, 0L))
+  for (S in list(B, C)) { a <- S$alts |> filter(ccode1 == 10L); expect_equal(sort(a$ccode2), c(30L, 40L)); expect_true(all(a$in_iv == 1L & a$in_s2 == 1L)) }
+  expect_equal(attr(A$alts, "n_neither"), 1L); expect_equal(attr(B$alts, "n_neither"), 2L)   # (20, 10) for 20 in every scenario; (10, 20) in B and C
+  ## non-initiating state-years always have identical sets: 20 never initiates
+  for (S in list(A, B, C)) { a <- S$alts |> filter(ccode1 == 20L); expect_true(all(a$in_iv == a$in_s2)); expect_false(10L %in% a$ccode2) }
+  ## the chosen targets of the kept events are stage-2 rows
+  for (S in list(A, C)) { k <- S$ev |> filter(in_mid, year == 1990L) |> transmute(ccode1 = initiator, ccode2 = target, year)
+    expect_equal(nrow(k |> anti_join(S$alts |> filter(in_s2 == 1L), by = c("ccode1", "ccode2", "year"))), 0L) }
+  ## choice_set_flags() refuses duplicate keys and pre-existing flag columns; the n_neither attribute counts the removed rows
+  expect_error(choice_set_flags(bind_rows(A$alts |> select(-in_iv, -in_s2), A$alts[1, ] |> select(-in_iv, -in_s2)), A$af_iv, A$af_s2), "duplicate")
+  expect_error(choice_set_flags(A$alts, A$af_iv, A$af_s2))
+})
+
+## ---- a toy cell on disk (panel / alts / events / manifest) so that assemble_cell() and build_stan_data() run end to end ----------
+## states 10, 20, 30, 40 in 1990, h = 3. Panel: 10 (y1 = 1), 20 (y1 = 0, never initiates), 30 (y1 = 1), 40 (y1 = 1).
+## Alternatives (ccode1 -> ccode2: in_iv, in_s2):
+##   10: 20 (1,1), 30 (1,1), 40 (0,1)   40 is stage-2 only (fighting 10 at January, their dispute ended before 10's reference date)
+##   20: 10, 30, 40 all (1,1)           a non-initiator: identical sets
+##   30: 10 (1,1), 20 (1,1), 40 (1,0)   40 is IV only (fighting 30 at 30's reference date but not at January)
+##   40: 10, 20, 30 all (1,1)
+## Events (mid): 10 -> 20 (dispute 1); 10 -> 30 (disputes 4;5, one of them WWII: is_ww2 TRUE, in_mid_noww2 TRUE, in_fmid_noww2 FALSE);
+##   30 -> 20 (dispute 2); 30 -> 40 (dispute 3, fighting_at_ref: stage 1 only, its row is IV only); 30 -> 10 (dispute 6, pure WWII);
+##   40 -> 20 (dispute 7, pure WWII: under --drop_ww2 state-year 40 loses y1)
+write_toy_cell <- function(dir, alts_edit = identity) {
+  dir.create(dir, showWarnings = FALSE, recursive = TRUE)
+  panel <- tibble(ccode = c(10L, 20L, 30L, 40L), year = 1990L, h = 3L, y1_mid = c(1L, 0L, 1L, 1L), y1_fmid = c(1L, 0L, 1L, 1L),
+                  mon_prior_mids_h = c(2L, 0L, 1L, 3L), mon_peace_years_h = c(3L, 10L, 1L, 2L),
+                  dM_h = c(0.5, -0.2, 0.1, -0.4), dRpr_h = c(0.3, 0.0, -0.6, 0.2), dReig_h = c(0.1, 0.2, 0.3, 0.4),
+                  cowmaj_tm1 = c(1L, 0L, 0L, 1L), dem_tm1 = c(1L, 1L, 0L, 0L), ongoing_tm1 = c(0L, 0L, 1L, 1L))
+  a <- tidyr::expand_grid(ccode1 = c(10L, 20L, 30L, 40L), ccode2 = c(10L, 20L, 30L, 40L)) |> filter(ccode1 != ccode2) |>
+    mutate(year = 1990L, h = 3L, in_iv = 1L, in_s2 = 1L)
+  a$in_iv[a$ccode1 == 10L & a$ccode2 == 40L] <- 0L
+  a$in_s2[a$ccode1 == 30L & a$ccode2 == 40L] <- 0L
+  set.seed(1)
+  alts <- a |> mutate(dM = rnorm(n()), dR_pr = rnorm(n()), dR_eig = rnorm(n()), dy_prior_mids_h = rpois(n(), 1), dy_peace_years_h = 1L + rpois(n(), 5),
+                      log_capdist = log1p(runif(n(), 100, 5000)), dM_j_h = rnorm(n()), dRpr_j_h = rnorm(n()), dch_j_missing = as.integer(ccode2 == 40L),
+                      contig_land = as.integer(ccode1 + ccode2 == 30L), alliance_def_off = as.integer(ccode1 == 40L), joint_dem = as.integer(ccode1 %in% c(10L, 20L) & ccode2 %in% c(10L, 20L)),
+                      major_count = as.integer(ccode1 %in% c(10L, 40L)) + as.integer(ccode2 %in% c(10L, 40L)), dy_mid_tm1 = as.integer(ccode1 == 30L & ccode2 == 40L), polrel = 1L) |>
+    mutate(dM_j_h = ifelse(dch_j_missing == 1L, 0, dM_j_h), dRpr_j_h = ifelse(dch_j_missing == 1L, 0, dRpr_j_h)) |> alts_edit()
+  ev <- tibble(initiator = c(10L, 10L, 30L, 30L, 30L, 40L), target = c(20L, 30L, 20L, 40L, 10L, 20L), year = 1990L,
+               dispnum = c(1L, 4L, 2L, 3L, 6L, 7L), dispnums = c("1", "4;5", "2", "3", "6", "7"), n_disputes = c(1L, 2L, 1L, 1L, 1L, 1L),
+               escalation = FALSE, is_joiner_pair = FALSE, is_ww2 = c(FALSE, TRUE, FALSE, FALSE, TRUE, TRUE), target_has_pos_tm1 = TRUE,
+               fighting_at_ref = c(FALSE, FALSE, FALSE, TRUE, FALSE, FALSE), war_disp = FALSE,
+               in_mid = TRUE, in_fmid = TRUE, in_fmidcow = FALSE, in_fmidub = TRUE, in_war = FALSE,
+               in_mid_noww2 = c(TRUE, TRUE, TRUE, TRUE, FALSE, FALSE), in_fmid_noww2 = c(TRUE, FALSE, TRUE, TRUE, FALSE, FALSE),
+               in_fmidcow_noww2 = FALSE, in_fmidub_noww2 = c(TRUE, TRUE, TRUE, TRUE, FALSE, FALSE), in_war_noww2 = FALSE)
+  saveRDS(panel, file.path(dir, "stage1_panel_lag3.rds")); saveRDS(alts, file.path(dir, "alts_lag3_all.rds")); saveRDS(ev, file.path(dir, "events.rds"))
+  man <- lapply(c("stage1_panel_lag3.rds", "alts_lag3_all.rds", "events.rds"), function(f) { o <- readRDS(file.path(dir, f))
+    data.frame(file = f, nrow = nrow(o), ncol = ncol(o), sha256 = file_digest(file.path(dir, f)), note = "toy") })
+  write_manifest(man, file.path(dir, "manifest.csv"))
+  invisible(dir)
+}
+quiet <- function(expr) { out <- NULL; capture.output(out <- expr); out }
+
+test_that("assembly: fighting_at_ref events leave stage 2 only; chosen rows are stage-2 rows; the two sets reach build_stan_data() and the R likelihood", {
+  td <- write_toy_cell(tempfile("toycell"))
+  A <- quiet(assemble_cell("mid", 3L, "all", data_dir = td))
+  expect_equal(A$sy$ccode, c(10L, 20L, 30L, 40L)); expect_equal(A$sy$y1, c(1L, 0L, 1L, 1L))
+  expect_equal(nrow(A$alts), 12L); expect_equal(sum(A$alts$in_iv), 11L); expect_equal(sum(A$alts$in_s2), 11L)
+  ## usable events: 10->20, 10->30, 30->20, 30->10, 40->20; 30->40 is fighting_at_ref (its row exists with in_s2 = 0) and is not an event
+  expect_equal(nrow(A$ev), 5L); expect_equal(A$n_fighting_at_ref, 1L); expect_equal(A$n_orphan, 0L)
+  chosen <- A$alts[A$ev$alt_row, ]
+  expect_true(all(chosen$in_s2 == 1L)); expect_false(any(chosen$ccode1 == 30L & chosen$ccode2 == 40L))
+  expect_true(any(A$alts$ccode1 == 30L & A$alts$ccode2 == 40L & A$alts$in_s2 == 0L & A$alts$in_iv == 1L))   # the IV-only row stays in the block
+  expect_true(all(A$alts$sy_row[A$ev$alt_row] == A$ev$sy_row))
+  dat <- build_stan_data(A$sy, A$alts, A$ev, A$W_cols, A$X_cols, A$Z_cols, joint = 1L, x_ref = A$x_ref, allow_orphan_initiations = TRUE)
+  expect_equal(dat$N1, 4L); expect_equal(dat$N2, 12L); expect_equal(dat$E, 5L)
+  expect_equal(dat$in_iv, A$alts$in_iv); expect_equal(dat$in_s2, A$alts$in_s2); expect_equal(dat$P1, 5L); expect_equal(dat$P, 2L); expect_equal(dat$Pz, 7L)
+  expect_equal(dat$cs_end - dat$cs_start + 1L, rep(3L, 4))                    # one union block of 3 rows per state-year
+  expect_equal(dat$n_full, c(2L, 3L, 3L, 3L))                                 # n_full counts the IV rows (10 has 2)
+  expect_true(all(dat$in_s2[dat$ev_row] == 1L))
+  ## the brute-force likelihood uses the IV rows for lse and the stage-2 rows for the event softmax
+  set.seed(3); S <- dat$S
+  pars <- list(mu0 = c(0.3, -0.2), beta = matrix(rnorm(4, 0, 0.3), 2, 2), a_i = matrix(rnorm(2 * S), S, 2), c_i = rnorm(S), b_j = rnorm(S),
+               gamma = rnorm(dat$Pz), sigma_x = c(1, 1.3), rho = 0.2)
+  bf <- stage2_loglik_R(dat, pars)
+  r10 <- dat$cs_start[1]:dat$cs_end[1]; r30 <- dat$cs_start[3]:dat$cs_end[3]
+  expect_equal(bf$lse[1], log(sum(exp(bf$util[r10][dat$in_iv[r10] == 1L]))))                       # IV of 10 excludes its stage-2-only row (40)
+  expect_equal(bf$lse[3], log(sum(exp(bf$util[r30]))))                                             # IV of 30 is its whole block
+  e10 <- which(dat$ev_sy == 1L)
+  for (e in e10) expect_equal(bf$loglik[e], bf$util[dat$ev_row[e]] - log(sum(exp(bf$util[r10]))))  # stage 2 of 10 is its whole block
+  e30 <- which(dat$ev_sy == 3L)
+  for (e in e30) expect_equal(bf$loglik[e], bf$util[dat$ev_row[e]] - log(sum(exp(bf$util[r30][dat$in_s2[r30] == 1L]))))   # stage 2 of 30 excludes its IV-only row
+  for (n in c(2L, 4L)) { r <- dat$cs_start[n]:dat$cs_end[n]; expect_equal(bf$lse[n], log(sum(exp(bf$util[r])))) }
+  ## with every flag 1 the data equal the flag-free build exactly
+  A1 <- A; A1$alts$in_iv <- 1L; A1$alts$in_s2 <- 1L
+  d1 <- build_stan_data(A1$sy, A1$alts, A1$ev, A$W_cols, A$X_cols, A$Z_cols, joint = 1L, x_ref = A$x_ref, allow_orphan_initiations = TRUE)
+  d0 <- build_stan_data(A1$sy, A1$alts |> select(-in_iv, -in_s2), A1$ev, A$W_cols, A$X_cols, A$Z_cols, joint = 1L, x_ref = A$x_ref, allow_orphan_initiations = TRUE)
+  expect_identical(d1, d0); expect_true(all(d0$in_iv == 1L)); expect_equal(d0$n_full, rep(3L, 4))
+  ## stage2_loglik_R refuses data without the flags
+  expect_error(stage2_loglik_R(dat[setdiff(names(dat), "in_s2")], pars), "in_s2 are missing")
+})
+
+test_that("assembly: --drop_ww2 uses the no-WWII flags (mixed key kept, pure WWII dropped, y1 recounted); fighting_at_ref unchanged", {
+  td <- write_toy_cell(tempfile("toycell"))
+  A <- quiet(assemble_cell("mid", 3L, "all", DROP_WW2 = TRUE, data_dir = td))
+  ## kept: 10->20, 10->30 (mixed: non-WWII dispute 4 or 5 qualifies), 30->20; dropped: 30->10 and 40->20 (pure WWII); 30->40 fighting_at_ref
+  expect_equal(nrow(A$ev), 3L)
+  chosen <- A$alts[A$ev$alt_row, ] |> arrange(ccode1, ccode2)
+  expect_equal(paste(chosen$ccode1, chosen$ccode2), c("10 20", "10 30", "30 20"))
+  expect_equal(A$sy$y1, c(1L, 0L, 1L, 0L))                                    # 40's only event was WWII -> y1 recounted to 0
+  expect_equal(A$n_fighting_at_ref, 1L); expect_equal(A$n_ww2, 3L)
+  ## the old rule in_mid & !is_ww2 would have dropped the mixed event as well
+  ev <- readRDS(file.path(td, "events.rds")); expect_equal(sum(ev$in_mid & !ev$is_ww2), 3L); expect_equal(sum(ev$in_mid_noww2), 4L)   # 30 -> 40 (fighting_at_ref) counts in both
+  ## fmid under --drop_ww2: the mixed key's fatal coding came from the WWII dispute only -> not in the no-WWII fatal sample
+  F <- quiet(assemble_cell("fmid", 3L, "all", DROP_WW2 = TRUE, data_dir = td))
+  expect_equal(nrow(F$ev), 2L); expect_equal(F$sy$y1, c(1L, 0L, 1L, 0L))
+  ## without the option everything is kept
+  B <- quiet(assemble_cell("mid", 3L, "all", data_dir = td)); expect_equal(nrow(B$ev), 5L); expect_equal(B$sy$y1, c(1L, 0L, 1L, 1L))
+  ## a build without the no-WWII flags is refused
+  td2 <- write_toy_cell(tempfile("toycell")); ev2 <- readRDS(file.path(td2, "events.rds")) |> select(-in_mid_noww2); saveRDS(ev2, file.path(td2, "events.rds"))
+  man <- read.csv(file.path(td2, "manifest.csv"), stringsAsFactors = FALSE); man$sha256[man$file == "events.rds"] <- file_digest(file.path(td2, "events.rds")); man$ncol[man$file == "events.rds"] <- ncol(ev2)
+  write.csv(man, file.path(td2, "manifest.csv"), row.names = FALSE)
+  expect_error(quiet(assemble_cell("mid", 3L, "all", data_dir = td2)))
+})
+
+test_that("assembly stops on an empty stage-1 IV set and on an empty or chosen-only stage-2 set; so does build_stan_data()", {
+  ## (20, 1990) keeps its rows but none in the IV set
+  td <- write_toy_cell(tempfile("toycell"), alts_edit = function(a) { a$in_iv[a$ccode1 == 20L] <- 0L; a })
+  expect_error(quiet(assemble_cell("mid", 3L, "all", data_dir = td)), "EMPTY stage-1 IV set")
+  ## (10, 1990): only its chosen rows are stage-2 rows ... make 30 and 40 IV only: 10 -> 30 is an event, so the set {20, 30} would hold
+  ## two chosen rows; drop the 10 -> 30 chosen row too by making the set {20} alone
+  td <- write_toy_cell(tempfile("toycell"), alts_edit = function(a) { a$in_s2[a$ccode1 == 10L & a$ccode2 %in% c(30L, 40L)] <- 0L; a$in_iv[a$ccode1 == 10L] <- 1L; a })
+  ## the chosen row of 10 -> 30 now has in_s2 = 0: that event is not usable, so the "all events have their row" check fires first
+  expect_error(quiet(assemble_cell("mid", 3L, "all", data_dir = td)))
+  ## a legal variant: 10 -> 30 is made fighting_at_ref so that only 10 -> 20 remains, and its set is the chosen row alone
+  td <- write_toy_cell(tempfile("toycell"), alts_edit = function(a) { a$in_s2[a$ccode1 == 10L & a$ccode2 %in% c(30L, 40L)] <- 0L; a$in_iv[a$ccode1 == 10L] <- 1L; a })
+  ev <- readRDS(file.path(td, "events.rds")); ev$fighting_at_ref[ev$initiator == 10L & ev$target == 30L] <- TRUE; saveRDS(ev, file.path(td, "events.rds"))
+  man <- read.csv(file.path(td, "manifest.csv"), stringsAsFactors = FALSE); man$sha256[man$file == "events.rds"] <- file_digest(file.path(td, "events.rds")); write.csv(man, file.path(td, "manifest.csv"), row.names = FALSE)
+  expect_error(quiet(assemble_cell("mid", 3L, "all", data_dir = td)), "empty or holds only the chosen target")
+  ## build_stan_data() has the same two guards and the chosen-row guard
+  td <- write_toy_cell(tempfile("toycell")); A <- quiet(assemble_cell("mid", 3L, "all", data_dir = td))
+  a_empty <- A$alts; a_empty$in_iv[a_empty$sy_row == 2L] <- 0L
+  expect_error(build_stan_data(A$sy, a_empty, A$ev, A$W_cols, A$X_cols, A$Z_cols, joint = 1L, allow_orphan_initiations = TRUE), "EMPTY stage-1 IV set")
+  a_only <- A$alts; a_only$in_s2[a_only$sy_row == 4L & a_only$ccode2 != 20L] <- 0L      # 40's set = its chosen row (20) alone
+  expect_error(build_stan_data(A$sy, a_only, A$ev, A$W_cols, A$X_cols, A$Z_cols, joint = 1L, allow_orphan_initiations = TRUE), "CHOSEN-ONLY")
+  a_out <- A$alts; a_out$in_s2[A$ev$alt_row[1]] <- 0L
+  expect_error(build_stan_data(A$sy, a_out, A$ev, A$W_cols, A$X_cols, A$Z_cols, joint = 1L, allow_orphan_initiations = TRUE), "outside the stage-2 set")
+  a_bad <- A$alts; a_bad$in_iv[1] <- 0L; a_bad$in_s2[1] <- 0L
+  expect_error(build_stan_data(A$sy, a_bad, A$ev, A$W_cols, A$X_cols, A$Z_cols, joint = 1L, allow_orphan_initiations = TRUE))
+})
+
+test_that("P2-5: a rebuild between the manifest snapshot and the load is caught; without a snapshot the live manifest is read", {
+  td <- write_toy_cell(tempfile("toycell"))
+  snapshot <- read.csv(file.path(td, "manifest.csv"), stringsAsFactors = FALSE)
+  A <- quiet(assemble_cell("mid", 3L, "all", data_dir = td, manifest = snapshot)); expect_equal(nrow(A$ev), 5L)
+  ## "rebuild": events.rds changes and the manifest on disk is updated accordingly
+  ev <- readRDS(file.path(td, "events.rds")); ev$rebuilt <- 1L; saveRDS(ev, file.path(td, "events.rds"))
+  man <- read.csv(file.path(td, "manifest.csv"), stringsAsFactors = FALSE); man$sha256[man$file == "events.rds"] <- file_digest(file.path(td, "events.rds")); man$ncol[man$file == "events.rds"] <- ncol(ev)
+  write.csv(man, file.path(td, "manifest.csv"), row.names = FALSE)
+  expect_error(quiet(assemble_cell("mid", 3L, "all", data_dir = td, manifest = snapshot)), "events.rds: sha256 digest does not match the manifest snapshot")
+  B <- quiet(assemble_cell("mid", 3L, "all", data_dir = td)); expect_equal(nrow(B$ev), 5L)              # live manifest: consistent again
+  ## a rebuild that changes a row count is caught by the nrow check first
+  pn <- readRDS(file.path(td, "stage1_panel_lag3.rds")); saveRDS(bind_rows(pn, pn[1, ] |> mutate(ccode = 50L)), file.path(td, "stage1_panel_lag3.rds"))
+  man$sha256[man$file == "stage1_panel_lag3.rds"] <- file_digest(file.path(td, "stage1_panel_lag3.rds")); man$nrow[man$file == "stage1_panel_lag3.rds"] <- 5L
+  write.csv(man, file.path(td, "manifest.csv"), row.names = FALSE)
+  expect_error(quiet(assemble_cell("mid", 3L, "all", data_dir = td, manifest = snapshot)), "stage1_panel_lag3.rds: nrow 5 != manifest 4")
+  ## the helper accepts a path or a data.frame
+  expect_error(assert_matches_manifest(file.path(td, "events.rds"), snapshot), "snapshot")
+  expect_equal(nrow(assert_matches_manifest(file.path(td, "events.rds"), file.path(td, "manifest.csv"))), 6L)
+  ## 02_fit_model.R passes its load-time snapshot into the assembly
+  src <- readLines(file.path(v2_root(), "R", "02_fit_model.R"))
+  expect_true(any(grepl("manifest = manifest_at_load", src, fixed = TRUE)))
+  expect_true(any(grepl('array[N2] int<lower=0, upper=1> in_iv;', src, fixed = TRUE)))     # second stale-binary marker
+})
+
+test_that("assembly with --full_controls returns exactly the 8bf0ce1 column lists, in order", {
+  td <- write_toy_cell(tempfile("toycell"))
+  A <- quiet(assemble_cell("mid", 3L, "all", FULL_CONTROLS = TRUE, data_dir = td))
+  expect_equal(A$W_cols, c("dM_i", "dR_i", "cowmaj_tm1", "dem_tm1", "log_prior_mids", "log_peace_years"))
+  expect_equal(A$X_cols, A$W_cols)
+  expect_equal(A$Z_cols, c("contig_land", "alliance_def_off", "joint_dem", "major_count", "log_dy_prior_mids", "log_dy_peace_years", "dM_j_h", "dRpr_j_h", "dch_j_missing"))
+  expect_true(all(abs(colMeans(as.matrix(A$sy[, c("cowmaj_tm1", "dem_tm1", "log_prior_mids", "log_peace_years")]))) < 1e-8))   # centred like the base
+  expect_equal(length(A$x_ref), 6L)
+  M <- quiet(assemble_cell("mid", 3L, "all", data_dir = td))
+  expect_equal(M$W_cols, c("dM_i", "dR_i", "ongoing_tm1", "log_prior_mids", "dem_tm1")); expect_equal(M$X_cols, c("dM_i", "dR_i"))
+  expect_equal(M$Z_cols, c("contig_land", "joint_dem", "log_dy_prior_mids", "dy_mid_tm1", "dM_j_h", "dRpr_j_h", "dch_j_missing"))
+})
+
+test_that("sample_alternatives(): IV rows come from the IV set, event blocks from the stage-2 set, the output flags are resolved", {
+  td <- write_toy_cell(tempfile("toycell")); A <- quiet(assemble_cell("mid", 3L, "all", data_dir = td))
+  sa <- sample_alternatives(A$alts, A$ev, m = 1L, seed = 11L)
+  iv <- sa$alts[seq_len(sa$n_iv), ]
+  expect_equal(sa$n_full, c(2L, 3L, 3L, 3L))                                   # the IV-set sizes, not the block sizes
+  expect_false(any(iv$sy_row == 1L & iv$ccode2 == 40L))                        # 10's stage-2-only row never enters the IV sample
+  blocks <- sa$alts[-seq_len(sa$n_iv), ]
+  expect_false(any(blocks$sy_row == 3L & blocks$ccode2 == 40L))               # 30's IV-only row never enters an event block
+  expect_true(all(sa$alts$in_iv == 1L), all(sa$alts$in_s2 == 1L))
+  expect_true(all(sa$ev$ev_end - sa$ev$ev_start + 1L == 2L))
+  dat <- build_stan_data(A$sy, sa$alts, sa$ev, A$W_cols, A$X_cols, A$Z_cols, joint = 1L, sampled = 1L, n_full = sa$n_full, x_ref = A$x_ref, allow_orphan_initiations = TRUE)
+  expect_equal(dat$sampled, 1L); expect_equal(dat$n_full, c(2L, 3L, 3L, 3L))
+  ## sampled data with an unresolved flag is refused; a chosen row outside the stage-2 set is refused by the sampler
+  a_bad <- sa$alts; a_bad$in_s2[1] <- 0L
+  expect_error(build_stan_data(A$sy, a_bad, sa$ev, A$W_cols, A$X_cols, A$Z_cols, joint = 1L, sampled = 1L, n_full = sa$n_full, allow_orphan_initiations = TRUE), "in_iv = in_s2 = 1")
+  a_out <- A$alts; a_out$in_s2[A$ev$alt_row[1]] <- 0L
+  expect_error(sample_alternatives(a_out, A$ev, m = 1L), "not in the stage-2 set")
+  ## repeated draws over many seeds never pick an excluded row
+  for (sd in 1:30) { s2 <- sample_alternatives(A$alts, A$ev, m = 2L, seed = sd)
+    expect_false(any(s2$alts$sy_row[seq_len(s2$n_iv)] == 1L & s2$alts$ccode2[seq_len(s2$n_iv)] == 40L))
+    expect_false(any(s2$alts$sy_row[-seq_len(s2$n_iv)] == 3L & s2$alts$ccode2[-seq_len(s2$n_iv)] == 40L)) }
+})
+
+test_that("real build (when present): the alternatives carry the flags, no empty IV set, no chosen-only stage-2 set, snapshot check works", {
+  man_path <- file.path(v2_root(), "data", "manifest.csv")
+  skip_if_not(file.exists(man_path) && file.exists(file.path(v2_root(), "data", "alts_lag3_all.rds")), "real data files not built")
+  man <- read.csv(man_path, stringsAsFactors = FALSE)
+  alts <- readRDS(file.path(v2_root(), "data", "alts_lag3_all.rds"))
+  expect_true(all(c("in_iv", "in_s2") %in% names(alts))); expect_true(all(alts$in_iv == 1L | alts$in_s2 == 1L))
+  n_iv <- alts |> group_by(ccode1, year) |> summarise(n = sum(in_iv), .groups = "drop"); expect_true(all(n_iv$n >= 1L))
+  ev <- readRDS(file.path(v2_root(), "data", "events.rds"))
+  expect_true(all(c("in_mid_noww2", "in_war_noww2") %in% names(ev))); expect_true(all(ev$in_mid_noww2 <= ev$in_mid))
+  ## a tampered snapshot (the panel digest) is caught before the large files are read
+  bad <- man; bad$sha256[bad$file == "stage1_panel_lag3.rds"] <- "0000"
+  expect_error(quiet(assemble_cell("mid", 3L, "all", manifest = bad)), "stage1_panel_lag3.rds: sha256 digest does not match the manifest snapshot")
 })

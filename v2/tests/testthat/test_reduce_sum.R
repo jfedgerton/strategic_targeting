@@ -67,3 +67,21 @@ test_that("reduce_sum: sampled-alternatives mode (per-event sets) also agrees ac
   expect_equal(par$ll2, stage2_loglik_R(base, stan_inits(base, pars)$pars)$loglik, tolerance = 1e-6)
   rstan_options(threads_per_chain = 1)
 })
+test_that("reduce_sum: masked choice sets (cs_mixed path) agree between the serial and the sliced evaluation, M1 and M2", {
+  for (mn in c("m1_latent_additive", "m2_ame")) {
+    p <- file.path(root, "stan", "build", paste0(mn, ".rds")); if (!file.exists(p)) skip("compiled model missing")
+    sm <- readRDS(p); with_uv <- mn == "m2_ame"
+    sim <- simulate_targeting(if (with_uv) "M2b" else "M1b", S = 7L, Tt = 5L, K = 2L, seed = 123L, target_rate = 0.6)
+    M <- mask_sets(sim)
+    base <- build_stan_data(M$sy, M$alts, M$ev, c("W1", "W2"), paste0("X", 1:4), c("Z1", "Z2"), joint = 1L, x_ref = rep(0, 4), K = if (with_uv) 2L else NULL)
+    expect_true(any(base$in_iv == 0L) && any(base$in_s2 == 0L))
+    pars <- make_pars(base, with_uv); init <- stan_inits(base, pars)$init
+    serial <- eval_fixed(sm, base, init, 1L)
+    expect_true(is.finite(serial$lp))
+    for (gs in c(1L, 3L)) { dat <- base; dat$grainsize <- gs; par <- eval_fixed(sm, dat, init, 2L)
+      expect_equal(par$lp, serial$lp, tolerance = 1e-10); expect_equal(par$grad, serial$grad, tolerance = 1e-8)
+      expect_equal(par$ll2, serial$ll2, tolerance = 1e-12); expect_equal(par$ll1, serial$ll1, tolerance = 1e-12) }
+    expect_equal(serial$ll2, stage2_loglik_R(base, stan_inits(base, pars)$pars)$loglik, tolerance = 1e-6)
+    rstan_options(threads_per_chain = 1)
+  }
+})
