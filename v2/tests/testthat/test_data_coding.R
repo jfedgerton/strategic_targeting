@@ -28,7 +28,7 @@ code_events <- function(dd, disp, include_joiners = FALSE,
                              is.na(fatal1) & is.na(fatal2) & is.na(fatal_disp) ~ NA,
                              TRUE ~ FALSE),
            war_disp = hostlev_disp == 5L,
-           war = hostlev_disp == 5L & hostlev1 == 5L & hostlev2 == 5L)      # pair-level war (2026-10-24)
+           war = hostlev_disp == 5L & (hostlev1 == 5L | hostlev2 == 5L))      # pair-level war (2026-10-24, at least one side at 5)
   ## ongoing-dispute rule at month resolution (2026-10-24): escalation = already fighting in another dispute at the
   ## event's dispute start date (year rule where undecided); excluded from every sample flag
   pdi <- pair_dispute_intervals(dd, dispute_date_bounds(disp, dd))
@@ -88,10 +88,12 @@ test_that("joiners (main build since 2026-10-24): every Side A x Side B pair is 
   expect_false(any(paste(ev$dispnum, ev$target, ev$initiator) %in% paste(ev$dispnum, ev$initiator, ev$target)))
   old <- code_events(toy_dd, toy_disp, include_joiners = FALSE)
   expect_equal(nrow(old), sum(!ev$is_joiner_pair))
-  ## the joiner pairs take the dispute-level fatality like every other pair; war is pair-level (2026-10-24): in dispute 2
-  ## only 10 (hostlev 5) vs 20 (hostlev 5) is a war pair, the pairs with 11 or 21 (hostlev 3) are war_disp but not war
+  ## the joiner pairs take the dispute-level fatality like every other pair; war is pair-level (2026-10-24, at least one
+  ## participant at hostlev 5): in dispute 2 every pair involving 10 or 20 (hostlev 5) is a war pair; a pair of 11 and 21
+  ## (both hostlev 3) would be war_disp but not war
   expect_true(all(ev$in_fmid[ev$dispnum == 2L])); expect_true(all(ev$war_disp[ev$dispnum == 2L]))
-  expect_equal(ev$in_war[ev$dispnum == 2L], ev$initiator[ev$dispnum == 2L] == 10L & ev$target[ev$dispnum == 2L] == 20L)
+  d2 <- ev$dispnum == 2L
+  expect_equal(ev$in_war[d2], ev$initiator[d2] %in% c(10L, 20L) | ev$target[d2] %in% c(10L, 20L))
 })
 
 test_that("fatal / war samples: negative fatality codes -> NA, fatal if either side >= 1; war = hostlev 5", {
@@ -123,12 +125,14 @@ test_that("fatal coding (2026-10-23): wars are fatal; MIC fills COW-missing only
   expect_true(code_events(dd3, disp3, mic = tibble(dispnum = 1L, mic_fatalmin = 30L))$in_fmid)
   expect_false(code_events(dd3, disp3, mic = tibble(dispnum = 1L, mic_fatalmin = 0L))$in_fmid)
   expect_false(code_events(dd3, disp3, mic = tibble(dispnum = 1L, mic_fatalmin = 30L))$in_fmidcow)
-  ## all-NA COW fatality, a war-level dispute, not in MIC: fatal by the war rule ONLY when the pair itself is at hostlev 5
-  ## (pair-level war, 2026-10-24); COW-only coding drops it either way
+  ## all-NA COW fatality, a war-level dispute, not in MIC: fatal by the war rule ONLY when at least one side of the pair is
+  ## at hostlev 5 (pair-level war, 2026-10-24); COW-only coding drops it either way
   ev_w <- code_events(dd3 |> mutate(hostlev1 = 5L, hostlev2 = 5L), mk_disp(1L, -9L, 5L, 1950L, 3L, 400))
   expect_true(ev_w$in_war); expect_true(ev_w$in_fmid); expect_false(ev_w$in_fmidcow)
-  ev_w2 <- code_events(dd3 |> mutate(hostlev1 = 5L, hostlev2 = 4L), mk_disp(1L, -9L, 5L, 1950L, 3L, 400))   # target never at 5
-  expect_false(ev_w2$in_war); expect_true(ev_w2$war_disp); expect_false(ev_w2$in_fmid); expect_equal(ev_w2$fatal_main, FALSE)
+  ev_w2 <- code_events(dd3 |> mutate(hostlev1 = 5L, hostlev2 = 4L), mk_disp(1L, -9L, 5L, 1950L, 3L, 400))   # one side at 5
+  expect_true(ev_w2$in_war); expect_true(ev_w2$war_disp); expect_true(ev_w2$in_fmid); expect_equal(ev_w2$fatal_main, TRUE)
+  ev_w3 <- code_events(dd3 |> mutate(hostlev1 = 4L, hostlev2 = 4L), mk_disp(1L, -9L, 5L, 1950L, 3L, 400))   # neither side at 5
+  expect_false(ev_w3$in_war); expect_true(ev_w3$war_disp); expect_false(ev_w3$in_fmid); expect_equal(ev_w3$fatal_main, FALSE)
   ## MIC never overrides a COW code: dispute 1 is COW non-fatal, MIC says fatal -> stays non-fatal
   ev_o <- code_events(toy_dd, toy_disp, mic = tibble(dispnum = c(1L, 2L), mic_fatalmin = c(5L, 0L)))
   expect_false(ev_o$in_fmid[ev_o$dispnum == 1L])
@@ -676,16 +680,17 @@ test_that("month rule: ended-before-the-new-start is not an escalation, still-ac
   expect_true(k7$drop); expect_false(k7$fallback)
 })
 
-test_that("war is pair-level: dispute war-level AND both participants at hostility level 5; the fatal war rule follows it", {
-  ## dispute 90, hostlev 5, three pairs: (10, 20) both at 5; (10, 21) target at 3; (11, 20) initiator at 3; fatality all missing
-  dd <- bind_rows(mk_dd(90L, 10L, 20L, 1970L), mk_dd(90L, 10L, 21L, 1970L), mk_dd(90L, 11L, 20L, 1970L)) |>
+test_that("war is pair-level: dispute war-level AND at least one participant at hostility level 5; the fatal war rule follows it", {
+  ## dispute 90, hostlev 5, four pairs: (10, 20) both at 5; (10, 21) target at 3; (11, 20) initiator at 3; (11, 21) neither at 5;
+  ## fatality all missing
+  dd <- bind_rows(mk_dd(90L, 10L, 20L, 1970L), mk_dd(90L, 10L, 21L, 1970L), mk_dd(90L, 11L, 20L, 1970L), mk_dd(90L, 11L, 21L, 1970L)) |>
     mutate(hostlev1 = ifelse(ccode1 %in% c(10L, 20L), 5L, 3L), hostlev2 = ifelse(ccode2 %in% c(10L, 20L), 5L, 3L), fatality1 = -9L, fatality2 = -9L)
   ev <- code_events(dd, mk_disp(90L, -9L, 5L, 1970L, 4L, 100), include_joiners = TRUE) |> arrange(initiator, target)
-  expect_equal(ev$war_disp, c(TRUE, TRUE, TRUE))
-  expect_equal(ev$war, c(TRUE, FALSE, FALSE))
-  expect_equal(ev$in_war, c(TRUE, FALSE, FALSE))
-  expect_equal(ev$fatal_main, c(TRUE, FALSE, FALSE))              # the war rule makes only the war pair fatal
-  expect_equal(ev$in_fmidub, c(TRUE, TRUE, TRUE))                 # the uncoded pairs are fatal only in the upper bound
+  expect_equal(ev$war_disp, c(TRUE, TRUE, TRUE, TRUE))
+  expect_equal(ev$war, c(TRUE, TRUE, TRUE, FALSE))
+  expect_equal(ev$in_war, c(TRUE, TRUE, TRUE, FALSE))
+  expect_equal(ev$fatal_main, c(TRUE, TRUE, TRUE, FALSE))         # the war rule makes the war pairs fatal, not the pair with neither side at 5
+  expect_equal(ev$in_fmidub, c(TRUE, TRUE, TRUE, TRUE))           # the uncoded pair is fatal only in the upper bound
   ## participant hostlev is the max over the pair's years
   dd2 <- bind_rows(mk_dd(90L, 10L, 20L, 1970:1971)) |> mutate(hostlev1 = ifelse(year == 1971L, 5L, 4L), hostlev2 = ifelse(year == 1971L, 5L, 4L))
   expect_true(code_events(dd2, mk_disp(90L, 0L, 5L, 1970L, 4L, 400))$war)

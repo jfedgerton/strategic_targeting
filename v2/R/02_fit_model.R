@@ -93,7 +93,8 @@ git_commit_at_load <- tryCatch(system2("git", c("-C", v2_root(), "rev-parse", "H
 if (is.null(git_commit_at_load) || length(git_commit_at_load) != 1 || is.na(git_commit_at_load) || !grepl("^[0-9a-f]{40}$", git_commit_at_load)) {
   logf("git rev-parse HEAD unavailable at load (recorded as NA)"); git_commit_at_load <- NA_character_
 }
-git_dirty_at_load <- tryCatch(length(system2("git", c("-C", v2_root(), "status", "--porcelain", "--", "R", "stan"), stdout = TRUE, stderr = FALSE)) > 0, error = function(e) NA)
+git_dirty_at_load <- if (is.na(git_commit_at_load)) NA else
+  tryCatch(length(system2("git", c("-C", v2_root(), "status", "--porcelain", "--", "R", "stan"), stdout = TRUE, stderr = FALSE)) > 0, error = function(e) NA)
 slurm_job_id <- Sys.getenv("SLURM_JOB_ID", unset = NA_character_); slurm_task_id <- Sys.getenv("SLURM_ARRAY_TASK_ID", unset = NA_character_)
 if (!is.na(slurm_job_id) && slurm_job_id == "") slurm_job_id <- NA_character_
 if (!is.na(slurm_task_id) && slurm_task_id == "") slurm_task_id <- NA_character_
@@ -144,7 +145,6 @@ logf("divergences: %d; max-treedepth hits: %d", sum(sapply(sp, function(m) sum(m
 pars_struct <- c("alpha0", "alpha", "tau", "mu0", "beta", "sigma_x", "sd_re", "sigma_b", "gamma", "Sigma", "Omega", "R_Om",
                  if (family == "m2_ame") "u_diag")
 sm_tab <- summary(fit, pars = pars_struct)$summary
-write.csv(data.frame(parameter = rownames(sm_tab), sm_tab), file.path(out_dir, paste0("summary_", cell, ".csv")), row.names = FALSE)
 logf("worst Rhat among structural parameters: %.3f; min n_eff: %.0f",
      max(sm_tab[, "Rhat"], na.rm = TRUE), min(sm_tab[, "n_eff"], na.rm = TRUE))
 ## ---- provenance just before saving: the data files must not have changed while sampling ---------------------------
@@ -155,6 +155,7 @@ if (length(chg_bad) > 0) stop(sprintf("manifest.csv changed while sampling (%s);
 for (f in cell_files) if (file_digest(file.path(data_dir, f)) != manifest_cell$sha256[manifest_cell$file == f]) stop(sprintf("%s on disk no longer matches the manifest read at load; the fit is NOT saved", f))
 git_commit_now <- tryCatch(system2("git", c("-C", v2_root(), "rev-parse", "HEAD"), stdout = TRUE, stderr = FALSE)[1], error = function(e) NA_character_)
 if (!identical(git_commit_now, git_commit_at_load)) logf("WARNING: git HEAD moved while sampling (%s -> %s); the fit records the commit at load", git_commit_at_load, git_commit_now)
+write.csv(data.frame(parameter = rownames(sm_tab), sm_tab), file.path(out_dir, paste0("summary_", cell, ".csv")), row.names = FALSE)   # only after the provenance re-check
 saveRDS(list(fit = fit, dat = dat, cell = cell, state_codes = state_codes, W_cols = W_cols, X_cols = X_cols, Z_cols = Z_cols,
              sy_keys = sy |> select(ccode, year, state_idx, y1), ev = ev, x_ref = x_ref, elapsed_min = elapsed,
              manifest = manifest_cell,

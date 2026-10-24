@@ -53,7 +53,7 @@
 ## events.rds with escalation = TRUE but leave every sample flag, stage 2 and y1 / n_ev in stage 1. For choice
 ## sets each state-year has a reference date (start of its earliest non-escalation event, else January of t);
 ## alternative j is dropped when i and j are in a different dispute active at that date that started before it.
-## War is coded at the pair level (dispute war-level AND both participants at hostility level 5), and same-year
+## War is coded at the pair level (dispute war-level AND at least one participant at hostility level 5), and same-year
 ## events of one (initiator, target) pair from different disputes collapse into one event (helpers in 00_helpers.R).
 ##
 ## Conflict-history controls (new in v2), all relative to the change window [t-1-h, t-1]:
@@ -224,13 +224,14 @@ events <- events |> rename(initiator = ccode1, target = ccode2) |>
          fatal = case_when(fatal1 %in% TRUE | fatal2 %in% TRUE | fatal_disp %in% TRUE ~ TRUE,
                            is.na(fatal1) & is.na(fatal2) & is.na(fatal_disp) ~ NA,
                            TRUE ~ FALSE),
-         ## war at the PAIR level (PI decision 2026-10-24, audit finding): the dispute is war-level AND both participants
-         ## of the pair reached hostility level 5 (participant hostlev from cow_mid_dirdisps, max over the pair's years).
+         ## war at the PAIR level (PI decision 2026-10-24, revised the same day): the dispute is war-level AND at least one
+         ## participant of the pair reached hostility level 5 (participant hostlev from cow_mid_dirdisps, max over the pair's
+         ## years). The first version required both participants at 5 (329 war events); the PI chose the less strict rule.
          ## war_disp is the old dispute-level coding, kept for the counts only.
          war_disp = hostlev_disp == 5L,
-         war = hostlev_disp == 5L & hostlev1 == 5L & hostlev2 == 5L)
+         war = hostlev_disp == 5L & (hostlev1 == 5L | hostlev2 == 5L))
 stopifnot(all(events$initiator != events$target), !anyNA(events$war), !anyNA(events$war_disp), all(events$war_disp[events$war]))
-blog("war coding: dispute-level war events %d; pair-level (dispute war AND both participants hostlev 5) %d; dropped by the pair rule %d (joiner pairs %d, originator pairs %d)",
+blog("war coding: dispute-level war events %d; pair-level (dispute war AND at least one participant hostlev 5) %d; dropped by the pair rule %d (joiner pairs %d, originator pairs %d)",
      sum(events$war_disp), sum(events$war), sum(events$war_disp & !events$war), sum(events$war_disp & !events$war & events$is_joiner_pair),
      sum(events$war_disp & !events$war & !events$is_joiner_pair))
 ## ---- ongoing-dispute rule, month resolution (PI decision 2026-10-24; helpers and the date conventions in 00_helpers.R) --
