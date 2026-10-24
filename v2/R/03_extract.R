@@ -12,8 +12,9 @@
 ##   reach_<cell>.csv      (appendix) posterior mean / 90% interval of r_i = ||mu_i||, |mu_i1|, |mu_i2|
 ##   focus_sigma_<cell>.csv, focus_states_<cell>.csv  (appendix, descriptive) pooled Sigma summary and per-state
 ##                         empirical dispersion of chosen-target positions around mean mu_event (n < 5 flagged)
-## r0 (peer radius, SD units of the within-year standardised positions) is a documented
-## argument; 0.5 is the v2 default and a PI decision to confirm.
+## r0 (peer radius, in scaled gap units: log ratio divided by the per-axis constant in change_scale.csv,
+## so 0.5 is about a 5-fold CINC ratio on the material axis) is a documented argument; 0.5 is the v2
+## default and a PI decision to confirm.
 ## ============================================================================
 suppressPackageStartupMessages({ library(rstan); library(dplyr) })
 this_file <- sub("^--file=", "", grep("^--file=", commandArgs(FALSE), value = TRUE))

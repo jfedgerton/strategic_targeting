@@ -8,8 +8,10 @@
 ##   hybrid_pm   : r >= r0, mu_1 > 0, mu_2 < 0      (+,-)  materially stronger, relationally weaker
 ##   hybrid_mp   : r >= r0, mu_1 < 0, mu_2 > 0      (-,+)
 ## r0 is an argument with no hidden default inside the classifier; callers must pass it
-## (the sim and real-data scripts document their choice). Both dM and dR are differences
-## of within-year standardised scores, so r0 is in SD units.
+## (the sim and real-data scripts document their choice). Both dM and dR are log ratios of CINC
+## share / IGO PageRank divided by one constant per axis (change_scale.csv, h = NA; 3.268 and 0.524
+## log points), so r0 is in those scaled gap units, e.g. 0.5 is about a 5-fold CINC ratio and a 1.3-fold
+## PageRank ratio.
 ##
 ## Posterior type probabilities are the share of draws falling in each region.
 ## theta = atan2(mu_2, mu_1) is summarised by its circular mean; r by mean and quantiles.
@@ -138,7 +140,7 @@ classify_types_1d <- function(mu_draws, r0, state_labels = NULL, allow_identical
 ## Direction convention (same as the 5-bin typology): mu_d = preferred (own - target) position on axis d,
 ## so mu_d > band  means the state targets others positioned BELOW itself on that axis ("down"),
 ##    mu_d < -band means it targets others ABOVE itself ("up"), and |mu_d| <= band is "peer".
-## band_M and band_R are per-axis thresholds (SD units); the default for both is the 5-bin r0.
+## band_M and band_R are per-axis thresholds in scaled gap units (log ratio / gap constant); the default for both is the 5-bin r0.
 CELL9_LABELS <- c(bully = "bully", challenger = "challenger", peer = "peer",
                   mat_opportunist = "material opportunist", rel_opportunist = "relational opportunist",
                   mat_challenger = "material challenger", rel_challenger = "relational challenger",

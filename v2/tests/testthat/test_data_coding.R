@@ -18,20 +18,26 @@ code_events <- function(dd, disp, include_joiners = FALSE,
     left_join(disp, by = "dispnum")
   events <- pair |> filter(sidea1 == 1L, sidea2 == 0L)
   if (!include_joiners) events <- events |> filter(orig1 == 1L, orig2 == 1L)
-  events |> rename(initiator = ccode1, target = ccode2) |>
-    mutate(fatal1 = ifelse(fatality1 < 0, NA, fatality1 >= 1),
+  events <- events |> rename(initiator = ccode1, target = ccode2) |>
+    mutate(is_joiner_pair = orig1 == 0L | orig2 == 0L,
+           fatal1 = ifelse(fatality1 < 0, NA, fatality1 >= 1),
            fatal2 = ifelse(fatality2 < 0, NA, fatality2 >= 1),
            fatal_disp = ifelse(fatality_disp < 0, NA, fatality_disp >= 1),
            fatal = case_when(fatal1 %in% TRUE | fatal2 %in% TRUE | fatal_disp %in% TRUE ~ TRUE,
                              is.na(fatal1) & is.na(fatal2) & is.na(fatal_disp) ~ NA,
                              TRUE ~ FALSE),
-           war = hostlev_disp == 5L,
-           in_mid = TRUE, in_war = war %in% TRUE) |>
+           war = hostlev_disp == 5L)
+  ## ongoing-dispute rule (2026-10-24): escalation = already fighting in another dispute at t; excluded from every sample flag
+  events <- flag_escalations(events, already_fighting_keys(dd))
+  events |>
     left_join(mic, by = "dispnum") |> left_join(gml, by = c("dispnum", "initiator", "target")) |>
     mutate(fatal_mic = ifelse(is.na(mic_fatalmin), NA, mic_fatalmin >= 1),
-           in_fmid = code_fatal_main(fatal, fatal_mic, war, fatal_gml),
-           in_fmidub = in_fmid | (is.na(fatal) & is.na(fatal_mic) & is.na(fatal_gml)),
-           in_fmidcow = fatal %in% TRUE)
+           fatal_main = code_fatal_main(fatal, fatal_mic, war, fatal_gml),
+           in_mid = !escalation,
+           in_fmid = fatal_main & !escalation,
+           in_fmidub = (fatal_main | (is.na(fatal) & is.na(fatal_mic) & is.na(fatal_gml))) & !escalation,
+           in_fmidcow = (fatal %in% TRUE) & !escalation,
+           in_war = (war %in% TRUE) & !escalation)
 }
 
 ## toy directed dispute-years: dispute 1 is bilateral A=10 vs B=20 (both originators), 1950-1951;
@@ -65,10 +71,19 @@ test_that("F4: initiation is Side A originator -> Side B originator, one directi
   expect_equal(sort(ev$initiator[ev$dispnum == 2L]), c(10L, 11L))
 })
 
-test_that("joiner flag adds joiner pairs for robustness", {
+test_that("joiners (main build since 2026-10-24): every Side A x Side B pair is an event, is_joiner_pair marks pairs with a joiner", {
   ev <- code_events(toy_dd, toy_disp, include_joiners = TRUE)
-  expect_equal(nrow(ev), 5)
+  expect_equal(nrow(ev), 5)                                     # d1: 10->20; d2: 10->20, 10->21, 11->20, 11->21
   expect_true(21L %in% ev$target)
+  expect_equal(sum(ev$is_joiner_pair), 2L)                      # the two pairs with the Side B joiner 21
+  expect_equal(sort(ev$initiator[ev$is_joiner_pair]), c(10L, 11L))
+  expect_false(any(ev$is_joiner_pair[ev$target == 20L]))
+  ## one direction per dispute pair still holds with joiners, and the originator-only set is exactly the old event base
+  expect_false(any(paste(ev$dispnum, ev$target, ev$initiator) %in% paste(ev$dispnum, ev$initiator, ev$target)))
+  old <- code_events(toy_dd, toy_disp, include_joiners = FALSE)
+  expect_equal(nrow(old), sum(!ev$is_joiner_pair))
+  ## the joiner pairs are coded with the dispute-level fatality / hostility like every other pair (war rule, COW codes)
+  expect_true(all(ev$in_war[ev$dispnum == 2L])); expect_true(all(ev$in_fmid[ev$dispnum == 2L]))
 })
 
 test_that("fatal / war samples: negative fatality codes -> NA, fatal if either side >= 1; war = hostlev 5", {
@@ -237,8 +252,15 @@ test_that("capital distance enters as log1p(km) measured at t-1, like the other 
   expect_equal(alts$log_capdist, log1p(1200))            # the 1990 (t-1) value, not 1989
 })
 test_that("Z columns: main spec has land contiguity, the target power changes and no distance; flags add distance / drop contiguity / add the missing indicator", {
-  expect_equal(z_columns(), c("contig_land", "alliance_def_off", "joint_dem", "major_count", "log_dy_prior_mids", "log_dy_peace_years",
+  ## 2026-10-24: dyadic peace years left the main Z, the lagged DV dy_mid_tm1 entered; --dy_peace_years restores the former
+  expect_equal(z_columns(), c("contig_land", "alliance_def_off", "joint_dem", "major_count", "log_dy_prior_mids", "dy_mid_tm1",
                               "dM_j_h", "dRpr_j_h"))
+  expect_false("log_dy_peace_years" %in% z_columns())
+  expect_equal(z_columns(DY_PEACE_YEARS = TRUE), c("contig_land", "alliance_def_off", "joint_dem", "major_count", "log_dy_prior_mids", "dy_mid_tm1",
+                                                   "log_dy_peace_years", "dM_j_h", "dRpr_j_h"))
+  for (ch in c(TRUE, FALSE)) expect_true("dy_mid_tm1" %in% z_columns(CONFLICT_HISTORY = ch))    # the lagged DV is not a --conflict_history control
+  expect_false("dy_mid_tm1" %in% Z_CENTRED)                                                  # 0/1, not centred
+  expect_equal(SY_INDICATORS, c("cowmaj_tm1", "dem_tm1", "ongoing_tm1"))
   expect_true("log_capdist" %in% z_columns(DISTANCE = TRUE)); expect_true("contig_land" %in% z_columns(DISTANCE = TRUE))
   expect_false("contig_land" %in% z_columns(CONTIGUITY = FALSE))
   expect_false("log_dy_prior_mids" %in% z_columns(CONFLICT_HISTORY = FALSE))
@@ -416,4 +438,110 @@ test_that("assert_fit_current (2026-10-23): a fit made from older data files is 
   expect_true(assert_fit_current(ok, mp))
   expect_error(assert_fit_current(stale, mp), "alts_lag3_all.rds")
   expect_error(assert_fit_current(gone, mp), "stage1_panel_lag9.rds")
+})
+
+## ---- joiners, ongoing disputes, lagged involvement (PI decisions 2026-10-24) ------------------------------------------
+## Toy directed dispute-years (both directions, as in cow_mid_dirdisps):
+##   dispute 70: 10 (A) vs 20 (B), 1980-1982; 30 joins Side B in 1982 (orig 0) -> pair (10, 30) onset 1982 (a LATER JOINER)
+##   dispute 71: 10 (A) vs 20 (B), onset 1981, while dispute 70 is still active -> an ESCALATION of the ongoing fight
+##   dispute 72: 40 (A) vs 50 (B), 1979 only; dispute 73: 40 (A) vs 50 (B), onset 1980 -> the earlier dispute ENDED at t-1
+##   dispute 74: 10, 11 (A) vs 20, 21 (B), 1990, all originators -> multilateral A x B expansion (4 events)
+mk_dd <- function(dispnum, a, b, years, orig_a = 1L, orig_b = 1L) {
+  f <- tibble(dispnum = dispnum, ccode1 = a, ccode2 = b, year = years, disponset = as.integer(years == min(years)), dispongoing = 1L,
+              sidea1 = 1L, sidea2 = 0L, orig1 = orig_a, orig2 = orig_b, fatality1 = 0L, fatality2 = 0L, hostlev1 = 3L, hostlev2 = 3L)
+  bind_rows(f, f |> mutate(ccode1 = b, ccode2 = a, sidea1 = 0L, sidea2 = 1L, orig1 = orig_b, orig2 = orig_a))
+}
+toy_dd2 <- bind_rows(mk_dd(70L, 10L, 20L, 1980:1982), mk_dd(70L, 10L, 30L, 1982L, orig_b = 0L),
+                     mk_dd(71L, 10L, 20L, 1981L), mk_dd(72L, 40L, 50L, 1979L), mk_dd(73L, 40L, 50L, 1980L),
+                     mk_dd(74L, 10L, 20L, 1990L), mk_dd(74L, 10L, 21L, 1990L), mk_dd(74L, 11L, 20L, 1990L), mk_dd(74L, 11L, 21L, 1990L))
+toy_disp2 <- tibble(dispnum = 70:74, fatality_disp = 0L, hostlev_disp = 3L)
+
+test_that("already-fighting keys: pair in a dispute active at t with pair onset before t, both directions, joiners included", {
+  af <- already_fighting_keys(toy_dd2)
+  k <- paste(af$ccode1, af$ccode2, af$year, af$dispnum)
+  expect_true(all(c("10 20 1981 70", "20 10 1981 70", "10 20 1982 70", "20 10 1982 70") %in% k))
+  expect_false("10 20 1980 70" %in% k)                            # onset year itself is not "already fighting"
+  expect_false(any(af$dispnum %in% c(71L, 72L, 73L, 74L)))        # one-year disputes contribute nothing
+  expect_false("10 30 1982 70" %in% k)                            # the later joiner's pair onset IS 1982: a selection, not ongoing
+  expect_false("40 50 1980 73" %in% k); expect_false("40 50 1980 72" %in% k)   # dispute 72 ended in 1979
+  expect_equal(nrow(af), 4L)
+})
+
+test_that("events with joiners: later joiner pair has its own onset year; multilateral A x B expansion; one direction per pair", {
+  ev <- code_events(toy_dd2, toy_disp2, include_joiners = TRUE)
+  e70 <- ev |> filter(dispnum == 70L) |> arrange(target)
+  expect_equal(e70$target, c(20L, 30L)); expect_equal(e70$year, c(1980L, 1982L))
+  expect_equal(e70$is_joiner_pair, c(FALSE, TRUE))
+  e74 <- ev |> filter(dispnum == 74L)
+  expect_equal(nrow(e74), 4L); expect_setequal(paste(e74$initiator, e74$target), c("10 20", "10 21", "11 20", "11 21"))
+  expect_false(any(e74$is_joiner_pair))
+  expect_false(any(paste(ev$dispnum, ev$target, ev$initiator) %in% paste(ev$dispnum, ev$initiator, ev$target)))
+  expect_true(all(ev$initiator %in% c(10L, 11L, 40L)))            # Side A -> Side B only
+  ## without joiners the (10, 30) pair is absent and nothing else changes
+  old <- code_events(toy_dd2, toy_disp2, include_joiners = FALSE)
+  expect_equal(nrow(old), nrow(ev) - 1L); expect_false(30L %in% old$target)
+})
+
+test_that("escalation: a second dispute between an already-fighting pair leaves stage 2 AND stage 1; a pair whose dispute ended at t-1 does not", {
+  ev <- code_events(toy_dd2, toy_disp2, include_joiners = TRUE)
+  e71 <- ev |> filter(dispnum == 71L)
+  expect_true(e71$escalation); expect_false(e71$in_mid); expect_false(e71$in_fmid); expect_false(e71$in_war)
+  expect_true(nrow(ev |> filter(dispnum == 71L)) == 1L)            # the row is kept, flagged, not deleted
+  e73 <- ev |> filter(dispnum == 73L)
+  expect_false(e73$escalation); expect_true(e73$in_mid)            # dispute 72 ended in 1979: 1980 is a fresh selection
+  expect_false(any(ev$escalation[ev$dispnum != 71L]))
+  ## stage 1: y1 from the in_mid flag; state 10 in 1981 had only the escalation -> y1 = 0; 1980 and 1982 -> 1
+  panel <- tibble(ccode = c(10L, 10L, 10L, 40L, 40L), year = c(1980L, 1981L, 1982L, 1979L, 1980L))
+  ev_sy <- ev |> group_by(ccode = initiator, year) |> summarise(n_ev_mid = sum(in_mid), n_all = n(), .groups = "drop")
+  p <- panel |> left_join(ev_sy, by = c("ccode", "year")) |> mutate(across(c(n_ev_mid, n_all), ~ coalesce(.x, 0L)), y1_mid = as.integer(n_ev_mid > 0))
+  expect_equal(p$y1_mid, c(1L, 0L, 1L, 1L, 1L))
+  expect_equal(p$n_all[p$ccode == 10L & p$year == 1981L], 1L)      # the state-year had an event row, but it was an escalation
+  ## recount from the non-escalation events agrees with y1
+  re <- ev |> filter(!escalation) |> distinct(ccode = initiator, year) |> mutate(y = 1L)
+  expect_equal(coalesce((panel |> left_join(re, by = c("ccode", "year")))$y, 0L), p$y1_mid)
+  ## stage 2: choice sets at t drop already-fighting alternatives; the escalation's own row goes with them, no other event's does
+  states <- tibble(ccode = c(10L, 11L, 20L, 21L, 30L, 40L, 50L, 60L))
+  alts <- tidyr::expand_grid(ccode1 = c(10L, 40L), year = 1979:1982) |>
+    cross_join(states |> rename(ccode2 = ccode)) |> filter(ccode1 != ccode2)
+  af <- already_fighting_keys(toy_dd2) |> distinct(ccode1, ccode2, year) |> mutate(af = 1L)
+  alts2 <- alts |> left_join(af, by = c("ccode1", "ccode2", "year")) |> filter(is.na(af)) |> select(-af)
+  expect_equal(nrow(alts) - nrow(alts2), 2L)                       # (10, 20, 1981) and (10, 20, 1982)
+  expect_false(any(alts2$ccode1 == 10L & alts2$ccode2 == 20L & alts2$year %in% 1981:1982))
+  expect_true(any(alts2$ccode1 == 10L & alts2$ccode2 == 20L & alts2$year == 1980L))
+  expect_true(any(alts2$ccode1 == 10L & alts2$ccode2 == 30L & alts2$year == 1982L))   # the joiner event's alternative stays
+  expect_true(any(alts2$ccode1 == 40L & alts2$ccode2 == 50L & alts2$year == 1980L))   # ended-at-t-1 pair stays
+  kept <- ev |> filter(in_mid, year <= 1982L) |> transmute(ccode1 = initiator, ccode2 = target, year)
+  expect_equal(nrow(kept |> anti_join(alts2, by = c("ccode1", "ccode2", "year"))), 0L)   # every kept event has its row
+  expect_equal(nrow(ev |> filter(escalation) |> transmute(ccode1 = initiator, ccode2 = target, year) |> semi_join(alts2, by = c("ccode1", "ccode2", "year"))), 0L)
+})
+
+test_that("ongoing_tm1 (stage 1) and dy_mid_tm1 (stage 2): involvement in any MID active at t-1, any role, joiners included", {
+  act_s <- active_state_years(toy_dd2); act_p <- active_pair_years(toy_dd2)
+  panel <- tibble(ccode = c(10L, 10L, 10L, 30L, 40L, 40L, 60L), year = c(1980L, 1981L, 1983L, 1983L, 1980L, 1981L, 1980L)) |>
+    left_join(act_s |> transmute(ccode, year = year + 1L, ongoing_tm1 = active), by = c("ccode", "year")) |> mutate(ongoing_tm1 = coalesce(ongoing_tm1, 0L))
+  expect_equal(panel$ongoing_tm1, c(0L, 1L, 1L, 1L, 1L, 1L, 0L))
+  ## 10 in 1980: nothing in 1979 -> 0; 10 in 1981 (dispute 70 active 1980) -> 1; 10 and the JOINER 30 in 1983 (active 1982) -> 1
+  ## 40 in 1980 (dispute 72 in 1979) -> 1; 40 in 1981 (dispute 73 in 1980) -> 1; 60 never -> 0
+  expect_true(all(panel$ongoing_tm1 %in% c(0L, 1L))); expect_false(anyNA(panel$ongoing_tm1))
+  alts <- tibble(ccode1 = c(40L, 40L, 10L, 30L, 20L, 10L), ccode2 = c(50L, 60L, 30L, 10L, 10L, 20L), year = c(1980L, 1980L, 1983L, 1983L, 1983L, 1980L)) |>
+    left_join(act_p |> transmute(ccode1, ccode2, year = year + 1L, dy_mid_tm1 = active), by = c("ccode1", "ccode2", "year")) |> mutate(dy_mid_tm1 = coalesce(dy_mid_tm1, 0L))
+  expect_equal(alts$dy_mid_tm1, c(1L, 0L, 1L, 1L, 1L, 0L))
+  ## (40, 50, 1980): dispute 72 ended at t-1 -> 1 and the row is NOT already fighting; (40, 60): unrelated -> 0;
+  ## (10, 30) and (30, 10) in 1983: the joiner pair was active in 1982 -> 1 in both directions; (10, 20, 1980): nothing in 1979 -> 0
+  expect_false(any(paste(alts$ccode1, alts$ccode2, alts$year) %in% with(already_fighting_keys(toy_dd2), paste(ccode1, ccode2, year))))
+  ## a remaining alternative with dy_mid_tm1 = 1 implies every dispute of the pair active at t-1 had ended by t (otherwise it would be already fighting)
+  expect_false("dy_mid_tm1" %in% Z_CENTRED); expect_true("dy_mid_tm1" %in% z_columns())
+})
+
+test_that("WWII dispute list is derived from the COW data and asserted against WW2_DISPNUMS", {
+  skip_if_not_installed("peacesciencer")
+  suppressPackageStartupMessages(library(peacesciencer))
+  dd <- cow_mid_dirdisps |> mutate(across(c(dispnum, ccode1, ccode2, year), as.integer))
+  tbl <- ww2_disputes(cow_mid_disps |> mutate(dispnum = as.integer(dispnum)), dd, cow_war_inter)
+  expect_setequal(tbl$dispnum[tbl$is_ww2], WW2_DISPNUMS)
+  expect_true(258L %in% tbl$dispnum[tbl$is_ww2])
+  expect_true(all(c(157L, 179L, 183L, 613L) %in% tbl$dispnum[!tbl$is_ww2]))   # the Sino-Japanese, Winter, Nomonhan and Franco-Thai wars
+  expect_true(all(tbl$hiact[tbl$is_ww2 & tbl$dispnum != 258L] == WW2_HIACT_JOIN_WAR))
+  expect_true(all(tbl$n_dyadyears_in_war139[tbl$is_ww2] > 0))
+  expect_error(ww2_disputes(cow_mid_disps |> mutate(dispnum = as.integer(dispnum)) |> filter(dispnum != 258L), dd, cow_war_inter), "WW2_DISPNUMS")
 })

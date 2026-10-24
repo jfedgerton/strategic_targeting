@@ -125,6 +125,89 @@ code_fatal_main <- function(fatal_cow, fatal_mic, war, fatal_gml) {
 }
 MIC_CONF_SHA256 <- "41cef02d0dcb23f91658b2367864b018a517e13d5b0278394dc12775fa5a5ee0"   # mic-conf-1.0.csv
 
+## ---- dispute participation (PI decisions 2026-10-24; README "Events", "Ongoing disputes") ----------------------
+## dd: COW-MID directed dispute-years (cow_mid_dirdisps) with integer dispnum, ccode1, ccode2, year. The data hold
+## both directions of every opposing pair for every year the pair is in the dispute. Every function below uses
+## EVERY participant (originators and joiners, both sides), so the already-fighting rule, the stage-1 control
+## ongoing_tm1 and the dyadic lagged DV dy_mid_tm1 count joiner involvement the same way the events do.
+## pair_dispute_years(): one row per (dispnum, ccode1, ccode2, year) with pair_onset = the pair's first year in
+## that dispute (the events' onset year uses the same definition).
+pair_dispute_years <- function(dd) {
+  stopifnot(all(c("dispnum", "ccode1", "ccode2", "year") %in% names(dd)))
+  out <- dd |> distinct(dispnum, ccode1, ccode2, year) |> group_by(dispnum, ccode1, ccode2) |>
+    mutate(pair_onset = min(year)) |> ungroup()
+  assert_no_dup_keys(out, c("dispnum", "ccode1", "ccode2", "year"), "pair dispute-years")
+  out
+}
+## already_fighting_keys(): directed (ccode1, ccode2, year, dispnum) such that the pair is a participant pair of
+## dispute dispnum, the dispute is active for the pair in `year` and the pair's onset in it is BEFORE `year`.
+## A stage-2 alternative (i, j, t) matching any row is "already fighting" and is dropped from the choice set.
+already_fighting_keys <- function(dd) {
+  pair_dispute_years(dd) |> filter(year > pair_onset) |> select(ccode1, ccode2, year, dispnum)
+}
+## flag_escalations(): events (initiator, target, year, dispnum) get escalation = TRUE when (initiator, target, year)
+## is already fighting in a dispute OTHER than the event's own. The own dispute can never match because the event
+## year is the pair's onset in it, and this is asserted.
+flag_escalations <- function(events, af) {
+  stopifnot(all(c("initiator", "target", "year", "dispnum") %in% names(events)), all(c("ccode1", "ccode2", "year", "dispnum") %in% names(af)))
+  hit <- events |> select(initiator, target, year, dispnum) |>
+    inner_join(af |> rename(initiator = ccode1, target = ccode2, af_dispnum = dispnum), by = c("initiator", "target", "year"), relationship = "many-to-many")
+  if (nrow(hit) > 0 && any(hit$dispnum == hit$af_dispnum)) stop("flag_escalations: an event matched an already-fighting row of its OWN dispute (onset year is not the pair's first year)")
+  esc <- hit |> distinct(initiator, target, year, dispnum) |> mutate(escalation = TRUE)
+  out <- events |> left_join(esc, by = c("initiator", "target", "year", "dispnum")) |> mutate(escalation = coalesce(escalation, FALSE))
+  stopifnot(nrow(out) == nrow(events), !anyNA(out$escalation))
+  out
+}
+## active_state_years(): (ccode, year) for every state that is a participant (any role) in a dispute active that year.
+## Joined at year t-1 it is the stage-1 control ongoing_tm1.
+active_state_years <- function(dd) dd |> distinct(ccode = ccode1, year) |> mutate(active = 1L)
+## active_pair_years(): (ccode1, ccode2, year), both directions, for every pair of opposing participants in a dispute
+## active that year. Joined at year t-1 it is the dyadic lagged DV dy_mid_tm1.
+active_pair_years <- function(dd) {
+  a <- dd |> distinct(ccode1, ccode2, year)
+  bind_rows(a, a |> rename(ccode1 = ccode2, ccode2 = ccode1)) |> distinct() |> mutate(active = 1L)
+}
+
+## ---- WWII disputes (PI-approved appendix option --drop_ww2, 2026-10-24) -----------------------------------------
+## COW-MID 5.0 codes the Second World War as dispute 258 (1939-03 to 1945-09, 26 states). Several other war-level
+## (hostlev 5) disputes of 1939-1945 are the run-ups to a state's ENTRY into that war (Germany vs Norway, Italy vs
+## Greece, Germany vs the USSR, the United States vs Japan and Germany, the USSR vs Japan in 1945, ...). COW closes
+## each of them with highest action 21 ("join interstate war") and codes the same dyad as a WWII war dyad-year in
+## the COW inter-state war data (warnum 139). The rule applied here, derived from the data and logged by the build:
+##   WWII = 258, plus every hostlev-5 dispute that (a) starts between 1939-09 and 1945-09, (b) has dispute-level
+##   highest action 21 (join interstate war) and (c) has at least one of its dyad-years in COW inter-state war 139.
+## Excluded on purpose, with the reason the build logs: 157 (Third Sino-Japanese War, COW war 130, began 1937-07,
+## before the window), 179 (Russo-Finnish Winter War, COW war 142), 183 (Nomonhan, COW war 136) and 613
+## (Franco-Thai War, COW war 145); these begin a war of their own (highest action 20) and share no dyad-year with
+## war 139. The list is asserted against WW2_DISPNUMS so a data update changes it loudly, not silently.
+WW2_DISPNUMS <- c(235L, 258L, 339L, 414L, 418L, 518L, 2725L, 3701L, 3705L, 3717L, 3724L, 3813L, 3820L, 3822L, 3826L, 3827L)
+WW2_HIACT_JOIN_WAR <- 21L
+ww2_disputes <- function(disp, dd, war_inter) {
+  stopifnot(all(c("dispnum", "styear", "stmon", "hiact", "hostlev") %in% names(disp)),
+            all(c("warnum", "ccode1", "ccode2", "year") %in% names(war_inter)))
+  ww_dyads <- war_inter |> filter(warnum == 139) |> transmute(ccode1 = as.integer(ccode1), ccode2 = as.integer(ccode2), year = as.integer(year)) |> distinct()
+  stopifnot(nrow(ww_dyads) > 0)
+  yrs <- dd |> group_by(dispnum) |> summarise(y0 = min(year), y1 = max(year), n_states = n_distinct(c(ccode1, ccode2)), .groups = "drop")
+  in_ww <- dd |> distinct(dispnum, ccode1, ccode2, year) |> semi_join(ww_dyads, by = c("ccode1", "ccode2", "year")) |> count(dispnum, name = "n_dyadyears_in_war139")
+  cand <- disp |> filter(hostlev == 5L) |> inner_join(yrs, by = "dispnum") |> filter(y0 <= 1945L, y1 >= 1939L) |>
+    left_join(in_ww, by = "dispnum") |> mutate(n_dyadyears_in_war139 = coalesce(n_dyadyears_in_war139, 0L),
+                                              start = styear * 100L + stmon,
+                                              in_window = start >= 193909L & start <= 194509L,
+                                              joins_war = hiact == WW2_HIACT_JOIN_WAR,
+                                              is_ww2 = dispnum == 258L | (in_window & joins_war & n_dyadyears_in_war139 > 0L),
+                                              reason = case_when(dispnum == 258L ~ "COW-MID dispute of the Second World War",
+                                                                 is_ww2 ~ "starts 1939-09..1945-09, highest action 21 (join interstate war), dyad-years in COW war 139",
+                                                                 !in_window ~ "starts before 1939-09 (a war of its own)",
+                                                                 !joins_war ~ "highest action 20 (begins a war of its own), not a WWII entry",
+                                                                 TRUE ~ "no dyad-year in COW inter-state war 139")) |>
+    arrange(dispnum)
+  got <- sort(cand$dispnum[cand$is_ww2])
+  if (!identical(got, sort(WW2_DISPNUMS)))
+    stop(sprintf("WWII dispute list derived from the data (%s) differs from WW2_DISPNUMS (%s); review and update 00_helpers.R",
+                 paste(got, collapse = ","), paste(sort(WW2_DISPNUMS), collapse = ",")))
+  cand |> select(dispnum, styear, stmon, y0, y1, n_states, hiact, hostlev, n_dyadyears_in_war139, is_ww2, reason)
+}
+
 ## ---- gap scale (PI decision 2026-10-23): SD of the within-year gap v_i - v_j over all ordered pairs i != j ----
 ## Exact, without forming the pairs. Per year with n values and SS = sum((v - mean(v))^2), sum over ordered pairs of
 ## (v_i - v_j)^2 = 2 n SS and there are n (n - 1) pairs; the pairs' mean is exactly 0. Years with one state add nothing.

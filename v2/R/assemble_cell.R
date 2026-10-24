@@ -4,23 +4,32 @@
 ## consumer sees the SAME rows (audit F3/F8: one assembly path, manifest-checked inputs).
 ## Returns list(sy, alts, ev, W_cols, X_cols, Z_cols, state_codes, x_ref, n_full, sampled, log lines)
 ## ============================================================================
-## Dyadic control columns. Main Z = land contiguity, alliance, joint democracy, major-power count
-## (+ conflict history) + the TARGET's power changes over the same window (dM_j_h, dRpr_j_h; PI decision
-## 2026-10-23, in every model including the 1-D ones). TARGET_MISSING = TRUE adds the 0/1 indicator
-## dch_j_missing for targets with no change value (assemble_cell() sets it only when the indicator is
-## non-constant in the assembled cell). DISTANCE = TRUE adds log1p(capital distance km) (alternative
+## Dyadic control columns. Main Z = land contiguity, alliance, joint democracy, major-power count, the dyadic
+## prior-MID count (CONFLICT_HISTORY), the dyadic lagged DV dy_mid_tm1 (PI decision 2026-10-24, always in; the pair
+## was in a MID active at t-1, joiners included) + the TARGET's power changes over the same window (dM_j_h, dRpr_j_h;
+## PI decision 2026-10-23, in every model including the 1-D ones). The dyadic peace-years control left the main Z on
+## 2026-10-24; DY_PEACE_YEARS = TRUE (fit option --dy_peace_years, cell suffix _dypy) restores it. TARGET_MISSING =
+## TRUE adds the 0/1 indicator dch_j_missing for targets with no change value (assemble_cell() sets it only when the
+## indicator is non-constant in the assembled cell). DISTANCE = TRUE adds log1p(capital distance km) (alternative
 ## specification, not the main spec); CONTIGUITY = FALSE drops contig_land (robustness option).
-z_columns <- function(CONFLICT_HISTORY = TRUE, DISTANCE = FALSE, CONTIGUITY = TRUE, TARGET_MISSING = FALSE) {
+z_columns <- function(CONFLICT_HISTORY = TRUE, DISTANCE = FALSE, CONTIGUITY = TRUE, TARGET_MISSING = FALSE, DY_PEACE_YEARS = FALSE) {
   c(if (CONTIGUITY) "contig_land", "alliance_def_off", "joint_dem", "major_count",
-    if (CONFLICT_HISTORY) c("log_dy_prior_mids", "log_dy_peace_years"),
+    if (CONFLICT_HISTORY) "log_dy_prior_mids",
+    "dy_mid_tm1",
+    if (DY_PEACE_YEARS) "log_dy_peace_years",
     if (DISTANCE) "log_capdist",
     "dM_j_h", "dRpr_j_h",
     if (TARGET_MISSING) "dch_j_missing")
 }
-## continuous Z columns that assemble_cell() centres over the assembled alternative rows (the 0/1 indicators stay as is)
+## continuous Z columns that assemble_cell() centres over the assembled alternative rows (the 0/1 indicators, dy_mid_tm1
+## included, stay as is)
 Z_CENTRED <- c("log_dy_prior_mids", "log_dy_peace_years", "log_capdist", "dM_j_h", "dRpr_j_h")
+## Monadic 0/1 controls that enter W and X and are centred like the conflict-history counts: major power, democracy and
+## (2026-10-24) ongoing_tm1 = participant in any MID active at t-1.
+SY_INDICATORS <- c("cowmaj_tm1", "dem_tm1", "ongoing_tm1")
 assemble_cell <- function(SAMPLE, LAG, VARIANT, CENT = "pr", CONFLICT_HISTORY = TRUE, SAMPLED_M = 0L,
-                          DISTANCE = FALSE, CONTIGUITY = TRUE, data_dir = file.path(v2_root(), "data")) {
+                          DISTANCE = FALSE, CONTIGUITY = TRUE, DY_PEACE_YEARS = FALSE, DROP_WW2 = FALSE,
+                          data_dir = file.path(v2_root(), "data")) {
   stopifnot(SAMPLE %in% c("mid", "fmid", "fmidcow", "fmidub", "war"), LAG %in% c(1L, 3L, 5L, 10L), VARIANT %in% c("all", "polrel"), CENT %in% c("pr", "eig"))
   manifest_path <- file.path(data_dir, "manifest.csv")
   stopifnot(file.exists(manifest_path))
@@ -29,7 +38,10 @@ assemble_cell <- function(SAMPLE, LAG, VARIANT, CENT = "pr", CONFLICT_HISTORY = 
   alts   <- assert_matches_manifest(file.path(data_dir, sprintf("alts_lag%d_%s.rds", LAG, VARIANT)), manifest_path)
   events <- assert_matches_manifest(file.path(data_dir, "events.rds"), manifest_path)
   stopifnot(all(panel$h == LAG), all(alts$h == LAG))
-  logf("inputs verified: panel %d rows, alts %d rows, events %d rows", nrow(panel), nrow(alts), nrow(events))
+  stopifnot(all(c("escalation", "is_joiner_pair", "is_ww2", "target_has_pos_tm1") %in% names(events)),
+            all(c("ongoing_tm1") %in% names(panel)), all(c("dy_mid_tm1") %in% names(alts)))
+  logf("inputs verified: panel %d rows, alts %d rows, events %d rows (%d escalations, %d joiner pairs, %d WWII)",
+       nrow(panel), nrow(alts), nrow(events), sum(events$escalation), sum(events$is_joiner_pair), sum(events$is_ww2))
   
   ## ---- stage-1 panel -> sy ------------------------------------------------------------------
   y1_col <- paste0("y1_", SAMPLE); ev_flag <- paste0("in_", SAMPLE)
@@ -45,12 +57,14 @@ assemble_cell <- function(SAMPLE, LAG, VARIANT, CENT = "pr", CONFLICT_HISTORY = 
   ## state index: union of initiators (panel) and targets (alts), sorted by ccode (index only; anchors are NOT taken from this order)
   state_codes <- sort(unique(c(sy$ccode, alts$ccode2)))
   sy$state_idx <- match(sy$ccode, state_codes)
-  ctrl_sy <- c("cowmaj_tm1", "dem_tm1", if (CONFLICT_HISTORY) c("log_prior_mids", "log_peace_years"))
-  ## centre every stage-1 / mu control (the 0/1 major-power and democracy indicators as well as the conflict-history
-  ## counts; PI decision 2026-10-23) so that the mu intercept mu0 is the ideal gap of a state with zero power change at
-  ## average major-power, democracy and history values, and alpha0 in stage 1 is the log-odds at those averages.
-  ## dM_i and dR_i are NOT centred (zero power change is the substantive reference).
-  stopifnot(all(ctrl_sy %in% names(sy)), all(sy$cowmaj_tm1 %in% c(0, 1)), all(sy$dem_tm1 %in% c(0, 1)))
+  ctrl_sy <- c(SY_INDICATORS, if (CONFLICT_HISTORY) c("log_prior_mids", "log_peace_years"))
+  ## centre every stage-1 / mu control (the 0/1 major-power, democracy and ongoing-MID indicators as well as the
+  ## conflict-history counts; PI decisions 2026-10-23 / 2026-10-24) so that the mu intercept mu0 is the ideal gap of a
+  ## state with zero power change at average major-power, democracy, ongoing-involvement and history values, and alpha0
+  ## in stage 1 is the log-odds at those averages. dM_i and dR_i are NOT centred (zero power change is the reference).
+  stopifnot(all(ctrl_sy %in% names(sy)))
+  for (cc in SY_INDICATORS) stopifnot(!anyNA(sy[[cc]]), all(sy[[cc]] %in% c(0, 1)))
+  logf("ongoing_tm1: mean %.4f over %d state-years (%d in a MID active at t-1)", mean(sy$ongoing_tm1), nrow(sy), sum(sy$ongoing_tm1))
   for (cc in ctrl_sy) sy[[cc]] <- sy[[cc]] - mean(sy[[cc]])
   stopifnot(all(abs(colMeans(as.matrix(sy[, ctrl_sy, drop = FALSE]))) < 1e-8))
   W_cols <- c("dM_i", "dR_i", ctrl_sy)      # PI decision 2026-10-22: initiator power changes also enter stage 1 directly
@@ -74,19 +88,56 @@ assemble_cell <- function(SAMPLE, LAG, VARIANT, CENT = "pr", CONFLICT_HISTORY = 
   logf("target changes: %d of %d alternative rows have a target without a change value (set to 0); dch_j_missing %s Z (%s)",
        n_miss, nrow(alts), if (target_missing) "enters" else "is NOT in",
        if (target_missing) "non-constant in this cell" else "constant in this cell")
-  Z_cols <- z_columns(CONFLICT_HISTORY, DISTANCE, CONTIGUITY, TARGET_MISSING = target_missing)
+  Z_cols <- z_columns(CONFLICT_HISTORY, DISTANCE, CONTIGUITY, TARGET_MISSING = target_missing, DY_PEACE_YEARS = DY_PEACE_YEARS)
   ## centre the continuous Z columns over the assembled alternative rows (as before for the conflict-history and distance
   ## columns; the target changes are treated the same way). A constant shift of a Z column is identical for every
   ## alternative in every choice set and cancels in the softmax, so this changes no likelihood value.
   for (cc in intersect(Z_cols, Z_CENTRED)) alts[[cc]] <- alts[[cc]] - mean(alts[[cc]])
   stopifnot(all(abs(colMeans(as.matrix(alts[, intersect(Z_cols, Z_CENTRED), drop = FALSE]))) < 1e-8))
+  ## dyadic lagged DV (PI decision 2026-10-24): 0/1, not centred, must vary within the assembled cell
+  stopifnot(!anyNA(alts$dy_mid_tm1), all(alts$dy_mid_tm1 %in% c(0L, 1L)))
+  if (length(unique(alts$dy_mid_tm1)) < 2)
+    stop(sprintf("dy_mid_tm1 is constant (%d) over the %d assembled alternative rows of this cell (sample %s, lag %d, variant %s); it cannot enter Z",
+                 alts$dy_mid_tm1[1], nrow(alts), SAMPLE, LAG, VARIANT))
   
   ## ---- events in this sample -------------------------------------------------------------------------
-  ev_all <- events |> filter(.data[[ev_flag]]) |> transmute(ccode1 = initiator, ccode2 = target, year, dispnum)
-  ev <- ev_all |> inner_join(sy_key, by = c("ccode1", "year")) |>
-    inner_join(alts |> transmute(ccode1, ccode2, year, alt_row = row_number()), by = c("ccode1", "ccode2", "year"))
-  logf("events in sample %s: %d; usable (initiator in panel AND target in choice set): %d", SAMPLE, nrow(ev_all), nrow(ev))
+  ## The sample flag in_<sample> already excludes escalations (events whose pair was fighting in another dispute at t);
+  ## asserted here, not assumed. --drop_ww2 (appendix) removes the WWII events and their stage-1 initiations as well.
+  ev_all <- events |> filter(.data[[ev_flag]])
+  stopifnot(!any(ev_all$escalation))
+  n_ww2 <- sum(ev_all$is_ww2)
+  if (DROP_WW2) {
+    ev_all <- ev_all |> filter(!is_ww2)
+    logf("--drop_ww2: %d WWII events (disputes %s) removed from sample %s before stage 1 and stage 2", n_ww2, paste(sort(unique(events$dispnum[events$is_ww2])), collapse = ","), SAMPLE)
+  } else logf("WWII events in sample %s: %d of %d (kept; --drop_ww2=TRUE removes them)", SAMPLE, n_ww2, nrow(ev_all))
+  ## stage-1 outcome recounted from the kept events (independent path through the escalation and WWII columns). Without
+  ## --drop_ww2 it must equal the panel's y1_<sample>; with it the recount IS y1, so WWII-only state-years get y1 = 0.
+  y1_re <- ev_all |> distinct(ccode = initiator, year) |> mutate(.y1 = 1L)
+  sy <- sy |> left_join(y1_re, by = c("ccode", "year")) |> mutate(.y1 = coalesce(.y1, 0L))
+  if (!DROP_WW2) {
+    if (!all(sy$y1 == sy$.y1)) stop(sprintf("y1_%s disagrees with the recount from non-escalation events on %d state-years", SAMPLE, sum(sy$y1 != sy$.y1)))
+  } else {
+    logf("--drop_ww2: stage-1 initiations %d -> %d (%d state-years whose only %s events were WWII now have y1 = 0)", sum(sy$y1), sum(sy$.y1), sum(sy$y1 == 1L & sy$.y1 == 0L), SAMPLE)
+    stopifnot(all(sy$.y1 <= sy$y1))
+    sy$y1 <- sy$.y1
+  }
+  sy <- sy |> select(-.y1)
+  ## no alternative row may be an already-fighting pair-year: every escalation event's (i, j, t) is one, so none may match
+  esc_keys <- events |> filter(escalation) |> transmute(ccode1 = initiator, ccode2 = target, year)
+  if (nrow(alts |> semi_join(esc_keys, by = c("ccode1", "ccode2", "year"))) > 0) stop("alternative rows match already-fighting (escalation) pair-years; rebuild the data")
+  ev_keys <- ev_all |> transmute(ccode1 = initiator, ccode2 = target, year, dispnum, target_has_pos_tm1)
+  ev <- ev_keys |> inner_join(sy_key, by = c("ccode1", "year")) |>
+    inner_join(alts |> transmute(ccode1, ccode2, year, alt_row = row_number(), dy_mid_tm1), by = c("ccode1", "ccode2", "year"))
+  logf("events in sample %s: %d; usable (initiator in panel AND target in choice set): %d", SAMPLE, nrow(ev_keys), nrow(ev))
   stopifnot(nrow(ev) > 0, all(sy$y1[ev$sy_row] == 1L))
+  ## every event whose chosen alternative can exist (initiator in sy, target with positions at t-1 and in the system at t)
+  ## has it in its choice set; in the "all" variant without the distance filter this is exact, elsewhere a lower bound
+  expected <- ev_keys |> semi_join(sy_key, by = c("ccode1", "year")) |> filter(target_has_pos_tm1)
+  if (VARIANT == "all" && !DISTANCE) {
+    if (nrow(ev) != nrow(expected)) stop(sprintf("%d events with initiator in the panel and a target with positions at t-1 are not in their choice set (expected %d usable, got %d)", abs(nrow(expected) - nrow(ev)), nrow(expected), nrow(ev)))
+  } else stopifnot(nrow(ev) <= nrow(expected))
+  stopifnot(nrow(ev_keys |> semi_join(sy_key, by = c("ccode1", "year")) |> filter(!target_has_pos_tm1) |> semi_join(alts, by = c("ccode1", "ccode2", "year"))) == 0)
+  logf("dy_mid_tm1: %d of %d alternative rows = 1; chosen events with dy_mid_tm1 = 1: %d of %d", sum(alts$dy_mid_tm1), nrow(alts), sum(ev$dy_mid_tm1), nrow(ev))
   n_orphan <- sum(sy$y1 == 1L & !(seq_len(nrow(sy)) %in% ev$sy_row))
   logf("state-years with y1 = 1 but no usable stage-2 event (kept in stage 1 only): %d", n_orphan)
   ev <- ev |> select(sy_row, alt_row)
@@ -105,5 +156,6 @@ assemble_cell <- function(SAMPLE, LAG, VARIANT, CENT = "pr", CONFLICT_HISTORY = 
   x_ref <- colMeans(as.matrix(sy[sy$y1 == 1L, X_cols, drop = FALSE]))
   logf("x_ref (mean X over initiating state-years): %s", paste(sprintf("%s=%.3f", X_cols, x_ref), collapse = ", "))
   list(sy = sy, alts = alts, ev = ev, W_cols = W_cols, X_cols = X_cols, Z_cols = Z_cols, state_codes = state_codes,
-       x_ref = x_ref, n_full = n_full, sampled = sampled, n_orphan = n_orphan, manifest_path = manifest_path)
+       x_ref = x_ref, n_full = n_full, sampled = sampled, n_orphan = n_orphan, manifest_path = manifest_path,
+       n_ww2 = n_ww2, drop_ww2 = DROP_WW2, dy_peace_years = DY_PEACE_YEARS)
 }
