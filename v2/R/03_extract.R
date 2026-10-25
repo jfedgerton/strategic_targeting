@@ -1,7 +1,11 @@
 ## ============================================================================
 ## 03_extract.R -- post-process one fit: typology from posterior mu_i, AME alignment
 ##
-## Usage: Rscript v2/R/03_extract.R --fit=v2/output/fit_<cell>.rds [--r0=0.5] [--band_M=r0] [--band_R=r0]
+## Usage: Rscript v2/R/03_extract.R --fit=v2/output/fit_<cell>.rds [--r0=0.5] [--band_M=r0] [--band_R=r0] [--allow_stale=FALSE]
+## Pilot fits (fit_*_pilot.rds, or a saved pilot configuration) are refused; a STALE fit (manifest changed while sampling) needs
+## --allow_stale=TRUE (2026-10-25 C1 / C2). The manifest the fit is checked against is the one in the fit's own data directory
+## (v2/data, or v2/data_sideA for --direction=sideA fits). The typology / mu_state CSVs of one-dimensional cells carry an `axis`
+## column (material / relational; B2).
 ## Writes next to the fit:
 ##   typology_<cell>.csv   per-state posterior type probabilities, MAP type, r / theta summaries
 ##   mu_state_<cell>.csv   posterior mean and 90% interval of mu_i at x_ref
@@ -24,9 +28,11 @@ Sys.setenv(V2_ROOT = normalizePath(file.path(dirname(this_file), "..")))
 args <- commandArgs(trailingOnly = TRUE)
 fit_path <- sub("^--fit=", "", grep("^--fit=", args, value = TRUE))
 r0 <- as.numeric(sub("^--r0=", "", c(grep("^--r0=", args, value = TRUE), "--r0=0.5")[1]))
-stopifnot(length(fit_path) == 1, file.exists(fit_path), is.finite(r0), r0 > 0)
+allow_stale <- as.logical(sub("^--allow_stale=", "", c(grep("^--allow_stale=", args, value = TRUE), "--allow_stale=FALSE")[1]))
+stopifnot(length(fit_path) == 1, file.exists(fit_path), is.finite(r0), r0 > 0, !is.na(allow_stale))
 obj <- readRDS(fit_path); fit <- obj$fit; cell <- obj$cell
-assert_fit_current(obj, file.path(v2_root(), "data", "manifest.csv"))
+assert_production_fit(obj, allow_stale = allow_stale)
+assert_fit_current(obj, file.path(v2_root(), if (is.null(obj$data_dir)) "data" else obj$data_dir, "manifest.csv"))
 out_dir <- dirname(fit_path)
 log_open(paste0("03_extract_", cell))
 logf("fit %s; r0 = %.2f", cell, r0)
@@ -40,9 +46,10 @@ cls <- classify_types(mu, r0 = r0, state_labels = labels)
 n_init <- tabulate(obj$dat$sy_state[obj$dat$ev_sy], nbins = obj$dat$S)
 cls$n_events_as_initiator <- n_init
 cls$r0 <- r0
+if (dim(mu)[3] == 1) cls$axis <- axis_labels(obj$dat$D_mode)     # B2: a one-dimensional cell names its axis
 write.csv(cls, file.path(out_dir, paste0("typology_", cell, ".csv")), row.names = FALSE)
 mu_cols <- intersect(c("mu1_mean", "mu1_lo", "mu1_hi", "mu2_mean", "mu2_lo", "mu2_hi", "mu_mean", "mu_lo", "mu_hi"), names(cls))
-write.csv(cls |> select(state, all_of(mu_cols), n_events_as_initiator),
+write.csv(cls |> select(state, all_of(mu_cols), any_of("axis"), n_events_as_initiator),
           file.path(out_dir, paste0("mu_state_", cell, ".csv")), row.names = FALSE)
 logf("targeting dimensions D = %d (%s)", dim(mu)[3], if (dim(mu)[3] == 1) "one-axis typology: weaker / peer / stronger" else "bully / peer / challenger / hybrids")
 print(typology_summary(cls |> filter(n_events_as_initiator > 0)))
