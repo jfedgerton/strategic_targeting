@@ -14,7 +14,8 @@
 ## PageRank ratio.
 ##
 ## Posterior type probabilities are the share of draws falling in each region.
-## theta = atan2(mu_2, mu_1) is summarised by its circular mean; r by mean and quantiles.
+## theta = atan2(mu_2, mu_1) is summarised by its circular mean and a circular 90% interval (unwrapped around the
+## circular mean, bounds in (-pi, pi], theta_width = the arc length); r by mean and quantiles.
 ##
 ## Every function checks array shapes (audit F1: the old polar_coords.r silently
 ## collapsed a 1 x N x K slice to a scalar).
@@ -65,13 +66,22 @@ classify_types <- function(mu_draws, r0, state_labels = NULL, allow_identical_en
   colnames(probs) <- paste0("p_", TYPE_LEVELS)
   stopifnot(identical(dim(probs), c(S, 5L)), all(abs(rowSums(probs) - 1) < 1e-8))
   circ_mean <- function(th) atan2(mean(sin(th)), mean(cos(th)))
+  ## angle intervals are CIRCULAR (P3 fix 2026-10-25): the draws are unwrapped around the circular mean (deviations in (-pi, pi]),
+  ## the 5 / 95% quantiles of the deviations are added back and the bounds wrapped to (-pi, pi]. Plain quantiles of atan2 split a
+  ## cloud straddling +-pi (a challenger near (-1, 0)) into a spurious [-3.1, 3.1] interval.
+  wrap <- function(a) ((a + pi) %% (2 * pi)) - pi
+  th_mean <- apply(theta, 2, circ_mean)
+  dev <- wrap(sweep(theta, 2, th_mean))
+  theta_lo <- wrap(th_mean + apply(dev, 2, quantile, 0.05)); theta_hi <- wrap(th_mean + apply(dev, 2, quantile, 0.95))
+  theta_width <- apply(dev, 2, quantile, 0.95) - apply(dev, 2, quantile, 0.05)          # arc length of the interval, in (0, 2 pi)
+  stopifnot(all(theta_width >= 0), all(theta_width <= 2 * pi), all(abs(th_mean) <= pi))
   out <- data.frame(state = state_labels,
                     mu1_mean = colMeans(m1), mu2_mean = colMeans(m2),
                     mu1_lo = apply(m1, 2, quantile, 0.05), mu1_hi = apply(m1, 2, quantile, 0.95),
                     mu2_lo = apply(m2, 2, quantile, 0.05), mu2_hi = apply(m2, 2, quantile, 0.95),
                     r_mean = colMeans(r), r_lo = apply(r, 2, quantile, 0.05), r_hi = apply(r, 2, quantile, 0.95),
-                    theta_circmean = apply(theta, 2, circ_mean),
-                    theta_lo = apply(theta, 2, quantile, 0.05), theta_hi = apply(theta, 2, quantile, 0.95),
+                    theta_circmean = th_mean,
+                    theta_lo = theta_lo, theta_hi = theta_hi, theta_width = theta_width,
                     probs, stringsAsFactors = FALSE)
   out$map_type <- TYPE_LEVELS[apply(probs, 1, which.max)]
   out$map_prob <- apply(probs, 1, max)
@@ -83,7 +93,9 @@ classify_types <- function(mu_draws, r0, state_labels = NULL, allow_identical_en
 ## Extract mu_state draws from an rstan fit as [n_draws, S, 2]
 mu_state_draws <- function(fit) {
   arr <- rstan::extract(fit, pars = "mu_state")$mu_state
-  if (length(dim(arr)) == 2) arr <- array(arr, c(dim(arr), 1L))     # D = 1: rstan drops the unit dimension
+  ## rstan keeps matrix[S, 1] as a 3-d array [draws, S, 1] (it does NOT drop the unit dimension; the comment here was wrong,
+  ## review 2026-10-25 B3). The 2-d branch is a safety net for a caller that passes [draws, S] by hand.
+  if (length(dim(arr)) == 2) arr <- array(arr, c(dim(arr), 1L))
   stopifnot(length(dim(arr)) == 3, dim(arr)[3] %in% 1:2)
   arr
 }
@@ -91,7 +103,7 @@ mu_state_draws <- function(fit) {
 ## Per-event classification (mu at the event's own X): same shape contract.
 mu_event_draws <- function(fit) {
   arr <- rstan::extract(fit, pars = "mu_event")$mu_event
-  if (length(dim(arr)) == 2) arr <- array(arr, c(dim(arr), 1L))
+  if (length(dim(arr)) == 2) arr <- array(arr, c(dim(arr), 1L))     # safety net only; rstan keeps [draws, E, 1] (see above)
   stopifnot(length(dim(arr)) == 3, dim(arr)[3] %in% 1:2)
   arr
 }

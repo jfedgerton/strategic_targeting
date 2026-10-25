@@ -1,7 +1,7 @@
 ## ============================================================================
 ## benchmarks.R -- two comparison models, built on the SAME v2 data files and timing
 ##
-## (i)  Directed-dyad logit of initiation (i -> j in year t) on the CINC ratio, the centrality
+## (i)  Directed-dyad logit of initiation (i -> j in year t) on the CINC ratio cinc_i / (cinc_i + cinc_j) = plogis(M_i - M_j), the centrality
 ##      difference dR, and the dyadic controls. Rows = every alternative row of the chosen choice
 ##      set file (state-year x alternative), outcome = 1 if (i, j, t) is an event in the sample.
 ##      Estimated with brms bernoulli (seed 123). This is the "standard" benchmark.
@@ -29,18 +29,21 @@ if (!exists("build_stan_data")) {
 ## ---- assembly functions (also used by the sim test) -------------------------------------------------
 ## alts: alternative rows with dM, dR, Z columns, ccode1/ccode2/year (or state_idx/target_idx/year);
 ## ev_keys: data.frame of event (ccode1, ccode2, year) rows in the sample
+## cinc_ratio (review 2026-10-25, B10): the directed-dyad logit's "CINC ratio" is cinc_i / (cinc_i + cinc_j) = plogis(M_i - M_j) with
+## M the log CINC share. It is computed from the RAW log material gap (logratio_col, dM_logratio in the alternatives files; the
+## model's dM is that log ratio divided by the gap constant and is NOT a ratio) or from two share columns (cinc_cols). Neither
+## available -> error: the benchmark no longer receives the scaled log gap under the name "ratio".
 assemble_dyad_logit <- function(alts, ev_keys, id_cols = c("ccode1", "ccode2", "year"),
                                 z_cols = c("contig_land", "alliance_def_off", "joint_dem", "major_count"),
-                                cinc_cols = NULL) {
+                                cinc_cols = NULL, logratio_col = "dM_logratio") {
   stopifnot(all(id_cols %in% names(alts)), all(id_cols %in% names(ev_keys)), all(z_cols %in% names(alts)))
   ev_keys$y <- 1L
   d <- alts |> left_join(ev_keys |> distinct(across(all_of(id_cols)), y), by = id_cols) |> mutate(y = coalesce(y, 0L))
   stopifnot(sum(d$y) <= nrow(ev_keys), sum(d$y) > 0)
-  ## CINC ratio: the model has dM = M_i - M_j, a log ratio of CINC shares divided by the gap constant GAP_SCALE_M
-  ## (change_scale.csv, h = NA); the "ratio" benchmark uses the raw share when available
-  ## (cinc_i / (cinc_i + cinc_j)); otherwise dM stands in and this is logged.
   if (!is.null(cinc_cols) && all(cinc_cols %in% names(d))) d$cinc_ratio <- d[[cinc_cols[1]]] / (d[[cinc_cols[1]]] + d[[cinc_cols[2]]])
-  else d$cinc_ratio <- d$dM
+  else if (!is.null(logratio_col) && logratio_col %in% names(d)) d$cinc_ratio <- plogis(d[[logratio_col]])
+  else stop("assemble_dyad_logit: the CINC ratio needs the raw log material gap (", logratio_col, ") or two share columns (cinc_cols); the scaled gap dM is not a ratio")
+  stopifnot(all(is.finite(d$cinc_ratio)), all(d$cinc_ratio > 0), all(d$cinc_ratio < 1))
   d
 }
 assemble_gap_regression <- function(sy, alts, ev, X_cols) {
@@ -85,7 +88,9 @@ if (sys.nframe() == 0 && length(grep("^--sample=", commandArgs(TRUE))) == 1) {
   z_cols <- z_columns()                      # the main-spec Z (audit 2026-10-24: no separate hard-coded list here)
   stopifnot(all(z_cols %in% names(alts)))
   ## (i) directed-dyad logit
-  d1 <- assemble_dyad_logit(alts, ev_keys, z_cols = z_cols)
+  stopifnot("dM_logratio" %in% names(alts))
+  d1 <- assemble_dyad_logit(alts, ev_keys, z_cols = z_cols, logratio_col = "dM_logratio")
+  logf("cinc_ratio = plogis(dM_logratio) = cinc_i / (cinc_i + cinc_j): mean %.3f, 5/95 pct %.3f / %.3f", mean(d1$cinc_ratio), quantile(d1$cinc_ratio, .05), quantile(d1$cinc_ratio, .95))
   offset_term <- 0
   if (MAX_ROWS > 0 && nrow(d1) > MAX_ROWS) {
     ## keep all events, subsample non-events; the intercept is corrected by log(sampling fraction)

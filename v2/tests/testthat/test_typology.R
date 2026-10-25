@@ -146,3 +146,25 @@ test_that("focus: one-dimensional models are labelled by their own axis (Codex r
   expect_error(focus_sigma(sig1))                       # D_mode is required
   expect_error(focus_sigma(sig1, D_mode = 3L))          # D = 1 array cannot be a both-dimensions model
 })
+
+test_that("P3 (2026-10-25): theta intervals are circular -- a cloud straddling +-pi gets a narrow interval around its circular mean", {
+  set.seed(9)
+  n <- 4000
+  ## entity 1: challenger-like cloud at angle pi (mu1 = -1, mu2 ~ 0): plain quantiles of atan2 would give about [-3.1, 3.1]
+  th1 <- pi + rnorm(n, 0, 0.1); m1 <- cbind(cos(th1), sin(th1))
+  ## entity 2: bully at pi/4 with the same spread
+  th2 <- pi / 4 + rnorm(n, 0, 0.1); m2 <- cbind(cos(th2), sin(th2))
+  mu <- array(NA_real_, c(n, 2, 2)); mu[, 1, ] <- m1; mu[, 2, ] <- m2
+  cls <- classify_types(mu, r0 = 0.5, state_labels = c("challenger_axis", "bully"))
+  expect_equal(abs(cls$theta_circmean[1]), pi, tolerance = 0.02)
+  expect_lt(cls$theta_width[1], 0.5); expect_lt(cls$theta_width[2], 0.5)                           # about 2 * 1.645 * 0.1 = 0.33
+  expect_equal(cls$theta_width[1], cls$theta_width[2], tolerance = 0.1)
+  expect_true(all(abs(c(cls$theta_lo, cls$theta_hi)) <= pi))
+  ## the bounds are the circular mean +- the deviation quantiles (wrapped): entity 2 is far from the wrap, so lo < mean < hi
+  expect_lt(cls$theta_lo[2], cls$theta_circmean[2]); expect_gt(cls$theta_hi[2], cls$theta_circmean[2])
+  ## entity 1 straddles the wrap: lo is just below +pi and hi just above -pi, i.e. lo > hi numerically but the arc is short
+  expect_gt(cls$theta_lo[1], pi - 0.3); expect_lt(cls$theta_hi[1], -pi + 0.3)
+  ## the plain quantile interval would have been nearly the whole circle
+  expect_gt(diff(quantile(atan2(m1[, 2], m1[, 1]), c(0.05, 0.95))), 6)
+  expect_equal(cls$map_type, c("challenger", "bully"))
+})
