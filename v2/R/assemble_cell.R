@@ -24,9 +24,14 @@
 ## CONFLICT_HISTORY is FALSE. The lists below are hard-coded per set (no shared abstraction) so that each one can be
 ## read off and tested against the base commit. w_controls() / x_controls() return the monadic controls (the columns
 ## after dM_i, dR_i) so that assemble_cell(), benchmarks.R and the tests share one list.
+## Main W since 2026-10-25 (PI decisions D2 and D3): the initiator's power LEVELS at t-1, M_lvl and R_lvl (within-year centred log
+## CINC share / log PageRank divided by the gap constants, built by 01_build_data.R; 0 = the system-average level that year, so
+## they are NOT grand-centred here), and the centred log system size at t-1, log_n_system_tm1 (the IV grows with the number of
+## alternatives, so tau * IV carried a system-size trend). Neither enters X. FULL_CONTROLS stays exactly 8bf0ce1.
+W_LEVELS <- c("M_lvl", "R_lvl")
 w_controls <- function(CONFLICT_HISTORY = TRUE, FULL_CONTROLS = FALSE) {
   if (FULL_CONTROLS) c("cowmaj_tm1", "dem_tm1", if (CONFLICT_HISTORY) c("log_prior_mids", "log_peace_years"))
-  else c("ongoing_tm1", if (CONFLICT_HISTORY) "log_prior_mids", "dem_tm1")
+  else c("M_lvl", "R_lvl", "ongoing_tm1", if (CONFLICT_HISTORY) "log_prior_mids", "dem_tm1", "log_n_system_tm1")
 }
 x_controls <- function(CONFLICT_HISTORY = TRUE, FULL_CONTROLS = FALSE) {
   if (FULL_CONTROLS) c("cowmaj_tm1", "dem_tm1", if (CONFLICT_HISTORY) c("log_prior_mids", "log_peace_years"))
@@ -59,10 +64,15 @@ Z_CENTRED <- c("log_dy_prior_mids", "log_dy_peace_years", "log_capdist", "dM_j_h
 SY_INDICATORS <- c("cowmaj_tm1", "dem_tm1", "ongoing_tm1")
 ## manifest: NULL reads data_dir/manifest.csv now; a data.frame is a SNAPSHOT read earlier by the caller (02_fit_model.R passes
 ## the manifest it read at load, so a rebuild between that read and the loading of the inputs stops the run; review P2-5).
+## EVENT_WEIGHTS (PI decision 2026-10-25, D8): "dispute" (main) gives every stage-2 event the build's weight w_<sample> = 1 / (the
+## initiator's targets in the same dispute and onset year), a composite likelihood with dispute-level weighting; "none" gives weight 1
+## (the robustness comparison, cell suffix _w1). The weights multiply the stage-2 log-lik terms in the Stan programs; log_lik_stage2
+## stays unweighted per event.
 assemble_cell <- function(SAMPLE, LAG, VARIANT, CENT = "pr", CONFLICT_HISTORY = TRUE, SAMPLED_M = 0L,
                           DISTANCE = FALSE, CONTIGUITY = TRUE, DY_PEACE_YEARS = FALSE, DROP_WW2 = FALSE, FULL_CONTROLS = FALSE,
-                          data_dir = file.path(v2_root(), "data"), manifest = NULL) {
-  stopifnot(SAMPLE %in% c("mid", "fmid", "fmidcow", "fmidub", "war"), LAG %in% c(1L, 3L, 5L, 10L), VARIANT %in% c("all", "polrel"), CENT %in% c("pr", "eig"))
+                          EVENT_WEIGHTS = "dispute", data_dir = file.path(v2_root(), "data"), manifest = NULL) {
+  stopifnot(SAMPLE %in% c("mid", "fmid", "fmidcow", "fmidub", "war"), LAG %in% c(1L, 3L, 5L, 10L), VARIANT %in% c("all", "polrel"), CENT %in% c("pr", "eig"),
+            EVENT_WEIGHTS %in% c("dispute", "none"))
   manifest_path <- file.path(data_dir, "manifest.csv")
   stopifnot(file.exists(manifest_path))
   if (is.null(manifest)) { manifest <- read.csv(manifest_path, stringsAsFactors = FALSE); manifest_source <- "read now" }
@@ -74,7 +84,8 @@ assemble_cell <- function(SAMPLE, LAG, VARIANT, CENT = "pr", CONFLICT_HISTORY = 
   stopifnot(all(panel$h == LAG), all(alts$h == LAG))
   stopifnot(all(c("escalation", "is_joiner_pair", "is_ww2", "target_has_pos_tm1", "fighting_at_ref", "dispnums", "n_disputes", "war_disp",
                   "in_mid_noww2", "in_fmid_noww2", "in_fmidcow_noww2", "in_fmidub_noww2", "in_war_noww2") %in% names(events)),
-            all(c("ongoing_tm1") %in% names(panel)), all(c("dy_mid_tm1", "in_iv", "in_s2") %in% names(alts)))
+            all(c("ongoing_tm1", "M_lvl", "R_lvl", "log_n_system_tm1") %in% names(panel)), all(c("dy_mid_tm1", "in_iv", "in_s2") %in% names(alts)),
+            all(c("dir_flipped", "dir_source", paste0("w_", SAMPLE)) %in% names(events)))
   stopifnot(!anyNA(alts$in_iv), !anyNA(alts$in_s2), all(alts$in_iv %in% 0:1), all(alts$in_s2 %in% 0:1), all(alts$in_iv == 1L | alts$in_s2 == 1L))
   assert_no_dup_keys(events |> filter(!escalation), c("initiator", "target", "year"), "events (one per initiator, target, year after the collapse)")
   logf("inputs verified against the manifest (%s): panel %d rows, alts %d rows (in both sets %d, IV only %d, stage 2 only %d), events %d rows (%d escalations, %d joiner pairs, %d WWII, %d collapsed from more than one dispute, %d fighting at the reference date)",
@@ -88,7 +99,14 @@ assemble_cell <- function(SAMPLE, LAG, VARIANT, CENT = "pr", CONFLICT_HISTORY = 
   ## drop panel state-years with no alternative row at all in this variant (logged by the build). A state-year that has
   ## rows but none in the stage-1 IV set is an error, not a drop.
   has_cs <- panel |> semi_join(alts, by = c("ccode" = "ccode1", "year"))
+  no_cs <- panel |> anti_join(alts, by = c("ccode" = "ccode1", "year"))
   logf("panel state-years with a non-empty choice set: %d of %d", nrow(has_cs), nrow(panel))
+  if (nrow(no_cs) > 0) {
+    ## P3 (2026-10-25): in the all-states variant every panel state-year has alternatives by construction, so a missing block is an
+    ## error; in polrel an isolated non-major state can have none and is dropped, listed with its ccodes
+    msg <- sprintf("%d panel state-years have NO alternative row in variant %s: %s", nrow(no_cs), VARIANT, paste(sprintf("%d-%d", no_cs$ccode, no_cs$year), collapse = " "))
+    if (VARIANT == "all") stop(msg) else logf("dropped from stage 1: %s", msg)
+  }
   n_iv_sy <- alts |> group_by(ccode1, year) |> summarise(n_iv = sum(in_iv), .groups = "drop")
   if (any(n_iv_sy$n_iv == 0L)) stop(sprintf("%d state-years have alternative rows but an EMPTY stage-1 IV set (no row with in_iv = 1); rebuild the data", sum(n_iv_sy$n_iv == 0L)))
   sy <- has_cs |> arrange(year, ccode) |>
@@ -108,8 +126,13 @@ assemble_cell <- function(SAMPLE, LAG, VARIANT, CENT = "pr", CONFLICT_HISTORY = 
   stopifnot(all(ctrl_sy %in% names(sy)), all(ctrl_x %in% ctrl_w), setequal(ctrl_x, if (FULL_CONTROLS) ctrl_w else character(0)))
   for (cc in SY_INDICATORS) stopifnot(!anyNA(sy[[cc]]), all(sy[[cc]] %in% c(0, 1)))
   logf("ongoing_tm1: mean %.4f over %d state-years (%d in a MID active at t-1)", mean(sy$ongoing_tm1), nrow(sy), sum(sy$ongoing_tm1))
-  for (cc in ctrl_sy) sy[[cc]] <- sy[[cc]] - mean(sy[[cc]])
-  stopifnot(all(abs(colMeans(as.matrix(sy[, ctrl_sy, drop = FALSE]))) < 1e-8))
+  ## the power levels (D2) are already centred within year over every state with positions (0 = the system average that year) and
+  ## are left as they are, like dM_i and dR_i; every other control is grand-centred
+  ctrl_cent <- setdiff(ctrl_sy, W_LEVELS)
+  for (cc in ctrl_cent) sy[[cc]] <- sy[[cc]] - mean(sy[[cc]])
+  stopifnot(all(abs(colMeans(as.matrix(sy[, ctrl_cent, drop = FALSE]))) < 1e-8), all(is.finite(as.matrix(sy[, ctrl_sy, drop = FALSE]))))
+  if (any(W_LEVELS %in% ctrl_sy)) logf("power levels in W (D2, within-year centred over all states with positions, gap-scaled, NOT grand-centred): M_lvl mean %.4f SD %.3f, R_lvl mean %.4f SD %.3f",
+                                        mean(sy$M_lvl), sd(sy$M_lvl), mean(sy$R_lvl), sd(sy$R_lvl))
   W_cols <- c("dM_i", "dR_i", ctrl_w)      # PI decision 2026-10-22: initiator power changes also enter stage 1 directly
   X_cols <- c("dM_i", "dR_i", ctrl_x)      # main: power changes only; --full_controls: the same controls as W
   logf("control set: %s; W = %s; X = %s", if (FULL_CONTROLS) "FULL (base specification of commit 8bf0ce1)" else "MINIMAL (main)", paste(W_cols, collapse = ","), paste(X_cols, collapse = ","))
@@ -155,6 +178,17 @@ assemble_cell <- function(SAMPLE, LAG, VARIANT, CENT = "pr", CONFLICT_HISTORY = 
   logf("choice-set flags: %d alternative rows; in the stage-1 IV set %d, in the stage-2 set %d, in both %d; state-years whose two sets differ %d of %d",
        nrow(alts), sum(alts$in_iv), sum(alts$in_s2), sum(alts$in_iv == 1L & alts$in_s2 == 1L),
        nrow(alts |> group_by(sy_row) |> summarise(d = any(in_iv != in_s2), .groups = "drop") |> filter(d)), nrow(sy))
+  ## ---- D3 diagnostic: the IV at a null point against the system size -----------------------------------------------------------
+  ## IV_null[n] = log sum over the IV rows of exp(-1/2 (dM^2 + dR^2)) (mu = 0, Sigma = I, b = gamma = 0, no u'v): it grows with the
+  ## number of alternatives, so without log_n_system_tm1 in W the trend in the system's size entered stage 1 through tau * IV.
+  ## Logged: cor(IV_null, log_n_system_tm1), and the share of IV_null's variance explained by W BEFORE (W without log_n_system_tm1)
+  ## and AFTER (with it) adding the column.
+  iv_null <- as.numeric(rowsum(exp(-0.5 * (alts$dM^2 + alts$dR^2)) * (alts$in_iv == 1L), alts$sy_row, reorder = TRUE))
+  stopifnot(length(iv_null) == nrow(sy), all(iv_null > 0)); iv_null <- log(iv_null)
+  r2 <- function(cols) if (length(cols)) summary(lm(iv_null ~ as.matrix(sy[, cols, drop = FALSE])))$r.squared else 0
+  w_before <- setdiff(c("dM_i", "dR_i", ctrl_w), "log_n_system_tm1"); w_after <- c("dM_i", "dR_i", ctrl_w)
+  logf("IV at a null point (D3): cor(IV_null, log_n_system_tm1) = %.3f; R^2 of IV_null on W without / with log_n_system_tm1 = %.3f / %.3f (log_n_system_tm1 %s W)",
+       cor(iv_null, sy$log_n_system_tm1), r2(w_before), r2(w_after), if ("log_n_system_tm1" %in% ctrl_w) "in" else "NOT in")
 
   ## ---- events in this sample -------------------------------------------------------------------------
   ## The sample flag in_<sample> already excludes escalations (events whose pair was fighting in another dispute at t);
@@ -186,8 +220,12 @@ assemble_cell <- function(SAMPLE, LAG, VARIANT, CENT = "pr", CONFLICT_HISTORY = 
   }
   sy <- sy |> select(-.y1)
   ## one chosen alternative per (i, j, t): same-year duplicates were collapsed by the build (PI decision 2026-10-24)
-  ev_keys <- ev_all |> transmute(ccode1 = initiator, ccode2 = target, year, dispnum, dispnums, target_has_pos_tm1, fighting_at_ref)
+  w_col <- paste0("w_", SAMPLE)
+  ev_keys <- ev_all |> transmute(ccode1 = initiator, ccode2 = target, year, dispnum, dispnums, target_has_pos_tm1, fighting_at_ref, dir_flipped,
+                                 w = if (EVENT_WEIGHTS == "dispute") .data[[w_col]] else 1)
   assert_no_dup_keys(ev_keys, c("ccode1", "ccode2", "year"), sprintf("events of sample %s", SAMPLE))
+  stopifnot(all(is.finite(ev_keys$w)), all(ev_keys$w > 0), all(ev_keys$w <= 1))
+  logf("direction (D1): %d of %d events in sample %s have the reversed direction (COW war initiator)", sum(ev_keys$dir_flipped), nrow(ev_keys), SAMPLE)
   ## an event whose pair was already fighting at the state-year's reference date (its earlier dispute ended before the
   ## event) has no STAGE-2 row by construction and enters stage 1 only; its (i, j, t) may keep an IV-only row (in_s2 = 0)
   far_keys <- ev_keys |> filter(fighting_at_ref)
@@ -220,7 +258,10 @@ assemble_cell <- function(SAMPLE, LAG, VARIANT, CENT = "pr", CONFLICT_HISTORY = 
   logf("dy_mid_tm1: %d of %d alternative rows = 1; chosen events with dy_mid_tm1 = 1: %d of %d", sum(alts$dy_mid_tm1), nrow(alts), sum(ev$dy_mid_tm1), nrow(ev))
   n_orphan <- sum(sy$y1 == 1L & !(seq_len(nrow(sy)) %in% ev$sy_row))
   logf("state-years with y1 = 1 but no usable stage-2 event (kept in stage 1 only): %d", n_orphan)
-  ev <- ev |> select(sy_row, alt_row)
+  ## stage-2 event weights (D8): w_<sample> from the build (or 1 under EVENT_WEIGHTS = "none"); build_stan_data() passes them as ev_w
+  logf("event weights (D8, %s): %d usable events, sum of weights %.1f; weight 1 on %d events, min %.4f; weights of the events in the panel's (initiator, dispute, year) groups whose other targets left stage 2 no longer sum to 1 (logged, not rescaled)",
+       EVENT_WEIGHTS, nrow(ev), sum(ev$w), sum(ev$w == 1), min(ev$w))
+  ev <- ev |> select(sy_row, alt_row, w)
   
   ## ---- optional sampled alternatives ------------------------------------------------------------------
   n_full <- NULL; sampled <- 0L
@@ -237,5 +278,6 @@ assemble_cell <- function(SAMPLE, LAG, VARIANT, CENT = "pr", CONFLICT_HISTORY = 
   logf("x_ref (mean X over initiating state-years): %s", paste(sprintf("%s=%.3f", X_cols, x_ref), collapse = ", "))
   list(sy = sy, alts = alts, ev = ev, W_cols = W_cols, X_cols = X_cols, Z_cols = Z_cols, state_codes = state_codes,
        x_ref = x_ref, n_full = n_full, sampled = sampled, n_orphan = n_orphan, manifest_path = manifest_path,
-       n_ww2 = n_ww2, drop_ww2 = DROP_WW2, dy_peace_years = DY_PEACE_YEARS, full_controls = FULL_CONTROLS, n_fighting_at_ref = nrow(far_keys))
+       n_ww2 = n_ww2, drop_ww2 = DROP_WW2, dy_peace_years = DY_PEACE_YEARS, full_controls = FULL_CONTROLS, n_fighting_at_ref = nrow(far_keys),
+       event_weights = EVENT_WEIGHTS, n_flipped = sum(ev_keys$dir_flipped), iv_null_cor_logn = cor(iv_null, sy$log_n_system_tm1))
 }

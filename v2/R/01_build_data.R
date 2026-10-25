@@ -9,7 +9,9 @@
 ##   sy_positions.rds              state-year positions M = log CINC share, R_pr = log IGO PageRank (both raw log
 ##                                 shares, NOT standardised within year; PI decision 2026-10-23), R_eig (eigenvector
 ##                                 centrality, still std within year; not used in the main grid)
-##   events.rds                    one row per (initiator, target, year) directed event among the kept rows (same-year
+##   events.rds                    one row per (initiator, target, year) directed event among the kept rows (initiator = COW's
+##                                 war-initiating side in war-level disputes linked to a COW war, else MID Side A; D1 2026-10-25:
+##                                 dir_flipped, dir_source, dir_rule, war_link; stage-2 weights w_<sample>, D8) (same-year
 ##                                 duplicates from different disputes collapsed; dispnum = smallest, dispnums lists all,
 ##                                 n_disputes), joiners included (is_joiner_pair), plus one row per escalation event
 ##                                 (escalation = TRUE under the month rule; excluded from every sample flag and from y1;
@@ -26,7 +28,8 @@
 ##                                 initiator change in stage 1 and the target change in stage 2.
 ##   change_scale.csv              the pooled SD constants per lag and variable
 ##   stage1_panel_lag{h}.rds       state-year panel for h in LAGS: y1_{mid,fmid,fmidcow,fmidub,war} (escalations
-##                                 excluded), W, X, ongoing_tm1 (participant in any MID active at t-1)
+##                                 excluded), W, X, ongoing_tm1 (participant in any MID active at t-1), the power levels M_lvl /
+##                                 R_lvl at t-1 (within-year centred, gap-scaled; D2) and log_n_system_tm1 (D3)
 ##   alts_lag{h}_{all,polrel}.rds  flattened choice sets (one row per state-year x alternative): the UNION of the
 ##                                 stage-1 IV set (in_iv = 1: pair not already fighting at JANUARY of t, every state-year)
 ##                                 and the stage-2 set (in_s2 = 1: pair not already fighting at the state-year's reference
@@ -43,7 +46,8 @@
 ##
 ## Initiation coding (audit F4; PI decision 2026-10-24): initiator = Side A participant (sidea == 1),
 ## target = Side B participant. One direction per dispute pair, onset year = the pair's first year in the
-## dispute. For multilateral disputes every (Side A x Side B) pair is one event. Since 2026-10-24 joiners
+## dispute. Since 2026-10-25 (D1) war-level disputes linked to a COW inter-state war take COW's war-initiating
+## side instead (Side A is the first codable action, not the aggressor); V2_DIRECTION=sideA rebuilds the old coding. For multilateral disputes every (Side A x Side B) pair is one event. Since 2026-10-24 joiners
 ## (orig == 0) are part of the main build (INCLUDE_JOINERS = TRUE); is_joiner_pair marks pairs with a joiner
 ## on either side (tabulation only, not a covariate). INCLUDE_JOINERS = FALSE reproduces the originator-only
 ## event base.
@@ -81,13 +85,25 @@ if (length(this_file) == 0) this_file <- "v2/R/01_build_data.R"
 source(file.path(dirname(this_file), "00_helpers.R"))
 Sys.setenv(V2_ROOT = normalizePath(file.path(dirname(this_file), "..")))
 set.seed(V2_SEED)
-log_open("01_build_data")
-out_dir <- file.path(v2_root(), "data"); dir.create(out_dir, showWarnings = FALSE)
+## ---- initiator direction (PI decision 2026-10-25, D1; README "Initiator direction") -------------------------------------
+## DIRECTION = "cowwar" (main): in war-level disputes linked to a COW inter-state war the initiator is the state on COW's
+## war-initiating side (pair-level dyad-year match first, dispute-level side mapping for the unmatched pairs); everything else
+## keeps the Side A rule. DIRECTION = "sideA" (appendix rebuild of the pre-2026-10-25 coding): Side A everywhere. Selected by
+## the environment variable V2_DIRECTION (e.g. `V2_DIRECTION=sideA Rscript v2/R/01_build_data.R`). The two codings write to
+## SEPARATE directories, v2/data (cowwar) and v2/data_sideA (sideA), each with its own manifest and build_log, so they never
+## overwrite each other; 02_fit_model.R --direction=sideA reads the second one and suffixes its cells with _sideA.
+DIRECTION <- Sys.getenv("V2_DIRECTION", unset = "cowwar")
+if (!DIRECTION %in% c("cowwar", "sideA")) stop("V2_DIRECTION must be 'cowwar' (main) or 'sideA' (appendix); got ", DIRECTION)
+log_open(paste0("01_build_data", if (DIRECTION == "sideA") "_sideA" else ""))
+out_dir <- file.path(v2_root(), if (DIRECTION == "sideA") "data_sideA" else "data"); dir.create(out_dir, showWarnings = FALSE)
 build_log <- file.path(out_dir, "build_log.txt"); cat("", file = build_log)
 blog <- function(fmt, ...) { m <- logf(fmt, ...); cat(m, "\n", file = build_log, append = TRUE) }
 
 ## ---- flags (PI decisions; see README) ----------------------------------------------
 LAGS            <- c(1L, 3L, 5L, 10L)
+WAR_DIR_WINDOW  <- 1L             # D1: a MID pair with onset t links to a COW war dyad-year in [t, t + WAR_DIR_WINDOW] (MID onsets precede war onsets)
+WAR_DIR_MIN_LINK <- 2L            # D1: dispute-level mapping needs at least this many pair-decided events behind the linked war and the side mapping
+PART_DATES      <- TRUE           # D5: participant-level start / end months from peacesciencer::gml_part where the dispnum matches
 INCLUDE_JOINERS <- TRUE           # main build since 2026-10-24: Side A x Side B pairs including joiners (FALSE = originators only)
 IGO_FILL        <- "drop"         # "drop": years with all-missing IGO data are dropped from positions
                                   # "locf": R at year y uses the latest IGO year <= y (igo_src_year recorded)
@@ -95,8 +111,8 @@ PR_CONT_MAX     <- 5L             # politically relevant: conttype in 1..PR_CONT
 PREWINDOW_YEARS <- 10L            # conflict-history look-back before the change window starts
 POLITY_DEM_CUT  <- 6L             # democracy = polity2 >= 6 (NA -> 0, flagged in *_dem_missing)
 FIRST_YEAR      <- 1816L
-blog("flags: LAGS=%s INCLUDE_JOINERS=%s IGO_FILL=%s PR_CONT_MAX=%d PREWINDOW_YEARS=%d",
-     paste(LAGS, collapse = ","), INCLUDE_JOINERS, IGO_FILL, PR_CONT_MAX, PREWINDOW_YEARS)
+blog("flags: DIRECTION=%s (output dir %s) LAGS=%s INCLUDE_JOINERS=%s IGO_FILL=%s PR_CONT_MAX=%d PREWINDOW_YEARS=%d WAR_DIR_WINDOW=%d WAR_DIR_MIN_LINK=%d PART_DATES=%s",
+     DIRECTION, basename(out_dir), paste(LAGS, collapse = ","), INCLUDE_JOINERS, IGO_FILL, PR_CONT_MAX, PREWINDOW_YEARS, WAR_DIR_WINDOW, WAR_DIR_MIN_LINK, PART_DATES)
 
 ## ============================================================================
 ## 1. State-years, CINC share, majors, democracy
@@ -212,18 +228,81 @@ dd <- cow_mid_dirdisps |> mutate(across(c(dispnum, ccode1, ccode2, year), as.int
 ## dispute-level fatality / hostility
 disp <- cow_mid_disps |> transmute(dispnum = as.integer(dispnum), fatality_disp = fatality, hostlev_disp = hostlev)
 assert_no_dup_keys(disp, "dispnum", "cow_mid_disps")
-## one row per (dispnum, ccode1, ccode2): the onset year of the pair within the dispute
-pair <- dd |> group_by(dispnum, ccode1, ccode2) |>
-  summarise(year = min(year), sidea1 = first(sidea1), sidea2 = first(sidea2),
-            orig1 = first(orig1), orig2 = first(orig2),
-            fatality1 = max(fatality1), fatality2 = max(fatality2),
-            hostlev1 = max(hostlev1), hostlev2 = max(hostlev2), .groups = "drop") |>
-  left_join(disp, by = "dispnum")
+## one row per (dispnum, ccode1, ccode2): the onset year of the pair within the dispute, with the sides of the pair's EARLIEST
+## year (P3 fix 2026-10-25: first() depended on row order; a state can switch sides within a dispute)
+pair <- build_pair_table(dd, disp)
+side_chg <- attr(pair, "side_changes")
+blog("pair table: %d directed dispute pairs; pairs whose sidea differs across their dispute-years (earliest year's value used): %d (%s)",
+     nrow(pair), nrow(side_chg), if (nrow(side_chg)) paste(sprintf("dispute %d %d-%d", side_chg$dispnum, side_chg$ccode1, side_chg$ccode2), collapse = "; ") else "none")
 ## A -> B direction only, originators on both sides (main) or any participants (robustness)
 events <- pair |> filter(sidea1 == 1L, sidea2 == 0L)
 if (!INCLUDE_JOINERS) events <- events |> filter(orig1 == 1L, orig2 == 1L)
-events <- events |> rename(initiator = ccode1, target = ccode2) |>
-  mutate(is_joiner_pair = orig1 == 0L | orig2 == 0L,          # tabulation only; NOT a model covariate
+events <- events |> rename(initiator = ccode1, target = ccode2)
+## ---- initiator direction for war-level disputes (PI decision 2026-10-25, D1; helpers and the rule in 00_helpers.R) -----------
+## COW-MID Side A = first codable action, not the aggressor (dispute 258: Side A = Poland and the Allies). For disputes at
+## hostility level 5 that link to a COW inter-state war the direction follows COW's war-initiating side: pair-level dyad-year
+## match (year t or t + WAR_DIR_WINDOW), then the dispute-level side mapping for the unmatched pairs of a linked dispute; ambiguous
+## cases and unlinked disputes keep Side A. Under DIRECTION = "sideA" the decisions are computed and logged but NOT applied.
+war_dy <- war_dyad_years(cow_war_inter)
+blog("COW inter-state wars: %d wars, %d distinct dyad-years (both directions); every war has exactly one initiating side (asserted)",
+     n_distinct(war_dy$warnum), nrow(war_dy))
+n_ev_dir <- nrow(events)
+events <- cow_war_direction(events, war_dy, window = WAR_DIR_WINDOW, min_link = WAR_DIR_MIN_LINK)
+pm <- attr(events, "pair_matches"); dl <- attr(events, "dispute_links")
+stopifnot(nrow(events) == n_ev_dir)
+## match-rate details (the t + 1 window is justified below; the alternatives are logged for the PI)
+wl <- events |> filter(hostlev_disp == 5L) |> select(dispnum, initiator, target, year)
+match_in <- function(w) nrow(wl |> semi_join(war_dy |> rename(initiator = ccode1, target = ccode2, wyear = year) |> inner_join(wl, by = c("initiator", "target"), relationship = "many-to-many") |>
+                                       filter(wyear >= year, wyear <= year + w) |> distinct(dispnum, initiator, target, year), by = c("dispnum", "initiator", "target", "year")))
+blog("direction (D1): war-level dispute events %d in %d disputes; pair matched to a COW war dyad-year with the window t..t+%d: %d (t only %d; t..t+1 %d; t..t+2 %d; any ongoing year >= t %d); matched events with a war ONSET in the window %d, ongoing-only %d; pair-level decisions: flip %d, keep (confirmed) %d, ambiguous (two wars, opposite initiators) %d",
+     nrow(wl), n_distinct(wl$dispnum), WAR_DIR_WINDOW, sum(events$dir_rule %in% c("pair_match", "pair_ambiguous")), match_in(0L), match_in(1L), match_in(2L), match_in(500L),
+     nrow(pm |> group_by(dispnum, initiator, target, year) |> summarise(o = any(cowinteronset == 1L), .groups = "drop") |> filter(o)),
+     nrow(pm |> group_by(dispnum, initiator, target, year) |> summarise(o = any(cowinteronset == 1L), .groups = "drop") |> filter(!o)),
+     sum(events$dir_rule == "pair_match" & events$dir_flipped), sum(events$dir_rule == "pair_match" & !events$dir_flipped), sum(events$dir_rule == "pair_ambiguous"))
+blog("direction (D1): why t..t+1. The MID onset year is the pair's first year in the dispute (the crisis), the COW war dyad-year begins when the fighting reached war level; of the %d matched events %d match at t and %d only at t+1; widening to t+2 would add %d more, any later ongoing year %d more (not used)",
+     match_in(WAR_DIR_WINDOW), match_in(0L), match_in(1L) - match_in(0L), match_in(2L) - match_in(1L), match_in(500L) - match_in(1L))
+blog("direction (D1): dispute-level links: %d war-level disputes with pair-decided events, %d linked to one COW war by a strict majority of at least %d events, %d with an unambiguous side mapping (strict majority, at least %d events); decisions for the unmatched pairs of linked disputes: flip %d events, keep %d; unmatched pairs kept as Side A because the dispute has no pair match %d events (%d disputes), no majority link / fewer than %d events %d events (%d disputes), split side mapping %d events (%d disputes)",
+     sum(dl$n_pair_decided > 0), sum(dl$link_ok), WAR_DIR_MIN_LINK, sum(dl$map_ok), WAR_DIR_MIN_LINK,
+     sum(events$dir_rule == "dispute_mapping" & events$dir_flipped), sum(events$dir_rule == "dispute_mapping" & !events$dir_flipped),
+     sum(events$dir_rule == "dispute_no_pair_match"), n_distinct(events$dispnum[events$dir_rule == "dispute_no_pair_match"]),
+     WAR_DIR_MIN_LINK, sum(events$dir_rule == "dispute_no_majority_link"), n_distinct(events$dispnum[events$dir_rule == "dispute_no_majority_link"]),
+     sum(events$dir_rule == "dispute_split_side_mapping"), n_distinct(events$dispnum[events$dir_rule == "dispute_split_side_mapping"]))
+## what a minimum of 1 would do (for the PI): disputes with exactly one pair-decided event
+one_link <- dl |> filter(n_pair_decided == 1L)
+blog("direction (D1): with WAR_DIR_MIN_LINK = 1 the %d disputes with a single pair-decided event would map their %d unmatched pairs too (flip %d, keep %d); not applied",
+     nrow(one_link), sum(events$dispnum %in% one_link$dispnum & events$dir_rule == "dispute_no_majority_link"),
+     sum(events$dispnum %in% one_link$dispnum[!one_link$sideA_war_side_init %in% TRUE] & events$dir_rule == "dispute_no_majority_link"),
+     sum(events$dispnum %in% one_link$dispnum[one_link$sideA_war_side_init %in% TRUE] & events$dir_rule == "dispute_no_majority_link"))
+blog("direction (D1): events by rule: %s", paste(names(table(events$dir_rule)), table(events$dir_rule), sep = "=", collapse = ", "))
+if (DIRECTION == "sideA") {
+  blog("DIRECTION = sideA: the %d flips above are NOT applied (appendix rebuild); dir_source = sideA, dir_rule = sideA_build on every event", sum(events$dir_flipped))
+  events <- events |> mutate(dir_flipped = FALSE, dir_source = "sideA", dir_rule = "sideA_build", war_link = NA_integer_)
+}
+## the full list of flipped events, grouped by dispute, with the COW war number and name
+flipped <- events |> filter(dir_flipped) |> arrange(dispnum, year, initiator, target)
+blog("direction (D1): %d events reversed in %d disputes (%s); listed below as dispute / war / year / Side A rule -> applied direction",
+     nrow(flipped), n_distinct(flipped$dispnum), paste(names(table(flipped$dir_source)), table(flipped$dir_source), sep = "=", collapse = ", "))
+for (d in unique(flipped$dispnum)) {
+  fd <- flipped[flipped$dispnum == d, ]
+  cat(sprintf("  dispute %d (COW war %d, %s; %d of %d war-level pairs reversed, %d by the pair match, %d by the dispute mapping):\n", d, fd$war_link[1], cow_war_name(fd$war_link[1]),
+              nrow(fd), sum(events$dispnum == d), sum(fd$dir_source == "cow_war_pair"), sum(fd$dir_source == "cow_war_dispute")), file = build_log, append = TRUE)
+  for (r in seq_len(nrow(fd))) cat(sprintf("    %d: Side A %d -> %d  becomes  %d -> %d  (%s)\n", fd$year[r], fd$initiator[r], fd$target[r], fd$target[r], fd$initiator[r], fd$dir_source[r]), file = build_log, append = TRUE)
+}
+amb <- events |> filter(hostlev_disp == 5L, dir_source == "sideA") |> count(dispnum, dir_rule)
+blog("direction (D1): war-level dispute events kept as Side A: %d in %d disputes (listed below with the reason)", sum(amb$n), n_distinct(amb$dispnum))
+for (r in seq_len(nrow(amb))) cat(sprintf("  kept as Side A: dispute %d, %d events, reason %s%s\n", amb$dispnum[r], amb$n[r], amb$dir_rule[r],
+                                          if (amb$dispnum[r] %in% dl$dispnum) sprintf(" (pair-decided events %d, linked war %s, side mapping %d of %d)", dl$n_pair_decided[dl$dispnum == amb$dispnum[r]],
+                                                                                        ifelse(is.na(dl$war_link[dl$dispnum == amb$dispnum[r]]), "none", as.character(dl$war_link[dl$dispnum == amb$dispnum[r]])),
+                                                                                        dl$n_map_modal[dl$dispnum == amb$dispnum[r]], dl$n_map[dl$dispnum == amb$dispnum[r]]) else ""), file = build_log, append = TRUE)
+events <- apply_direction(events)
+stopifnot(nrow(events) == n_ev_dir, all((events$sidea1 == 0L) == events$dir_flipped), all(events$sidea1 + events$sidea2 == 1L))
+if (DIRECTION == "cowwar") {
+  ## the review's headline case must hold on the real data: Germany -> Poland 1939 exists, Poland -> Germany 1939 does not
+  stopifnot(any(events$initiator == 255L & events$target == 290L & events$year == 1939L), !any(events$initiator == 290L & events$target == 255L & events$year == 1939L))
+} else stopifnot(!any(events$dir_flipped))
+rm(wl, match_in, one_link, flipped, amb)
+events <- events |>
+  mutate(is_joiner_pair = orig1 == 0L | orig2 == 0L,          # tabulation only; NOT a model covariate (originator status moved with the state)
          fatal1 = ifelse(fatality1 < 0, NA, fatality1 >= 1),
          fatal2 = ifelse(fatality2 < 0, NA, fatality2 >= 1),
          fatal_disp = ifelse(fatality_disp < 0, NA, fatality_disp >= 1),
@@ -252,19 +331,32 @@ disp_dates <- dispute_date_bounds(disp_full <- cow_mid_disps |> mutate(dispnum =
 blog("dispute dates (dispute-level; peacesciencer has no end month and no participant dates): %d disputes; start month known %d; end month exact %d, end spans 2 months %d, more %d; end bounds outside the last dispute-year (whole year used) %d",
      nrow(disp_dates), sum(disp_dates$start_month_known), sum(disp_dates$end_lo == disp_dates$end_hi), sum(disp_dates$end_hi - disp_dates$end_lo == 1L),
      sum(disp_dates$end_hi - disp_dates$end_lo > 1L), sum(disp_dates$end_rule == "year_only"))
-pdi <- pair_dispute_intervals(dd, disp_dates)
-blog("pair-dispute spells (both directions): %d (pairs %d, pairs with a re-entry spell %d); entry month exact %d; later entrants (entry month unknown) %d; spells ending before the dispute's last year (exit month unknown) %d",
+## Participant-level dates (PI decision 2026-10-25, D5): peacesciencer::gml_part has participant start and end year / month for
+## 2165 of the 2436 COW dispnums; where the dispnum matches, the pair's entry is the later of the two starts and its exit the earlier
+## of the two ends (exact months), else the dispute-level bounds stay. The pre-D5 intervals (dispute bounds only, unclipped entry)
+## are rebuilt for the before / after counts only; every downstream object uses `pdi`.
+part_tbl <- if (PART_DATES) gml_part else NULL
+pdi_nopart <- pair_dispute_intervals(dd, disp_dates, part = NULL)
+pdi <- pair_dispute_intervals(dd, disp_dates, part = part_tbl)
+stopifnot(nrow(pdi) == nrow(pdi_nopart), identical(pdi$dispnum, pdi_nopart$dispnum), identical(pdi$ccode1, pdi_nopart$ccode1))
+blog("pair-dispute spells (both directions): %d (pairs %d, pairs with a re-entry spell %d); entry month exact %d; entry month unknown %d; spells ending before the dispute's last year (exit month unknown) %d",
      nrow(pdi), nrow(distinct(pdi, dispnum, ccode1, ccode2)), sum(pdi$spell > 1L), sum(pdi$start_exact), sum(!pdi$start_exact),
      sum(pdi$spell_last != disp_dates$y1[match(pdi$dispnum, disp_dates$dispnum)]))
+blog("participant dates (D5): gml_part covers %d of %d COW dispnums (%d participant spells); pair spells dated from participant months %d of %d (exact entry AND exit); dispute-level bounds kept for %d; reasons: %s",
+     length(intersect(unique(as.integer(gml_part$dispnum)), unique(dd$dispnum))), n_distinct(dd$dispnum), nrow(gml_part), sum(pdi$date_source == "participant"), nrow(pdi),
+     sum(pdi$date_source == "dispute"), paste(names(table(pdi$part_reason)), table(pdi$part_reason), sep = "=", collapse = "; "))
+blog("participant dates (D5): spells whose entry bound exceeded the feasible exit (start_hi > end_hi) under the dispute-level bounds: %d of %d, now clipped to the exit (start_hi <= end_hi asserted); with participant dates %d spells still needed the clip; exact entry months before / after %d / %d, exact exit months before / after %d / %d",
+     sum(pdi_nopart$start_clipped), nrow(pdi_nopart), sum(pdi$start_clipped), sum(pdi_nopart$start_exact), sum(pdi$start_exact),
+     sum(pdi_nopart$end_lo == pdi_nopart$end_hi), sum(pdi$end_lo == pdi$end_hi))
 ## Codex review P1-2 (2026-10-24): a pair with a joiner on either side whose spell begins in the dispute's first year used
 ## to get the dispute's exact start month although the joiner's entry month is unknown. Its entry interval is now
 ## [dispute start, December of that year] (start_exact FALSE). The pre-review intervals are rebuilt here ONLY to log the
 ## before / after counts; every downstream object uses `pdi`.
-pdi_old <- pair_dispute_intervals(dd, disp_dates, joiner_entry_unknown = FALSE)
+pdi_old <- pair_dispute_intervals(dd, disp_dates, joiner_entry_unknown = FALSE, part = part_tbl)
 stopifnot(nrow(pdi_old) == nrow(pdi), identical(pdi_old$start_lo, pdi$start_lo), identical(pdi_old$end_lo, pdi$end_lo), identical(pdi_old$end_hi, pdi$end_hi))
 chg_spell <- pdi$start_hi != pdi_old$start_hi
-stopifnot(all(!pdi$both_orig[chg_spell]), all(pdi$spell_first[chg_spell] == disp_dates$y0[match(pdi$dispnum[chg_spell], disp_dates$dispnum)]),
-          all(ym_year(pdi$start_hi[chg_spell]) == pdi$spell_first[chg_spell]), all(pdi$start_hi[chg_spell] %% 12L == 11L))
+stopifnot(all(!pdi$both_orig[chg_spell]), all(pdi$date_source[chg_spell] == "dispute"), all(pdi$spell_first[chg_spell] == disp_dates$y0[match(pdi$dispnum[chg_spell], disp_dates$dispnum)]),
+          all(ym_year(pdi$start_hi[chg_spell]) == pdi$spell_first[chg_spell]), all(pdi$start_hi[chg_spell] %% 12L == 11L | pdi$start_clipped[chg_spell]))
 blog("joiner entry month (review P1-2): %d of %d spells have a joiner on either side; %d of them begin in the dispute's first year and now carry the interval [dispute start, December] instead of the exact start month (directed, both directions; %d distinct undirected pairs); spells with an exact entry month before / after: %d / %d",
      sum(!pdi$both_orig), nrow(pdi), sum(chg_spell), nrow(pdi[chg_spell, ] |> transmute(a = pmin(ccode1, ccode2), b = pmax(ccode1, ccode2), dispnum) |> distinct()),
      sum(pdi_old$start_exact), sum(pdi$start_exact))
@@ -272,10 +364,24 @@ af_keys <- already_fighting_keys(dd)                           # the year rule, 
 assert_no_dup_keys(af_keys, c("ccode1", "ccode2", "year", "dispnum"), "already-fighting keys (year rule)")
 ev_year <- flag_escalations(events, af_keys)                   # year rule on the same events
 ev_old <- flag_escalations_month(events, pdi_old)              # pre-review joiner intervals, for the comparison only
+ev_nopart <- flag_escalations_month(events, pdi_nopart)        # pre-D5 intervals (dispute-level bounds), for the comparison only
 events <- flag_escalations_month(events, pdi)
-cmp <- attr(events, "comparisons")
+cmp <- attr(events, "comparisons"); cmp_nopart <- attr(ev_nopart, "comparisons")
 stopifnot(identical(events$escalation_year, ev_year$escalation))   # the year rule inside the month helper equals the old path
-stopifnot(nrow(ev_old) == nrow(events), identical(ev_old$dispnum, events$dispnum), identical(ev_old$initiator, events$initiator))
+stopifnot(nrow(ev_old) == nrow(events), identical(ev_old$dispnum, events$dispnum), identical(ev_old$initiator, events$initiator),
+          nrow(ev_nopart) == nrow(events), identical(ev_nopart$dispnum, events$dispnum), identical(ev_nopart$escalation_year, events$escalation_year))
+blog("participant dates (D5): escalations with dispute-level bounds / with participant dates %d / %d (newly escalation %d, no longer escalation %d); undecided (event, other dispute) comparisons %d / %d; events whose decision rests on a year-rule fallback %d / %d",
+     sum(ev_nopart$escalation), sum(events$escalation), sum(!ev_nopart$escalation & events$escalation), sum(ev_nopart$escalation & !events$escalation),
+     sum(cmp_nopart$fallback), sum(cmp$fallback), sum(ev_nopart$esc_fallback), sum(events$esc_fallback))
+ex_p <- events[ev_nopart$escalation != events$escalation, ] |> head(10)
+for (r in seq_len(nrow(ex_p))) cat(sprintf("  D5 change: %d -> %d %d dispute %d: escalation %s -> %s (event date %s..%s)\n", ex_p$initiator[r], ex_p$target[r], ex_p$year[r], ex_p$dispnum[r],
+                                           ev_nopart$escalation[ev_nopart$dispnum == ex_p$dispnum[r] & ev_nopart$initiator == ex_p$initiator[r] & ev_nopart$target == ex_p$target[r]], ex_p$escalation[r],
+                                           ym_label(ex_p$ev_start_lo[r]), ym_label(ex_p$ev_start_hi[r])), file = build_log, append = TRUE)
+## same-year opposite-direction pairs among the non-escalation events (i -> j and j -> i both in year t, from different disputes)
+opp_pairs <- function(ev) { k <- ev |> filter(!escalation) |> transmute(a = pmin(initiator, target), b = pmax(initiator, target), year, dir = initiator < target) |> distinct() |>
+  count(a, b, year) |> filter(n == 2L); nrow(k) }
+blog("participant dates (D5): same-year opposite-direction pairs among the non-escalation events (unordered (i, j, t) with both i -> j and j -> i): dispute-level bounds %d, participant dates %d",
+     opp_pairs(ev_nopart), opp_pairs(events))
 blog("joiner entry month (review P1-2): escalations before / after %d / %d (newly escalation %d, no longer escalation %d); events whose decision rests on a year-rule fallback before / after %d / %d; events whose own date interval widened to [start, December] %d",
      sum(ev_old$escalation), sum(events$escalation), sum(!ev_old$escalation & events$escalation), sum(ev_old$escalation & !events$escalation),
      sum(ev_old$esc_fallback), sum(events$esc_fallback), sum(ev_old$ev_start_hi != events$ev_start_hi))
@@ -354,6 +460,13 @@ if (nrow(far) > 0) {
                                            ym_label(far$ev_start_lo[r]), ym_label(ref_dates$ref_lo[ref_dates$ccode == far$initiator[r] & ref_dates$year == far$year[r]]),
                                            ym_label(ref_dates$ref_hi[ref_dates$ccode == far$initiator[r] & ref_dates$year == far$year[r]])), file = build_log, append = TRUE)
 }
+## D5 before / after on the stage-2 choice-set rule: fighting_at_ref under the dispute-level bounds
+ref_np <- reference_dates(ev_nopart)
+af_np <- already_fighting_keys_month(pdi_nopart, ref_np) |> filter(drop) |> distinct(ccode1, ccode2, year)
+far_np <- ev_nopart |> filter(!escalation) |> semi_join(af_np |> rename(initiator = ccode1, target = ccode2), by = c("initiator", "target", "year"))
+blog("participant dates (D5): fighting_at_ref events with dispute-level bounds / with participant dates %d / %d; already-fighting (i, j, t) keys at the reference date %d / %d, at January %d / %d",
+     nrow(far_np), nrow(far), nrow(af_np), nrow(af_s2), nrow(already_fighting_keys_month(pdi_nopart, NULL) |> filter(drop) |> distinct(ccode1, ccode2, year)), nrow(af_iv))
+rm(pdi_nopart, ev_nopart, cmp_nopart, ref_np, af_np, far_np, ex_p)
 ## ---- WWII disputes (appendix option --drop_ww2; rule and list in 00_helpers.R) ------------------------------------
 ww2_tbl <- ww2_disputes(disp_full, dd, cow_war_inter)
 events <- events |> mutate(is_ww2 = dispnum %in% WW2_DISPNUMS)
@@ -420,6 +533,23 @@ stopifnot(nrow(events) == n_ev_before, !anyNA(events$in_fmid), !anyNA(events$in_
           all(events$in_mid[events$in_fmidub]),        # every sample is a subset of mid (so escalations are in none)
           !any(events$in_mid & events$escalation),
           sum(events$in_fmidub & !events$in_fmid) == sum(events$fatal_source == "missing_nonfatal" & !events$escalation))
+## ---- stage-2 event weights (PI decision 2026-10-25, D8; README "Coalition expansion") ---------------------------------------
+## w_<sample> = 1 / (number of the initiator's targets in the same dispute and onset year that are in the sample), computed on the
+## pre-collapse rows; the collapse sums a key's weights and caps at 1. Escalations carry 0 (they are in no sample).
+events <- event_weights(events)
+stopifnot(all(events$w_mid[events$in_mid] > 0), all(events$w_mid[!events$in_mid] == 0), all(events$w_war[!events$in_war] == 0))
+for (s in c("mid", "fmid", "fmidcow", "fmidub", "war")) {
+  w <- events[[paste0("w_", s)]][events[[paste0("in_", s)]]]; k <- round(1 / w)
+  blog("  event weights %-7s: %d events; initiator-dispute-years %d; weight 1 (single target) %d events, 1/2 %d, 1/3..1/5 %d, 1/6..1/10 %d, below 1/10 %d; min weight %.4f (k = %d targets); sum of weights %.1f (= decisions)",
+       s, length(w), nrow(events |> filter(.data[[paste0("in_", s)]]) |> distinct(dispnum, initiator, year)), sum(k == 1L), sum(k == 2L), sum(k >= 3L & k <= 5L), sum(k >= 6L & k <= 10L), sum(k > 10L),
+       min(w), max(k), sum(w))
+}
+kfor <- events |> filter(dispnum %in% c(4186L, 4343L), year == 2000L) |> group_by(dispnum, initiator) |> summarise(n_targets = n(), w_mid = w_mid[1], .groups = "drop") |> arrange(dispnum, desc(n_targets))
+blog("  event weights, KFOR / Yugoslavia 2000 (disputes 4186 and 4343): %s",
+     paste(sprintf("dispute %d: %d initiators, max targets per initiator %d (initiator %d, w_mid = %.4f)", unique(kfor$dispnum),
+                   tapply(kfor$initiator, kfor$dispnum, length), tapply(kfor$n_targets, kfor$dispnum, max),
+                   kfor$initiator[match(unique(kfor$dispnum), kfor$dispnum)], kfor$w_mid[match(unique(kfor$dispnum), kfor$dispnum)]), collapse = "; "))
+rm(kfor)
 ## target has positions at t-1 and is a system member at t: the conditions for its alternative row to exist in the
 ## "all" choice set (besides not already fighting); assemble_cell() asserts every such event is in its choice set
 events <- events |> left_join(pos |> transmute(target = ccode, year = year + 1L, .pos = 1L), by = c("target", "year")) |>
@@ -460,10 +590,13 @@ sample_codings <- list(mid = rep(TRUE, nrow(events)), fmid = events$fatal_main, 
 for (s in names(sample_codings)) {
   cs <- sample_codings[[s]]; flag <- events[[paste0("in_", s)]]
   stopifnot(identical(as.logical(flag), as.logical(cs & !events$escalation)))
-  blog("  sample %-7s: (a) originator pairs %4d; (b) with joiners %4d; (c) year-rule escalations removed %4d; (d) month-rule escalations removed %4d; removed by the month rule %3d (joiner pairs %3d, originator pairs %3d); WWII events in (d) %3d; fighting_at_ref in (d) %3d",
+  blog("  sample %-7s: (a) originator pairs %4d; (b) with joiners %4d; (c) year-rule escalations removed %4d; (d) month-rule escalations removed %4d; removed by the month rule %3d (joiner pairs %3d, originator pairs %3d); WWII events in (d) %3d; fighting_at_ref in (d) %3d; direction reversed in (d) %3d (pair match %3d, dispute mapping %3d)",
        s, sum(cs & !events$is_joiner_pair), sum(cs), sum(cs & !events$escalation_year), sum(flag), sum(cs & events$escalation),
-       sum(cs & events$escalation & events$is_joiner_pair), sum(cs & events$escalation & !events$is_joiner_pair), sum(flag & events$is_ww2), sum(flag & events$fighting_at_ref))
+       sum(cs & events$escalation & events$is_joiner_pair), sum(cs & events$escalation & !events$is_joiner_pair), sum(flag & events$is_ww2), sum(flag & events$fighting_at_ref),
+       sum(flag & events$dir_flipped), sum(flag & events$dir_flipped & events$dir_source == "cow_war_pair"), sum(flag & events$dir_flipped & events$dir_source == "cow_war_dispute"))
 }
+blog("direction (D1): reversed events %d of %d (escalations among them %d); by source %s; by sample, see the table above",
+     sum(events$dir_flipped), nrow(events), sum(events$dir_flipped & events$escalation), paste(names(table(events$dir_source[events$dir_flipped])), table(events$dir_source[events$dir_flipped]), sep = "=", collapse = ", "))
 ## war at the pair level versus the dispute level, after the month-rule escalation exclusion
 blog("war sample: dispute-level coding would give %d events after escalations, the pair-level coding gives %d (removed %d, of which WWII %d); WWII share of the pair-level war sample %.1f%% (%d of %d); war rule in fatal coding now adds %d events",
      sum(events$war_disp & !events$escalation), sum(events$in_war), sum(events$war_disp & !events$war & !events$escalation),
@@ -475,7 +608,11 @@ blog("war sample: dispute-level coding would give %d events after escalations, t
 ## alternative per (i, j, t), asserted in assemble_cell(). Escalation rows are untouched.
 n_pre <- nrow(events); pre_counts <- sapply(c("in_mid", "in_fmid", "in_fmidcow", "in_fmidub", "in_war"), function(cc) sum(events[[cc]]))
 dup_keys <- events |> filter(!escalation) |> count(initiator, target, year) |> filter(n > 1)
+w_cap <- events |> filter(!escalation) |> group_by(initiator, target, year) |> summarise(s = sum(w_mid), .groups = "drop") |> filter(s > 1 + 1e-12)
 events <- collapse_duplicate_events(events)
+blog("direction (D1) / weights (D8) in the collapse: collapsed keys whose source disputes disagree on the direction rule (one reversed, one not; sidea1 + sidea2 != 1) %d; keys whose summed mid weight exceeded 1 and was capped %d",
+     sum(events$sidea1 + events$sidea2 != 1L), nrow(w_cap))
+rm(w_cap)
 post_counts <- sapply(c("in_mid", "in_fmid", "in_fmidcow", "in_fmidub", "in_war"), function(cc) sum(events[[cc]]))
 stopifnot(nrow(events) == n_pre - sum(dup_keys$n) + nrow(dup_keys), all(events$n_disputes[events$escalation] == 1L),
           sum(events$n_disputes[!events$escalation]) == pre_counts["in_mid"], all(post_counts <= pre_counts),
@@ -634,6 +771,14 @@ GAP_SCALE_R <- gap_scale(pos$R_pr, pos$year)
 stopifnot(is.finite(GAP_SCALE_M), GAP_SCALE_M > 0, is.finite(GAP_SCALE_R), GAP_SCALE_R > 0)
 blog("gap scale (one constant per axis, all years): M (log CINC ratio) %.6f; R_pr (log PageRank ratio) %.6f; 1 scaled unit = power ratio %.2f (M), %.2f (R_pr)",
      GAP_SCALE_M, GAP_SCALE_R, exp(GAP_SCALE_M), exp(GAP_SCALE_R))
+## D2: within-year centred, gap-scaled levels of every state with positions (joined to the panel at t-1 below)
+pos_lvl <- pos_k |> group_by(year) |> mutate(M_lvl = (M - mean(M)) / GAP_SCALE_M, R_lvl = (R_pr - mean(R_pr)) / GAP_SCALE_R) |> ungroup()
+lvl_chk <- pos_lvl |> group_by(year) |> summarise(mM = mean(M_lvl), mR = mean(R_lvl), .groups = "drop")
+stopifnot(all(abs(lvl_chk$mM) < 1e-10), all(abs(lvl_chk$mR) < 1e-10), all(is.finite(pos_lvl$M_lvl)), all(is.finite(pos_lvl$R_lvl)),
+          all(abs(pos_lvl$M_lvl * GAP_SCALE_M - (pos_lvl$M - ave(pos_lvl$M, pos_lvl$year))) < 1e-10))
+blog("power levels (D2): M_lvl = (log CINC share - year mean) / %.6f, R_lvl = (log PageRank - year mean) / %.6f over all %d state-years with positions; SD %.3f / %.3f, 5/50/95 pct %.2f/%.2f/%.2f and %.2f/%.2f/%.2f",
+     GAP_SCALE_M, GAP_SCALE_R, nrow(pos_lvl), sd(pos_lvl$M_lvl), sd(pos_lvl$R_lvl), quantile(pos_lvl$M_lvl, .05), median(pos_lvl$M_lvl), quantile(pos_lvl$M_lvl, .95),
+     quantile(pos_lvl$R_lvl, .05), median(pos_lvl$R_lvl), quantile(pos_lvl$R_lvl, .95))
 manifest <- list()
 add_manifest <- function(obj, fname, note) {
   p <- file.path(out_dir, fname); saveRDS(obj, p)
@@ -641,8 +786,8 @@ add_manifest <- function(obj, fname, note) {
   blog("wrote %s: %d x %d", fname, nrow(obj), ncol(obj))
 }
 add_manifest(pos, "sy_positions.rds", "state-year positions: M = log CINC share, R_pr = log PageRank (raw log shares), R_eig std within year")
-add_manifest(events, "events.rds", sprintf("directed events (Side A x Side B pairs), joiners %s (is_joiner_pair); month-rule escalation flag (excluded from all in_* flags); pair-level war; same-year duplicates collapsed (dispnums); fighting_at_ref; is_ww2; target_has_pos_tm1",
-                                           if (INCLUDE_JOINERS) "included" else "excluded"))
+add_manifest(events, "events.rds", sprintf("directed events (Side A x Side B pairs; DIRECTION=%s: war-level disputes follow COW's war-initiating side, dir_flipped / dir_source / war_link), joiners %s (is_joiner_pair); month-rule escalation flag with participant-level dates where gml_part matches (excluded from all in_* flags); pair-level war; same-year duplicates collapsed (dispnums); fighting_at_ref; is_ww2; target_has_pos_tm1; stage-2 weights w_<sample>",
+                                           DIRECTION, if (INCLUDE_JOINERS) "included" else "excluded"))
 ## number of system states per year, for the system-growth diagnostic on the change variables (item 4 of the
 ## 2026-10-23 decision): g3 at t-1 = log n_system(t-1) - log n_system(t-4), constant within a year
 nsys_year <- states |> distinct(year, n_system) |> arrange(year)
@@ -665,8 +810,13 @@ for (h in LAGS) {
                sprintf("power changes h=%d: raw and (year-centred / pooled SD) transformed; pooled SD M=%.6f R_pr=%.6f", h, chg$scale$pooled_sd[1], chg$scale$pooled_sd[2]))
 
   ## ---- stage-1 panel: states in system at t with positions at t-1 and t-1-h ---------
+  ## Power LEVELS at t-1 (PI decision 2026-10-25, D2): the within-year centred log CINC share and log PageRank, divided by the
+  ## gap constants so one unit matches the stage-2 gap axes. Centred over EVERY state with positions in that year (pos, the same
+  ## set the gap scale uses), not over the panel rows, so the reference (0 = the system-average level that year) does not depend
+  ## on h. They enter the main stage-1 W (relative standing; W had the power CHANGES only, so a "capable states initiate more"
+  ## effect could flow into mu0 through the inclusive value); they are NOT in X (open PI question).
   panel <- states |> select(ccode, year) |>
-    inner_join(pos_k |> transmute(ccode, year = year + 1L, M_tm1 = M, Rpr_tm1 = R_pr, Reig_tm1 = R_eig), by = c("ccode", "year")) |>
+    inner_join(pos_lvl |> transmute(ccode, year = year + 1L, M_tm1 = M, Rpr_tm1 = R_pr, Reig_tm1 = R_eig, M_lvl, R_lvl), by = c("ccode", "year")) |>
     inner_join(pos_k |> transmute(ccode, year = year + 1L + h, M_w0 = M, Rpr_w0 = R_pr, Reig_w0 = R_eig), by = c("ccode", "year")) |>
     mutate(dReig_h = Reig_tm1 - Reig_w0, h = h, win_start = year - 1L - h) |>     # R_eig change unchanged (z-score difference)
     ## initiator power changes from the change table (dM_h, dRpr_h transformed; dM_raw_h, dRpr_raw_h raw)
@@ -717,9 +867,14 @@ for (h in LAGS) {
   stopifnot(all(chk_y1$y1_mid == chk_y1$.y))
   blog("  ongoing_tm1 h=%d: mean %.4f (%d of %d state-years in a MID active at t-1)", h, mean(panel$ongoing_tm1), sum(panel$ongoing_tm1), nrow(panel))
   assert_no_dup_keys(panel, c("ccode", "year"), sprintf("stage-1 panel h=%d", h))
-  assert_no_na(panel, c("dM_h", "dRpr_h", "dM_raw_h", "dRpr_raw_h", "dReig_h", "M_tm1", "Rpr_tm1", "cowmaj_tm1", "dem_tm1", "ongoing_tm1",
+  assert_no_na(panel, c("dM_h", "dRpr_h", "dM_raw_h", "dRpr_raw_h", "dReig_h", "M_tm1", "Rpr_tm1", "M_lvl", "R_lvl", "log_n_system_tm1", "cowmaj_tm1", "dem_tm1", "ongoing_tm1",
                         "mon_prior_mids_h", "mon_peace_years_h", "y1_mid", "y1_fmid", "y1_fmidcow", "y1_fmidub", "y1_war"), "stage-1 panel")
-  assert_finite(panel, c("dM_h", "dRpr_h", "dM_raw_h", "dRpr_raw_h", "M_tm1", "Rpr_tm1"), sprintf("stage-1 panel h=%d", h))
+  assert_finite(panel, c("dM_h", "dRpr_h", "dM_raw_h", "dRpr_raw_h", "M_tm1", "Rpr_tm1", "M_lvl", "R_lvl", "log_n_system_tm1"), sprintf("stage-1 panel h=%d", h))
+  ## D2 levels on the panel rows: they are centred over ALL states with positions at t-1, so the panel mean is near but not exactly 0
+  stopifnot(all(abs(panel$M_lvl * GAP_SCALE_M - (panel$M_tm1 - ave(pos_lvl$M, pos_lvl$year)[match(panel$year - 1L, pos_lvl$year)])) < 1e-8))
+  blog("  power levels h=%d (D2): M_lvl mean %.4f SD %.3f, R_lvl mean %.4f SD %.3f over the panel rows; cor(M_lvl, dM_h) %.3f, cor(R_lvl, dRpr_h) %.3f, cor(M_lvl, R_lvl) %.3f; log_n_system_tm1 (D3) mean %.3f SD %.3f",
+       h, mean(panel$M_lvl), sd(panel$M_lvl), mean(panel$R_lvl), sd(panel$R_lvl), cor(panel$M_lvl, panel$dM_h), cor(panel$R_lvl, panel$dRpr_h), cor(panel$M_lvl, panel$R_lvl),
+       mean(panel$log_n_system_tm1), sd(panel$log_n_system_tm1))
   ## invariants of the transformed changes on the panel rows (item 4): within-year mean 0, pooled SD 1, and no
   ## correlation with system growth (g3 is constant within a year, so the year-centring removes it by construction)
   yr_chk <- panel |> group_by(year) |> summarise(mM = mean(dM_h), mR = mean(dRpr_h), .groups = "drop")
@@ -741,7 +896,7 @@ for (h in LAGS) {
   ev_lost <- events |> filter(in_mid) |> anti_join(panel, by = c("initiator" = "ccode", "year"))
   blog("  non-escalation events whose initiator state-year is NOT in the panel (no positions at t-1 / t-1-h): %d of %d", nrow(ev_lost), sum(events$in_mid))
   add_manifest(panel, sprintf("stage1_panel_lag%d.rds", h),
-               sprintf("stage-1 panel, h=%d; y1 excludes escalations; ongoing_tm1 added; dM_h / dRpr_h year-centred and scaled by pooled SD M=%.6f R_pr=%.6f", h, chg$scale$pooled_sd[1], chg$scale$pooled_sd[2]))
+               sprintf("stage-1 panel, h=%d; y1 excludes escalations; ongoing_tm1; levels M_lvl / R_lvl at t-1 (within-year centred / gap constants); log_n_system_tm1; dM_h / dRpr_h year-centred and scaled by pooled SD M=%.6f R_pr=%.6f", h, chg$scale$pooled_sd[1], chg$scale$pooled_sd[2]))
 
   ## ---- choice sets: panel state-year x every other system member at t with positions at t-1 ----
   alts <- panel |> select(ccode1 = ccode, year, M_i = M_tm1, Rpr_i = Rpr_tm1, Reig_i = Reig_tm1, win_start) |>

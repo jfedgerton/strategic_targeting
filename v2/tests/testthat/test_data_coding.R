@@ -8,18 +8,22 @@ source(file.path(root, "R", "00_helpers.R"))
 
 ## ---- the coding rules under test, lifted verbatim from 01_build_data.R ---------------------
 ## disp needs the dispute-level columns fatality_disp, hostlev_disp and (month rule, 2026-10-24) styear, stmon, mindur, maxdur
+## war_inter: COW inter-state war dyad-years for the direction rule (D1, 2026-10-25); the default is an empty table, so every
+## event keeps the Side A rule (dir_source "sideA"), as before. part: participant-level dates (D5), NULL = dispute-level bounds.
+empty_war_inter <- tibble(warnum = integer(), ccode1 = integer(), ccode2 = integer(), year = integer(), cowinterongoing = integer(), cowinteronset = integer(),
+                          sidea1 = integer(), sidea2 = integer(), initiator1 = integer(), initiator2 = integer())
 code_events <- function(dd, disp, include_joiners = FALSE,
                         mic = tibble(dispnum = integer(), mic_fatalmin = integer()),
-                        gml = tibble(dispnum = integer(), initiator = integer(), target = integer(), fatal_gml = logical())) {
-  pair <- dd |> group_by(dispnum, ccode1, ccode2) |>
-    summarise(year = min(year), sidea1 = first(sidea1), sidea2 = first(sidea2),
-              orig1 = first(orig1), orig2 = first(orig2),
-              fatality1 = max(fatality1), fatality2 = max(fatality2),
-              hostlev1 = max(hostlev1), hostlev2 = max(hostlev2), .groups = "drop") |>
-    left_join(disp |> select(dispnum, fatality_disp, hostlev_disp), by = "dispnum")
+                        gml = tibble(dispnum = integer(), initiator = integer(), target = integer(), fatal_gml = logical()),
+                        war_inter = empty_war_inter, part = NULL, direction = "cowwar") {
+  pair <- build_pair_table(dd, disp)                     # the build's pair table (earliest year's sides; P3 fix 2026-10-25)
   events <- pair |> filter(sidea1 == 1L, sidea2 == 0L)
   if (!include_joiners) events <- events |> filter(orig1 == 1L, orig2 == 1L)
-  events <- events |> rename(initiator = ccode1, target = ccode2) |>
+  events <- events |> rename(initiator = ccode1, target = ccode2)
+  ## D1: direction follows COW's war-initiating side in linked war-level disputes (window t..t+1, min 2 linked events, as the build)
+  events <- cow_war_direction(events, war_dyad_years(war_inter), window = 1L, min_link = 2L)
+  if (direction == "sideA") events <- events |> mutate(dir_flipped = FALSE, dir_source = "sideA", dir_rule = "sideA_build", war_link = NA_integer_)
+  events <- apply_direction(events) |>
     mutate(is_joiner_pair = orig1 == 0L | orig2 == 0L,
            fatal1 = ifelse(fatality1 < 0, NA, fatality1 >= 1),
            fatal2 = ifelse(fatality2 < 0, NA, fatality2 >= 1),
@@ -31,7 +35,7 @@ code_events <- function(dd, disp, include_joiners = FALSE,
            war = hostlev_disp == 5L & (hostlev1 == 5L | hostlev2 == 5L))      # pair-level war (2026-10-24, at least one side at 5)
   ## ongoing-dispute rule at month resolution (2026-10-24): escalation = already fighting in another dispute at the
   ## event's dispute start date (year rule where undecided); excluded from every sample flag
-  pdi <- pair_dispute_intervals(dd, dispute_date_bounds(disp, dd))
+  pdi <- pair_dispute_intervals(dd, dispute_date_bounds(disp, dd), part = part)
   events <- flag_escalations_month(events, pdi)
   events |>
     left_join(mic, by = "dispnum") |> left_join(gml, by = c("dispnum", "initiator", "target")) |>
@@ -41,8 +45,11 @@ code_events <- function(dd, disp, include_joiners = FALSE,
            in_fmid = fatal_main & !escalation,
            in_fmidub = (fatal_main | (is.na(fatal) & is.na(fatal_mic) & is.na(fatal_gml))) & !escalation,
            in_fmidcow = (fatal %in% TRUE) & !escalation,
-           in_war = (war %in% TRUE) & !escalation)
+           in_war = (war %in% TRUE) & !escalation) |>
+    event_weights()                                        # D8: w_<sample> on the pre-collapse rows
 }
+## war_dyad_years() needs a complete table; the empty one yields no match
+war_dyad_years_empty <- function() war_dyad_years(empty_war_inter)
 ## dispute-level toy rows with dates; mindur = maxdur means every COW day is known (the end stays bounded because
 ## peacesciencer drops the start day)
 mk_disp <- function(dispnum, fatality_disp, hostlev_disp, styear, stmon, dur)
@@ -631,7 +638,7 @@ test_that("pair-dispute intervals: later entrants get the whole entry year, earl
   dd_re <- bind_rows(toy_dd3, mk_dd(86L, 30L, 20L, 1995:1999) |> filter(year == 1999L) |> mutate(disponset = 0L)) |> filter(!(dispnum == 86L & ccode1 %in% c(30L, 20L) & ccode2 %in% c(30L, 20L) & year == 1998L))
   pr <- pair_dispute_intervals(dd_re, dispute_date_bounds(toy_disp3 |> mutate(mindur = ifelse(dispnum == 86L, 1500, mindur), maxdur = mindur), dd_re)) |> filter(dispnum == 86L, ccode1 == 30L)
   expect_equal(pr$spell, c(1L, 2L)); expect_equal(pr$spell_first, c(1995L, 1999L)); expect_equal(unique(pr$pair_onset), 1995L)
-  expect_equal(c(pr$start_lo[2], pr$start_hi[2]), ym_index(1999L, c(1L, 12L)))
+  expect_equal(pr$start_lo[2], ym_index(1999L, 1L)); expect_equal(pr$start_hi[2], pr$end_hi[2]); expect_true(pr$start_clipped[2])   # entry bound clipped to the feasible exit (D5)
   expect_equal(c(pr$end_lo[1], pr$end_hi[1]), ym_index(1997L, c(1L, 12L)))                       # spell 1 exits in 1997, month unknown
 })
 
@@ -758,9 +765,12 @@ test_that("review P2-3: a collapsed key mixing a WWII and a non-WWII dispute kee
 })
 
 test_that("control sets: minimal main W / X / Z, and --full_controls restores the previous specification exactly", {
-  expect_equal(w_controls(), c("ongoing_tm1", "log_prior_mids", "dem_tm1"))
+  ## main W since 2026-10-25: the power levels (D2) after dM_i, dR_i and the centred log system size (D3) last; X unchanged
+  expect_equal(w_controls(), c("M_lvl", "R_lvl", "ongoing_tm1", "log_prior_mids", "dem_tm1", "log_n_system_tm1"))
+  expect_equal(c("dM_i", "dR_i", w_controls()), c("dM_i", "dR_i", "M_lvl", "R_lvl", "ongoing_tm1", "log_prior_mids", "dem_tm1", "log_n_system_tm1"))
   expect_equal(x_controls(), character(0))
-  expect_equal(w_controls(CONFLICT_HISTORY = FALSE), c("ongoing_tm1", "dem_tm1"))
+  expect_equal(w_controls(CONFLICT_HISTORY = FALSE), c("M_lvl", "R_lvl", "ongoing_tm1", "dem_tm1", "log_n_system_tm1"))
+  expect_equal(W_LEVELS, c("M_lvl", "R_lvl")); expect_false(any(W_LEVELS %in% x_controls()))
   expect_false("cowmaj_tm1" %in% w_controls()); expect_false("log_peace_years" %in% w_controls())
   expect_equal(z_columns(), c("contig_land", "joint_dem", "log_dy_prior_mids", "dy_mid_tm1", "dM_j_h", "dRpr_j_h"))
   expect_false(any(c("alliance_def_off", "major_count") %in% z_columns()))
@@ -777,6 +787,7 @@ test_that("control sets: minimal main W / X / Z, and --full_controls restores th
   expect_equal(c("dM_i", "dR_i", w_controls(FULL_CONTROLS = TRUE)), c("dM_i", "dR_i", "cowmaj_tm1", "dem_tm1", "log_prior_mids", "log_peace_years"))
   expect_equal(w_controls(CONFLICT_HISTORY = FALSE, FULL_CONTROLS = TRUE), c("cowmaj_tm1", "dem_tm1")); expect_equal(x_controls(CONFLICT_HISTORY = FALSE, FULL_CONTROLS = TRUE), c("cowmaj_tm1", "dem_tm1"))
   expect_false("ongoing_tm1" %in% w_controls(FULL_CONTROLS = TRUE)); expect_false("dy_mid_tm1" %in% z_columns(FULL_CONTROLS = TRUE))
+  expect_false(any(c("M_lvl", "R_lvl", "log_n_system_tm1") %in% w_controls(FULL_CONTROLS = TRUE)))     # D2 / D3 columns never enter the 8bf0ce1 set
   for (ch in c(TRUE, FALSE)) for (di in c(TRUE, FALSE)) for (co in c(TRUE, FALSE)) for (tm in c(TRUE, FALSE))
     expect_equal(z_columns(ch, di, co, TARGET_MISSING = tm, FULL_CONTROLS = TRUE), base_z(ch, di, co, tm))
   expect_equal(z_columns(FULL_CONTROLS = TRUE), c("contig_land", "alliance_def_off", "joint_dem", "major_count", "log_dy_prior_mids", "log_dy_peace_years", "dM_j_h", "dRpr_j_h"))
@@ -807,10 +818,13 @@ test_that("control sets: minimal main W / X / Z, and --full_controls restores th
   }
   ## every W / X control is one the build writes and the centring list covers the 0/1 indicators that enter
   expect_true(all(w_controls(FULL_CONTROLS = TRUE) %in% c(SY_INDICATORS, "log_prior_mids", "log_peace_years")))
+  expect_true(all(w_controls() %in% c(SY_INDICATORS, W_LEVELS, "log_prior_mids", "log_n_system_tm1")))
   src <- readLines(file.path(v2_root(), "R", "02_fit_model.R"))
   expect_true(any(grepl('get_arg("full_controls", FALSE)', src, fixed = TRUE))); expect_true(any(grepl('"_fullctrl"', src, fixed = TRUE)))
   expect_true(any(grepl("manifest_at_load", src, fixed = TRUE))); expect_true(any(grepl("SLURM_ARRAY_TASK_ID", src, fixed = TRUE)))
-  expect_true(any(grepl("manifest.csv changed while sampling", src, fixed = TRUE)))
+  expect_true(any(grepl("changed while sampling", src, fixed = TRUE))); expect_true(any(grepl("_STALE", src, fixed = TRUE)))   # C2: saved as STALE, not discarded
+  expect_true(any(grepl("assert_compiled_current", src, fixed = TRUE))); expect_true(any(grepl('"_pilot"', src, fixed = TRUE)))   # C3, C1
+  expect_true(any(grepl("file.rename(tmp_path, fit_path)", src, fixed = TRUE)))                                                  # C2 atomic save
 })
 
 ## ---- Codex review fixes (2026-10-24): joiner entry month (P1-2), two choice sets (P1-1), no-WWII flags (P2-3), base control
@@ -905,6 +919,7 @@ write_toy_cell <- function(dir, alts_edit = identity) {
   panel <- tibble(ccode = c(10L, 20L, 30L, 40L), year = 1990L, h = 3L, y1_mid = c(1L, 0L, 1L, 1L), y1_fmid = c(1L, 0L, 1L, 1L),
                   mon_prior_mids_h = c(2L, 0L, 1L, 3L), mon_peace_years_h = c(3L, 10L, 1L, 2L),
                   dM_h = c(0.5, -0.2, 0.1, -0.4), dRpr_h = c(0.3, 0.0, -0.6, 0.2), dReig_h = c(0.1, 0.2, 0.3, 0.4),
+                  M_lvl = c(0.8, -0.3, -0.1, -0.4), R_lvl = c(0.2, 0.5, -0.4, -0.3), log_n_system_tm1 = log(4),
                   cowmaj_tm1 = c(1L, 0L, 0L, 1L), dem_tm1 = c(1L, 1L, 0L, 0L), ongoing_tm1 = c(0L, 0L, 1L, 1L))
   a <- tidyr::expand_grid(ccode1 = c(10L, 20L, 30L, 40L), ccode2 = c(10L, 20L, 30L, 40L)) |> filter(ccode1 != ccode2) |>
     mutate(year = 1990L, h = 3L, in_iv = 1L, in_s2 = 1L)
@@ -922,7 +937,12 @@ write_toy_cell <- function(dir, alts_edit = identity) {
                fighting_at_ref = c(FALSE, FALSE, FALSE, TRUE, FALSE, FALSE), war_disp = FALSE,
                in_mid = TRUE, in_fmid = TRUE, in_fmidcow = FALSE, in_fmidub = TRUE, in_war = FALSE,
                in_mid_noww2 = c(TRUE, TRUE, TRUE, TRUE, FALSE, FALSE), in_fmid_noww2 = c(TRUE, FALSE, TRUE, TRUE, FALSE, FALSE),
-               in_fmidcow_noww2 = FALSE, in_fmidub_noww2 = c(TRUE, TRUE, TRUE, TRUE, FALSE, FALSE), in_war_noww2 = FALSE)
+               in_fmidcow_noww2 = FALSE, in_fmidub_noww2 = c(TRUE, TRUE, TRUE, TRUE, FALSE, FALSE), in_war_noww2 = FALSE,
+               ## D1 direction flags (30 -> 10 is a reversed war-level pair in this toy) and D8 weights (10's two targets in 1990 are two
+               ## disputes, weight 1 each; 30 -> 20 and 30 -> 40 are coalition targets of dispute 2;3? no: separate disputes -> 1;
+               ## 30 -> 10 (dispute 6) carries w_mid 0.5 to exercise a non-unit weight)
+               dir_flipped = c(FALSE, FALSE, FALSE, FALSE, TRUE, FALSE), dir_source = c("sideA", "sideA", "sideA", "sideA", "cow_war_pair", "sideA"),
+               w_mid = c(1, 1, 1, 1, 0.5, 1), w_fmid = c(1, 1, 1, 1, 0.5, 1), w_fmidcow = 0, w_fmidub = c(1, 1, 1, 1, 0.5, 1), w_war = 0)
   saveRDS(panel, file.path(dir, "stage1_panel_lag3.rds")); saveRDS(alts, file.path(dir, "alts_lag3_all.rds")); saveRDS(ev, file.path(dir, "events.rds"))
   man <- lapply(c("stage1_panel_lag3.rds", "alts_lag3_all.rds", "events.rds"), function(f) { o <- readRDS(file.path(dir, f))
     data.frame(file = f, nrow = nrow(o), ncol = ncol(o), sha256 = file_digest(file.path(dir, f)), note = "toy") })
@@ -944,7 +964,13 @@ test_that("assembly: fighting_at_ref events leave stage 2 only; chosen rows are 
   expect_true(all(A$alts$sy_row[A$ev$alt_row] == A$ev$sy_row))
   dat <- build_stan_data(A$sy, A$alts, A$ev, A$W_cols, A$X_cols, A$Z_cols, joint = 1L, x_ref = A$x_ref, allow_orphan_initiations = TRUE)
   expect_equal(dat$N1, 4L); expect_equal(dat$N2, 12L); expect_equal(dat$E, 5L)
-  expect_equal(dat$in_iv, A$alts$in_iv); expect_equal(dat$in_s2, A$alts$in_s2); expect_equal(dat$P1, 5L); expect_equal(dat$P, 2L); expect_equal(dat$Pz, 7L)
+  expect_equal(dat$in_iv, A$alts$in_iv); expect_equal(dat$in_s2, A$alts$in_s2); expect_equal(dat$P1, 8L); expect_equal(dat$P, 2L); expect_equal(dat$Pz, 7L)   # P1 = 8 since D2 / D3
+  ## D8: the event weights reach the Stan data from the events file (30 -> 10, dispute 6, carries 0.5); EVENT_WEIGHTS = "none" gives 1
+  expect_equal(dat$ev_w, A$ev$w); expect_true(any(dat$ev_w == 0.5)); expect_equal(sum(dat$ev_w == 1), 4L)
+  A1 <- quiet(assemble_cell("mid", 3L, "all", EVENT_WEIGHTS = "none", data_dir = td)); expect_true(all(A1$ev$w == 1))
+  ## D2: the levels are NOT grand-centred in assemble_cell() (0 = the system-average level that year); the other controls are
+  expect_equal(A$sy$M_lvl, c(0.8, -0.3, -0.1, -0.4)); expect_lt(abs(mean(A$sy$ongoing_tm1)), 1e-12); expect_lt(abs(mean(A$sy$log_n_system_tm1)), 1e-12)
+  expect_equal(A$n_flipped, 1L)
   expect_equal(dat$cs_end - dat$cs_start + 1L, rep(3L, 4))                    # one union block of 3 rows per state-year
   expect_equal(dat$n_full, c(2L, 3L, 3L, 3L))                                 # n_full counts the IV rows (10 has 2)
   expect_true(all(dat$in_s2[dat$ev_row] == 1L))
@@ -1040,7 +1066,7 @@ test_that("P2-5: a rebuild between the manifest snapshot and the load is caught;
   ## 02_fit_model.R passes its load-time snapshot into the assembly
   src <- readLines(file.path(v2_root(), "R", "02_fit_model.R"))
   expect_true(any(grepl("manifest = manifest_at_load", src, fixed = TRUE)))
-  expect_true(any(grepl('array[N2] int<lower=0, upper=1> in_iv;', src, fixed = TRUE)))     # second stale-binary marker
+  expect_true(any(grepl("assert_compiled_current(sm, stan_src", src, fixed = TRUE)))        # C3: the marker checks became the source / model_code identity check
 })
 
 test_that("Codex re-check P2: Z centring uses the IV rows only, so removing a stage-2-only row changes no stage-1 IV value", {
@@ -1094,7 +1120,7 @@ test_that("assembly with --full_controls returns exactly the 8bf0ce1 column list
   expect_true(all(abs(colMeans(as.matrix(A$sy[, c("cowmaj_tm1", "dem_tm1", "log_prior_mids", "log_peace_years")]))) < 1e-8))   # centred like the base
   expect_equal(length(A$x_ref), 6L)
   M <- quiet(assemble_cell("mid", 3L, "all", data_dir = td))
-  expect_equal(M$W_cols, c("dM_i", "dR_i", "ongoing_tm1", "log_prior_mids", "dem_tm1")); expect_equal(M$X_cols, c("dM_i", "dR_i"))
+  expect_equal(M$W_cols, c("dM_i", "dR_i", "M_lvl", "R_lvl", "ongoing_tm1", "log_prior_mids", "dem_tm1", "log_n_system_tm1")); expect_equal(M$X_cols, c("dM_i", "dR_i"))
   expect_equal(M$Z_cols, c("contig_land", "joint_dem", "log_dy_prior_mids", "dy_mid_tm1", "dM_j_h", "dRpr_j_h", "dch_j_missing"))
 })
 
@@ -1133,4 +1159,219 @@ test_that("real build (when present): the alternatives carry the flags, no empty
   ## a tampered snapshot (the panel digest) is caught before the large files are read
   bad <- man; bad$sha256[bad$file == "stage1_panel_lag3.rds"] <- "0000"
   expect_error(quiet(assemble_cell("mid", 3L, "all", manifest = bad)), "stage1_panel_lag3.rds: sha256 digest does not match the manifest snapshot")
+})
+
+## ---- initiator direction for war-level disputes (PI decision 2026-10-25, D1) ------------------------------------------------------
+## mk_war(): COW inter-state war dyad-years, both directions, for one war; init = the war side (1 or 2) with the initiator
+mk_war <- function(warnum, a, b, years, init = 2L, onset_year = min(years)) {
+  f <- tibble(warnum = warnum, ccode1 = a, ccode2 = b, year = years, cowinterongoing = 1L, cowinteronset = as.integer(years == onset_year),
+              sidea1 = 1L, sidea2 = 2L, initiator1 = as.integer(init == 1L), initiator2 = as.integer(init == 2L))
+  bind_rows(f, f |> mutate(ccode1 = b, ccode2 = a, sidea1 = 2L, sidea2 = 1L, initiator1 = as.integer(init == 2L), initiator2 = as.integer(init == 1L)))
+}
+## disputes: 100 (war level) 10, 11 (A) vs 20 (B, originator), 21 (B, joiner) in 1950 -- COW war 500 has 10, 11 vs 20 (20 initiated), 21 absent
+##           101 (war level) 30 (A) vs 40 (B) in 1960 -- two COW wars with OPPOSITE initiators match (501 in 1960, 502 in 1961): ambiguous
+##           102 (hostlev 3) 50 (A) vs 60 (B) in 1970 -- war 503 matches but the dispute is not war level: untouched
+##           103 (war level) 70 (A) vs 80, 81 (B) in 1980 -- war 504 covers (70, 80) only, 80 initiated: 70 -> 80 flips, 70 -> 81 has a single
+##               pair-decided event behind its dispute (below the minimum of 2): kept as Side A
+##           104 (war level) 90 (A) vs 91 (B) in 1990 -- war 505, 90 initiated: confirmed, not flipped
+##           105 (war level) 92 (A) vs 93 (B) in 1995 -- war 506 begins in 1996 (t + 1), 93 initiated: flips through the window
+war5 <- function(x) x |> mutate(hostlev1 = 5L, hostlev2 = 5L)
+toy_dd_dir <- bind_rows(war5(mk_dd(100L, 10L, 20L, 1950L)), war5(mk_dd(100L, 10L, 21L, 1950L, orig_b = 0L)), war5(mk_dd(100L, 11L, 20L, 1950L)), war5(mk_dd(100L, 11L, 21L, 1950L, orig_b = 0L)),
+                        war5(mk_dd(101L, 30L, 40L, 1960L)), mk_dd(102L, 50L, 60L, 1970L), war5(mk_dd(103L, 70L, 80L, 1980L)), war5(mk_dd(103L, 70L, 81L, 1980L)),
+                        war5(mk_dd(104L, 90L, 91L, 1990L)), war5(mk_dd(105L, 92L, 93L, 1995L)))
+toy_disp_dir <- bind_rows(mk_disp(100L, 5L, 5L, 1950L, 3L, 200), mk_disp(101L, 5L, 5L, 1960L, 4L, 100), mk_disp(102L, 0L, 3L, 1970L, 5L, 10),
+                          mk_disp(103L, 5L, 5L, 1980L, 6L, 100), mk_disp(104L, 5L, 5L, 1990L, 7L, 100), mk_disp(105L, 5L, 5L, 1995L, 8L, 300))
+toy_war <- bind_rows(mk_war(500L, 10L, 20L, 1950L), mk_war(500L, 11L, 20L, 1950L),
+                     mk_war(501L, 30L, 40L, 1960L, init = 1L), mk_war(502L, 30L, 40L, 1961L, init = 2L),
+                     mk_war(503L, 50L, 60L, 1970L), mk_war(504L, 70L, 80L, 1980L), mk_war(505L, 90L, 91L, 1990L, init = 1L), mk_war(506L, 92L, 93L, 1996L))
+
+test_that("D1: war dyad-years carry the initiating side; a war without exactly one initiating side is rejected", {
+  wd <- war_dyad_years(toy_war)
+  expect_equal(nrow(wd), nrow(toy_war)); expect_true(all(wd$side1_init != wd$side2_init))
+  expect_true(wd$side2_init[wd$warnum == 500L & wd$ccode1 == 10L]); expect_false(wd$side2_init[wd$warnum == 505L & wd$ccode1 == 90L])
+  expect_error(war_dyad_years(toy_war |> mutate(initiator1 = 0L, initiator2 = 0L)), "exactly one initiating side")
+  expect_error(war_dyad_years(toy_war |> mutate(initiator1 = 1L, initiator2 = 1L)), "exactly one initiating side")
+})
+
+test_that("D1: pair-level flip, dispute-level flip, ambiguous and single-link pairs kept, non-war disputes untouched, the t+1 window", {
+  ev <- code_events(toy_dd_dir, toy_disp_dir, include_joiners = TRUE, war_inter = toy_war)
+  e <- function(d) ev |> filter(dispnum == d) |> arrange(initiator, target)
+  ## dispute 100: the two matched pairs flip (pair match), the two joiner pairs flip through the dispute-level side mapping
+  d100 <- e(100L)
+  expect_equal(nrow(d100), 4L); expect_true(all(d100$dir_flipped)); expect_true(all(d100$initiator %in% c(20L, 21L))); expect_true(all(d100$target %in% c(10L, 11L)))
+  expect_equal(sort(d100$dir_source), c("cow_war_dispute", "cow_war_dispute", "cow_war_pair", "cow_war_pair"))
+  expect_equal(d100$dir_source[d100$initiator == 20L], c("cow_war_pair", "cow_war_pair")); expect_equal(d100$dir_source[d100$initiator == 21L], c("cow_war_dispute", "cow_war_dispute"))
+  expect_true(all(d100$war_link == 500L)); expect_true(all(d100$sidea1 == 0L & d100$sidea2 == 1L))
+  ## originator status moved with the state: 20 (originator) -> 10 is an originator pair, 21 (joiner) -> 10 a joiner pair
+  expect_false(d100$is_joiner_pair[d100$initiator == 20L & d100$target == 10L]); expect_true(d100$is_joiner_pair[d100$initiator == 21L & d100$target == 10L])
+  expect_equal(d100$orig1[d100$initiator == 21L], c(0L, 0L)); expect_equal(d100$orig2[d100$initiator == 21L], c(1L, 1L))
+  ## dispute 101: two wars with opposite initiators -> ambiguous, Side A kept
+  expect_false(e(101L)$dir_flipped); expect_equal(e(101L)$dir_source, "sideA"); expect_equal(e(101L)$dir_rule, "pair_ambiguous"); expect_equal(e(101L)$initiator, 30L)
+  ## dispute 102 is not war level: untouched although a war dyad matches
+  expect_false(e(102L)$dir_flipped); expect_equal(e(102L)$dir_rule, "non_war_dispute"); expect_true(is.na(e(102L)$war_link))
+  ## dispute 103: 70 -> 80 flips (pair match); 70 -> 81 is kept because only one pair-decided event backs the dispute mapping
+  d103 <- e(103L)
+  expect_true(any(d103$initiator == 80L & d103$target == 70L & d103$dir_flipped & d103$dir_source == "cow_war_pair"))
+  expect_true(any(d103$initiator == 70L & d103$target == 81L & !d103$dir_flipped & d103$dir_rule == "dispute_no_majority_link"))
+  ## dispute 104: the Side A state initiated the war -> confirmed, not flipped, still "cow_war_pair"
+  expect_false(e(104L)$dir_flipped); expect_equal(e(104L)$dir_source, "cow_war_pair"); expect_equal(e(104L)$initiator, 90L)
+  ## dispute 105: the war dyad-year is t + 1 -> matched and flipped; with window 0 it is unmatched
+  expect_true(e(105L)$dir_flipped); expect_equal(e(105L)$initiator, 93L)
+  pair0 <- build_pair_table(toy_dd_dir, toy_disp_dir) |> filter(sidea1 == 1L, sidea2 == 0L) |> rename(initiator = ccode1, target = ccode2)
+  d0 <- cow_war_direction(pair0, war_dyad_years(toy_war), window = 0L)
+  expect_equal(d0$dir_rule[d0$dispnum == 105L], "dispute_no_pair_match"); expect_false(d0$dir_flipped[d0$dispnum == 105L])
+  ## one direction per dispute pair still holds, every flipped row has sidea1 = 0, and the attributes list the matches and links
+  expect_false(any(paste(ev$dispnum, ev$target, ev$initiator) %in% paste(ev$dispnum, ev$initiator, ev$target)))
+  expect_equal(ev$sidea1 == 0L, ev$dir_flipped)
+  dl <- attr(cow_war_direction(pair0, war_dyad_years(toy_war)), "dispute_links")
+  expect_equal(dl$n_pair_decided[dl$dispnum == 100L], 2L); expect_true(dl$map_ok[dl$dispnum == 100L]); expect_false(dl$map_ok[dl$dispnum == 103L])
+  ## the sideA build option leaves every direction alone and marks the source
+  evA <- code_events(toy_dd_dir, toy_disp_dir, include_joiners = TRUE, war_inter = toy_war, direction = "sideA")
+  expect_false(any(evA$dir_flipped)); expect_true(all(evA$dir_source == "sideA")); expect_true(all(evA$initiator %in% c(10L, 11L, 30L, 50L, 70L, 90L, 92L)))
+  ## without war data nothing is flipped (the pre-2026-10-25 coding)
+  ev0 <- code_events(toy_dd_dir, toy_disp_dir, include_joiners = TRUE)
+  expect_false(any(ev0$dir_flipped)); expect_true(all(ev0$dir_rule %in% c("non_war_dispute", "dispute_no_pair_match")))
+  ## downstream: y1 follows the applied direction (20 initiates in 1950, 10 does not)
+  y1 <- ev |> filter(in_mid) |> distinct(initiator, year)
+  expect_true(any(y1$initiator == 20L & y1$year == 1950L)); expect_false(any(y1$initiator == 10L & y1$year == 1950L))
+  ## apply_direction() swaps every per-participant column and refuses a table that is not Side A -> Side B
+  expect_error(apply_direction(ev |> mutate(sidea1 = 1L)), "sidea")
+})
+
+test_that("D1 on the real data (when present): Germany -> Poland 1939 exists, Poland -> Germany 1939 does not", {
+  f <- file.path(v2_root(), "data", "events.rds")
+  if (!file.exists(f)) skip("real build not present")
+  ev <- readRDS(f)
+  expect_true(any(ev$initiator == 255L & ev$target == 290L & ev$year == 1939L))
+  expect_false(any(ev$initiator == 290L & ev$target == 255L & ev$year == 1939L))
+  g <- ev |> filter(initiator == 255L, target == 290L, year == 1939L)
+  expect_true(g$dir_flipped); expect_equal(g$dir_source, "cow_war_pair"); expect_equal(g$war_link, 139L); expect_true(g$in_war)
+  expect_true(all(c("dir_flipped", "dir_source", "dir_rule", "war_link", "w_mid", "w_war") %in% names(ev)))
+  expect_equal(ev$dir_flipped, ev$sidea2 == 1L)
+  ## USSR -> Japan 1939 (Nomonhan) and China -> USSR 1929 are reversed as the review found
+  expect_true(any(ev$initiator == 740L & ev$target == 365L & ev$year == 1939L & ev$dir_flipped))
+  expect_true(any(ev$initiator == 365L & ev$target == 710L & ev$year == 1929L & ev$dir_flipped))
+  expect_false(any(ev$dir_flipped & ev$dir_source == "sideA")); expect_false(any(ev$dir_flipped & ev$hostlev_disp != 5L))
+})
+
+## ---- participant-level dates (PI decision 2026-10-25, D5) --------------------------------------------------------------------------
+test_that("D5: participant start / end months give exact pair entry and exit; inconsistent participants fall back; entry bounds are clipped", {
+  ## dispute 90: 10 (A, orig) vs 20 (B, orig) 1990-1991, 400 days from 1990-03; 30 joins Side B in 1990 (orig 0). Participant dates:
+  ## 10 and 20 1990-03 .. 1991-04; 30 1990-09 .. 1991-04 -> pair (10, 30) entry 1990-09 exactly (was [1990-03, 1990-12])
+  dd <- bind_rows(mk_dd(90L, 10L, 20L, 1990:1991), mk_dd(90L, 10L, 30L, 1990:1991, orig_b = 0L), mk_dd(91L, 10L, 30L, 1990L), mk_dd(92L, 10L, 30L, 1991L))
+  disp <- bind_rows(mk_disp(90L, 0L, 3L, 1990L, 3L, 400), mk_disp(91L, 0L, 3L, 1990L, 7L, 5), mk_disp(92L, 0L, 3L, 1991L, 2L, 5))
+  part <- tibble(dispnum = c(90L, 90L, 90L, 91L, 91L), ccode = c(10L, 20L, 30L, 10L, 30L),
+                 styear = c(1990L, 1990L, 1990L, 1990L, 1990L), stmon = c(3L, 3L, 9L, 7L, 7L), stday = -9L,
+                 endyear = c(1991L, 1991L, 1991L, 1990L, 1990L), endmon = c(4L, 4L, 4L, 7L, 7L), endday = -9L)
+  db <- dispute_date_bounds(disp, dd)
+  p0 <- pair_dispute_intervals(dd, db); p1 <- pair_dispute_intervals(dd, db, part = part)
+  j0 <- p0 |> filter(dispnum == 90L, ccode1 == 10L, ccode2 == 30L); j1 <- p1 |> filter(dispnum == 90L, ccode1 == 10L, ccode2 == 30L)
+  expect_equal(c(j0$start_lo, j0$start_hi), c(ym_index(1990L, 3L), ym_index(1990L, 12L))); expect_equal(j0$date_source, "dispute")
+  expect_equal(c(j1$start_lo, j1$start_hi), rep(ym_index(1990L, 9L), 2)); expect_equal(c(j1$end_lo, j1$end_hi), rep(ym_index(1991L, 4L), 2))
+  expect_true(j1$start_exact); expect_equal(j1$date_source, "participant"); expect_equal(j1$part_reason, "participant dates used")
+  o1 <- p1 |> filter(dispnum == 90L, ccode1 == 10L, ccode2 == 20L); expect_equal(c(o1$start_lo, o1$end_hi), c(ym_index(1990L, 3L), ym_index(1991L, 4L)))
+  ## dispute 92 is not in part: dispute-level bounds stay; both directions of a pair get the same dates
+  expect_equal(p1$date_source[p1$dispnum == 92L], c("dispute", "dispute")); expect_equal(p1$part_reason[p1$dispnum == 92L][1], "dispute not in gml_part")
+  expect_equal(p1 |> filter(dispnum == 90L, ccode1 == 30L, ccode2 == 10L) |> pull(start_lo), j1$start_lo)
+  ## the escalation decision follows: 91 (July 1990) vs the joiner pair's dispute 90 was undecided (year fallback -> not an escalation);
+  ## with the entry known to be September, July is certainly BEFORE the entry -> certainly not an escalation, no fallback
+  ev0 <- code_events(dd, disp, include_joiners = TRUE); ev1 <- code_events(dd, disp, include_joiners = TRUE, part = part)
+  expect_true(ev0$esc_fallback[ev0$dispnum == 91L]); expect_false(ev1$esc_fallback[ev1$dispnum == 91L]); expect_false(ev1$escalation[ev1$dispnum == 91L])
+  expect_true(ev1$escalation[ev1$dispnum == 92L])                                             # February 1991: entered 1990-09, still active (ends 1991-04)
+  ## a participant whose GML entry is AFTER the pair's first COW year contradicts the COW years: dispute bounds, reason recorded
+  part_bad <- part |> mutate(styear = ifelse(ccode == 30L & dispnum == 90L, 1991L, styear), stmon = ifelse(ccode == 30L & dispnum == 90L, 2L, stmon))
+  pb <- pair_dispute_intervals(dd, db, part = part_bad) |> filter(dispnum == 90L, ccode1 == 10L, ccode2 == 30L)
+  expect_equal(pb$date_source, "dispute"); expect_match(pb$part_reason, "entry after the spell's first COW year")
+  expect_equal(c(pb$start_lo, pb$start_hi), c(ym_index(1990L, 3L), ym_index(1990L, 12L)))
+  ## a GML entry BEFORE the first COW year is clamped to January of that year (the pair was in the dispute by then)
+  part_early <- part |> mutate(styear = ifelse(ccode == 30L & dispnum == 90L, 1989L, styear))
+  pe <- pair_dispute_intervals(dd, db, part = part_early) |> filter(dispnum == 90L, ccode1 == 10L, ccode2 == 30L)
+  expect_equal(pe$date_source, "participant"); expect_equal(c(pe$start_lo, pe$start_hi), rep(ym_index(1990L, 3L), 2))   # the pair entry is the LATER start, 10's 1990-03, so nothing to clamp
+  part_both <- part |> mutate(styear = ifelse(dispnum == 90L, 1989L, styear))
+  pc2 <- pair_dispute_intervals(dd, db, part = part_both) |> filter(dispnum == 90L, ccode1 == 10L, ccode2 == 20L)
+  expect_match(pc2$part_reason, "entry clamped"); expect_equal(c(pc2$start_lo, pc2$start_hi), rep(ym_index(1990L, 1L), 2))   # both GML starts in 1989: clamped to January 1990
+  ## a participant with no overlapping gml_part spell, and one with two spells, fall back too
+  pn <- pair_dispute_intervals(dd, db, part = part |> filter(!(dispnum == 90L & ccode == 30L))) |> filter(dispnum == 90L, ccode1 == 10L, ccode2 == 30L)
+  expect_match(pn$part_reason, "no gml_part spell")
+  p2 <- pair_dispute_intervals(dd, db, part = bind_rows(part, part |> filter(dispnum == 90L, ccode == 30L) |> mutate(stmon = 11L))) |> filter(dispnum == 90L, ccode1 == 10L, ccode2 == 30L)
+  expect_match(p2$part_reason, "several gml_part spells")
+  ## clipping: a joiner pair entering some time in 1990 when the dispute ends in 1990-05 had start_hi (December) > end_hi (May)
+  dd_c <- bind_rows(mk_dd(95L, 10L, 20L, 1990L), mk_dd(95L, 10L, 30L, 1990L, orig_b = 0L)); disp_c <- mk_disp(95L, 0L, 3L, 1990L, 2L, 60)
+  pc <- pair_dispute_intervals(dd_c, dispute_date_bounds(disp_c, dd_c)) |> filter(ccode1 == 10L, ccode2 == 30L)
+  expect_true(pc$start_clipped); expect_equal(pc$start_hi, pc$end_hi); expect_true(pc$start_lo <= pc$start_hi); expect_lt(pc$start_hi, ym_index(1990L, 12L))
+  expect_false(any(pair_dispute_intervals(dd_c, dispute_date_bounds(disp_c, dd_c))$start_hi > pair_dispute_intervals(dd_c, dispute_date_bounds(disp_c, dd_c))$end_hi))
+})
+
+test_that("D5 on the real data: Egypt <-> Israel 1967 (disputes 1035 and 1480) get participant-level dates and the right escalation call", {
+  skip_if_not_installed("peacesciencer")
+  suppressPackageStartupMessages(library(peacesciencer))
+  dd <- cow_mid_dirdisps |> mutate(across(c(dispnum, ccode1, ccode2, year), as.integer)) |> filter(dispnum %in% c(1035L, 1480L))
+  disp <- cow_mid_disps |> mutate(dispnum = as.integer(dispnum)) |> filter(dispnum %in% c(1035L, 1480L))
+  pdi <- pair_dispute_intervals(dd, dispute_date_bounds(disp, dd), part = gml_part)
+  ## 1035 (the Six-Day War): Egypt 651 and Israel 666 are 1966-12 .. 1967-06 in gml_part but their COW pair-years begin in 1967, so the
+  ## entry is clamped to January 1967 (exact; under the dispute-level bounds the pair, a later entrant, had the whole of 1967) and the
+  ## exit is the exact 1967-06 (was the duration bound)
+  p <- pdi |> filter(dispnum == 1035L, ccode1 == 651L, ccode2 == 666L)
+  expect_equal(p$date_source, "participant"); expect_match(p$part_reason, "entry clamped")
+  expect_equal(c(p$start_lo, p$start_hi), rep(ym_index(1967L, 1L), 2)); expect_equal(c(p$end_lo, p$end_hi), rep(ym_index(1967L, 6L), 2))
+  p0 <- pair_dispute_intervals(dd, dispute_date_bounds(disp, dd)) |> filter(dispnum == 1035L, ccode1 == 651L, ccode2 == 666L)
+  expect_equal(p0$start_lo, ym_index(1967L, 1L)); expect_equal(p0$start_hi, p0$end_hi); expect_true(p0$start_clipped); expect_lt(p0$end_lo, p0$end_hi)
+  ## Jordan 663 joined 1967-05: the pair (663, 666) enters in May 1967, exits June
+  pj <- pdi |> filter(dispnum == 1035L, ccode1 == 663L, ccode2 == 666L)
+  expect_equal(c(pj$start_lo, pj$start_hi), rep(ym_index(1967L, 5L), 2)); expect_equal(pj$end_hi, ym_index(1967L, 6L)); expect_equal(pj$date_source, "participant")
+  ## 1480 (the War of Attrition): Israel and Egypt 1967-06-29 .. 1970-08 -> pair entry 1967-06; the USSR's 1969 spell gives the (365, 666) pair a 1969 entry
+  pw <- pdi |> filter(dispnum == 1480L, ccode1 == 666L, ccode2 == 651L)
+  expect_equal(pw$date_source, "participant"); expect_equal(c(pw$start_lo, pw$start_hi), rep(ym_index(1967L, 6L), 2)); expect_equal(pw$end_hi, ym_index(1970L, 8L))
+  pu <- pdi |> filter(dispnum == 1480L, ccode1 == 365L, ccode2 == 666L); expect_equal(pu$spell_first, 1970L); expect_equal(pu$date_source, "dispute")   # the USSR's gml_part spell (1969-04) does not overlap its COW year 1970
+  ## Israel -> Egypt 1967 in 1480 (GML start June 29) against 1035 (GML end June 10 / 17): at MONTH resolution both are June 1967, a tie,
+  ## and the same-month convention counts an end in the reference month as still active, so the event is an escalation WITHOUT a fallback.
+  ## Under the dispute-level bounds the comparison was undecided and the year rule (onset 1967 not before 1967) said not an escalation.
+  ## The day fields of gml_part would separate the two; the pipeline works at month resolution (documented limitation, README).
+  ev_pairs <- build_pair_table(dd, disp |> transmute(dispnum, fatality_disp = fatality, hostlev_disp = hostlev)) |> filter(sidea1 == 1L, sidea2 == 0L) |> rename(initiator = ccode1, target = ccode2)
+  e1 <- flag_escalations_month(ev_pairs, pdi); e0 <- flag_escalations_month(ev_pairs, pair_dispute_intervals(dd, dispute_date_bounds(disp, dd)))
+  k <- e1$dispnum == 1480L & e1$initiator == 666L & e1$target == 651L
+  expect_true(any(k)); expect_false(e1$esc_fallback[k]); expect_true(e1$escalation[k]); expect_true(e0$esc_fallback[k]); expect_false(e0$escalation[k])
+  expect_equal(c(e1$ev_start_lo[k], e1$ev_start_hi[k]), rep(ym_index(1967L, 6L), 2))
+  expect_false(any(e1$escalation[e1$dispnum == 1035L]))
+})
+
+## ---- stage-2 event weights (PI decision 2026-10-25, D8) --------------------------------------------------------------------------------
+test_that("D8: w_<sample> = 1 / the initiator's targets in the same dispute and year, per sample; the collapse sums and caps at 1", {
+  ## dispute 200: 10 (A) vs 20, 21, 22 (B) in 1990, hostlev 5 but only (10, 20) at participant level 5 -> war sample has one target (w_war 1),
+  ## mid has three (w_mid 1/3); dispute 201: 10 -> 20 again in 1990 (collapses with the 200 pair: w_mid 1/3 + 1 capped at 1)
+  dd <- bind_rows(mk_dd(200L, 10L, 20L, 1990L) |> mutate(hostlev1 = 5L, hostlev2 = 5L), mk_dd(200L, 10L, 21L, 1990L), mk_dd(200L, 10L, 22L, 1990L),
+                  mk_dd(201L, 10L, 20L, 1990L), mk_dd(202L, 30L, 40L, 1991L), mk_dd(202L, 31L, 40L, 1991L))
+  disp <- bind_rows(mk_disp(200L, 1L, 5L, 1990L, 3L, 100), mk_disp(201L, 0L, 3L, 1990L, 8L, 5), mk_disp(202L, 0L, 3L, 1991L, 1L, 5))
+  ev <- code_events(dd, disp, include_joiners = TRUE)
+  e200 <- ev |> filter(dispnum == 200L)
+  expect_equal(e200$w_mid, rep(1 / 3, 3)); expect_equal(sum(e200$w_mid), 1)
+  expect_equal(e200$w_war[e200$target == 20L], 1); expect_equal(e200$w_war[e200$target != 20L], c(0, 0))     # outside the war sample: 0
+  expect_equal(ev$w_mid[ev$dispnum == 201L], 1)
+  expect_equal(ev$w_mid[ev$dispnum == 202L], c(1, 1))                      # two initiators against one target: one decision each
+  expect_true(all(ev$w_fmid[!ev$in_fmid] == 0)); expect_true(all(ev$w_mid[ev$in_mid] > 0))
+  ## escalations carry 0 everywhere
+  dd_e <- bind_rows(dd, mk_dd(203L, 10L, 21L, 1990L)); disp_e <- bind_rows(disp, mk_disp(203L, 0L, 3L, 1990L, 4L, 5))   # April, while 200 (March, 100 days) is active
+  ev_e <- code_events(dd_e, disp_e, include_joiners = TRUE)
+  expect_true(ev_e$escalation[ev_e$dispnum == 203L]); expect_equal(ev_e$w_mid[ev_e$dispnum == 203L], 0)
+  ## the collapse: (10, 20, 1990) from 200 (1/3) and 201 (1) -> min(1, 4/3) = 1; (10, 21) and (10, 22) keep 1/3
+  out <- collapse_duplicate_events(ev |> add_collapse_cols())
+  k <- out |> filter(initiator == 10L, target == 20L); expect_equal(k$n_disputes, 2L); expect_equal(k$w_mid, 1); expect_equal(k$w_war, 1)
+  expect_equal(out$w_mid[out$initiator == 10L & out$target == 21L], 1 / 3)
+  expect_equal(out$dir_flipped, rep(FALSE, nrow(out))); expect_true(all(out$dir_source == "sideA"))
+  expect_error(collapse_duplicate_events(ev |> add_collapse_cols() |> mutate(w_mid = 1.5)), "outside")
+  expect_error(collapse_duplicate_events(ev |> add_collapse_cols() |> select(-w_war)), "absent")
+  expect_error(event_weights(ev |> select(-in_war)))
+})
+
+test_that("P3: the pair table takes the sides of the pair's EARLIEST year and reports side changes", {
+  ## pair (10, 20): 10 on Side A in 1939 and on Side B in 1941 (opposed again after switching sides, like France and the USSR in 258)
+  dd <- bind_rows(mk_dd(300L, 10L, 20L, 1939L), mk_dd(300L, 20L, 10L, 1941L) |> mutate(disponset = 0L))
+  pair <- build_pair_table(dd, mk_disp(300L, 5L, 5L, 1939L, 9L, 2000))
+  p <- pair |> filter(ccode1 == 10L, ccode2 == 20L)
+  expect_equal(p$year, 1939L); expect_equal(c(p$sidea1, p$sidea2), c(1L, 0L))                   # the 1939 sides, whatever the row order
+  pair_rev <- build_pair_table(dd |> arrange(desc(year)), mk_disp(300L, 5L, 5L, 1939L, 9L, 2000)) |> filter(ccode1 == 10L, ccode2 == 20L)
+  expect_equal(c(pair_rev$sidea1, pair_rev$sidea2), c(1L, 0L))
+  expect_equal(nrow(attr(pair, "side_changes")), 2L)                                               # both directions of the one pair
+  expect_equal(nrow(attr(build_pair_table(toy_dd, toy_disp), "side_changes")), 0L)
+  expect_error(build_pair_table(dd |> mutate(orig1 = ifelse(year == 1941L, 0L, orig1)), mk_disp(300L, 5L, 5L, 1939L, 9L, 2000)), "originator status")
 })

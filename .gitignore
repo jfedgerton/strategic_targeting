@@ -6,3 +6,4 @@ v2/sim/fits/
 *.Rout
 .Rhistory
 v2/output/
+v2/data_sideA/
