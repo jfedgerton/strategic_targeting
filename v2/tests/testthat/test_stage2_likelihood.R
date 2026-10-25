@@ -181,6 +181,15 @@ test_that("masked sets: Stan rejects an empty IV set, a chosen row outside the s
 ## (a) With every row in both sets the new program must give the SAME log density, gradient and generated quantities.
 ## (b) With masked sets the new program's stage 1 must equal the old program run on the IV rows alone (no events), its stage 2 the
 ##     old program run on the stage-2 rows alone, and its log density the old IV-only density plus the new stage-2 log-liks.
+## the prior terms the 2026-10-25 programs add relative to every earlier program, at the init point of stan_inits()
+prior_shift_2026_10_25 <- function(dat, init) {
+  D <- if (dat$D_mode == 3L) 2L else 1L
+  lb <- function(r) dbeta((r + 1) / 2, 2.5, 2.5, log = TRUE)
+  if (D == 1L) return(list(shift = 0, n_grad = 0L))
+  if (dat$joint == 1L) return(list(shift = lb(init$rho_x[1]), n_grad = 1L))              # rho_x: implicit uniform -> Beta(2.5, 2.5)
+  r1 <- init$r_ca1[1]; r2 <- init$q_ca2[1] * sqrt(1 - r1^2)
+  list(shift = log1p(-(r1^2 + r2^2)) - lb(r1) - lb(r2), n_grad = 2L)                        # "a": two truncated Betas -> disk density
+}
 check_reference_3a9e7d0 <- function(model_name, family, joint, with_uv, K = 2L, D_mode = 3L) {
   ref <- file.path(ref_dir, paste0(model_name, "_3a9e7d0.rds"))
   if (ref_dir == "" || !file.exists(ref)) skip("reference build 3a9e7d0 not available (set V2_REF_BUILD)")
@@ -193,9 +202,19 @@ check_reference_3a9e7d0 <- function(model_name, family, joint, with_uv, K = 2L, 
   dat <- build_stan_data(sim$sy, sim$alts, sim$ev, cols[[1]], cols[[2]], cols[[3]], joint = joint, x_ref = rep(0, 4), K = Kk, D_mode = D_mode)
   expect_true(all(dat$in_iv == 1L & dat$in_s2 == 1L))
   p <- make_pars(dat, with_uv); init <- stan_inits(dat, p)$init
-  new <- eval_fixed_draw(sm_new, dat, init); old <- eval_fixed_draw(sm_ref, dat, init)   # rstan ignores the extra in_iv / in_s2 data for the old program
-  expect_equal(new$lp, old$lp, tolerance = 1e-12); expect_equal(new$grad, old$grad, tolerance = 1e-10)
+  new <- eval_fixed_draw(sm_new, dat, init); old <- eval_fixed_draw(sm_ref, dat, init)   # rstan ignores the extra in_iv / in_s2 / ev_w data for the old program
+  ## the current program differs from 3a9e7d0 ONLY by the known prior change of 2026-10-25 (B4 disk density on the "a" correlations,
+  ## explicit Beta(2.5, 2.5) on rho_x in "b"); with every weight 1 (D8) the likelihood part is identical. The shift is computed in R
+  ## at the init point and the gradient may differ only in the correlation coordinates (2 for "a", 1 for "b", none for D = 1).
+  sh <- prior_shift_2026_10_25(dat, init); shift <- sh$shift
+  expect_equal(new$lp, old$lp + shift, tolerance = 1e-12)
+  gd <- abs(new$grad - old$grad); expect_lte(sum(gd > 1e-8), sh$n_grad); expect_equal(length(gd), length(old$grad))
   expect_equal(new$ll1, old$ll1, tolerance = 1e-12); expect_equal(new$ll2, old$ll2, tolerance = 1e-12); expect_equal(new$mu_state, old$mu_state, tolerance = 1e-12)
+  ## event weights (D8): with weights w the log density moves by sum((w - 1) * log_lik_stage2) and nothing else changes
+  set.seed(11); dw <- dat; dw$ev_w <- runif(dat$E, 0.2, 1)
+  neww <- eval_fixed_draw(sm_new, dw, init)
+  expect_equal(neww$lp - new$lp, sum((dw$ev_w - 1) * new$ll2), tolerance = 1e-10)
+  expect_equal(neww$ll2, new$ll2, tolerance = 1e-12); expect_equal(neww$ll1, new$ll1, tolerance = 1e-12)
   ## (b) masked sets
   M <- mask_sets(sim)
   d_union <- build_stan_data(M$sy, M$alts, M$ev, cols[[1]], cols[[2]], cols[[3]], joint = joint, x_ref = rep(0, 4), K = Kk, anchor = dat$anchor, D_mode = D_mode)
@@ -206,7 +225,7 @@ check_reference_3a9e7d0 <- function(model_name, family, joint, with_uv, K = 2L, 
   nu <- eval_fixed_draw(sm_new, d_union, init); o_iv <- eval_fixed_draw(sm_ref, d_iv, init); o_s2 <- eval_fixed_draw(sm_ref, d_s2, init)
   expect_equal(nu$ll1, o_iv$ll1, tolerance = 1e-12)                                       # stage 1 = old program on the IV rows
   expect_equal(nu$ll2, o_s2$ll2, tolerance = 1e-12)                                       # stage 2 = old program on the stage-2 rows
-  expect_equal(nu$lp, o_iv$lp + sum(nu$ll2), tolerance = 1e-10)                            # density = priors + stage 1 (IV rows) + stage 2
+  expect_equal(nu$lp, o_iv$lp + sum(nu$ll2) + shift, tolerance = 1e-10)                    # density = priors (+ the 2026-10-25 shift) + stage 1 (IV rows) + stage 2
   ## and the whole-block evaluation of the same union data differs (the masks matter)
   expect_false(isTRUE(all.equal(nu$ll1, eval_fixed_draw(sm_ref, d_union, init)$ll1, tolerance = 1e-8)))
   invisible(TRUE)
@@ -217,3 +236,28 @@ test_that("reference 3a9e7d0: M1m", check_reference_3a9e7d0("m1_latent_additive"
 test_that("reference 3a9e7d0: M2b (K=2)", check_reference_3a9e7d0("m2_ame", "M2b", 1L, TRUE))
 test_that("reference 3a9e7d0: M2a (K=2)", check_reference_3a9e7d0("m2_ame", "M2b", 0L, TRUE))
 test_that("reference 3a9e7d0: M2r (K=2)", check_reference_3a9e7d0("m2_ame", "M2b", 0L, TRUE, D_mode = 2L))
+
+## ---- equivalence with the dd48506 programs (the binaries of the 24-cell cluster run; no weights, old correlation priors) ------------
+## With every weight 1 the 2026-10-25 program is the dd48506 program plus the known prior shift; the generated quantities are identical.
+check_reference_dd48506 <- function(model_name, family, joint, with_uv, K = 2L, D_mode = 3L) {
+  ref <- file.path(ref_dir, paste0(model_name, "_dd48506.rds"))
+  if (ref_dir == "" || !file.exists(ref)) skip("reference build dd48506 not available (set V2_REF_BUILD)")
+  sm_new <- skip_if_no_build(model_name); sm_ref <- readRDS(ref)
+  expect_false(grepl("ev_w", sm_ref@model_code, fixed = TRUE)); expect_true(grepl("vector<lower=0, upper=1>[E] ev_w;", sm_new@model_code, fixed = TRUE))
+  Kk <- if (with_uv) K else NULL
+  sim <- simulate_targeting(family, S = 7L, Tt = 5L, K = K, seed = 123L, target_rate = 0.6)
+  M <- mask_sets(sim)
+  dat <- build_stan_data(M$sy, M$alts, M$ev, c("W1", "W2"), paste0("X", 1:4), c("Z1", "Z2"), joint = joint, x_ref = rep(0, 4), K = Kk, D_mode = D_mode)
+  expect_true(all(dat$ev_w == 1))
+  p <- make_pars(dat, with_uv); init <- stan_inits(dat, p)$init
+  new <- eval_fixed_draw(sm_new, dat, init); old <- eval_fixed_draw(sm_ref, dat, init)
+  sh <- prior_shift_2026_10_25(dat, init)
+  expect_equal(new$lp, old$lp + sh$shift, tolerance = 1e-12)
+  expect_lte(sum(abs(new$grad - old$grad) > 1e-8), sh$n_grad)
+  expect_equal(new$ll1, old$ll1, tolerance = 1e-12); expect_equal(new$ll2, old$ll2, tolerance = 1e-12); expect_equal(new$mu_state, old$mu_state, tolerance = 1e-12)
+}
+test_that("reference dd48506: M1m identical with weights 1 (no prior change in 1-D)", check_reference_dd48506("m1_latent_additive", "M1b", 0L, FALSE, D_mode = 1L))
+test_that("reference dd48506: M1a (disk prior shift only)", check_reference_dd48506("m1_latent_additive", "M1b", 0L, FALSE))
+test_that("reference dd48506: M1b (rho_x prior shift only)", check_reference_dd48506("m1_latent_additive", "M1b", 1L, FALSE))
+test_that("reference dd48506: M2b (K=2)", check_reference_dd48506("m2_ame", "M2b", 1L, TRUE))
+test_that("reference dd48506: M2r (K=2) identical", check_reference_dd48506("m2_ame", "M2b", 0L, TRUE, D_mode = 2L))

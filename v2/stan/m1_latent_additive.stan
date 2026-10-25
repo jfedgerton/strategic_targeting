@@ -26,6 +26,14 @@
 //                    corr(c, a2) remain free, parameterised so R is always PD:
 //                    r1 = corr(c,a1) in (-1,1), r2 = q * sqrt(1 - r1^2), q in (-1,1)
 //                    => det(R) = 1 - r1^2 - r2^2 > 0.
+// Event weights (PI decision 2026-10-25, D8): the stage-2 term of event e enters the log density as
+// ev_w[e] * (U[chosen] - log_sum_exp(U over the set)), a composite likelihood with dispute-level weighting
+// (w = 1 / the initiator's number of targets in the same dispute and onset year, so joining a dispute against k
+// Side-B members is one decision's worth of information). ev_w = 1 everywhere IS the unweighted program.
+// log_lik_stage2 (generated quantities) stays the unweighted per-event term; the weights are saved with the fit.
+// Prior on the "a" correlations (review fix 2026-10-25, B4): p(r1, r2) propto 1 - r1^2 - r2^2 on the unit disk,
+// the LKJ(2) 3x3 density restricted to corr(a1, a2) = 0, whose marginals are Beta(2.5, 2.5) on (r + 1) / 2 like
+// the "b" model's. The "b" model's rho_x gets the same marginal explicitly (P3, 2026-10-25).
 // Choice-set flags (Codex review P1-1, PI choice "A'", 2026-10-24). Rows cs_start[n]..cs_end[n]
 // are the UNION of two sets of state-year n: in_iv[r] = 1 marks the stage-1 IV set (alternatives
 // not already fighting state i at JANUARY of t, the same rule for initiating and non-initiating
@@ -101,7 +109,7 @@ functions {
                       array[] int s2_first, array[] int s2_count, array[] int s2_loc,
                       matrix x, array[] int alt_target, matrix Z, int Pz,
                       array[] int ev_first, array[] int ev_count, array[] int ev_sorted,
-                      array[] int ev_row, array[] int ev_start, array[] int ev_end, int sampled,
+                      array[] int ev_row, array[] int ev_start, array[] int ev_end, vector ev_w, int sampled,
                       int D, int dcol,
                       real alpha0, vector alpha, real tau, row_vector mu0, matrix beta, matrix a_i, vector c_i,
                       vector sigma_x, real rho, vector b_j, vector gamma) {
@@ -128,13 +136,13 @@ functions {
       for (j in 1:ev_count[n]) {
         int ev = ev_sorted[ev_first[n] + j - 1];
         if (sampled == 0) {
-          lp += u[ev_row[ev] - s + 1] - lse2;                    // event set == the state-year's in_s2 rows
+          lp += ev_w[ev] * (u[ev_row[ev] - s + 1] - lse2);       // event set == the state-year's in_s2 rows; weighted (D8)
         } else {
           int s2 = ev_start[ev];
           int e2 = ev_end[ev];
           vector[e2 - s2 + 1] u2 = util_block(s2, e2, x, mu_n, sigma_x, rho, b_j, alt_target,
                                               zg_block(Z, gamma, s2, e2, Pz), D, dcol);
-          lp += u2[ev_row[ev] - s2 + 1] - log_sum_exp(u2);
+          lp += ev_w[ev] * (u2[ev_row[ev] - s2 + 1] - log_sum_exp(u2));
         }
       }
     }
@@ -170,6 +178,9 @@ data {
   array[E] int<lower=1, upper=N2> ev_row;      // chosen alternative's row
   array[E] int<lower=1, upper=N2> ev_start;    // the event's OWN choice-set rows
   array[E] int<lower=1, upper=N2> ev_end;
+  vector<lower=0, upper=1>[E] ev_w;            // stage-2 event weights (D8, 2026-10-25): 1 / the initiator's targets in the same
+                                               // dispute and year; multiply the stage-2 log-lik terms (composite likelihood);
+                                               // all 1 = the unweighted program; log_lik_stage2 is unweighted per event
   // ---- flags and reference point
   int<lower=0, upper=1> joint;
   int<lower=0, upper=1> sampled;
@@ -318,13 +329,17 @@ model {
       target += beta_lpdf((r_c_a1 + 1) / 2 | 2.5, 2.5);
     } else if (joint == 1) {
       L_Om_joint[1] ~ lkj_corr_cholesky(2);
+      // Sigma's correlation (b only): explicit (rho + 1) / 2 ~ Beta(2.5, 2.5), the same marginal as the shared
+      // correlations (2026-10-25 P3; before this the prior was the implicit uniform(-1, 1) of the bounds)
+      target += beta_lpdf((rho_x[1] + 1) / 2 | 2.5, 2.5);
     } else {
-      // Same marginal prior on the shared correlations as LKJ(2) implies for a 3x3 matrix:
-      // (r + 1) / 2 ~ Beta(2.5, 2.5), i.e. Var(r) = 1/6, applied symmetrically to corr(c, a1)
-      // and corr(c, a2), with corr(a1, a2) = 0 and PD enforced through r2 = q sqrt(1 - r1^2)
-      // (Jacobian 0.5 * log(1 - r1^2)). So "a" differs from "b" only by the cross-dimensional
-      // restrictions (Sigma off-diagonal and corr(a1, a2)), not by the priors they share.
-      target += beta_lpdf((r_c_a1 + 1) / 2 | 2.5, 2.5) + beta_lpdf((r_c_a2 + 1) / 2 | 2.5, 2.5);
+      // "a" prior on (r1, r2) = (corr(c, a1), corr(c, a2)) with corr(a1, a2) = 0 (review fix 2026-10-25, B4). LKJ(2) on the
+      // 3x3 matrix is proportional to det(R) = 1 - r1^2 - r2^2 on the slice corr(a1, a2) = 0, so the density on the unit
+      // disk is p(r1, r2) propto (1 - r1^2 - r2^2); its marginals are exactly (r + 1) / 2 ~ Beta(2.5, 2.5) (Var 1/6), the
+      // LKJ(2) 3x3 marginals of the "b" model. (Two independent Beta(2.5, 2.5) marginals truncated to the disk, the
+      // previous code, give Var about 0.158 and are not that density.) Parameterisation r2 = q sqrt(1 - r1^2), q in (-1, 1):
+      // Jacobian |dr2 / dq| = sqrt(1 - r1^2), i.e. 0.5 * log1m(r1^2).
+      target += log1m(square(r_c_a1) + square(r_c_a2));
       target += 0.5 * log1m(square(r_c_a1));
     }
     to_vector(z_re) ~ std_normal();
@@ -338,7 +353,7 @@ model {
                                 y1, sy_state, W, X, cs_start, cs_end, iv_corr,
                                 cs_mixed, iv_first, iv_count, iv_loc, s2_first, s2_count, s2_loc,
                                 x, alt_target, Z, Pz,
-                                ev_first, ev_count, ev_sorted, ev_row, ev_start, ev_end, sampled, D, dcol,
+                                ev_first, ev_count, ev_sorted, ev_row, ev_start, ev_end, ev_w, sampled, D, dcol,
                                 alpha0, alpha, tau, mu0, beta, a_i, c_i, sigma_x, rho, b_j, gamma);
   }
 }
