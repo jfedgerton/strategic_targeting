@@ -1,4 +1,6 @@
 #!/bin/bash
+# DEPRECATED (2026-10-25): superseded by 08_main_grid.sbatch. Its cell names (fit_mid_lag<h>_all_pr_<model>[_K2].rds) COLLIDE with the
+# main grid's, so a run of this script would overwrite main-grid fits. Kept for reference only; do not submit.
 #SBATCH --job-name=v2_fit_all
 #SBATCH --account=jfe4_cr_default
 #SBATCH --partition=basic
@@ -7,6 +9,7 @@
 #SBATCH --mem=48G
 #SBATCH --array=0-15
 #SBATCH --output=%x_%A_%a.out
+#SBATCH --open-mode=append   # a requeued task appends to its log instead of truncating it (2026-10-25 C7)
 # Full choice set (variant=all, ~1.7M alternative rows per lag) for the a/b models only: expected > 48 h, so paid account.
 # Superseded for the main results by 08_main_grid.sbatch (all eight models x four lags); kept for ad hoc reruns.
 # Cells: 4 models x 4 lags for the main sample (mid, PageRank). Run 04_pilot.sbatch FIRST to get the

@@ -1,9 +1,13 @@
 ## ============================================================================
 ## run_sim.R -- fit M1a, M1b, M2a, M2b (K = 2) to data simulated from M1b and M2b
 ##
-## Usage: Rscript v2/sim/run_sim.R [chains] [iter] [warmup] [only]
-##   only = comma-separated "truth:model" cells to (re)fit, e.g. "M1b:M1a,M2b:M2b"; cells not listed
+## Usage: Rscript v2/sim/run_sim.R [chains] [iter] [warmup] [only] [variant]
+##   only = comma-separated "truth:model" cells to (re)fit, e.g. "M1b:M1a,M2b:M2b" ("" = all); cells not listed
 ##   reuse their saved fit in v2/sim/fits/ when present (results are recomputed from it) and are skipped otherwise.
+##   variant = "" (default world, random-walk step SD 0.3) | "persistent" (persistent positions, step SD 0.06; result files
+##   and fits get the suffix _persistent). Since 2026-10-25 (B5) the world is simulate_current(): the CURRENT model layout
+##   (non-zero mu0, gap scaling, in_iv / in_s2 masks, minimal controls with the power levels and log system size, event
+##   weights, r0 = 0.5, x_ref = the initiator mean); the old simulate_targeting() world remains for the unit tests only.
 ## Defaults are sized for a 2-core / 8 GB container: chains = 2, iter = 700, warmup = 350.
 ## On Roar use chains = 4, iter = 2000, warmup = 1000.
 ## Writes: v2/sim/fits/<truth>_<model>.rds (gitignored), v2/sim/results/*.csv
@@ -14,13 +18,18 @@ args <- commandArgs(trailingOnly = TRUE)
 CHAINS <- if (length(args) >= 1) as.integer(args[1]) else 2L
 ITER   <- if (length(args) >= 2) as.integer(args[2]) else 700L
 WARMUP <- if (length(args) >= 3) as.integer(args[3]) else 350L
-ONLY   <- if (length(args) >= 4) strsplit(args[4], ",")[[1]] else NULL   # e.g. "M1b:M1a,M2b:M2b"
+ONLY   <- if (length(args) >= 4 && nzchar(args[4])) strsplit(args[4], ",")[[1]] else NULL   # e.g. "M1b:M1a,M2b:M2b"
+VARIANT <- if (length(args) >= 5) args[5] else ""
+stopifnot(VARIANT %in% c("", "persistent"))
+STEP_SD <- if (VARIANT == "persistent") 0.06 else 0.3
+SUF <- if (VARIANT == "persistent") "_persistent" else ""
+R0 <- 0.5
 
 this_file <- sub("^--file=", "", grep("^--file=", commandArgs(FALSE), value = TRUE))
 sim_dir <- normalizePath(dirname(this_file))
 Sys.setenv(V2_ROOT = normalizePath(file.path(sim_dir, "..")))
 source(file.path(sim_dir, "..", "R", "00_helpers.R"))
-source(file.path(sim_dir, "..", "R", "typology.R"))
+source(file.path(sim_dir, "..", "R", "typology.R")); source(file.path(sim_dir, "..", "R", "measurement_tests.R"))
 source(file.path(sim_dir, "simulate.R"))
 log_open("run_sim")
 set.seed(V2_SEED)
@@ -31,7 +40,6 @@ dir.create(file.path(sim_dir, "results"), showWarnings = FALSE)
 
 models <- list(m1 = readRDS(file.path(v2_root(), "stan", "build", "m1_latent_additive.rds")),
                m2 = readRDS(file.path(v2_root(), "stan", "build", "m2_ame.rds")))
-W_cols <- c("W1", "W2"); X_cols <- paste0("X", 1:4); Z_cols <- c("Z1", "Z2")
 specs <- data.frame(model = c("M1a", "M1b", "M2a", "M2b"),
                     family = c("m1", "m1", "m2", "m2"),
                     joint = c(0L, 1L, 0L, 1L), stringsAsFactors = FALSE)
@@ -40,17 +48,22 @@ recovery_rows <- list(); conv_rows <- list(); class_rows <- list(); loo_rows <- 
 fits_by_truth <- list()
 
 for (truth_family in c("M1b", "M2b")) {
-  sim <- simulate_targeting(truth_family, seed = V2_SEED)
-  logf("truth = %s : S=%d N1=%d N2=%d E=%d", truth_family, sim$meta$S, sim$meta$N1, sim$meta$N2, sim$meta$E)
-  write.csv(data.frame(state_idx = seq_len(sim$meta$S), type = sim$types,
+  sim <- simulate_current(truth_family, seed = V2_SEED, step_sd = STEP_SD)
+  W_cols <- sim$cols$W; X_cols <- sim$cols$X; Z_cols <- sim$cols$Z
+  logf("truth = %s (%s world, step SD %.2f): S=%d N1=%d N2=%d E=%d (events with weight 1/2: %d); masked state-years %d (IV-only rows %d, stage-2-only rows %d); mu0 = (%.2f, %.2f); x_ref = (%.3f, %.3f)",
+       truth_family, if (VARIANT == "") "default" else VARIANT, STEP_SD, sim$meta$S, sim$meta$N1, sim$meta$N2, sim$meta$E, 2 * sim$meta$n_coalition,
+       sim$meta$n_masked_sy, sim$meta$n_iv_only, sim$meta$n_s2_only, sim$truth$mu0[1], sim$truth$mu0[2], sim$x_ref[1], sim$x_ref[2])
+  write.csv(data.frame(state_idx = seq_len(sim$meta$S), type = sim$types, planted = sim$truth$planted,
+                       mu_ref1 = sim$truth$mu_state_ref[, 1], mu_ref2 = sim$truth$mu_state_ref[, 2],
                        a1 = sim$truth$a_i[, 1], a2 = sim$truth$a_i[, 2], c = sim$truth$c_i),
-            file.path(sim_dir, "results", paste0("truth_", truth_family, "_states.csv")), row.names = FALSE)
+            file.path(sim_dir, "results", paste0("truth_", truth_family, "_states", SUF, ".csv")), row.names = FALSE)
   for (k in seq_len(nrow(specs))) {
     sp <- specs[k, ]
     tag <- paste0(truth_family, ":", sp$model)
-    fit_path <- file.path(sim_dir, "fits", paste0(truth_family, "_", sp$model, ".rds"))
+    fit_path <- file.path(sim_dir, "fits", paste0(truth_family, "_", sp$model, SUF, ".rds"))
     dat <- build_stan_data(sim$sy, sim$alts, sim$ev, W_cols, X_cols, Z_cols, joint = sp$joint,
-                           x_ref = rep(0, 4), K = if (sp$family == "m2") 2L else NULL)
+                           x_ref = sim$x_ref, K = if (sp$family == "m2") 2L else NULL)
+    stopifnot(any(dat$in_iv == 0L), any(dat$in_s2 == 0L), any(dat$ev_w < 1))
     reused <- FALSE
     if (!is.null(ONLY) && !(tag %in% ONLY)) {
       ## not selected for (re)fitting: reuse the saved fit if one exists (its results are recomputed below)
@@ -88,11 +101,11 @@ for (truth_family in c("M1b", "M2b")) {
     rows <- list()
     add <- function(name, draws, truth) rows[[length(rows) + 1]] <<- data.frame(param = name, truth = truth, t(q(draws)))
     add("alpha0", post$alpha0, tr$alpha0)
-    for (p in 1:2) add(sprintf("alpha[%d]", p), post$alpha[, p], tr$alpha[p])
+    for (p in seq_along(tr$alpha)) add(sprintf("alpha[%d] %s", p, W_cols[p]), post$alpha[, p], tr$alpha[p])
     add("tau", post$tau, tr$tau)
     for (d in 1:2) add(sprintf("mu0[%d]", d), post$mu0[, d], tr$mu0[d])
-    for (p in 1:4) for (d in 1:2) add(sprintf("beta[%d,%d]", p, d), post$beta[, p, d], tr$beta[p, d])
-    for (p in 1:2) add(sprintf("gamma[%d]", p), post$gamma[, p], tr$gamma[p])
+    for (p in 1:2) for (d in 1:2) add(sprintf("beta[%d,%d] %s", p, d, X_cols[p]), post$beta[, p, d], tr$beta[p, d])
+    for (p in seq_along(tr$gamma)) add(sprintf("gamma[%d] %s", p, Z_cols[p]), post$gamma[, p], tr$gamma[p])
     add("Sigma[1,1]", post$Sigma[, 1, 1], tr$Sigma[1, 1]); add("Sigma[2,2]", post$Sigma[, 2, 2], tr$Sigma[2, 2])
     add("Sigma[1,2]", post$Sigma[, 1, 2], tr$Sigma[1, 2])
     for (i in 1:3) for (j in i:3) add(sprintf("Omega[%d,%d]", i, j), post$Omega[, i, j], tr$Omega[i, j])
@@ -100,26 +113,29 @@ for (truth_family in c("M1b", "M2b")) {
                                       covered = truth >= lo & truth <= hi, abs_err = abs(mean - truth),
                                       fixed_zero = (model %in% c("M1a", "M2a")) & param %in% c("Sigma[1,2]", "Omega[2,3]"))
     recovery_rows[[tag]] <- rec
-    ## ---- type classification from posterior mu_state (x_ref = 0 so mu_i = mu0 + a_i; mu0 = 0 here) ------
-    cls <- classify_types(post$mu_state, r0 = 0.8)           # draws x S x 2 -> per-state table
+    ## ---- type classification from posterior mu_state at x_ref (the initiator mean), r0 = 0.5; truth = the true mu_i classified alike --
+    cls <- classify_types(post$mu_state, r0 = R0)            # draws x S x 2 -> per-state table
     cls$true_type <- sim$types
     cls$state_idx <- seq_len(sim$meta$S)
     acc <- mean(cls$map_type == cls$true_type)
-    class_rows[[tag]] <- data.frame(truth = truth_family, model = sp$model, accuracy = acc,
+    class_rows[[tag]] <- data.frame(truth = truth_family, model = sp$model, r0 = R0, accuracy = acc,
                                     n_states = sim$meta$S,
-                                    mean_abs_err_mu = mean(abs(apply(post$mu_state, c(2, 3), mean) - tr$mu_state_ref0)))
-    write.csv(cls, file.path(sim_dir, "results", paste0("classification_", truth_family, "_", sp$model, ".csv")), row.names = FALSE)
-    ## ---- LOO, stage 1 and stage 2 kept separate ----------------------------------------------
+                                    mean_abs_err_mu = mean(abs(apply(post$mu_state, c(2, 3), mean) - tr$mu_state_ref)))
+    write.csv(cls, file.path(sim_dir, "results", paste0("classification_", truth_family, "_", sp$model, SUF, ".csv")), row.names = FALSE)
+    ## ---- LOO: stage 2, stage 1 (conditional) and the joint state-year LOO (B1) ------------------------------------------
     ll2 <- loo::extract_log_lik(fit, "log_lik_stage2", merge_chains = FALSE)
     ll1 <- loo::extract_log_lik(fit, "log_lik_stage1", merge_chains = FALSE)
     loo2 <- loo::loo(ll2, r_eff = loo::relative_eff(exp(ll2)))
     loo1 <- loo::loo(ll1, r_eff = loo::relative_eff(exp(ll1)))
+    looj <- loo_joint_sy(fit, dat)
     loo_rows[[tag]] <- data.frame(truth = truth_family, model = sp$model,
                                   elpd_stage2 = loo2$estimates["elpd_loo", 1], se_stage2 = loo2$estimates["elpd_loo", 2],
                                   bad_k_stage2 = sum(loo2$diagnostics$pareto_k > 0.7),
-                                  elpd_stage1 = loo1$estimates["elpd_loo", 1], se_stage1 = loo1$estimates["elpd_loo", 2],
-                                  bad_k_stage1 = sum(loo1$diagnostics$pareto_k > 0.7))
-    fits_by_truth[[truth_family]][[sp$model]] <- list(loo1 = loo1, loo2 = loo2)
+                                  elpd_stage1_conditional = loo1$estimates["elpd_loo", 1], se_stage1_conditional = loo1$estimates["elpd_loo", 2],
+                                  bad_k_stage1_conditional = sum(loo1$diagnostics$pareto_k > 0.7),
+                                  elpd_joint_stateyear = looj$estimates["elpd_loo", 1], se_joint_stateyear = looj$estimates["elpd_loo", 2],
+                                  bad_k_joint_stateyear = sum(looj$diagnostics$pareto_k > 0.7))
+    fits_by_truth[[truth_family]][[sp$model]] <- list(loo1 = loo1, loo2 = loo2, looj = looj)
     ## ---- AME recovery ---------------------------------------------------------------------------
     if (sp$family == "m2") {
       Ud <- rstan::extract(fit, pars = "U", permuted = FALSE)   # iter x chain x (S*K)
@@ -159,19 +175,22 @@ for (tf in names(fits_by_truth)) {
     if (!all(pair %in% names(f))) next
     c2 <- loo::loo_compare(f[[pair[1]]]$loo2, f[[pair[2]]]$loo2)
     c1 <- loo::loo_compare(f[[pair[1]]]$loo1, f[[pair[2]]]$loo1)
+    cj <- loo::loo_compare(f[[pair[1]]]$looj, f[[pair[2]]]$looj)
     cmp_rows[[length(cmp_rows) + 1]] <- data.frame(
       truth = tf, comparison = paste(pair, collapse = " vs "),
       stage2_elpd_diff_b_minus_a = f[[pair[2]]]$loo2$estimates["elpd_loo", 1] - f[[pair[1]]]$loo2$estimates["elpd_loo", 1],
       stage2_se_diff = c2[2, "se_diff"],
-      stage1_elpd_diff_b_minus_a = f[[pair[2]]]$loo1$estimates["elpd_loo", 1] - f[[pair[1]]]$loo1$estimates["elpd_loo", 1],
-      stage1_se_diff = c1[2, "se_diff"])
+      stage1_conditional_elpd_diff_b_minus_a = f[[pair[2]]]$loo1$estimates["elpd_loo", 1] - f[[pair[1]]]$loo1$estimates["elpd_loo", 1],
+      stage1_conditional_se_diff = c1[2, "se_diff"],
+      joint_stateyear_elpd_diff_b_minus_a = f[[pair[2]]]$looj$estimates["elpd_loo", 1] - f[[pair[1]]]$looj$estimates["elpd_loo", 1],
+      joint_stateyear_se_diff = cj[2, "se_diff"])
   }
 }
 ## misclassification between a and b
 mis_rows <- list()
 for (tf in c("M1b", "M2b")) for (fam in c("M1", "M2")) {
-  fa <- file.path(sim_dir, "results", sprintf("classification_%s_%sa.csv", tf, fam))
-  fb <- file.path(sim_dir, "results", sprintf("classification_%s_%sb.csv", tf, fam))
+  fa <- file.path(sim_dir, "results", sprintf("classification_%s_%sa%s.csv", tf, fam, SUF))
+  fb <- file.path(sim_dir, "results", sprintf("classification_%s_%sb%s.csv", tf, fam, SUF))
   if (file.exists(fa) && file.exists(fb)) {
     a <- read.csv(fa); b <- read.csv(fb)
     mis_rows[[length(mis_rows) + 1]] <- data.frame(truth = tf, family = fam,
@@ -180,11 +199,11 @@ for (tf in c("M1b", "M2b")) for (fam in c("M1", "M2")) {
   }
 }
 res_dir <- file.path(sim_dir, "results")
-write.csv(bind_rows(recovery_rows), file.path(res_dir, "recovery.csv"), row.names = FALSE)
-write.csv(bind_rows(conv_rows), file.path(res_dir, "convergence.csv"), row.names = FALSE)
-write.csv(bind_rows(class_rows), file.path(res_dir, "classification_accuracy.csv"), row.names = FALSE)
-write.csv(bind_rows(loo_rows), file.path(res_dir, "loo.csv"), row.names = FALSE)
-if (length(cmp_rows)) write.csv(bind_rows(cmp_rows), file.path(res_dir, "loo_compare.csv"), row.names = FALSE)
-if (length(mis_rows)) write.csv(bind_rows(mis_rows), file.path(res_dir, "misclassification_a_vs_b.csv"), row.names = FALSE)
-if (length(ame_rows)) write.csv(bind_rows(ame_rows), file.path(res_dir, "ame_recovery.csv"), row.names = FALSE)
+write.csv(bind_rows(recovery_rows), file.path(res_dir, paste0("recovery", SUF, ".csv")), row.names = FALSE)
+write.csv(bind_rows(conv_rows), file.path(res_dir, paste0("convergence", SUF, ".csv")), row.names = FALSE)
+write.csv(bind_rows(class_rows), file.path(res_dir, paste0("classification_accuracy", SUF, ".csv")), row.names = FALSE)
+write.csv(bind_rows(loo_rows), file.path(res_dir, paste0("loo", SUF, ".csv")), row.names = FALSE)
+if (length(cmp_rows)) write.csv(bind_rows(cmp_rows), file.path(res_dir, paste0("loo_compare", SUF, ".csv")), row.names = FALSE)
+if (length(mis_rows)) write.csv(bind_rows(mis_rows), file.path(res_dir, paste0("misclassification_a_vs_b", SUF, ".csv")), row.names = FALSE)
+if (length(ame_rows)) write.csv(bind_rows(ame_rows), file.path(res_dir, paste0("ame_recovery", SUF, ".csv")), row.names = FALSE)
 logf("run_sim finished; results in %s", res_dir)

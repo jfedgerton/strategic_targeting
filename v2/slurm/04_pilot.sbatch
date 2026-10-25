@@ -8,6 +8,7 @@
 #SBATCH --mem=32G                                  # basic bills 4 GB per core: 8 cores x 4 GB
 #SBATCH --array=1-4
 #SBATCH --output=%x_%A_%a.out
+#SBATCH --open-mode=append   # a requeued task appends to its log instead of truncating it (2026-10-25 C7)
 # Timing pilots: 1 chain x 60 iterations each, run in parallel as an array, with THREADS_PER_CHAIN
 # (default 8) reduce_sum threads; compare with --export=ALL,THREADS_PER_CHAIN=1 --cpus-per-task=1 --mem=4G
 # to measure the within-chain speed-up on Roar hardware.

@@ -13,15 +13,18 @@ sim_dir <- normalizePath(dirname(this_file)); Sys.setenv(V2_ROOT = normalizePath
 source(file.path(sim_dir, "..", "R", "00_helpers.R")); source(file.path(sim_dir, "..", "R", "benchmarks.R")); source(file.path(sim_dir, "simulate.R"))
 log_open("run_benchmarks_sim"); set.seed(V2_SEED)
 res_dir <- file.path(sim_dir, "results")
-sim <- simulate_targeting("M1b", S = 30L, Tt = 12L, seed = V2_SEED)
-sy <- sim$sy; alts <- sim$alts; ev <- sim$ev; X_cols <- paste0("X", 1:4); Z_cols <- c("Z1", "Z2")
+sim <- simulate_current("M1b", S = 30L, Tt = 12L, seed = V2_SEED)          # the current-model world (2026-10-25, B5)
+sy <- sim$sy; alts <- sim$alts |> filter(in_s2 == 1L); ev <- sim$ev; X_cols <- sim$cols$X; Z_cols <- sim$cols$Z
+ev <- ev |> mutate(alt_row = match(paste(sim$alts$sy_row[alt_row], sim$alts$target_idx[alt_row]), paste(alts$sy_row, alts$target_idx)))
+stopifnot(!anyNA(ev$alt_row))
 ## ---- 6. benchmarks on the simulated frames (assembly + short brms fits) ---------------------------------------------
 ev_keys <- data.frame(state_idx = alts$state_idx[ev$alt_row], target_idx = alts$target_idx[ev$alt_row], year = alts$year[ev$alt_row])
-d1 <- assemble_dyad_logit(alts, ev_keys, id_cols = c("state_idx", "target_idx", "year"), z_cols = Z_cols)
+## cinc_ratio = plogis(raw log material gap) (B10); simulate_current() carries dM_logratio like the real alternatives files
+d1 <- assemble_dyad_logit(alts, ev_keys, id_cols = c("state_idx", "target_idx", "year"), z_cols = Z_cols, logratio_col = "dM_logratio")
 stopifnot(sum(d1$y) == nrow(ev))
 d1$off <- 0
 t0 <- Sys.time()
-b1 <- brm(y ~ cinc_ratio + dR + Z1 + Z2 + offset(off) + (1 | state_idx) + (1 | target_idx), data = d1, family = bernoulli(),
+b1 <- brm(bf(as.formula(paste("y ~ cinc_ratio + dR +", paste(Z_cols, collapse = " + "), "+ offset(off) + (1 | state_idx) + (1 | target_idx)"))), data = d1, family = bernoulli(),
           prior = c(set_prior("normal(0, 1)", class = "b"), set_prior("student_t(3, 0, 1.5)", class = "sd")),
           chains = CHAINS, cores = CHAINS, iter = ITER, warmup = WARMUP, seed = V2_SEED, refresh = 0)
 d2 <- assemble_gap_regression(sy, alts, ev, X_cols)

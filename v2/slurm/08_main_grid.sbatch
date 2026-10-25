@@ -8,6 +8,7 @@
 #SBATCH --mem=128G                                 # basic bills 4 GB per core: 32 cores x 4 GB
 #SBATCH --array=0-95
 #SBATCH --output=%x_%A_%a.out
+#SBATCH --open-mode=append   # a requeued task appends to its log instead of truncating it (2026-10-25 C7)
 # MAIN-RESULTS GRID: sample {mid, fmid, war} x model {M1m, M1r, M1a, M1b, M2m, M2r, M2a, M2b} x lag {1, 3, 5, 10}
 # = 96 cells, full all-states choice set (variant=all, sampled_m=0), PageRank centrality, K = 2 for M2,
 # 4 chains x 2000 iterations (1000 warmup), seed 123, within-chain parallelism via reduce_sum with

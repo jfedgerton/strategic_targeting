@@ -8,6 +8,7 @@
 #SBATCH --mem=32G
 #SBATCH --array=0-47
 #SBATCH --output=%x_%A_%a.out
+#SBATCH --open-mode=append   # a requeued task appends to its log instead of truncating it (2026-10-25 C7)
 # ROBUSTNESS array (politically relevant choice set, both centralities) on the free account (< 48 h).
 # The MAIN specification is the full all-states choice set (variant=all, sampled_m=0, the defaults of
 # 02_fit_model.R) and is run by 08_main_grid.sbatch on jfe4_cr_default. This array uses variant=polrel

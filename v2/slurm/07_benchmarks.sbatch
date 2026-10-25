@@ -8,6 +8,7 @@
 #SBATCH --mem=48G
 #SBATCH --array=0-3
 #SBATCH --output=%x_%A_%a.out
+#SBATCH --open-mode=append   # a requeued task appends to its log instead of truncating it (2026-10-25 C7)
 # Benchmarks (directed-dyad logit, old gap regression) for each lag on the main sample.
 # Slurm runs a spooled copy of this script, so locate the repo via the submit dir (submit from the repo root).
 source "${SLURM_SUBMIT_DIR:?submit from the repo root}/v2/slurm/00_env.sh" || exit 1

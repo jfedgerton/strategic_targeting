@@ -1,5 +1,7 @@
 # Simulation report (v2 pipeline)
 
+**SUPERSEDED (2026-10-25).** The results below were produced by the OLD simulated world (`simulate_targeting()`: z-scored positions, mu0 = 0, four X controls, no choice-set masks, no event weights, r0 = 0.8, x_ref = 0) and the programs before the review fixes of 2026-10-25 (disk prior on the "a" correlations, explicit rho_x prior, event weights). `run_sim.R`, `run_sim_1d.R` and `run_measurement_tests.R` now simulate the CURRENT model (`simulate_current()`, including a persistent-position variant) and must be rerun (`slurm/10_simulations.sbatch`, open account) before any conclusion here is cited; `write_sim_report.R` then regenerates this file. The conclusions below have not been rewritten.
+
 Generated 2026-10-22 16:44 by `v2/sim/write_sim_report.R` from `v2/sim/results/*.csv`. Seed 123 throughout.
 
 ## Design
