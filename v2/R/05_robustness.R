@@ -13,8 +13,13 @@
 ##   --cell_index = 0..5 maps variant (slowest) x cell: 0-1 bilateral, 2-3 coalition, 4-5 coalition_drop3; without it all six run in sequence.
 ##   Post-processing: 06_context_compare.R --sample=mid --lag=3 (needs the _bi and _co fits; _co_drop3 optional).
 ## Test preset (no switch; the existing permutation and systematic-measurement-error tests on the main cell's a / b fits):
-##   perm_error   permutation test (rescore = reliance diagnostic, refit = calibrated p-value) and the relational-level error
-##                inflation, per family, on ROBUSTNESS_MAIN_CELL (mid, lag 5); --tests=holdout adds the temporal holdout
+##   perm_error   the temporal holdout (B9, constants frozen on the training years; --cutoff), the permutation test (rescore =
+##                reliance diagnostic, refit = calibrated p-value) and the relational-level error inflation, per family, on
+##                ROBUSTNESS_MAIN_CELL (mid, lag 5); default --tests=holdout,permutation,inflation (04_robustness.sbatch runs
+##                permutation + inflation in one task per family and the holdout in one task per cutoff (1990, 2000) and family)
+##                Refused with --changes=winsor or --pairs != all (audit fix 15): the inflation and holdout refits rebuild the
+##                changes and the frozen constants from the raw levels, which does not reproduce a winsorised cell, and the pairs
+##                cells recompute y1 from a subset of the events; neither case has been checked for the refit-based tests.
 ##
 ## Usage:
 ##   Rscript v2/R/05_robustness.R --preset=noww2 [--cells=mid:3:M1b,fmid:3:M1b,...] [--cell_index=i] [--dry_run=TRUE]
@@ -23,7 +28,7 @@
 ##       cells      : "sample:lag:model" list; default ROBUSTNESS_CELLS (spec.R). --cell_index=i (0-based) runs ONE cell of the
 ##                    list (the Slurm array of 04_robustness.sbatch); without it every cell runs in sequence.
 ##       other switches are passed through, so --preset=noww2 --controls=full fits the _noww2_fullctrl cells
-##   Rscript v2/R/05_robustness.R --preset=perm_error --family=m1|m2 [--tests=permutation,inflation] [--n_perm=50]
+##   Rscript v2/R/05_robustness.R --preset=perm_error --family=m1|m2 [--tests=holdout,permutation,inflation] [--n_perm=50]
 ##          [--perm_mode=rescore|refit] [--deltas=0.25,0.5,1.0] [--cutoff=1990] [--r0=0.5] [--chains=4] [--iter=1500] [--warmup=750]
 ##          [--sample=mid --lag=5] [--allow_stale=FALSE] [switches]
 ##       needs the production a / b fits of the cell (fit_<cell>_M1a / M1b or M2a_K2 / M2b_K2 with the switch suffix) from
@@ -97,10 +102,13 @@ FAMILY <- get_arg(args, "family", "m1"); K <- spec$ame_K; CUTOFF <- as.integer(g
 N_PERM <- as.integer(get_arg(args, "n_perm", 50)); PERM_MODE <- get_arg(args, "perm_mode", "rescore")
 DELTAS <- as.numeric(strsplit(get_arg(args, "deltas", "0.25,0.5,1.0"), ",")[[1]]); R0 <- get_arg(args, "r0", R0)
 CHAINS <- as.integer(get_arg(args, "chains", 4)); ITER <- as.integer(get_arg(args, "iter", 1500)); WARMUP <- as.integer(get_arg(args, "warmup", 750))
-TESTS <- strsplit(get_arg(args, "tests", "permutation,inflation"), ",")[[1]]
+TESTS <- strsplit(get_arg(args, "tests", "holdout,permutation,inflation"), ",")[[1]]   # the pre-restructure default (run_measurement_real.R); audit fix 6
 ALLOW_STALE <- get_arg(args, "allow_stale", FALSE)
 stopifnot(SAMPLE %in% ALL_SAMPLES, LAG %in% LAGS, all(TESTS %in% c("holdout", "permutation", "inflation")), FAMILY %in% c("m1", "m2"),
           PERM_MODE %in% c("rescore", "refit"), all(is.finite(DELTAS)), N_PERM >= 1)
+## audit fix 15 (2026-10-26): the refit-based tests are not defined for winsorised changes or a pairs subset (see the header)
+if (spec$changes == "winsor") stop("perm_error refuses --changes=winsor: the inflation and holdout refits rebuild the changes from the raw levels and would not reproduce the winsorised cell")
+if (spec$pairs != "all") stop(sprintf("perm_error refuses --pairs=%s: the refit-based tests are defined on the full event sample (y1 of every initiating state-year)", spec$pairs))
 cell <- sprintf("%s_lag%d_%s_%s_%s%s", SAMPLE, LAG, VARIANT, CENTRALITY, toupper(FAMILY), spec_suffix(spec))
 log_open(paste0("05_robustness_perm_error_", cell)); set.seed(V2_SEED)
 rstan_options(auto_write = FALSE); options(mc.cores = min(CHAINS, parallel::detectCores()))

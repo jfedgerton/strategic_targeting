@@ -15,6 +15,10 @@ if [ ! -f "$V2_ROOT/R/01_build_data.R" ]; then
   exit 1
 fi
 export R_LIBS_USER="${R_LIBS_USER:-$HOME/R/x86_64-pc-linux-gnu-library/4.2}"
+# Compiler flags for the Stan programs (env/Makevars: -O2 with the gcc memory parameters; compiling M2 needs about 3 GB). The README
+# referred to this file but nothing applied it before 2026-10-26 (audit fix 10).
+export R_MAKEVARS_USER="$V2_ROOT/env/Makevars"
+[ -f "$R_MAKEVARS_USER" ] || { echo "ERROR: $R_MAKEVARS_USER not found" >&2; exit 1; }
 export OMP_NUM_THREADS=1
 # Within-chain parallelism (reduce_sum): rstan 2.32 adds -DSTAN_THREADS itself; this makes it explicit
 # for any other build so compile_models.R's assertion passes. Threads are set per fit with

@@ -53,4 +53,15 @@ test_that("model codes and sampler settings", {
   ## the robustness presets name real switches and values
   for (p in names(ROBUSTNESS_PRESETS)) for (nm in names(ROBUSTNESS_PRESETS[[p]])) expect_true(ROBUSTNESS_PRESETS[[p]][[nm]] %in% SPEC_CHOICES[[nm]])
   expect_true(all(vapply(strsplit(ROBUSTNESS_CELLS, ":"), length, 1L) == 3L))
+  ## submit_robustness.sh hard-codes the default cell list (no R on the login node); it must be ROBUSTNESS_CELLS (audit fix 3)
+  sh <- readLines(file.path(root, "slurm", "submit_robustness.sh"))
+  dflt <- sub('^DEFAULT_CELLS="([^"]*)".*$', "\\1", grep("^DEFAULT_CELLS=", sh, value = TRUE))
+  expect_equal(strsplit(dflt, ",")[[1]], ROBUSTNESS_CELLS)
+  ## the main-grid submit script's default index lists are the M1 / M2 halves of the 0-95 mapping (lag slowest, model, sample)
+  sh <- readLines(file.path(root, "slurm", "submit_main_grid.sh"))
+  idx <- function(nm) sub(sprintf('^%s="\\$\\{%s:-([^}]*)\\}".*$', nm, nm), "\\1", grep(sprintf("^%s=", nm), sh, value = TRUE))
+  expand <- function(s) unlist(lapply(strsplit(s, ",")[[1]], function(r) { ab <- as.integer(strsplit(r, "-")[[1]]); ab[1]:ab[2] }))
+  grid <- expand.grid(sample = seq_along(MAIN_SAMPLES), model = seq_along(MODELS), lag = seq_along(LAGS))      # sample fastest, lag slowest = index order
+  expect_equal(expand(idx("M1_IDX")), which(model_family(MODELS[grid$model]) == "M1") - 1L)
+  expect_equal(expand(idx("M2_IDX")), which(model_family(MODELS[grid$model]) == "M2") - 1L)
 })

@@ -7,3 +7,4 @@ v2/sim/fits/
 .Rhistory
 v2/output/
 v2/data_sideA/
+*.out

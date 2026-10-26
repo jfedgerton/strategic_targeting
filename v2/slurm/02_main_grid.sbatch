@@ -16,13 +16,15 @@
 #
 # Real run      : bash v2/slurm/submit_main_grid.sh
 #                 = two arrays of this script: the 48 M1 cells (indices 0-11,24-35,48-59,72-83), then the 48 M2 cells
-#                 (12-23,36-47,60-71,84-95) with --dependency=afterok on the M1 array, so each M2 task starts its chains at the
-#                 posterior means of its cell's M1 fit (02_fit_model.R --init_from default; PI decision 2026-10-25). A plain
-#                 `sbatch v2/slurm/02_main_grid.sbatch` runs all 96 at once; an M2 task whose M1 fit is not there yet falls
-#                 back to random inits (logged loudly, recorded in the fit).
-# Roar DRY RUN  : bash v2/slurm/submit_main_grid.sh --export=ALL,DRY_RUN=TRUE --time=00:30:00 --mem=16G --cpus-per-task=1
-#                 (every task assembles and validates its Stan data with --dry_run=TRUE and exits; no sampling.
-#                  Command-line sbatch options override the directives above, so the dry run is cheap.)
+#                 (12-23,36-47,60-71,84-95) with --dependency=afterok on the M1 array and --kill-on-invalid-dep=yes, so each M2
+#                 task starts its chains at the posterior means of its cell's M1 fit (02_fit_model.R --init_from default; PI
+#                 decision 2026-10-25). One lag alone: M1_IDX=24-35 M2_IDX=36-47 bash v2/slurm/submit_main_grid.sh (lag 3). A plain
+#                 `sbatch v2/slurm/02_main_grid.sbatch` runs all 96 at once; an M2 task whose M1 fit file is not there falls
+#                 back to random inits (logged loudly, recorded in the fit); an M1 fit that exists but is unusable stops the task.
+# Roar DRY RUN  : sbatch --account=open --export=ALL,DRY_RUN=TRUE --time=00:30:00 --mem=16G --cpus-per-task=1 v2/slurm/02_main_grid.sbatch
+#                 (every task assembles and validates its Stan data with --dry_run=TRUE and exits; no sampling, so it bills the free
+#                  open credits, not jfe4_cr_default. Command-line sbatch options override the directives above, so the dry run is
+#                  cheap; a dry run needs no M1 fits, so the plain 96-task array is enough.)
 # The M2 cells run 4000 iterations (2000 warmup, adapt_delta 0.95; SAMPLER in spec.R) and need about twice the M1 walltime.
 # Variants are NOT run from this script (their cells would carry a switch suffix); use 04_robustness.sbatch.
 # Submit from the repo root; nothing in this file submits anything by itself.
