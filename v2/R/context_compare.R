@@ -8,9 +8,12 @@
 ##   $stats      long table (block, comparison, axis, statistic, estimate, lo, hi, n_states, note):
 ##               block "context": coalition vs bilateral, per axis (material, relational), over the initiating states with at least
 ##                 min_decisions WEIGHTED stage-2 decisions (sum of ev_w) in BOTH fits:
-##                 cor_pmean        correlation of the posterior-mean mu_state across the two contexts (point estimate, no interval)
-##                 cor_draw         the same correlation computed per posterior draw, draws paired by index across the two fits
-##                                  (estimate = posterior mean, lo / hi = 5 / 95% quantiles)
+##                 cor_pmean        correlation of the posterior-mean mu_state across the two contexts (point estimate, no interval). It is
+##                                  a correlation of posterior MEANS and is attenuated by estimation noise in both fits (a state's two
+##                                  means are noisy readings of its two mu_i), so a value below 1 is not by itself evidence of a context
+##                                  effect. The per-draw correlation reported until 2026-10-26 (cor_draw) was removed (audit fix 20): with
+##                                  draws paired by index it is attenuated far more and its interval excluded 1 under a simulated null
+##                                  where both contexts share one truth (0.60 [0.48, 0.71] against a posterior-mean correlation of 1.00).
 ##                 mean_shift       mean over those states of mu_state(coalition) - mu_state(bilateral), per draw (mean, 5 / 95%)
 ##                 type_agreement   share of those states with the same MAP type (classify_types(), r0) in both fits
 ##               block "leverage": coalition_drop3 vs coalition, the same four statistics (NULL when the drop3 fit is absent)
@@ -51,15 +54,14 @@ pair_block <- function(mu_a, mu_b, R, r0, labels, block, comparison) {
     A <- mu_a[, R, d, drop = TRUE]; B <- mu_b[, R, d, drop = TRUE]        # draws x states
     stopifnot(identical(dim(A), c(n_draws, length(R))))
     cor_pm <- cor(colMeans(A), colMeans(B))
-    cor_dr <- vapply(seq_len(n_draws), function(k) suppressWarnings(cor(A[k, ], B[k, ])), numeric(1))
     shift <- rowMeans(B - A)
     stopifnot(is.finite(cor_pm), all(is.finite(shift)))
     rows[[length(rows) + 1]] <- data.frame(block = block, comparison = comparison, axis = ax,
-      statistic = c("cor_pmean", "cor_draw", "mean_shift"),
-      estimate = c(cor_pm, mean(cor_dr, na.rm = TRUE), mean(shift)),
-      lo = c(NA, quantile(cor_dr, 0.05, na.rm = TRUE), quantile(shift, 0.05)), hi = c(NA, quantile(cor_dr, 0.95, na.rm = TRUE), quantile(shift, 0.95)),
-      n_states = length(R), note = c("correlation of posterior means (point estimate)", sprintf("per-draw correlation, %d draws paired by index; mean and 5 / 95%% quantiles", n_draws),
-                                     "mean over the states of mu_b - mu_a per draw; mean and 5 / 95% quantiles"), stringsAsFactors = FALSE)
+      statistic = c("cor_pmean", "mean_shift"),
+      estimate = c(cor_pm, mean(shift)),
+      lo = c(NA, quantile(shift, 0.05)), hi = c(NA, quantile(shift, 0.95)),
+      n_states = length(R), note = c("correlation of the POSTERIOR MEANS of mu_state across the two fits (point estimate); attenuated by estimation noise in both fits, so < 1 is not by itself a context effect",
+                                     sprintf("mean over the states of mu_b - mu_a per draw (%d draws paired by index); mean and 5 / 95%% quantiles", n_draws)), stringsAsFactors = FALSE)
   }
   agree <- ca$map_type[R] == cb$map_type[R]
   rows[[length(rows) + 1]] <- data.frame(block = block, comparison = comparison, axis = "both", statistic = "type_agreement", estimate = mean(agree), lo = NA, hi = NA,
@@ -139,19 +141,19 @@ context_compare_md <- function(cc, title) {
   st <- cc$stats
   f <- function(block, comparison, ax, stat) { r <- st[st$block == block & st$comparison == comparison & st$axis == ax & st$statistic == stat, ]; stopifnot(nrow(r) == 1); r }
   line <- function(block, comparison, ax) {
-    a <- f(block, comparison, ax, "cor_pmean"); b <- f(block, comparison, ax, "cor_draw"); m <- f(block, comparison, ax, "mean_shift")
-    sprintf("| %s | %.3f | %.3f [%.3f, %.3f] | %.3f [%.3f, %.3f] | %d |", ax, a$estimate, b$estimate, b$lo, b$hi, m$estimate, m$lo, m$hi, a$n_states)
+    a <- f(block, comparison, ax, "cor_pmean"); m <- f(block, comparison, ax, "mean_shift")
+    sprintf("| %s | %.3f | %.3f [%.3f, %.3f] | %d |", ax, a$estimate, m$estimate, m$lo, m$hi, a$n_states)
   }
   out <- c(sprintf("# %s", title), "",
-           sprintf("States with at least %g weighted stage-2 decisions in both fits of a comparison; r0 = %.2f; draws paired by index. Stage 1 is identical across contexts (asserted); the fitted model has one mu_state per state, so the role split reports raw weighted chosen-target gaps, not posterior quantities.", cc$min_decisions, cc$r0), "",
+           sprintf("States with at least %g weighted stage-2 decisions in both fits of a comparison; r0 = %.2f; draws paired by index for the mean shift. The correlation is of the POSTERIOR MEANS of mu_state and is attenuated by estimation noise in both fits, so a value below 1 is not by itself a context effect. Stage 1 is identical across contexts (asserted); the fitted model has one mu_state per state, so the role split reports raw weighted chosen-target gaps, not posterior quantities.", cc$min_decisions, cc$r0), "",
            "## Coalition vs bilateral (mu_state, coalition minus bilateral)", "",
-           "| axis | cor of posterior means | per-draw cor, mean [5%, 95%] | mean shift [5%, 95%] | states |", "|---|---|---|---|---|",
+           "| axis | cor of posterior means (attenuated) | mean shift [5%, 95%] | states |", "|---|---|---|---|",
            line("context", "coalition_vs_bilateral", "material"), line("context", "coalition_vs_bilateral", "relational"), "",
            sprintf("MAP type agreement: %.1f%% (%s)", 100 * f("context", "coalition_vs_bilateral", "both", "type_agreement")$estimate, f("context", "coalition_vs_bilateral", "both", "type_agreement")$note), "",
            "Cross-tab (rows bilateral, columns coalition):", "", crosstab_md(cc$crosstab[cc$crosstab$block == "context", ]), "")
   if (any(st$block == "leverage")) {
     out <- c(out, "## Leverage: coalition without the top-3 coalition disputes vs coalition (drop3 minus coalition)", "",
-             "| axis | cor of posterior means | per-draw cor, mean [5%, 95%] | mean shift [5%, 95%] | states |", "|---|---|---|---|---|",
+             "| axis | cor of posterior means (attenuated) | mean shift [5%, 95%] | states |", "|---|---|---|---|",
              line("leverage", "coalition_drop3_vs_coalition", "material"), line("leverage", "coalition_drop3_vs_coalition", "relational"), "",
              sprintf("MAP type agreement: %.1f%% (%s)", 100 * f("leverage", "coalition_drop3_vs_coalition", "both", "type_agreement")$estimate, f("leverage", "coalition_drop3_vs_coalition", "both", "type_agreement")$note), "",
              crosstab_md(cc$crosstab[cc$crosstab$block == "leverage", ]), "")

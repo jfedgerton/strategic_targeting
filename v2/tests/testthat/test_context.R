@@ -56,6 +56,25 @@ test_that("participant spell dates: GML day / month where the years agree, clamp
   p0 <- participant_spell_dates(dd, db, part = NULL); expect_true(all(!startsWith(p0$entry_src, "participant"))); expect_equal(nrow(attr(p0, "membership")), 0L)
 })
 
+test_that("audit fix 18: several GML spells inside one COW spell take the exit year, month AND day from the latest-ending spell", {
+  ## 10 has two GML spells in dispute 1 (a side switch): 1939-03-25 .. 1940-06-10 and 1940-07-01 .. 1941-05-07; the second ends later but
+  ## has the SMALLER end month. The latest end is 1941-05-07, not 1941-06-10 (the bug mixed the year of one row with the month of another).
+  dd <- dd_rows(1L, 10L, 20L, 1939:1941)
+  db <- dispute_date_bounds(disp_row(1L, 1939L, 3L, 800), dd)
+  part <- bind_rows(part_row(1L, 10L, 1939L, 3L, 25L, 1940L, 6L, 10L), part_row(1L, 10L, 1940L, 7L, 1L, 1941L, 5L, 7L),
+                    part_row(1L, 20L, 1939L, 3L, 25L, 1941L, 9L, 7L))
+  psd <- participant_spell_dates(dd, db, part)
+  p10 <- psd[psd$ccode == 10L, ]
+  expect_equal(nrow(p10), 1L); expect_equal(p10$entry_dkey, as.integer(as.Date("1939-03-25")))                   # the earliest start
+  expect_equal(p10$exit_res, 1L); expect_equal(p10$exit_dkey, as.integer(as.Date("1941-05-07")))                   # the latest end, all three fields from the same row
+  expect_equal(c(p10$exit_y, p10$exit_m, p10$exit_d), c(1941L, 5L, 7L))
+  ## the order of the GML rows does not matter
+  psd2 <- participant_spell_dates(dd, db, part[c(2L, 1L, 3L), ]); expect_equal(psd2[psd2$ccode == 10L, ]$exit_dkey, p10$exit_dkey)
+  ## the later-ending spell with a LARGER end month (no mixing possible) gives the same result as before
+  part3 <- bind_rows(part_row(1L, 10L, 1939L, 3L, 25L, 1940L, 6L, 10L), part_row(1L, 10L, 1940L, 7L, 1L, 1941L, 9L, 7L), part[3, ])
+  expect_equal(participant_spell_dates(dd, db, part3)[1, ]$exit_dkey, as.integer(as.Date("1941-09-07")))
+})
+
 ## a Germany-1939-like dispute: 1 = initiator 10 (orig) vs 20 (orig, same day), 30 and 40 join on day 31 of the same month, 50 joins in
 ## September; the initiator's 1939 group has pairs with 20 (March 25), 30 and 40 (March 31) and 50 (September); 60 attacks 20 in 1940
 toy_context <- function(part_days = TRUE) {
@@ -91,15 +110,43 @@ test_that("coalition flag: evaluated at the GROUP onset, constant within (initia
   expect_true(all(!cc$coal_incl[cc$dispnum %in% 2:3]))
   expect_true(all(cc$coal_incl >= cc$coal_strict))
   chk <- cc |> group_by(dispnum, initiator, year) |> summarise(a = n_distinct(coal_incl), b = n_distinct(coal_strict), .groups = "drop"); expect_true(all(chk$a == 1L & chk$b == 1L))
-  ## month resolution (no days in GML): 10's group onset is March 1939; 30 and 40 enter the SAME month -> inclusive coalition, strict bilateral
+  ## month resolution (no days in GML): 10's group onset is March 1939; 30 and 40 enter the SAME month -> inclusive coalition; by the entry
+  ## comparison alone strict-bilateral (n_strict 0), but the three pairs tie at the group onset, so 10 faces three onset-defining targets and
+  ## the group is a coalition under the strict convention as well (audit fix 19; before it the strict flag was FALSE here)
   tm <- toy_context(part_days = FALSE)
   cm <- coalition_context(tm$pairs, tm$psd); gm <- attr(cm, "groups")
-  expect_true(all(cm$coal_incl[cm$initiator == 10L])); expect_true(all(!cm$coal_strict[cm$initiator == 10L])); expect_equal(gm$coal_res[gm$initiator == 10L], "month")
-  expect_equal(gm$n_incl[gm$initiator == 10L], 3L); expect_equal(gm$n_strict[gm$initiator == 10L], 0L)
+  expect_true(all(cm$coal_incl[cm$initiator == 10L])); expect_true(all(cm$coal_strict[cm$initiator == 10L])); expect_equal(gm$coal_res[gm$initiator == 10L], "month")
+  expect_equal(gm$n_incl[gm$initiator == 10L], 3L); expect_equal(gm$n_strict[gm$initiator == 10L], 0L); expect_equal(gm$n_onset_defining[gm$initiator == 10L], 3L)
+  expect_equal(grp$n_onset_defining[grp$initiator == 10L], 1L)                                      # at day resolution only the pair with 20 defines the onset
   ## the strict flag with a target that entered BEFORE the initiator: 60 (May 1940) against 20: 20 is the pair, the others make the coalition
   expect_true(gm$target_strict[gm$initiator == 60L]); expect_true(all(cm$coal_strict[cm$initiator == 60L]))
   ## a mismatched pair (no participant spell containing the year) is an error
   expect_error(coalition_context(tc$pairs |> mutate(year = ifelse(initiator == 70L, 1951L, year)), tc$psd), "no participant spell")
+})
+
+test_that("audit fix 19: an initiator facing two or more targets from the first moment is a coalition under the STRICT convention too", {
+  ## dispute 1: 10 attacks 20 and 30 on the same day (both originators, 1990-08-02; an Iraq-1990-like case); nobody else present
+  ## dispute 2: 40 attacks 50 alone on August 1, 60 joins 50's side in September -> bilateral under both conventions (one onset-defining target)
+  dd <- bind_rows(dd_rows(1L, 10L, 20L, 1990L), dd_rows(1L, 10L, 30L, 1990L), dd_rows(2L, 40L, 50L, 1990L), dd_rows(2L, 40L, 60L, 1990L, orig_b = 0L))
+  disp <- bind_rows(disp_row(1L, 1990L, 8L, 100), disp_row(2L, 1990L, 8L, 100)); db <- dispute_date_bounds(disp, dd)
+  part <- bind_rows(part_row(1L, 10L, 1990L, 8L, 2L, 1990L, 11L, 10L), part_row(1L, 20L, 1990L, 8L, 2L, 1990L, 11L, 10L), part_row(1L, 30L, 1990L, 8L, 2L, 1990L, 11L, 10L),
+                    part_row(2L, 40L, 1990L, 8L, 1L, 1990L, 11L, 10L), part_row(2L, 50L, 1990L, 8L, 1L, 1990L, 11L, 10L), part_row(2L, 60L, 1990L, 9L, 2L, 1990L, 11L, 10L))
+  psd <- participant_spell_dates(dd, db, part); pdi <- pair_dispute_intervals(dd, db, part = part)
+  pairs <- tibble(dispnum = c(1L, 1L, 2L, 2L), initiator = c(10L, 10L, 40L, 40L), target = c(20L, 30L, 50L, 60L), year = 1990L) |>
+    inner_join(pdi |> filter(spell == 1L) |> select(dispnum, initiator = ccode1, target = ccode2, ev_start_lo = start_lo, ev_start_hi = start_hi), by = c("dispnum", "initiator", "target"))
+  cc <- coalition_context(pairs, psd); grp <- attr(cc, "groups")
+  g1 <- grp[grp$dispnum == 1L, ]; g2 <- grp[grp$dispnum == 2L, ]
+  expect_equal(g1$n_onset_defining, 2L); expect_equal(g1$n_incl, 2L); expect_equal(g1$n_strict, 0L); expect_false(g1$target_strict)   # the entry comparison alone says strict-bilateral
+  expect_true(g1$coal_incl); expect_true(g1$coal_strict)                                                                              # two targets at the onset: multilateral under both
+  expect_true(all(cc$coal_strict[cc$dispnum == 1L]))
+  expect_equal(g2$n_onset_defining, 1L); expect_false(g2$coal_incl); expect_false(g2$coal_strict)                                     # 60 joins after the onset: bilateral
+  expect_true(all(cc$coal_incl >= cc$coal_strict))
+  ## the same at month resolution (no days): dispute 1 still has two onset-defining targets (strict coalition); dispute 2 stays bilateral
+  part_m <- part |> mutate(stday = -9L, endday = -9L)
+  psd_m <- participant_spell_dates(dd, db, part_m); pdi_m <- pair_dispute_intervals(dd, db, part = part_m)
+  pairs_m <- pairs |> select(dispnum, initiator, target, year) |> inner_join(pdi_m |> filter(spell == 1L) |> select(dispnum, initiator = ccode1, target = ccode2, ev_start_lo = start_lo, ev_start_hi = start_hi), by = c("dispnum", "initiator", "target"))
+  cm <- coalition_context(pairs_m, psd_m); gm <- attr(cm, "groups")
+  expect_equal(gm$n_onset_defining[gm$dispnum == 1L], 2L); expect_true(gm$coal_strict[gm$dispnum == 1L]); expect_false(gm$coal_incl[gm$dispnum == 2L]); expect_false(gm$coal_strict[gm$dispnum == 2L])
 })
 
 test_that("ambiguous onset: both states in the dispute before they were opposed (side switch) falls back to the COW year and is flagged", {
@@ -185,16 +232,54 @@ test_that("assembly: context = all is the plain call; bilateral and coalition pa
   ## a group split among single-dispute members (flag not constant within the group) is rejected
   td4 <- write_toy_cell(tempfile("toycell"), events_edit = function(e) { e$dispnum[3] <- 1L; e$dispnums[3] <- "1"; e$initiator[3] <- 10L; e$target[3] <- 40L; e })   # 10 -> 40 (dispute 1) coalition, 10 -> 20 (dispute 1) bilateral
   expect_error(quiet(assemble_cell("mid", 3L, "all", CONTEXT = "bilateral", data_dir = td4)), "not constant within the group")
+  ## a collapsed key whose flag contradicts its group's flag (the OR of the collapse violated): 10 -> 40 in dispute 4 is a coalition single
+  ## member, the collapsed key 10 -> 30 (4;5) is flagged bilateral -> the group splits the wrong way under both contexts (audit fix 21)
+  td5 <- write_toy_cell(tempfile("toycell"), events_edit = function(e) { e$coal_incl[2] <- FALSE; e$coal_strict[2] <- FALSE
+    bind_rows(e, e[1, ] |> mutate(target = 40L, dispnum = 4L, dispnums = "4", coal_incl = TRUE, coal_strict = TRUE, is_ww2 = FALSE)) })
+  expect_error(quiet(assemble_cell("mid", 3L, "all", CONTEXT = "bilateral", data_dir = td5)), "contradicts the group's own flag")
+  expect_error(quiet(assemble_cell("mid", 3L, "all", CONTEXT = "coalition", data_dir = td5)), "contradicts the group's own flag")
+  ## the legitimate direction (the collapsed key is coalition through its other dispute, the single member bilateral) passes under both
+  td6 <- write_toy_cell(tempfile("toycell"), events_edit = function(e) bind_rows(e, e[1, ] |> mutate(target = 40L, dispnum = 4L, dispnums = "4", is_ww2 = FALSE)))   # 10 -> 40 (4) bilateral; 10 -> 30 (4;5) coalition
+  B6 <- quiet(assemble_cell("mid", 3L, "all", CONTEXT = "bilateral", data_dir = td6)); C6 <- quiet(assemble_cell("mid", 3L, "all", CONTEXT = "coalition", data_dir = td6))
+  expect_equal(B6$n_context_split_groups, 1L); expect_equal(C6$n_context_split_groups, 1L)
   ## assemble_cell_spec() passes the switches through
   S1 <- quiet(assemble_cell_spec("mid", 3L, parse_spec(c("--context=coalition", "--coal_drop=top3")), data_dir = td)); expect_identical(S1$ev, D3$ev)
   S2 <- quiet(assemble_cell_spec("mid", 3L, parse_spec(c("--context=bilateral", "--coal_ties=strict")), data_dir = td)); expect_identical(S2$ev, Bs$ev)
 })
 
-test_that("robustness driver: the context preset is a fixed six-row table; 02_fit_model.R records the switches", {
-  src <- readLines(file.path(root, "R", "05_robustness.R"))
-  expect_true(any(grepl('PRESET == "context"', src, fixed = TRUE))); expect_true(any(grepl("CONTEXT_PRESET$variants", src, fixed = TRUE)))
+test_that("robustness driver: the context preset expands to the six (variant, cell) calls of 02_fit_model.R with the expected switches and cell names", {
+  ## behavioural (audit fix 22, replaces a source-text grep): 05_robustness.R runs from a throw-away v2 root whose 02_fit_model.R is a stub
+  ## that records its arguments, so the driver's expansion is observed, not the real fits
+  tmp <- tempfile("drv_v2_"); dir.create(file.path(tmp, "v2"), recursive = TRUE)
+  file.copy(file.path(root, "R"), file.path(tmp, "v2"), recursive = TRUE); dir.create(file.path(tmp, "v2", "logs")); dir.create(file.path(tmp, "v2", "output"))
+  rec <- file.path(tmp, "calls.txt")
+  writeLines(c("args <- commandArgs(trailingOnly = TRUE)", sprintf("cat(paste(args, collapse = ' '), '\\n', sep = '', file = '%s', append = TRUE)", rec)), file.path(tmp, "v2", "R", "02_fit_model.R"))
+  drv <- file.path(tmp, "v2", "R", "05_robustness.R")
+  run <- function(...) { out <- suppressWarnings(system2("Rscript", c(drv, ...), stdout = TRUE, stderr = TRUE)); list(status = if (is.null(attr(out, "status"))) 0L else attr(out, "status"), out = out) }
+  r <- run("--preset=context", "--dry_run=TRUE", "--threads_per_chain=2")
+  expect_equal(r$status, 0L, info = paste(tail(r$out, 20), collapse = "\n"))
+  calls <- readLines(rec); expect_length(calls, 6L)
+  arg <- function(call, nm) unname(sub(paste0("^--", nm, "="), "", grep(paste0("^--", nm, "="), strsplit(call, " ")[[1]], value = TRUE)))
+  args_of <- function(nm) unname(vapply(calls, arg, "", nm))
+  ## variant slowest (bilateral, coalition, coalition_drop3), cell fastest (mid, fmid) = the --cell_index order 0-5 of CONTEXT_PRESET
+  expect_equal(args_of("sample"), rep(c("mid", "fmid"), 3))
+  expect_equal(args_of("context"), rep(c("bilateral", "coalition", "coalition"), each = 2))
+  expect_equal(args_of("coal_drop"), rep(c("none", "none", "top3"), each = 2))
+  expect_true(all(vapply(calls, arg, "", "coal_ties") == "inclusive")); expect_true(all(vapply(calls, arg, "", "lag") == "3")); expect_true(all(vapply(calls, arg, "", "model") == "M1b"))
+  expect_true(all(vapply(calls, arg, "", "dry_run") == "TRUE")); expect_true(all(vapply(calls, arg, "", "threads_per_chain") == "2"))
+  for (nm in c("pairs", "direction", "ww2", "weights", "controls", "changes")) expect_true(all(vapply(calls, arg, "", nm) == SPEC_DEFAULTS[[nm]]), info = nm)
+  ## the cell names the driver logs are the ones 02_fit_model.R would write
+  expect_true(any(grepl("cell mid_lag3_all_pr_M1b_bi:", r$out, fixed = TRUE))); expect_true(any(grepl("cell fmid_lag3_all_pr_M1b_co_drop3:", r$out, fixed = TRUE)))
+  ## one task of the Slurm array: --cell_index=3 is fmid, coalition; a pass-through switch adds its suffix; the fixed switches are refused
+  file.remove(rec); r3 <- run("--preset=context", "--cell_index=3", "--ww2=drop")
+  expect_equal(r3$status, 0L); calls <- readLines(rec); expect_length(calls, 1L)
+  expect_equal(arg(calls, "sample"), "fmid"); expect_equal(arg(calls, "context"), "coalition"); expect_equal(arg(calls, "ww2"), "drop")
+  expect_true(any(grepl("cell fmid_lag3_all_pr_M1b_co_noww2:", r3$out, fixed = TRUE)))
+  expect_true(run("--preset=context", "--cell_index=6")$status != 0L)
+  for (bad in c("--cells=mid:3:M1b", "--context=bilateral", "--coal_ties=strict", "--coal_drop=top3")) expect_true(run("--preset=context", bad)$status != 0L, info = bad)
+  ## the sbatch dispatches the preset, and 02_fit_model.R records the switches in the fit (the smoke test checks the fit object itself)
   sb <- readLines(file.path(root, "slurm", "04_robustness.sbatch")); expect_true(any(grepl("^  context)", sb)))
-  fit_src <- readLines(file.path(root, "R", "02_fit_model.R")); expect_true(any(grepl("context = spec$context, coal_ties = spec$coal_ties, coal_drop = spec$coal_drop", fit_src, fixed = TRUE)))
+  unlink(tmp, recursive = TRUE)
 })
 
 ## ---- the comparison on tiny mock fits (quickly fitted; needs the compiled M1 program) --------------------------------------------------
@@ -219,12 +304,11 @@ test_that("context_compare() runs on two tiny fits (plus a drop3 fit): blocks, i
   st <- cc$stats
   expect_setequal(unique(st$block), c("context", "leverage", "role"))
   ctx <- st[st$block == "context", ]
-  expect_equal(nrow(ctx), 7L)                                                                    # 3 statistics x 2 axes + type agreement
+  expect_equal(nrow(ctx), 5L)                                                                    # 2 statistics x 2 axes + type agreement (cor_draw removed, audit fix 20)
   for (ax in c("material", "relational")) {
-    r <- ctx[ctx$axis == ax, ]; expect_setequal(r$statistic, c("cor_pmean", "cor_draw", "mean_shift"))
-    cd <- r[r$statistic == "cor_draw", ]; expect_true(cd$lo <= cd$estimate && cd$estimate <= cd$hi); expect_true(abs(cd$estimate) <= 1)
+    r <- ctx[ctx$axis == ax, ]; expect_setequal(r$statistic, c("cor_pmean", "mean_shift")); expect_false("cor_draw" %in% st$statistic)
     ms <- r[r$statistic == "mean_shift", ]; expect_true(ms$lo <= ms$estimate && ms$estimate <= ms$hi)
-    expect_true(abs(r$estimate[r$statistic == "cor_pmean"]) <= 1); expect_true(is.na(r$lo[r$statistic == "cor_pmean"]))
+    cp <- r[r$statistic == "cor_pmean", ]; expect_true(abs(cp$estimate) <= 1); expect_true(is.na(cp$lo)); expect_match(cp$note, "attenuated")
   }
   ta <- ctx[ctx$statistic == "type_agreement", ]; expect_true(ta$estimate >= 0 && ta$estimate <= 1); expect_equal(unique(ctx$n_states), ta$n_states)
   ct <- cc$crosstab[cc$crosstab$block == "context", ]; expect_equal(sum(ct$n), ta$n_states); expect_equal(nrow(ct), 25L)
@@ -232,7 +316,7 @@ test_that("context_compare() runs on two tiny fits (plus a drop3 fit): blocks, i
   wb <- weighted_decisions(fits$bilateral$dat); wc <- weighted_decisions(fits$coalition$dat)
   expect_equal(ta$n_states, sum(wb >= 2 & wc >= 2)); expect_equal(sum(cc$states$in_comparison), ta$n_states)
   expect_equal(sum(wb), sum(ev$w[odd]))
-  lev <- st[st$block == "leverage", ]; expect_equal(nrow(lev), 7L); expect_true(all(lev$comparison == "coalition_drop3_vs_coalition"))
+  lev <- st[st$block == "leverage", ]; expect_equal(nrow(lev), 5L); expect_true(all(lev$comparison == "coalition_drop3_vs_coalition"))
   ## role block: raw weighted means per context x role, and the per-state coalition split; marked as data descriptives
   rl <- st[st$block == "role", ]
   expect_setequal(unique(rl$comparison), c("bilateral_originator", "bilateral_joiner", "coalition_originator", "coalition_joiner", "coalition_joiner_vs_originator_by_state"))
@@ -240,11 +324,11 @@ test_that("context_compare() runs on two tiny fits (plus a drop3 fit): blocks, i
   wm <- rl[rl$statistic == "weighted_mean_chosen_gap" & rl$comparison == "coalition_originator" & rl$axis == "material", ]
   fe <- fit_events(fits$coalition) |> inner_join(jl |> distinct(initiator, target, year, is_joiner_pair), by = c("initiator", "target", "year")) |> filter(!is_joiner_pair)
   expect_equal(wm$estimate, sum(fe$w * fe$x_material) / sum(fe$w))
-  ## the direct per-draw correlation reproduces the table
+  ## the direct computations reproduce the table: the correlation of the posterior means and the per-draw mean shift
   mu_b <- mu_state_draws(fits$bilateral$fit); mu_c <- mu_state_draws(fits$coalition$fit); R <- which(wb >= 2 & wc >= 2)
-  cors <- sapply(seq_len(dim(mu_b)[1]), function(k) cor(mu_b[k, R, 1], mu_c[k, R, 1]))
-  expect_equal(ctx$estimate[ctx$axis == "material" & ctx$statistic == "cor_draw"], mean(cors))
+  expect_equal(ctx$estimate[ctx$axis == "material" & ctx$statistic == "cor_pmean"], cor(colMeans(mu_b[, R, 1]), colMeans(mu_c[, R, 1])))
   expect_equal(ctx$estimate[ctx$axis == "relational" & ctx$statistic == "mean_shift"], mean(mu_c[, R, 2] - mu_b[, R, 2]))
+  md <- context_compare_md(cc, "toy"); expect_true(any(grepl("attenuated by estimation noise", md))); expect_false(any(grepl("per-draw cor", md)))
   ## without the drop3 fit the leverage block is absent; the markdown summary renders in both cases
   cc2 <- context_compare(fits[c("bilateral", "coalition")], jl, r0 = 0.5, min_decisions = 2); expect_false(any(cc2$stats$block == "leverage"))
   md <- context_compare_md(cc, "toy"); expect_true(any(grepl("Coalition vs bilateral", md))); expect_true(any(grepl("Leverage: coalition without", md)))

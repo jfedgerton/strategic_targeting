@@ -11,7 +11,8 @@
 ##   context_compare_<group>_crosstab.csv MAP-type cross-tabulations
 ##   context_compare_<group>_states.csv  per-state weighted decisions, MAP types and mu means per context
 ##   context_compare_<group>.md          a short summary
-## where <group> = <sample>_lag<h>_all_pr_<model>[_K<K>]<other suffixes>[_strict].
+## where <group> = the cell name without the context suffix: <sample>_lag<h>_all_pr_<model>[_K<K>][_orig|_join][_strict][_noww2]...
+## (the suffixes in cell_name() order, so fmid_lag3_all_pr_M1b_strict_noww2 goes with the fits _co_strict_noww2 and _bi_strict_noww2).
 ## ============================================================================
 suppressPackageStartupMessages({ library(rstan); library(dplyr) })
 this_file <- sub("^--file=", "", grep("^--file=", commandArgs(FALSE), value = TRUE))
@@ -30,8 +31,10 @@ base_args <- args[!grepl("^--(sample|lag|model|r0|min_decisions|allow_stale|coal
 spec_bi <- parse_spec(c(base_args, "--context=bilateral", paste0("--coal_ties=", TIES)))
 spec_co <- parse_spec(c(base_args, "--context=coalition", paste0("--coal_ties=", TIES)))
 spec_d3 <- parse_spec(c(base_args, "--context=coalition", paste0("--coal_ties=", TIES), "--coal_drop=top3"))
-group <- sprintf("%s_lag%d_%s_%s_%s%s%s%s", SAMPLE, LAG, VARIANT, CENTRALITY, MODEL, if (grepl("^M2", MODEL)) sprintf("_K%d", spec_bi$ame_K) else "",
-                 spec_suffix(parse_spec(base_args)), if (TIES == "strict") "_strict" else "")
+## the output group name = the bilateral cell name without its context suffix, so the suffix order is cell_name()'s (pairs, [context],
+## coal_ties, coal_drop, ww2, controls, weights, changes, direction; audit fix 23, 2026-10-26: before, _strict was appended last)
+group <- sub(SPEC_SUFFIX$context[["bilateral"]], "", cell_name(SAMPLE, LAG, MODEL, spec_bi), fixed = TRUE)
+stopifnot(identical(sub(SPEC_SUFFIX$context[["coalition"]], "", cell_name(SAMPLE, LAG, MODEL, spec_co), fixed = TRUE), group))
 log_open(paste0("06_context_compare_", group))
 out_dir <- file.path(v2_root(), "output"); data_dir <- spec_data_dir(spec_bi, v2_root()); manifest_path <- file.path(data_dir, "manifest.csv")
 logf("group %s; ties %s; r0 %.2f; min weighted decisions %g; data %s", group, TIES, R0, MIN_DEC, basename(data_dir))

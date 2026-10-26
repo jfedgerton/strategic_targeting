@@ -575,6 +575,8 @@ chk_c <- coal |> group_by(dispnum, initiator, year) |> summarise(a = n_distinct(
 stopifnot(all(chk_c$a == 1L), all(chk_c$b == 1L))
 blog("coalition context: %d pre-collapse non-escalation pairs in %d (initiator, dispute, year) groups (= the D8 weight groups); groups with a coalition context: inclusive %d, strict %d; pairs: inclusive %d, strict %d; the flag is constant within every group (asserted)",
      nrow(coal), nrow(coal_grp), sum(coal_grp$coal_incl), sum(coal_grp$coal_strict), sum(coal$coal_incl), sum(coal$coal_strict))
+blog("coalition context: groups with two or more onset-defining targets (several targets faced from the first moment: multilateral under BOTH conventions, audit fix 19): %d, of which %d would be strict-bilateral by the entry comparison alone",
+     sum(coal_grp$n_onset_defining >= 2L), sum(coal_grp$n_onset_defining >= 2L & (coal_grp$n_strict - as.integer(coal_grp$target_strict)) < 1L))
 blog("coalition context: participant spells %d (entry dated from gml_part %d, of which day resolution %d, month %d; dispute-level fallback %d: %s); exit from gml_part %d (day %d, month %d), fallback %d",
      nrow(psd), sum(startsWith(psd$entry_src, "participant")), sum(psd$entry_res == 1L), sum(psd$entry_res == 2L & startsWith(psd$entry_src, "participant")), sum(!startsWith(psd$entry_src, "participant")),
      paste(names(table(psd$entry_src[!startsWith(psd$entry_src, "participant")])), table(psd$entry_src[!startsWith(psd$entry_src, "participant")]), sep = "=", collapse = "; "),

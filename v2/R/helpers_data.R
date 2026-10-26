@@ -768,10 +768,14 @@ participant_spell_dates <- function(dd, db, part = NULL) {
     stopifnot(!anyNA(ps), all(ps$g_sm %in% 1:12), all(ps$g_em %in% 1:12))
     ov <- sp |> mutate(.id = row_number()) |> select(.id, dispnum, ccode, spell_first, spell_last) |>
       inner_join(ps, by = c("dispnum", "ccode"), relationship = "many-to-many") |> filter(g_ey >= spell_first, g_sy <= spell_last) |>
+      ## the latest GML end as ONE row: the sort key is computed in mutate() before summarise(), because inside summarise() the first
+      ## assignment reduces g_ey to a scalar and the later which.max() calls then indexed g_em / g_ed by another row (audit fix 18,
+      ## 2026-10-26: 8 of 5862 spells took the month and day from a different spell, e.g. Italy in 258, 1945-09-07 for 1945-05-07)
+      mutate(.xk = g_ey * 400L + g_em * 32L + pmax(g_ed, 1L)) |>
       group_by(.id) |> arrange(g_sy, g_sm, pmax(g_sd, 1L), .by_group = TRUE) |>
       summarise(n_gml = n(), g_sy = first(g_sy), g_sm = first(g_sm), g_sd = first(g_sd),
-                g_ey = g_ey[which.max(g_ey * 400L + g_em * 32L + pmax(g_ed, 1L))], g_em = g_em[which.max(g_ey * 400L + g_em * 32L + pmax(g_ed, 1L))],
-                g_ed = g_ed[which.max(g_ey * 400L + g_em * 32L + pmax(g_ed, 1L))], .groups = "drop")
+                .ix = which.max(.xk), g_ey = g_ey[.ix], g_em = g_em[.ix], g_ed = g_ed[.ix], .groups = "drop") |> select(-.ix)
+    stopifnot(all(ov$g_em %in% 1:12), !anyNA(ov$g_ey))
     sp <- sp |> mutate(.id = row_number()) |> left_join(ov, by = ".id") |> mutate(n_gml = coalesce(n_gml, 0L), in_gml_disp = dispnum %in% ps$dispnum)
     cow_part <- sp |> distinct(dispnum, ccode); gml_part_tbl <- ps |> distinct(dispnum, ccode) |> filter(dispnum %in% cow_part$dispnum)
     membership <- bind_rows(cow_part |> filter(dispnum %in% ps$dispnum) |> anti_join(gml_part_tbl, by = c("dispnum", "ccode")) |> mutate(issue = "COW participant absent from gml_part"),
@@ -834,8 +838,11 @@ context_present <- function(onsets, psd) {
 ## the data have the target's GML exit a few days before the initiator's GML entry in the same month; counted in n_target_exit_before_onset);
 ## their entry must not be after the onset (asserted). A participant with several spells is present when ANY spell is. Per onset row:
 ## n_incl / n_strict = the participants other than the initiator present under each convention, target_strict = an onset-defining target
-## entered strictly before the onset (the initiator joined an existing pair, so that target does not make a coalition), coal_incl =
-## n_incl >= 2, coal_strict = n_strict - target_strict >= 1, coal_res = the resolution of the entry comparisons (day / month / year / mixed).
+## entered strictly before the onset (the initiator joined an existing pair, so that target does not make a coalition), n_onset_defining =
+## the distinct onset-defining targets, coal_incl = n_incl >= 2, coal_strict = n_strict - target_strict >= 1 OR n_onset_defining >= 2 (an
+## initiator facing two or more targets from the first moment is multilateral under the spec's definition whatever the tie convention;
+## audit fix 19, 2026-10-26: 124 groups, e.g. Yugoslavia against 37 NATO states in 4343, Iraq against Kuwait and Saudi Arabia in 1990,
+## were strict-bilateral before), coal_res = the resolution of the entry comparisons (day / month / year / mixed).
 context_flags <- function(onsets, targets, psd) {
   stopifnot(all(c(".g", "ccode") %in% names(targets)), !anyDuplicated(onsets$.g))
   pres <- context_present(onsets, psd)
@@ -846,13 +853,15 @@ context_flags <- function(onsets, targets, psd) {
     mutate(.force = coalesce(.force, FALSE), present_incl = present_incl | .force, present_strict = present_strict | (.force & cmp_entry < 0L))
   agg <- pres |> group_by(.g) |>
     summarise(n_incl = n_distinct(ccode[present_incl]), n_strict = n_distinct(ccode[present_strict]), res_set = paste(sort(unique(cmp_res)), collapse = ""), .groups = "drop") |>
-    left_join(jt |> group_by(.g) |> summarise(target_strict = any(entered_before), n_target_exit_before_onset = sum(!present_incl), .groups = "drop"), by = ".g")
+    left_join(jt |> group_by(.g) |> summarise(target_strict = any(entered_before), n_target_exit_before_onset = sum(!present_incl), n_onset_defining = n_distinct(ccode), .groups = "drop"), by = ".g")
   out <- onsets |> select(.g) |> left_join(agg, by = ".g") |>
     mutate(n_incl = coalesce(n_incl, 0L), n_strict = coalesce(n_strict, 0L), target_strict = coalesce(target_strict, FALSE), n_target_exit_before_onset = coalesce(n_target_exit_before_onset, 0L),
-           coal_incl = n_incl >= 2L, coal_strict = (n_strict - as.integer(target_strict)) >= 1L,
+           n_onset_defining = coalesce(n_onset_defining, 0L),
+           coal_incl = n_incl >= 2L, coal_strict = (n_strict - as.integer(target_strict)) >= 1L | n_onset_defining >= 2L,
            coal_res = case_when(res_set == "1" ~ "day", res_set == "2" ~ "month", res_set == "3" ~ "year", TRUE ~ "mixed"))
-  stopifnot(nrow(out) == nrow(onsets), all(out$n_incl >= 1L), !anyNA(out$coal_incl), !anyNA(out$coal_strict), all(out$coal_incl >= out$coal_strict))
-  out |> select(.g, n_incl, n_strict, target_strict, n_target_exit_before_onset, coal_incl, coal_strict, coal_res)
+  stopifnot(nrow(out) == nrow(onsets), all(out$n_incl >= 1L), all(out$n_onset_defining >= 1L), all(out$n_incl >= out$n_onset_defining),
+            !anyNA(out$coal_incl), !anyNA(out$coal_strict), all(out$coal_incl >= out$coal_strict))
+  out |> select(.g, n_incl, n_strict, target_strict, n_onset_defining, n_target_exit_before_onset, coal_incl, coal_strict, coal_res)
 }
 ## coalition_context(pairs, psd): pairs = the PRE-collapse non-escalation event rows (dispnum, initiator, target, year, ev_start_lo,
 ## ev_start_hi, the pair's month-level entry interval from flag_escalations_month()); psd = participant_spell_dates(). Returns pairs with
@@ -919,7 +928,7 @@ coalition_context <- function(pairs, psd) {
   res <- pairs |> left_join(out |> select(dispnum, initiator, target, coal_incl, coal_strict, coal_onset_ambiguous, coal_res), by = c("dispnum", "initiator", "target"))
   stopifnot(nrow(res) == n_in, !anyNA(res$coal_incl))
   attr(res, "groups") <- grp |> select(dispnum, initiator, year, n_events, onset_res = res, onset_y = y, onset_mkey = mkey, onset_dkey = dkey, n_incl, n_strict, target_strict,
-                                       n_target_exit_before_onset, coal_incl, coal_strict, coal_res, n_event_flags_incl, n_event_flags_strict)
+                                       n_onset_defining, n_target_exit_before_onset, coal_incl, coal_strict, coal_res, n_event_flags_incl, n_event_flags_strict)
   attr(res, "events") <- out |> select(dispnum, initiator, target, year, o_res, o_mkey, o_dkey, onset_defining, onset_vs_pdi, ev_incl, ev_strict)
   res
 }

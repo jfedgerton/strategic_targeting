@@ -298,10 +298,16 @@ assemble_cell <- function(SAMPLE, LAG, VARIANT, CENT = "pr", CONFLICT_HISTORY = 
     split_g <- gs |> filter(n_kept > 0L, n_kept < n)
     bad_single <- split_g |> filter(n_single_kept > 0L, n_single_kept < n_single)
     if (nrow(bad_single) > 0) stop(sprintf("context = %s: %d (initiator, dispute, year) groups are split between kept and dropped events among their single-dispute members; the coalition flag is not constant within the group (rebuild the data)", CONTEXT, nrow(bad_single)))
-    ## in a split group the members with the minority status are all collapsed keys (the single-dispute members decide the group's status;
-    ## a group of collapsed keys only can be split as well, each key through its other dispute)
-    bad_mix <- split_g |> filter(n_single > 0L, ifelse(n_single_kept == n_single, n_coll_kept == n_coll, n_coll_kept == 0L))
-    if (nrow(bad_mix) > 0) stop(sprintf("context = %s: %d split groups are not explained by collapsed keys", CONTEXT, nrow(bad_mix)))
+    ## in a split group the minority members are collapsed keys (given the check above, by construction), and the split can go ONE way
+    ## only, because the collapse ORs the flag over a key's disputes: a collapsed key in a COALITION group is itself coalition, so under
+    ## context = bilateral the single-dispute members of a split group must all be kept (bilateral group, collapsed keys dropped through
+    ## their other dispute) and under context = coalition they must all be dropped (bilateral group, collapsed keys kept through the other
+    ## dispute). The reverse split means a collapsed key's flag contradicts its own group's flag (audit fix 21, 2026-10-26: the former
+    ## bad_mix condition was unreachable after the single-member check; a group of collapsed keys only cannot be checked this way).
+    bad_dir <- split_g |> filter(n_single > 0L, if (CONTEXT == "bilateral") n_single_kept < n_single else n_single_kept > 0L)
+    if (nrow(bad_dir) > 0) stop(sprintf("context = %s: %d split groups have a collapsed key whose flag contradicts the group's own flag (a key collapsed from a %s dispute must carry the coalition flag of the OR); rebuild the data",
+                                        CONTEXT, nrow(bad_dir), "coalition"))
+    stopifnot(all(split_g$n_kept == split_g$n_single_kept + split_g$n_coll_kept))
     n_split_groups <- nrow(split_g)
     logf("context = %s (ties %s, column %s): sample %s %d -> %d stage-2 events (%d removed; weights %.1f -> %.1f); stage 1 unchanged (y1 stays %d initiations); (initiator, dispute, year) groups of the sample %d, kept whole %d, dropped whole %d, split through collapsed keys mixing a bilateral and a coalition dispute %d (their weights no longer sum to one decision; logged, not rescaled)",
          CONTEXT, COAL_TIES, coal_col, SAMPLE, n_before, nrow(ev_all), n_before - nrow(ev_all), w_before, sum(ev_all[[w_col]]), sum(sy$y1),
