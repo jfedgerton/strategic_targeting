@@ -3,22 +3,22 @@
 #SBATCH --account=jfe4_cr_default
 #SBATCH --partition=basic
 #SBATCH --requeue
-#SBATCH --time=7-00:00:00    # PLACEHOLDER: set from the Roar pilot (04_pilot.sbatch) before the real run
+#SBATCH --time=7-00:00:00    # PLACEHOLDER: set from a Roar pilot (02_fit_model.R --pilot=TRUE, README "Quick start") before the real run
 #SBATCH --nodes=1 --ntasks=1 --cpus-per-task=32   # = chains (4) x threads_per_chain (8)
 #SBATCH --mem=128G                                 # basic bills 4 GB per core: 32 cores x 4 GB
 #SBATCH --array=0-95
 #SBATCH --output=%x_%A_%a.out
 #SBATCH --open-mode=append   # a requeued task appends to its log instead of truncating it (2026-10-25 C7)
 # MAIN-RESULTS GRID: sample {mid, fmid, war} x model {M1m, M1r, M1a, M1b, M2m, M2r, M2a, M2b} x lag {1, 3, 5, 10}
-# = 96 cells, full all-states choice set (variant=all, sampled_m=0), PageRank centrality, K = 2 for M2,
-# 4 chains x 2000 iterations (1000 warmup), seed 123, within-chain parallelism via reduce_sum with
-# THREADS_PER_CHAIN threads per chain (default 8 -> 32 cpus; override with --export=ALL,THREADS_PER_CHAIN=k
-# together with --cpus-per-task=4k and --mem=<16k>G).
+# = 96 cells of the MAIN specification (spec.R defaults: full all-states choice set, PageRank, K = 2 for M2, the sampler
+# settings of SAMPLER per family), seed 123, within-chain parallelism via reduce_sum with THREADS_PER_CHAIN threads per
+# chain (default 8 -> 32 cpus; override with --export=ALL,THREADS_PER_CHAIN=k together with --cpus-per-task=4k and --mem=<16k>G).
 #
-# Real run      : sbatch v2/slurm/08_main_grid.sbatch
-# Roar DRY RUN  : sbatch --export=ALL,DRY_RUN=TRUE --time=00:30:00 --mem=16G --cpus-per-task=1 v2/slurm/08_main_grid.sbatch
+# Real run      : sbatch v2/slurm/02_main_grid.sbatch
+# Roar DRY RUN  : sbatch --export=ALL,DRY_RUN=TRUE --time=00:30:00 --mem=16G --cpus-per-task=1 v2/slurm/02_main_grid.sbatch
 #                 (every task assembles and validates its Stan data with --dry_run=TRUE and exits; no sampling.
 #                  Command-line sbatch options override the directives above, so the dry run is cheap.)
+# Variants are NOT run from this script (their cells would carry a switch suffix); use 04_robustness.sbatch.
 # Submit from the repo root; nothing in this file submits anything by itself.
 # Slurm runs a spooled copy of this script, so locate the repo via the submit dir.
 source "${SLURM_SUBMIT_DIR:?submit from the repo root}/v2/slurm/00_env.sh" || exit 1
@@ -126,7 +126,5 @@ case $i in
 esac
 DRY=${DRY_RUN:-FALSE}
 THR=${THREADS_PER_CHAIN:-8}
-echo "task $i -> sample=$s model=$m lag=$l variant=all sampled_m=0 centrality=pr K=2 chains=4 threads_per_chain=$THR cpus=${SLURM_CPUS_PER_TASK:-?} dry_run=$DRY"
-Rscript v2/R/02_fit_model.R --sample=$s --lag=$l --variant=all --model=$m --centrality=pr \
-  --K=2 --chains=4 --iter=2000 --warmup=1000 --adapt_delta=0.9 --max_treedepth=10 --dry_run=$DRY \
-  --threads_per_chain=$THR
+echo "task $i -> sample=$s model=$m lag=$l (main specification; sampler defaults of spec.R) threads_per_chain=$THR cpus=${SLURM_CPUS_PER_TASK:-?} dry_run=$DRY"
+Rscript v2/R/02_fit_model.R --sample=$s --lag=$l --model=$m --dry_run=$DRY --threads_per_chain=$THR

@@ -1,3 +1,4 @@
+## ARCHIVED 2026-10-25: folded into R/05_robustness.R (preset perm_error). Kept for reference; source paths point at the new helpers, otherwise unchanged.
 ## ============================================================================
 ## run_measurement_real.R -- the refit-based measurement tests on ONE real-data cell
 ## (temporal holdout, permutation test, systematic measurement error). LOO and
@@ -19,9 +20,9 @@
 ## ============================================================================
 suppressPackageStartupMessages({ library(rstan); library(loo); library(dplyr) })
 this_file <- sub("^--file=", "", grep("^--file=", commandArgs(FALSE), value = TRUE))
-source(file.path(dirname(this_file), "00_helpers.R")); source(file.path(dirname(this_file), "typology.R"))
-source(file.path(dirname(this_file), "measurement_tests.R")); source(file.path(dirname(this_file), "assemble_cell.R"))
-Sys.setenv(V2_ROOT = normalizePath(file.path(dirname(this_file), "..")))
+source(file.path(dirname(this_file), "..", "..", "R", "spec.R")); source(file.path(dirname(this_file), "..", "..", "R", "helpers_data.R")); source(file.path(dirname(this_file), "..", "..", "R", "helpers_model.R")); source(file.path(dirname(this_file), "..", "..", "R", "typology.R"))
+source(file.path(dirname(this_file), "..", "..", "R", "measurement_tests.R")); source(file.path(dirname(this_file), "..", "..", "R", "assemble_cell.R"))
+Sys.setenv(V2_ROOT = normalizePath(file.path(dirname(this_file), "..", "..")))
 args <- commandArgs(trailingOnly = TRUE)
 get_arg <- function(name, default) { h <- grep(paste0("^--", name, "="), args, value = TRUE); if (!length(h)) return(default)
   v <- sub(paste0("^--", name, "="), "", h[1]); if (is.logical(default)) as.logical(v) else if (is.numeric(default)) as.numeric(v) else v }

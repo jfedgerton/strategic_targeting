@@ -6,7 +6,7 @@
 ## prior-only Stan runs.
 suppressPackageStartupMessages({ library(testthat); library(rstan) })
 root <- Sys.getenv("V2_ROOT"); if (root == "") root <- normalizePath(file.path(getwd(), "v2"), mustWork = FALSE)
-source(file.path(root, "R", "00_helpers.R")); source(file.path(root, "sim", "simulate.R"))
+source(file.path(root, "R", "spec.R")); source(file.path(root, "R", "helpers_data.R")); source(file.path(root, "R", "helpers_model.R")); source(file.path(root, "sim", "simulate.R"))
 
 test_that("the disk density 1 - r1^2 - r2^2 has exact Beta(2.5, 2.5) marginals; the old truncated-Beta scheme does not", {
   set.seed(123)

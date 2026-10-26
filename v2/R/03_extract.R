@@ -2,6 +2,7 @@
 ## 03_extract.R -- post-process one fit: typology from posterior mu_i, AME alignment
 ##
 ## Usage: Rscript v2/R/03_extract.R --fit=v2/output/fit_<cell>.rds [--r0=0.5] [--band_M=r0] [--band_R=r0] [--allow_stale=FALSE]
+## (r0 defaults to R0 in spec.R)
 ## Pilot fits (fit_*_pilot.rds, or a saved pilot configuration) are refused; a STALE fit (manifest changed while sampling) needs
 ## --allow_stale=TRUE (2026-10-25 C1 / C2). The manifest the fit is checked against is the one in the fit's own data directory
 ## (v2/data, or v2/data_sideA for --direction=sideA fits). The typology / mu_state CSVs of one-dimensional cells carry an `axis`
@@ -17,18 +18,19 @@
 ##   focus_sigma_<cell>.csv, focus_states_<cell>.csv  (appendix, descriptive) pooled Sigma summary and per-state
 ##                         empirical dispersion of chosen-target positions around mean mu_event (n < 5 flagged)
 ## r0 (peer radius, in scaled gap units: log ratio divided by the per-axis constant in change_scale.csv,
-## so 0.5 is about a 5-fold CINC ratio on the material axis) is a documented argument; 0.5 is the v2
+## so 0.5 is about a 5-fold CINC ratio on the material axis) is a documented argument; R0 = 0.5 in spec.R is the v2
 ## default and a PI decision to confirm.
 ## ============================================================================
 suppressPackageStartupMessages({ library(rstan); library(dplyr) })
 this_file <- sub("^--file=", "", grep("^--file=", commandArgs(FALSE), value = TRUE))
-source(file.path(dirname(this_file), "00_helpers.R"))
-source(file.path(dirname(this_file), "typology.R"))
-Sys.setenv(V2_ROOT = normalizePath(file.path(dirname(this_file), "..")))
+R_DIR <- dirname(this_file)
+source(file.path(R_DIR, "spec.R")); source(file.path(R_DIR, "helpers_data.R")); source(file.path(R_DIR, "helpers_model.R"))
+source(file.path(R_DIR, "typology.R"))
+Sys.setenv(V2_ROOT = normalizePath(file.path(R_DIR, "..")))
 args <- commandArgs(trailingOnly = TRUE)
 fit_path <- sub("^--fit=", "", grep("^--fit=", args, value = TRUE))
-r0 <- as.numeric(sub("^--r0=", "", c(grep("^--r0=", args, value = TRUE), "--r0=0.5")[1]))
-allow_stale <- as.logical(sub("^--allow_stale=", "", c(grep("^--allow_stale=", args, value = TRUE), "--allow_stale=FALSE")[1]))
+r0 <- get_arg(args, "r0", R0)
+allow_stale <- get_arg(args, "allow_stale", FALSE)
 stopifnot(length(fit_path) == 1, file.exists(fit_path), is.finite(r0), r0 > 0, !is.na(allow_stale))
 obj <- readRDS(fit_path); fit <- obj$fit; cell <- obj$cell
 assert_production_fit(obj, allow_stale = allow_stale)

@@ -4,7 +4,7 @@
 ## rules in isolation so a regression in the coding logic fails loudly without the full build.
 suppressPackageStartupMessages({ library(testthat); library(dplyr); library(tidyr) })
 root <- Sys.getenv("V2_ROOT"); if (root == "") root <- normalizePath(file.path(getwd(), "v2"), mustWork = FALSE)
-source(file.path(root, "R", "00_helpers.R"))
+source(file.path(root, "R", "spec.R")); source(file.path(root, "R", "helpers_data.R")); source(file.path(root, "R", "helpers_model.R"))
 
 ## ---- the coding rules under test, lifted verbatim from 01_build_data.R ---------------------
 ## disp needs the dispute-level columns fatality_disp, hostlev_disp and (month rule, 2026-10-24) styear, stmon, mindur, maxdur
@@ -324,7 +324,7 @@ test_that("a zero, NA or non-finite PageRank stops the build like a zero CINC sh
   expect_false(any(grepl("assert_standardized(pos, \"R_pr\")", src, fixed = TRUE)))
 })
 
-## ---- power changes: one table per lag, year-centred, one pooled SD (build_change_table in 00_helpers.R) ----------
+## ---- power changes: one table per lag, year-centred, one pooled SD (build_change_table in helpers_data.R) ----------
 ## toy levels (log units): states 10 and 40 have every year 1988-1994; state 20 has no level in 1992 (gap);
 ## state 30 enters in 1992. The state-year panel adds 20 in 1992 (in the system, no position that year).
 toy_pos <- tribble(
@@ -819,8 +819,10 @@ test_that("control sets: minimal main W / X / Z, and --full_controls restores th
   ## every W / X control is one the build writes and the centring list covers the 0/1 indicators that enter
   expect_true(all(w_controls(FULL_CONTROLS = TRUE) %in% c(SY_INDICATORS, "log_prior_mids", "log_peace_years")))
   expect_true(all(w_controls() %in% c(SY_INDICATORS, W_LEVELS, "log_prior_mids", "log_n_system_tm1")))
-  src <- readLines(file.path(v2_root(), "R", "02_fit_model.R"))
-  expect_true(any(grepl('get_arg("full_controls", FALSE)', src, fixed = TRUE))); expect_true(any(grepl('"_fullctrl"', src, fixed = TRUE)))
+  src <- readLines(file.path(v2_root(), "R", "02_fit_model.R")); spec_src <- readLines(file.path(v2_root(), "R", "spec.R"))
+  ## the full-controls option is the `controls` switch of spec.R (suffix _fullctrl) and reaches assemble_cell() through assemble_cell_spec()
+  expect_true(any(grepl('controls  = c("minimal", "full")', spec_src, fixed = TRUE))); expect_true(any(grepl('full = "_fullctrl"', spec_src, fixed = TRUE)))
+  expect_true(any(grepl("assemble_cell_spec(SAMPLE, LAG, spec", src, fixed = TRUE)))
   expect_true(any(grepl("manifest_at_load", src, fixed = TRUE))); expect_true(any(grepl("SLURM_ARRAY_TASK_ID", src, fixed = TRUE)))
   expect_true(any(grepl("changed while sampling", src, fixed = TRUE))); expect_true(any(grepl("_STALE", src, fixed = TRUE)))   # C2: saved as STALE, not discarded
   expect_true(any(grepl("assert_compiled_current", src, fixed = TRUE))); expect_true(any(grepl('"_pilot"', src, fixed = TRUE)))   # C3, C1
@@ -914,7 +916,7 @@ test_that("P1-1 regression: changing or adding a state-year's events never chang
 ## Events (mid): 10 -> 20 (dispute 1); 10 -> 30 (disputes 4;5, one of them WWII: is_ww2 TRUE, in_mid_noww2 TRUE, in_fmid_noww2 FALSE);
 ##   30 -> 20 (dispute 2); 30 -> 40 (dispute 3, fighting_at_ref: stage 1 only, its row is IV only); 30 -> 10 (dispute 6, pure WWII);
 ##   40 -> 20 (dispute 7, pure WWII: under --drop_ww2 state-year 40 loses y1)
-write_toy_cell <- function(dir, alts_edit = identity) {
+write_toy_cell <- function(dir, alts_edit = identity, events_edit = identity) {
   dir.create(dir, showWarnings = FALSE, recursive = TRUE)
   panel <- tibble(ccode = c(10L, 20L, 30L, 40L), year = 1990L, h = 3L, y1_mid = c(1L, 0L, 1L, 1L), y1_fmid = c(1L, 0L, 1L, 1L),
                   mon_prior_mids_h = c(2L, 0L, 1L, 3L), mon_peace_years_h = c(3L, 10L, 1L, 2L),
@@ -942,7 +944,7 @@ write_toy_cell <- function(dir, alts_edit = identity) {
                ## disputes, weight 1 each; 30 -> 20 and 30 -> 40 are coalition targets of dispute 2;3? no: separate disputes -> 1;
                ## 30 -> 10 (dispute 6) carries w_mid 0.5 to exercise a non-unit weight)
                dir_flipped = c(FALSE, FALSE, FALSE, FALSE, TRUE, FALSE), dir_source = c("sideA", "sideA", "sideA", "sideA", "cow_war_pair", "sideA"),
-               w_mid = c(1, 1, 1, 1, 0.5, 1), w_fmid = c(1, 1, 1, 1, 0.5, 1), w_fmidcow = 0, w_fmidub = c(1, 1, 1, 1, 0.5, 1), w_war = 0)
+               w_mid = c(1, 1, 1, 1, 0.5, 1), w_fmid = c(1, 1, 1, 1, 0.5, 1), w_fmidcow = 0, w_fmidub = c(1, 1, 1, 1, 0.5, 1), w_war = 0) |> events_edit()
   saveRDS(panel, file.path(dir, "stage1_panel_lag3.rds")); saveRDS(alts, file.path(dir, "alts_lag3_all.rds")); saveRDS(ev, file.path(dir, "events.rds"))
   man <- lapply(c("stage1_panel_lag3.rds", "alts_lag3_all.rds", "events.rds"), function(f) { o <- readRDS(file.path(dir, f))
     data.frame(file = f, nrow = nrow(o), ncol = ncol(o), sha256 = file_digest(file.path(dir, f)), note = "toy") })
@@ -1063,9 +1065,10 @@ test_that("P2-5: a rebuild between the manifest snapshot and the load is caught;
   ## the helper accepts a path or a data.frame
   expect_error(assert_matches_manifest(file.path(td, "events.rds"), snapshot), "snapshot")
   expect_equal(nrow(assert_matches_manifest(file.path(td, "events.rds"), file.path(td, "manifest.csv"))), 6L)
-  ## 02_fit_model.R passes its load-time snapshot into the assembly
+  ## 02_fit_model.R passes its load-time snapshot into the assembly (through assemble_cell_spec())
   src <- readLines(file.path(v2_root(), "R", "02_fit_model.R"))
   expect_true(any(grepl("manifest = manifest_at_load", src, fixed = TRUE)))
+  expect_true(any(grepl("manifest = manifest)", readLines(file.path(v2_root(), "R", "assemble_cell.R")), fixed = TRUE)))
   expect_true(any(grepl("assert_compiled_current(sm, stan_src", src, fixed = TRUE)))        # C3: the marker checks became the source / model_code identity check
 })
 
@@ -1374,4 +1377,69 @@ test_that("P3: the pair table takes the sides of the pair's EARLIEST year and re
   expect_equal(nrow(attr(pair, "side_changes")), 2L)                                               # both directions of the one pair
   expect_equal(nrow(attr(build_pair_table(toy_dd, toy_disp), "side_changes")), 0L)
   expect_error(build_pair_table(dd |> mutate(orig1 = ifelse(year == 1941L, 0L, orig1)), mk_disp(300L, 5L, 5L, 1939L, 9L, 2000)), "originator status")
+})
+
+## ---- switches of spec.R at assembly (2026-10-25): pairs = originators | joiners, changes = winsor -----------------------------------
+test_that("pairs switch: originators / joiners filter the events and recompute y1 from the kept events; all = unchanged", {
+  ## 10 -> 30 (dispute 4;5), 30 -> 10 (dispute 6) and 40 -> 20 (dispute 7) become joiner pairs
+  joiners <- function(e) e |> mutate(is_joiner_pair = dispnum %in% c(4L, 6L, 7L))
+  td <- write_toy_cell(tempfile("toycell"), events_edit = joiners)
+  A  <- quiet(assemble_cell("mid", 3L, "all", data_dir = td))
+  Ao <- quiet(assemble_cell("mid", 3L, "all", PAIRS = "originators", data_dir = td))
+  Aj <- quiet(assemble_cell("mid", 3L, "all", PAIRS = "joiners", data_dir = td))
+  expect_equal(A$sy$y1, c(1L, 0L, 1L, 1L)); expect_equal(nrow(A$ev), 5L); expect_equal(A$pairs, "all")
+  ## originators: 10 -> 20, 30 -> 20 usable, 30 -> 40 stage 1 only; state 40 (only a joiner event) gets y1 = 0
+  expect_equal(Ao$sy$y1, c(1L, 0L, 1L, 0L)); expect_equal(nrow(Ao$ev), 2L); expect_equal(Ao$n_fighting_at_ref, 1L)
+  chosen_o <- Ao$alts[Ao$ev$alt_row, ]; expect_setequal(paste(chosen_o$ccode1, chosen_o$ccode2), c("10 20", "30 20"))
+  ## joiners: 10 -> 30, 30 -> 10, 40 -> 20; state 20 never initiates
+  expect_equal(Aj$sy$y1, c(1L, 0L, 1L, 1L)); expect_equal(nrow(Aj$ev), 3L); expect_equal(Aj$n_fighting_at_ref, 0L)
+  chosen_j <- Aj$alts[Aj$ev$alt_row, ]; expect_setequal(paste(chosen_j$ccode1, chosen_j$ccode2), c("10 30", "30 10", "40 20"))
+  expect_true(any(Aj$ev$w == 0.5))                                             # the weights travel with the kept events
+  ## x_ref follows the recomputed y1 (mean X over the initiating state-years of the kept group)
+  expect_equal(unname(Ao$x_ref["dM_i"]), mean(c(0.5, 0.1))); expect_equal(unname(Aj$x_ref["dM_i"]), mean(c(0.5, 0.1, -0.4)))
+  ## alternatives, W / X / Z and the Z centring do not depend on the pairs switch
+  expect_equal(Ao$alts$dM_j_h, A$alts$dM_j_h); expect_equal(Ao$W_cols, A$W_cols); expect_equal(Ao$Z_cols, A$Z_cols)
+  ## the stage-1 data of both variants pass build_stan_data(), and a group that leaves no event stops
+  dat_o <- build_stan_data(Ao$sy, Ao$alts, Ao$ev, Ao$W_cols, Ao$X_cols, Ao$Z_cols, joint = 1L, x_ref = Ao$x_ref, allow_orphan_initiations = TRUE)
+  expect_equal(sum(dat_o$y1), 2L); expect_equal(dat_o$E, 2L)
+  td0 <- write_toy_cell(tempfile("toycell"))                                   # no joiner pairs at all
+  expect_error(quiet(assemble_cell("mid", 3L, "all", PAIRS = "joiners", data_dir = td0)), "leaves no event")
+  expect_error(quiet(assemble_cell("mid", 3L, "all", PAIRS = "both", data_dir = td0)))
+})
+
+test_that("changes switch: winsor clips dM_i, dR_i, dM_j_h, dRpr_j_h at the panel's 1st / 99th percentiles before the Z centring; raw = unchanged", {
+  td <- write_toy_cell(tempfile("toycell"))
+  A  <- quiet(assemble_cell("mid", 3L, "all", data_dir = td))
+  Aw <- quiet(assemble_cell("mid", 3L, "all", CHANGES = "winsor", data_dir = td))
+  panel <- readRDS(file.path(td, "stage1_panel_lag3.rds")); alts0 <- readRDS(file.path(td, "alts_lag3_all.rds"))
+  capM <- unname(quantile(panel$dM_h, c(0.01, 0.99))); capR <- unname(quantile(panel$dRpr_h, c(0.01, 0.99)))
+  expect_null(A$winsor); expect_equal(Aw$winsor$M, capM); expect_equal(Aw$winsor$R, capR); expect_equal(Aw$changes, "winsor")
+  ## initiator changes: the extremes are clipped, the interior values untouched
+  expect_equal(Aw$sy$dM_i, pmin(pmax(panel$dM_h, capM[1]), capM[2])); expect_equal(Aw$sy$dR_i, pmin(pmax(panel$dRpr_h, capR[1]), capR[2]))
+  expect_equal(sum(Aw$sy$dM_i != A$sy$dM_i), 2L)                              # 0.5 and -0.4 are the 4-point extremes
+  expect_true(all(Aw$sy$dM_i >= capM[1] & Aw$sy$dM_i <= capM[2]))
+  ## target changes: clipped at the SAME caps, then centred over the IV rows (so compare the de-centred values)
+  key <- function(a) paste(a$ccode1, a$ccode2)
+  raw_j <- alts0$dM_j_h[match(key(Aw$alts), key(alts0))]
+  clipped <- pmin(pmax(raw_j, capM[1]), capM[2])
+  expect_equal(Aw$alts$dM_j_h, clipped - mean(clipped[Aw$alts$in_iv == 1L]))
+  expect_true(any(raw_j < capM[1] | raw_j > capM[2]))                          # the toy alternatives do have values outside the caps
+  expect_lt(abs(mean(Aw$alts$dM_j_h[Aw$alts$in_iv == 1L])), 1e-12)
+  ## a target without a change value keeps 0 before the centring: its centred value is minus the IV-row mean of the clipped column
+  miss <- Aw$alts$dch_j_missing == 1L
+  expect_true(all(abs(Aw$alts$dM_j_h[miss] - (0 - mean(clipped[Aw$alts$in_iv == 1L]))) < 1e-12))
+  ## everything else is identical to the raw assembly
+  expect_equal(Aw$sy$y1, A$sy$y1); expect_equal(Aw$ev, A$ev); expect_equal(Aw$Z_cols, A$Z_cols); expect_equal(Aw$alts$contig_land, A$alts$contig_land)
+  expect_error(quiet(assemble_cell("mid", 3L, "all", CHANGES = "trim", data_dir = td)))
+})
+
+test_that("assemble_cell_spec() maps the switches of spec.R onto assemble_cell() and the main spec is the plain call", {
+  td <- write_toy_cell(tempfile("toycell"))
+  main <- parse_spec(character(0))
+  A <- quiet(assemble_cell("mid", 3L, "all", data_dir = td)); B <- quiet(assemble_cell_spec("mid", 3L, main, data_dir = td))
+  expect_equal(A$sy, B$sy); expect_equal(A$alts, B$alts); expect_equal(A$ev, B$ev); expect_equal(A$W_cols, B$W_cols); expect_equal(A$Z_cols, B$Z_cols)
+  C <- quiet(assemble_cell_spec("mid", 3L, parse_spec(c("--ww2=drop", "--weights=none", "--controls=full")), data_dir = td))
+  D <- quiet(assemble_cell("mid", 3L, "all", DROP_WW2 = TRUE, EVENT_WEIGHTS = "none", FULL_CONTROLS = TRUE, data_dir = td))
+  expect_equal(C$sy, D$sy); expect_equal(C$ev, D$ev); expect_equal(C$W_cols, D$W_cols); expect_equal(C$Z_cols, D$Z_cols)
+  expect_true(all(C$ev$w == 1)); expect_equal(C$full_controls, TRUE); expect_equal(C$drop_ww2, TRUE)
 })

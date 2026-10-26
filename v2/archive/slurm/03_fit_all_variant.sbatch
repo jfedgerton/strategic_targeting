@@ -1,4 +1,5 @@
 #!/bin/bash
+# ARCHIVED 2026-10-25 (deprecated earlier): superseded by slurm/02_main_grid.sbatch; its cell names collide with the main grid. Do not submit.
 # DEPRECATED (2026-10-25): superseded by 08_main_grid.sbatch. Its cell names (fit_mid_lag<h>_all_pr_<model>[_K2].rds) COLLIDE with the
 # main grid's, so a run of this script would overwrite main-grid fits. Kept for reference only; do not submit.
 #SBATCH --job-name=v2_fit_all

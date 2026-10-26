@@ -1,4 +1,5 @@
 #!/bin/bash
+# ARCHIVED 2026-10-25: replaced by slurm/03_post.sbatch (extraction + comparison per (sample, lag) group).
 #SBATCH --job-name=v2_extract
 #SBATCH --account=open
 #SBATCH --partition=basic   # the open partition no longer exists; --account=open bills the free READ credits

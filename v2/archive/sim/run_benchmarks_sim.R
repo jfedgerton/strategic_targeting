@@ -1,3 +1,4 @@
+## ARCHIVED 2026-10-25: replaced by sim/run_sim.R --task=benchmarks.
 ## ============================================================================
 ## run_benchmarks_sim.R -- exercise benchmarks.R (directed-dyad logit, old gap regression) on the
 ## simulated frames of the 30-state world. Separate from run_measurement_tests.R because the brms
@@ -9,8 +10,8 @@ CHAINS <- if (length(args) >= 1) as.integer(args[1]) else 2L
 ITER   <- if (length(args) >= 2) as.integer(args[2]) else 500L
 WARMUP <- if (length(args) >= 3) as.integer(args[3]) else 250L
 this_file <- sub("^--file=", "", grep("^--file=", commandArgs(FALSE), value = TRUE))
-sim_dir <- normalizePath(dirname(this_file)); Sys.setenv(V2_ROOT = normalizePath(file.path(sim_dir, "..")))
-source(file.path(sim_dir, "..", "R", "00_helpers.R")); source(file.path(sim_dir, "..", "R", "benchmarks.R")); source(file.path(sim_dir, "simulate.R"))
+sim_dir <- normalizePath(dirname(this_file)); Sys.setenv(V2_ROOT = normalizePath(file.path(sim_dir, "..", "..")))
+source(file.path(sim_dir, "..", "..", "R", "spec.R")); source(file.path(sim_dir, "..", "..", "R", "helpers_data.R")); source(file.path(sim_dir, "..", "..", "R", "helpers_model.R")); source(file.path(sim_dir, "..", "R", "benchmarks.R")); source(file.path(sim_dir, "..", "..", "sim", "simulate.R"))
 log_open("run_benchmarks_sim"); set.seed(V2_SEED)
 res_dir <- file.path(sim_dir, "results")
 sim <- simulate_current("M1b", S = 30L, Tt = 12L, seed = V2_SEED)          # the current-model world (2026-10-25, B5)

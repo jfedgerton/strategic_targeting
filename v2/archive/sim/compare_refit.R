@@ -1,3 +1,4 @@
+## ARCHIVED 2026-10-25: one-off check of the reduce_sum refit against the serial fit (2026-10-22); not part of the pipeline.
 ## ============================================================================
 ## compare_refit.R -- does a refit with the reduce_sum programs reproduce an earlier fit within MC error?
 ## Usage: Rscript v2/sim/compare_refit.R <old_fit.rds> <new_fit.rds> [out.csv]

@@ -1,6 +1,6 @@
 ## ============================================================================
 ## write_sim_report.R -- assemble v2/sim/SIM_REPORT.md from the result CSVs written by
-## run_sim.R, run_sim_1d.R and run_measurement_tests.R. Numbers are read, never typed.
+## run_sim.R (tasks main, 1d, measurement, benchmarks). Numbers are read, never typed.
 ## Usage: Rscript v2/sim/write_sim_report.R
 ## ============================================================================
 suppressPackageStartupMessages(library(dplyr))
@@ -71,7 +71,7 @@ if (!is.null(pb)) {
   add("## Gradient-time profile and within-chain parallelism (reduce_sum)", "",
       "Breakdown of one gradient evaluation on the 40-state cell (N1 = 1000 state-years, N2 = 39,000 alternative rows), measured with `log_prob` on the full data, on the same data with the events removed, and with `prior_only = 1`. Stan `profile()` sections (priors, stage2_utility, stage1_iv, stage2_events, stage1_bernoulli) are in both programs but rstan cannot read them; CmdStan would.", "",
       md_table(pb |> select(model, ms_full, ms_stage1_and_iv_utilities, ms_stage2_events, ms_priors_and_transforms, share_stage1_iv_utilities, share_stage2_events, share_priors), 2), "")
-  if (!is.null(tt)) add("Sampling time for 1 chain, fixed seed, by `threads_per_chain` (reduce_sum_static over state-years; grainsize = N1 for 1 thread, about N1 / (4 threads) otherwise). This container has 2 cores, so 4 threads is oversubscribed; the real speed-up curve must be read from the Roar pilot (04_pilot.sbatch with THREADS_PER_CHAIN = 1 vs 8).", "",
+  if (!is.null(tt)) add("Sampling time for 1 chain, fixed seed, by `threads_per_chain` (reduce_sum_static over state-years; grainsize = N1 for 1 thread, about N1 / (4 threads) otherwise). This container has 2 cores, so 4 threads is oversubscribed; the real speed-up curve must be read from a Roar pilot (02_fit_model.R --pilot=TRUE with --threads_per_chain 1 vs 8).", "",
                         md_table(tt |> select(model, threads_per_chain, grainsize, cores_available, oversubscribed, iterations, elapsed_s, s_per_iteration, ms_per_gradient), 2), "")
   if (!is.null(rf)) add(sprintf("Refit of M1b on M1b data with the reduce_sum program (threads = 2) against the earlier serial fit: %d parameters, max |z| = %.2f, share |z| < 2 = %.2f, max |mean difference| / posterior SD = %.2f (z uses MC standard errors sd / sqrt(n_eff) of both runs).", nrow(rf), max(abs(rf$z)), mean(abs(rf$z) < 2), max(rf$abs_diff_in_sd)), "")
 }
@@ -81,7 +81,7 @@ add("## What failed or is fragile", "",
     "* Σ is under-recovered in the joint fits on M1b data (Σ[1,2] = 0.19 vs 0.32, Σ[1,1] = 0.54 vs 0.64, both outside the 90% interval); on M2b data both are covered. The softmax identifies Σ⁻¹ jointly with the target effects b_j, so part of the targeting breadth can be absorbed there.",
     "* In the 1-D world the two-dimensional M1b fit matches M1m on LOO but its material-axis classification is worse (0.60 vs 0.93) because a_i2 and ρ are estimated from a dimension that carries no signal; M1r (wrong axis) loses 65 ELPD. The one-dimensional models therefore need the model comparison, not the typology alone, to tell which axis matters.",
     "* The permutation test's permuted advantage is strongly negative (−80): shuffling dR within choice sets hurts the joint model far more than the independent one, so the observed +14.8 advantage is well outside the permutation distribution (p = 0 of 20), but the statistic's sign under the null is not centred on zero and should be read as a calibration, not a p-value in the usual sense.",
-    "* The brms benchmark fits on simulated data are produced by `run_benchmarks_sim.R` in a separate R session because the brms compile was OOM-killed inside the measurement-test driver; see `benchmarks_sim.csv` if present.",
+    "* The brms benchmark fits on simulated data are produced by `run_sim.R --task=benchmarks` in a separate R session because the brms compile was OOM-killed inside the measurement-test driver; see `benchmarks_sim.csv` if present.",
     "* Ω is recovered as the covariance of a type mixture; its coverage reflects the MVN approximation to planted clusters.",
     "* The AME u'v is identified only up to the U/V scale fixed by the N(0,1) priors and the rotation fixed by the anchors; read the u'v statistics, not U or V.",
     "* The 'a' model on joint data: whether it loses on LOO and misclassifies depends on how far the planted correlations push the data; the numbers above are from one seed.", "")

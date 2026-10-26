@@ -23,12 +23,12 @@
 ## All refits use seed 123. Every build_stan_data() call passes allow_orphan_initiations = TRUE,
 ## matching 02_fit_model.R: a state-year can have y1 = 1 with no usable stage-2 event when its
 ## only target lacks positions at t-1. Functions take the sy / alts / ev frames used by build_stan_data()
-## so they run unchanged on simulated data (v2/sim/run_measurement_tests.R) and on the real
+## so they run unchanged on simulated data (v2/sim/run_sim.R --task=measurement) and on the real
 ## frames assembled by assemble_cell().
 ## ============================================================================
 suppressPackageStartupMessages({ library(rstan); library(loo); library(dplyr) })
 .mt_dir <- tryCatch(dirname(sub("^--file=", "", grep("^--file=", commandArgs(FALSE), value = TRUE))), error = function(e) ".")
-if (!exists("build_stan_data")) source(file.path(.mt_dir, "00_helpers.R"))
+if (!exists("build_stan_data")) { source(file.path(.mt_dir, "spec.R")); source(file.path(.mt_dir, "helpers_data.R")); source(file.path(.mt_dir, "helpers_model.R")) }
 if (!exists("classify_types")) source(file.path(.mt_dir, "typology.R"))
 EXCL_PARS <- c("z_re", "z_b", "V_raw", "U_free", "L_Om_joint", "L_Om", "re")
 
@@ -437,7 +437,7 @@ assert_fit_matches_cell <- function(obj, dat, W_cols, X_cols, Z_cols, what = "fi
 }
 
 ## ---- CLI for fitted real-data cells (LOO and misclassification only; the refit-based tests
-## are run through v2/slurm/06_measurement.sbatch which calls run_measurement_real.R) -----------------------------
+## are run through v2/slurm/04_robustness.sbatch, preset perm_error, which calls 05_robustness.R) -------------------------
 ## Usage: Rscript v2/R/measurement_tests.R --fit_a=<fit_*a.rds> --fit_b=<fit_*b.rds> [--r0=0.5] [--allow_stale=FALSE]
 if (sys.nframe() == 0 && length(grep("^--fit_a=", commandArgs(TRUE))) == 1) {
   args <- commandArgs(TRUE)

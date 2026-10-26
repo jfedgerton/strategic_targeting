@@ -1,4 +1,5 @@
 #!/bin/bash
+# ARCHIVED 2026-10-25: the brms benchmarks are an archived option (archive/R/benchmarks.R). Do not submit.
 #SBATCH --job-name=v2_bench
 #SBATCH --account=open
 #SBATCH --partition=basic   # the open partition no longer exists; --account=open bills the free READ credits

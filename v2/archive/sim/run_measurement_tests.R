@@ -1,3 +1,4 @@
+## ARCHIVED 2026-10-25: replaced by sim/run_sim.R --task=measurement.
 ## ============================================================================
 ## run_measurement_tests.R -- exercise measurement_tests.R and benchmarks.R on SIMULATED data
 ##
@@ -14,10 +15,10 @@ CHAINS <- if (length(args) >= 1) as.integer(args[1]) else 2L
 ITER   <- if (length(args) >= 2) as.integer(args[2]) else 500L
 WARMUP <- if (length(args) >= 3) as.integer(args[3]) else 250L
 this_file <- sub("^--file=", "", grep("^--file=", commandArgs(FALSE), value = TRUE))
-sim_dir <- normalizePath(dirname(this_file)); Sys.setenv(V2_ROOT = normalizePath(file.path(sim_dir, "..")))
-source(file.path(sim_dir, "..", "R", "00_helpers.R")); source(file.path(sim_dir, "..", "R", "typology.R"))
-source(file.path(sim_dir, "..", "R", "measurement_tests.R")); source(file.path(sim_dir, "..", "R", "benchmarks.R"))
-source(file.path(sim_dir, "simulate.R"))
+sim_dir <- normalizePath(dirname(this_file)); Sys.setenv(V2_ROOT = normalizePath(file.path(sim_dir, "..", "..")))
+source(file.path(sim_dir, "..", "..", "R", "spec.R")); source(file.path(sim_dir, "..", "..", "R", "helpers_data.R")); source(file.path(sim_dir, "..", "..", "R", "helpers_model.R")); source(file.path(sim_dir, "..", "..", "R", "typology.R"))
+source(file.path(sim_dir, "..", "..", "R", "measurement_tests.R")); source(file.path(sim_dir, "..", "R", "benchmarks.R"))
+source(file.path(sim_dir, "..", "..", "sim", "simulate.R"))
 log_open("run_measurement_tests"); set.seed(V2_SEED)
 rstan_options(auto_write = FALSE); options(mc.cores = min(CHAINS, parallel::detectCores()))
 res_dir <- file.path(sim_dir, "results"); dir.create(res_dir, showWarnings = FALSE)

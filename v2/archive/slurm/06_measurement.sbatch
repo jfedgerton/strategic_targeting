@@ -1,4 +1,5 @@
 #!/bin/bash
+# ARCHIVED 2026-10-25: replaced by slurm/04_robustness.sbatch with PRESET=perm_error (05_robustness.R).
 #SBATCH --job-name=v2_measure
 #SBATCH --account=open
 #SBATCH --partition=basic   # the open partition no longer exists; --account=open bills the free READ credits

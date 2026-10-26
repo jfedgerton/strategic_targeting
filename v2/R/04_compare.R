@@ -1,9 +1,9 @@
 ## ============================================================================
-## compare_models.R -- cross-model comparison for one (sample, lag) cell group of the main grid
+## 04_compare.R -- cross-model comparison for one (sample, lag) cell group: LOO, joint vs independent, M1 vs M2
 ##
-## Usage: Rscript v2/R/compare_models.R --sample=mid --lag=5 [--variant=all] [--centrality=pr] [--K=2] [--r0=0.5] [--allow_stale=FALSE]
-##                                       [--event_weights=dispute|none] [--direction=cowwar|sideA]
-## Loads the eight fits fit_<sample>_lag<h>_<variant>_<cent>_{M1m,M1r,M1a,M1b,M2m,M2r,M2a,M2b}[_K<K>][_w1][_sideA].rds
+## Usage: Rscript v2/R/04_compare.R --sample=mid --lag=5 [switches of spec.R] [--r0=0.5] [--allow_stale=FALSE]
+## Loads the eight fits fit_<sample>_lag<h>_all_pr_{M1m,M1r,M1a,M1b,M2m,M2r,M2a,M2b}[_K<K>]<switch suffix>.rds (the switches name
+## the variant group, e.g. --ww2=drop compares the _noww2 fits among themselves)
 ## (missing or UNREADABLE fits are skipped and listed; pilot fits are refused; STALE fits only with --allow_stale) and writes:
 ##   compare_loo_<group>.csv        per model: LOO ELPD of (i) stage 2 (target choice), (ii) stage 1 CONDITIONAL (the Bernoulli
 ##                                  term alone, the state-year's events staying in) and (iii) the JOINT state-year LOO
@@ -20,25 +20,24 @@
 ## ============================================================================
 suppressPackageStartupMessages({ library(rstan); library(loo); library(dplyr) })
 this_file <- sub("^--file=", "", grep("^--file=", commandArgs(FALSE), value = TRUE))
-source(file.path(dirname(this_file), "00_helpers.R")); source(file.path(dirname(this_file), "typology.R"))
-source(file.path(dirname(this_file), "measurement_tests.R"))
-Sys.setenv(V2_ROOT = normalizePath(file.path(dirname(this_file), "..")))
+R_DIR <- dirname(this_file)
+source(file.path(R_DIR, "spec.R")); source(file.path(R_DIR, "helpers_data.R")); source(file.path(R_DIR, "helpers_model.R"))
+source(file.path(R_DIR, "typology.R")); source(file.path(R_DIR, "measurement_tests.R"))
+Sys.setenv(V2_ROOT = normalizePath(file.path(R_DIR, "..")))
 args <- commandArgs(trailingOnly = TRUE)
-get_arg <- function(name, default) { h <- grep(paste0("^--", name, "="), args, value = TRUE); if (!length(h)) return(default)
-  v <- sub(paste0("^--", name, "="), "", h[1]); if (is.logical(default)) as.logical(v) else if (is.numeric(default)) as.numeric(v) else v }
-SAMPLE <- get_arg("sample", "mid"); LAG <- as.integer(get_arg("lag", 5)); VARIANT <- get_arg("variant", "all")
-CENT <- get_arg("centrality", "pr"); K <- as.integer(get_arg("K", 2)); R0 <- get_arg("r0", 0.5); ALLOW_STALE <- get_arg("allow_stale", FALSE)
-EVENT_WEIGHTS <- get_arg("event_weights", "dispute"); DIRECTION <- get_arg("direction", "cowwar")
-stopifnot(EVENT_WEIGHTS %in% c("dispute", "none"), DIRECTION %in% c("cowwar", "sideA"))
-opt_suffix <- paste0(if (EVENT_WEIGHTS == "none") "_w1" else "", if (DIRECTION == "sideA") "_sideA" else "")
-group <- sprintf("%s_lag%d_%s_%s%s", SAMPLE, LAG, VARIANT, CENT, opt_suffix)
+SAMPLE <- get_arg(args, "sample", "mid"); LAG <- as.integer(get_arg(args, "lag", 5))
+stopifnot(SAMPLE %in% ALL_SAMPLES, LAG %in% LAGS)
+spec <- parse_spec(args); R0 <- get_arg(args, "r0", R0); ALLOW_STALE <- get_arg(args, "allow_stale", FALSE)
+for (old in c("variant", "centrality", "K", "event_weights")) if (length(grep(paste0("^--", old, "="), args)))
+  stop(sprintf("--%s is no longer an option of 04_compare.R; use the switches of spec.R (--ame_K, --weights, ...)", old))
+group <- sprintf("%s_lag%d_%s_%s%s", SAMPLE, LAG, VARIANT, CENTRALITY, spec_suffix(spec))
 log_open(paste0("compare_", group))
+logf("group %s; spec: %s", group, spec_string(spec))
 out_dir <- file.path(v2_root(), "output")
-manifest_path <- file.path(v2_root(), if (DIRECTION == "sideA") "data_sideA" else "data", "manifest.csv")
-MODELS <- c("M1m", "M1r", "M1a", "M1b", "M2m", "M2r", "M2a", "M2b")
+manifest_path <- file.path(spec_data_dir(spec, v2_root()), "manifest.csv")
 fits <- list(); loos <- list(); rows <- list()
 for (m in MODELS) {
-  f <- file.path(out_dir, sprintf("fit_%s_lag%d_%s_%s_%s%s%s.rds", SAMPLE, LAG, VARIANT, CENT, m, if (grepl("^M2", m)) sprintf("_K%d", K) else "", opt_suffix))
+  f <- file.path(out_dir, paste0("fit_", cell_name(SAMPLE, LAG, m, spec), ".rds"))
   if (!file.exists(f) && ALLOW_STALE && file.exists(sub("\\.rds$", "_STALE.rds", f))) f <- sub("\\.rds$", "_STALE.rds", f)
   if (!file.exists(f)) { logf("missing fit: %s", basename(f)); next }
   obj <- read_fit_or_null(f)                       # C2: an unreadable fit is logged and treated as missing
@@ -135,4 +134,4 @@ if (length(m1m2)) {
   write.csv(bind_rows(m1m2), file.path(out_dir, paste0("compare_m1m2_", group, ".csv")), row.names = FALSE)
   write.csv(bind_rows(m1m2_state), file.path(out_dir, paste0("compare_m1m2_states_", group, ".csv")), row.names = FALSE)
 }
-logf("compare_models done for %s", group)
+logf("04_compare done for %s", group)

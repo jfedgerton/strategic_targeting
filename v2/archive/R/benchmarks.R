@@ -1,3 +1,4 @@
+## ARCHIVED 2026-10-25: archived option (brms directed-dyad logit and the old gap regression); no production script uses it. sim/run_sim.R --task=benchmarks still sources its assembly functions.
 ## ============================================================================
 ## benchmarks.R -- two comparison models, built on the SAME v2 data files and timing
 ##
@@ -22,8 +23,8 @@ suppressPackageStartupMessages({ library(brms); library(dplyr) })
 this_file <- sub("^--file=", "", grep("^--file=", commandArgs(FALSE), value = TRUE))
 ## when sourced from another script (v2/sim/run_measurement_tests.R) the helpers are already loaded
 if (!exists("build_stan_data")) {
-  source(file.path(dirname(this_file), "00_helpers.R"))
-  Sys.setenv(V2_ROOT = normalizePath(file.path(dirname(this_file), "..")))
+  source(file.path(dirname(this_file), "..", "..", "R", "spec.R")); source(file.path(dirname(this_file), "..", "..", "R", "helpers_data.R")); source(file.path(dirname(this_file), "..", "..", "R", "helpers_model.R"))
+  Sys.setenv(V2_ROOT = normalizePath(file.path(dirname(this_file), "..", "..")))
 }
 
 ## ---- assembly functions (also used by the sim test) -------------------------------------------------
@@ -63,7 +64,7 @@ gap_formula <- function(X_cols) {
 ## ---- CLI -------------------------------------------------------------------------------------------------
 if (sys.nframe() == 0 && length(grep("^--sample=", commandArgs(TRUE))) == 1) {
   args <- commandArgs(TRUE)
-  source(file.path(dirname(this_file), "assemble_cell.R"))   # z_columns() and x_controls(): the model's own main control lists
+  source(file.path(dirname(this_file), "..", "..", "R", "assemble_cell.R"))   # z_columns() and x_controls(): the model's own main control lists
   get_arg <- function(name, default) { h <- grep(paste0("^--", name, "="), args, value = TRUE); if (!length(h)) return(default)
     v <- sub(paste0("^--", name, "="), "", h[1]); if (is.logical(default)) as.logical(v) else if (is.numeric(default)) as.numeric(v) else v }
   SAMPLE <- get_arg("sample", "mid"); LAG <- as.integer(get_arg("lag", 5)); VARIANT <- get_arg("variant", "polrel"); CENT <- get_arg("centrality", "pr")

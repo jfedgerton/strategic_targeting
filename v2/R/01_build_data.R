@@ -22,7 +22,7 @@
 ##                                 target_has_pos_tm1, sample flags in_mid / in_fmid / in_fmidcow / in_fmidub / in_war
 ##                                 (+ fatal_source), and in_*_noww2 (the sample flags of the non-WWII disputes only,
 ##                                 used by --drop_ww2; Codex review P2-3)
-##   changes_lag{h}.rds            ONE state-level change table per lag (build_change_table() in 00_helpers.R):
+##   changes_lag{h}.rds            ONE state-level change table per lag (build_change_table() in helpers_data.R):
 ##                                 raw change dM_raw_h / dRpr_raw_h = level(t-1) - level(t-1-h), and the transformed
 ##                                 change dM_h / dRpr_h = (raw - year mean) / one pooled SD per lag. Feeds BOTH the
 ##                                 initiator change in stage 1 and the target change in stage 2.
@@ -64,7 +64,7 @@
 ## January of t) and drops j when i and j are in a different dispute active at that date that started before it.
 ## Joiner pairs entering a dispute in its first year have an unknown entry month, [dispute start, December] (P1-2).
 ## War is coded at the pair level (dispute war-level AND at least one participant at hostility level 5), and same-year
-## events of one (initiator, target) pair from different disputes collapse into one event (helpers in 00_helpers.R).
+## events of one (initiator, target) pair from different disputes collapse into one event (helpers in helpers_data.R).
 ##
 ## Conflict-history controls (new in v2), all relative to the change window [t-1-h, t-1]:
 ##   (a) mon_prior_mids_h : # distinct MIDs the state was a participant in (either side, joiners included
@@ -82,18 +82,19 @@ suppressPackageStartupMessages({
 })
 this_file <- sub("^--file=", "", grep("^--file=", commandArgs(FALSE), value = TRUE))
 if (length(this_file) == 0) this_file <- "v2/R/01_build_data.R"
-source(file.path(dirname(this_file), "00_helpers.R"))
+source(file.path(dirname(this_file), "spec.R")); source(file.path(dirname(this_file), "helpers_data.R"))
 Sys.setenv(V2_ROOT = normalizePath(file.path(dirname(this_file), "..")))
 set.seed(V2_SEED)
 ## ---- initiator direction (PI decision 2026-10-25, D1; README "Initiator direction") -------------------------------------
 ## DIRECTION = "cowwar" (main): in war-level disputes linked to a COW inter-state war the initiator is the state on COW's
 ## war-initiating side (pair-level dyad-year match first, dispute-level side mapping for the unmatched pairs); everything else
-## keeps the Side A rule. DIRECTION = "sideA" (appendix rebuild of the pre-2026-10-25 coding): Side A everywhere. Selected by
-## the environment variable V2_DIRECTION (e.g. `V2_DIRECTION=sideA Rscript v2/R/01_build_data.R`). The two codings write to
-## SEPARATE directories, v2/data (cowwar) and v2/data_sideA (sideA), each with its own manifest and build_log, so they never
-## overwrite each other; 02_fit_model.R --direction=sideA reads the second one and suffixes its cells with _sideA.
-DIRECTION <- Sys.getenv("V2_DIRECTION", unset = "cowwar")
-if (!DIRECTION %in% c("cowwar", "sideA")) stop("V2_DIRECTION must be 'cowwar' (main) or 'sideA' (appendix); got ", DIRECTION)
+## keeps the Side A rule. DIRECTION = "sideA" (appendix rebuild of the pre-2026-10-25 coding): Side A everywhere. Selected by the
+## `direction` switch of spec.R: `Rscript v2/R/01_build_data.R --direction=sideA` (the environment variable V2_DIRECTION=sideA
+## still works). The two codings write to SEPARATE directories, v2/data (cowwar) and v2/data_sideA (sideA), each with its own
+## manifest and build_log, so they never overwrite each other; 02_fit_model.R --direction=sideA reads the second one and
+## suffixes its cells with _sideA. The direction is the only switch the build takes; every other switch acts at assembly.
+DIRECTION <- parse_spec(c(commandArgs(trailingOnly = TRUE), paste0("--direction=", Sys.getenv("V2_DIRECTION", unset = "cowwar"))))$direction
+if (!DIRECTION %in% SPEC_CHOICES$direction) stop("--direction / V2_DIRECTION must be 'cowwar' (main) or 'sideA' (appendix); got ", DIRECTION)
 log_open(paste0("01_build_data", if (DIRECTION == "sideA") "_sideA" else ""))
 out_dir <- file.path(v2_root(), if (DIRECTION == "sideA") "data_sideA" else "data"); dir.create(out_dir, showWarnings = FALSE)
 build_log <- file.path(out_dir, "build_log.txt"); cat("", file = build_log)
@@ -238,7 +239,7 @@ blog("pair table: %d directed dispute pairs; pairs whose sidea differs across th
 events <- pair |> filter(sidea1 == 1L, sidea2 == 0L)
 if (!INCLUDE_JOINERS) events <- events |> filter(orig1 == 1L, orig2 == 1L)
 events <- events |> rename(initiator = ccode1, target = ccode2)
-## ---- initiator direction for war-level disputes (PI decision 2026-10-25, D1; helpers and the rule in 00_helpers.R) -----------
+## ---- initiator direction for war-level disputes (PI decision 2026-10-25, D1; helpers and the rule in helpers_data.R) -----------
 ## COW-MID Side A = first codable action, not the aggressor (dispute 258: Side A = Poland and the Allies). For disputes at
 ## hostility level 5 that link to a COW inter-state war the direction follows COW's war-initiating side: pair-level dyad-year
 ## match (year t or t + WAR_DIR_WINDOW), then the dispute-level side mapping for the unmatched pairs of a linked dispute; ambiguous
@@ -319,7 +320,7 @@ stopifnot(all(events$initiator != events$target), !anyNA(events$war), !anyNA(eve
 blog("war coding: dispute-level war events %d; pair-level (dispute war AND at least one participant hostlev 5) %d; dropped by the pair rule %d (joiner pairs %d, originator pairs %d)",
      sum(events$war_disp), sum(events$war), sum(events$war_disp & !events$war), sum(events$war_disp & !events$war & events$is_joiner_pair),
      sum(events$war_disp & !events$war & !events$is_joiner_pair))
-## ---- ongoing-dispute rule, month resolution (PI decision 2026-10-24; helpers and the date conventions in 00_helpers.R) --
+## ---- ongoing-dispute rule, month resolution (PI decision 2026-10-24; helpers and the date conventions in helpers_data.R) --
 ## An event is an escalation when i and j are both participants in a DIFFERENT dispute that started before the event's
 ## dispute start date and had not ended by it, at month resolution. peacesciencer 1.2.0 gives dispute-level start month
 ## and year (cow_mid_disps styear / stmon) and durations (mindur / maxdur) but no end month and no participant dates
@@ -420,7 +421,7 @@ for (r in seq_len(nrow(ex2))) cat("  newly an escalation:     ", show_ev(ex2[r, 
 ##                    of t; j leaves when i and j are in a different dispute active at that date that started before it.
 ##                    Unchanged from the previous build. Only information up to the reference date enters.
 ## For a non-initiating state-year the two sets are identical. The alternatives files keep ONE row block per state-year,
-## the UNION of both sets, with the 0/1 flags in_iv and in_s2 (choice_set_flags() in 00_helpers.R); the Stan programs take
+## the UNION of both sets, with the 0/1 flags in_iv and in_s2 (choice_set_flags() in helpers_data.R); the Stan programs take
 ## IV[n] over the in_iv rows and the stage-2 softmax over the in_s2 rows. The year rule's keys are kept to count the change.
 ## Because the stage-2 set is fixed at the reference date, a later event of the same state-year whose pair was still
 ## fighting at the reference date (their dispute ended between the reference date and the event) has no stage-2 row (it
@@ -467,7 +468,7 @@ far_np <- ev_nopart |> filter(!escalation) |> semi_join(af_np |> rename(initiato
 blog("participant dates (D5): fighting_at_ref events with dispute-level bounds / with participant dates %d / %d; already-fighting (i, j, t) keys at the reference date %d / %d, at January %d / %d",
      nrow(far_np), nrow(far), nrow(af_np), nrow(af_s2), nrow(already_fighting_keys_month(pdi_nopart, NULL) |> filter(drop) |> distinct(ccode1, ccode2, year)), nrow(af_iv))
 rm(pdi_nopart, ev_nopart, cmp_nopart, ref_np, af_np, far_np, ex_p)
-## ---- WWII disputes (appendix option --drop_ww2; rule and list in 00_helpers.R) ------------------------------------
+## ---- WWII disputes (switch --ww2=drop; rule and list in helpers_data.R) ------------------------------------
 ww2_tbl <- ww2_disputes(disp_full, dd, cow_war_inter)
 events <- events |> mutate(is_ww2 = dispnum %in% WW2_DISPNUMS)
 blog("WWII disputes (is_ww2; appendix option --drop_ww2): %s", paste(sort(WW2_DISPNUMS), collapse = ", "))
@@ -484,7 +485,7 @@ for (r in seq_len(nrow(ww2_tbl)))
 ## COW code. fmidcow = the original COW-only coding (missing -> not fatal), kept for the appendix.
 mic_path <- file.path(v2_root(), "data_raw", "mic-conf-1.0.csv")
 stopifnot(file.exists(mic_path))
-if (file_digest(mic_path) != MIC_CONF_SHA256) stop("data_raw/mic-conf-1.0.csv sha256 does not match MIC_CONF_SHA256 in 00_helpers.R")
+if (file_digest(mic_path) != MIC_CONF_SHA256) stop("data_raw/mic-conf-1.0.csv sha256 does not match MIC_CONF_SHA256 in helpers_data.R")
 mic <- read.csv(mic_path) |> transmute(dispnum = as.integer(micnum), mic_fatalmin = as.integer(fatalmin))
 assert_no_dup_keys(mic, "dispnum", "MIC confrontations"); assert_no_na(mic, "mic_fatalmin", "MIC confrontations")
 stopifnot(nrow(mic) == 1881L, all(mic$mic_fatalmin >= 0))
@@ -765,7 +766,7 @@ pos_k <- pos |> select(ccode, year, M, R_pr, R_eig)
 ## within-year sum of squares SS = sum((v - mean(v))^2), sum over ordered pairs i != j of (v_i - v_j)^2 = 2 n SS, and
 ## there are n (n - 1) pairs, so the pooled variance is sum_y(2 n_y SS_y) / sum_y(n_y (n_y - 1)).
 ## One unit of a scaled gap = GAP_SCALE log points, i.e. a power ratio of exp(GAP_SCALE).
-## (gap_scale() is in 00_helpers.R so it can be unit-tested.)
+## (gap_scale() is in helpers_data.R so it can be unit-tested.)
 GAP_SCALE_M <- gap_scale(pos$M, pos$year)
 GAP_SCALE_R <- gap_scale(pos$R_pr, pos$year)
 stopifnot(is.finite(GAP_SCALE_M), GAP_SCALE_M > 0, is.finite(GAP_SCALE_R), GAP_SCALE_R > 0)

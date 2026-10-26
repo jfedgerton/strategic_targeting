@@ -1,3 +1,4 @@
+## ARCHIVED 2026-10-25: one-off gradient profile and thread timing (2026-10-22); not part of the pipeline.
 ## ============================================================================
 ## profile_timing.R -- where the gradient time goes, and the reduce_sum speed-up
 ##
@@ -16,9 +17,9 @@ args <- commandArgs(trailingOnly = TRUE)
 N_EVAL <- if (length(args) >= 1) as.integer(args[1]) else 20L
 ITER_T <- if (length(args) >= 2) as.integer(args[2]) else 40L
 this_file <- sub("^--file=", "", grep("^--file=", commandArgs(FALSE), value = TRUE))
-sim_dir <- normalizePath(dirname(this_file)); Sys.setenv(V2_ROOT = normalizePath(file.path(sim_dir, "..")))
-source(file.path(sim_dir, "..", "R", "00_helpers.R")); source(file.path(sim_dir, "simulate.R"))
-source(file.path(sim_dir, "..", "tests", "testthat", "helper-fixed-draw.R"))
+sim_dir <- normalizePath(dirname(this_file)); Sys.setenv(V2_ROOT = normalizePath(file.path(sim_dir, "..", "..")))
+source(file.path(sim_dir, "..", "..", "R", "spec.R")); source(file.path(sim_dir, "..", "..", "R", "helpers_data.R")); source(file.path(sim_dir, "..", "..", "R", "helpers_model.R")); source(file.path(sim_dir, "..", "..", "sim", "simulate.R"))
+source(file.path(sim_dir, "..", "..", "tests", "testthat", "helper-fixed-draw.R"))
 log_open("profile_timing"); set.seed(V2_SEED); rstan_options(auto_write = FALSE)
 res_dir <- file.path(sim_dir, "results")
 models <- list(m1_latent_additive = readRDS(file.path(v2_root(), "stan", "build", "m1_latent_additive.rds")),

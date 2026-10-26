@@ -23,7 +23,7 @@
 ## the realised sample covariance of (c_i, a_i1, a_i2) across states.
 ## ============================================================================
 ## family "M1m": one-dimensional truth -- the stage-2 utility uses only dM with scalar mu_i = X beta[,1] + a_i1
-## and scalar variance sigma_x[1]^2 (beta[,2], a_i2, rho, dR play no role); used by run_sim_1d.R.
+## and scalar variance sigma_x[1]^2 (beta[,2], a_i2, rho, dR play no role); used by run_sim.R --task=1d.
 simulate_targeting <- function(family = c("M1b", "M2b", "M1m"), S = 40L, Tt = 25L, K = 2L,
                                seed = 123L, target_rate = 0.45, mu0 = c(0, 0)) {
   family <- match.arg(family)

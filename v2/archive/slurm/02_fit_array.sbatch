@@ -1,4 +1,5 @@
 #!/bin/bash
+# ARCHIVED 2026-10-25: the politically-relevant choice set (variant=polrel) is an archived option; robustness refits are slurm/04_robustness.sbatch. Do not submit.
 #SBATCH --job-name=v2_fit
 #SBATCH --account=open
 #SBATCH --partition=basic   # the open partition no longer exists; --account=open bills the free READ credits

@@ -2,7 +2,7 @@
 ## Builds tiny Stan data sets and a fixed "natural" parameter draw translated into Stan inits.
 suppressPackageStartupMessages(library(rstan))
 root <- Sys.getenv("V2_ROOT"); if (root == "") root <- normalizePath(file.path(getwd(), "v2"), mustWork = FALSE)
-source(file.path(root, "R", "00_helpers.R")); source(file.path(root, "sim", "simulate.R"))
+source(file.path(root, "R", "spec.R")); source(file.path(root, "R", "helpers_data.R")); source(file.path(root, "R", "helpers_model.R")); source(file.path(root, "sim", "simulate.R"))
 
 skip_if_no_build <- function(m) {
   p <- file.path(root, "stan", "build", paste0(m, ".rds"))

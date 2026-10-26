@@ -1,4 +1,5 @@
 #!/bin/bash
+# ARCHIVED 2026-10-25: timing pilots are run by hand with 02_fit_model.R --pilot=TRUE (README "Quick start"). Tasks 3 and 4 use archived options.
 #SBATCH --job-name=v2_pilot
 #SBATCH --account=open
 #SBATCH --partition=basic   # the open partition no longer exists; --account=open bills the free READ credits

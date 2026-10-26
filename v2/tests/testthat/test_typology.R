@@ -1,7 +1,7 @@
 ## Shape and logic tests for typology.R (audit F1: never let an array slice collapse to a scalar)
 suppressPackageStartupMessages({ library(testthat) })
 root <- Sys.getenv("V2_ROOT"); if (root == "") root <- normalizePath(file.path(getwd(), "v2"), mustWork = FALSE)
-source(file.path(root, "R", "00_helpers.R")); source(file.path(root, "R", "typology.R"))
+source(file.path(root, "R", "spec.R")); source(file.path(root, "R", "helpers_data.R")); source(file.path(root, "R", "helpers_model.R")); source(file.path(root, "R", "typology.R"))
 
 test_that("classify_types requires a [draws, S, 2] array and r0", {
   expect_error(classify_types(matrix(rnorm(20), 10, 2), r0 = 0.5))              # 2-d

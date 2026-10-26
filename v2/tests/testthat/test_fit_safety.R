@@ -1,7 +1,7 @@
 ## Fit safety and provenance (review 2026-10-25, C1 / C2 / C3 / C4) and the summary labels (B2)
 suppressPackageStartupMessages({ library(testthat) })
 root <- Sys.getenv("V2_ROOT"); if (root == "") root <- normalizePath(file.path(getwd(), "v2"), mustWork = FALSE)
-source(file.path(root, "R", "00_helpers.R"))
+source(file.path(root, "R", "spec.R")); source(file.path(root, "R", "helpers_data.R")); source(file.path(root, "R", "helpers_model.R"))
 
 test_that("C1: pilot fits are refused, by the saved flag or by the pilot settings; C2: stale fits need allow_stale", {
   prod <- list(cell = "x", args = list(pilot = FALSE, chains = 4L, iter = 2000L, warmup = 1000L))

@@ -2,7 +2,7 @@
 ## with the brute-force stage-2 likelihood, and permute_dR must be a within-choice-set permutation.
 suppressPackageStartupMessages({ library(testthat); library(dplyr) })
 root <- Sys.getenv("V2_ROOT"); if (root == "") root <- normalizePath(file.path(getwd(), "v2"), mustWork = FALSE)
-source(file.path(root, "R", "00_helpers.R")); source(file.path(root, "R", "typology.R"))
+source(file.path(root, "R", "spec.R")); source(file.path(root, "R", "helpers_data.R")); source(file.path(root, "R", "helpers_model.R")); source(file.path(root, "R", "typology.R"))
 source(file.path(root, "R", "measurement_tests.R")); source(file.path(root, "sim", "simulate.R"))
 
 sim <- simulate_targeting("M2b", S = 7L, Tt = 4L, K = 2L, seed = 123L, target_rate = 0.6)

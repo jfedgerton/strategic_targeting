@@ -1,9 +1,19 @@
 ## ============================================================================
 ## assemble_cell.R -- assemble the sy / alts / ev frames for one real-data cell
-## Used by 02_fit_model.R (fits), run_measurement_real.R (measurement tests) so that every
-## consumer sees the SAME rows (audit F3/F8: one assembly path, manifest-checked inputs).
+## Used by 02_fit_model.R (fits) and 05_robustness.R (refit presets, measurement tests) so that every consumer sees the SAME
+## rows (audit F3/F8: one assembly path, manifest-checked inputs). assemble_cell_spec() maps a spec (spec.R) onto the arguments.
 ## Returns list(sy, alts, ev, W_cols, X_cols, Z_cols, state_codes, x_ref, n_full, sampled, log lines)
 ## ============================================================================
+## Switches of spec.R handled here (every other switch is a constant of the main specification since 2026-10-25):
+##   PAIRS         = "all" (main) | "originators" (events with is_joiner_pair FALSE) | "joiners" (TRUE). The events of the sample
+##                   are filtered and y1 is recomputed from the kept events exactly as DROP_WW2 does, so a state-year whose
+##                   only events were in the other group gets y1 = 0. Joiners-only is a STAGE-2 comparison: its stage 1 counts a
+##                   state as initiating only when it joined (is_joiner_pair is FALSE for a collapsed key with any originator pair).
+##   CHANGES       = "raw" (main) | "winsor": the initiator changes dM_i, dR_i and the target changes dM_j_h, dRpr_j_h are clipped
+##                   at the WINSOR_PROBS (1st / 99th percentile) quantiles of the stage-1 panel's dM_h / dRpr_h for the cell's lag
+##                   (the target change is the same state-year change table, so one pair of cut points per axis), BEFORE the Z
+##                   centring; cut points and the number of clipped values are logged. A target without a change value stays 0.
+##   DROP_WW2, FULL_CONTROLS, EVENT_WEIGHTS: the ww2, controls and weights switches (below).
 ## Control sets (PI decision 2026-10-24, minimal controls). Major-power status and alliance are components of material
 ## and relational power, so they are bad controls and left the main specification; the main sets are as small as the
 ## design allows.
@@ -70,9 +80,9 @@ SY_INDICATORS <- c("cowmaj_tm1", "dem_tm1", "ongoing_tm1")
 ## stays unweighted per event.
 assemble_cell <- function(SAMPLE, LAG, VARIANT, CENT = "pr", CONFLICT_HISTORY = TRUE, SAMPLED_M = 0L,
                           DISTANCE = FALSE, CONTIGUITY = TRUE, DY_PEACE_YEARS = FALSE, DROP_WW2 = FALSE, FULL_CONTROLS = FALSE,
-                          EVENT_WEIGHTS = "dispute", data_dir = file.path(v2_root(), "data"), manifest = NULL) {
+                          EVENT_WEIGHTS = "dispute", PAIRS = "all", CHANGES = "raw", data_dir = file.path(v2_root(), "data"), manifest = NULL) {
   stopifnot(SAMPLE %in% c("mid", "fmid", "fmidcow", "fmidub", "war"), LAG %in% c(1L, 3L, 5L, 10L), VARIANT %in% c("all", "polrel"), CENT %in% c("pr", "eig"),
-            EVENT_WEIGHTS %in% c("dispute", "none"))
+            EVENT_WEIGHTS %in% c("dispute", "none"), PAIRS %in% c("all", "originators", "joiners"), CHANGES %in% c("raw", "winsor"))
   manifest_path <- file.path(data_dir, "manifest.csv")
   stopifnot(file.exists(manifest_path))
   if (is.null(manifest)) { manifest <- read.csv(manifest_path, stringsAsFactors = FALSE); manifest_source <- "read now" }
@@ -113,6 +123,18 @@ assemble_cell <- function(SAMPLE, LAG, VARIANT, CENT = "pr", CONFLICT_HISTORY = 
     mutate(y1 = .data[[y1_col]],
            log_prior_mids = log1p(mon_prior_mids_h), log_peace_years = log1p(mon_peace_years_h),
            dM_i = dM_h, dR_i = .data[[dR_col]])
+  ## changes = winsor: cut points from the stage-1 PANEL of this lag (every state-year the build wrote, before the choice-set join),
+  ## one pair per axis, applied to the initiator changes here and to the target changes below (same change table)
+  winsor <- NULL
+  if (CHANGES == "winsor") {
+    winsor <- list(M = unname(quantile(panel$dM_h, WINSOR_PROBS, type = 7)), R = unname(quantile(panel[[dR_col]], WINSOR_PROBS, type = 7)))
+    stopifnot(all(is.finite(unlist(winsor))), winsor$M[1] < 0, winsor$M[2] > 0, winsor$R[1] < 0, winsor$R[2] > 0)   # 0 stays inside the caps
+    n_clip_M <- sum(sy$dM_i < winsor$M[1] | sy$dM_i > winsor$M[2]); n_clip_R <- sum(sy$dR_i < winsor$R[1] | sy$dR_i > winsor$R[2])
+    sy <- sy |> mutate(dM_i = pmin(pmax(dM_i, winsor$M[1]), winsor$M[2]), dR_i = pmin(pmax(dR_i, winsor$R[1]), winsor$R[2]))
+    logf("changes = winsor: cut points at the %s / %s percentiles of the lag-%d panel (%d state-years): dM_h [%.4f, %.4f], %s [%.4f, %.4f]; initiator values clipped: dM_i %d, dR_i %d of %d",
+         WINSOR_PROBS[1] * 100, WINSOR_PROBS[2] * 100, LAG, nrow(panel), winsor$M[1], winsor$M[2], dR_col, winsor$R[1], winsor$R[2], n_clip_M, n_clip_R, nrow(sy))
+    stopifnot(all(sy$dM_i >= winsor$M[1] & sy$dM_i <= winsor$M[2]), all(sy$dR_i >= winsor$R[1] & sy$dR_i <= winsor$R[2]))
+  }
   ## state index: union of initiators (panel) and targets (alts), sorted by ccode (index only; anchors are NOT taken from this order)
   state_codes <- sort(unique(c(sy$ccode, alts$ccode2)))
   sy$state_idx <- match(sy$ccode, state_codes)
@@ -152,6 +174,14 @@ assemble_cell <- function(SAMPLE, LAG, VARIANT, CENT = "pr", CONFLICT_HISTORY = 
   stopifnot(all(c("dM_j_h", "dRpr_j_h", "dch_j_missing") %in% names(alts)), all(alts$dch_j_missing %in% c(0L, 1L)),
             all(alts$dM_j_h[alts$dch_j_missing == 1L] == 0), all(alts$dRpr_j_h[alts$dch_j_missing == 1L] == 0))
   n_miss <- sum(alts$dch_j_missing); target_missing <- n_miss > 0 && n_miss < nrow(alts)
+  if (CHANGES == "winsor") {
+    ## the target change is the same state-year change as the initiator's (asserted by the build), so the SAME cut points apply;
+    ## the relational target change follows the PageRank table (dRpr_j_h) in both centralities, as in z_columns()
+    n_clip_Mj <- sum(alts$dM_j_h < winsor$M[1] | alts$dM_j_h > winsor$M[2]); n_clip_Rj <- sum(alts$dRpr_j_h < winsor$R[1] | alts$dRpr_j_h > winsor$R[2])
+    alts <- alts |> mutate(dM_j_h = pmin(pmax(dM_j_h, winsor$M[1]), winsor$M[2]), dRpr_j_h = pmin(pmax(dRpr_j_h, winsor$R[1]), winsor$R[2]))
+    stopifnot(all(alts$dM_j_h[alts$dch_j_missing == 1L] == 0), all(alts$dRpr_j_h[alts$dch_j_missing == 1L] == 0))
+    logf("changes = winsor: target values clipped before the Z centring: dM_j_h %d, dRpr_j_h %d of %d alternative rows", n_clip_Mj, n_clip_Rj, nrow(alts))
+  }
   logf("target changes: %d of %d alternative rows have a target without a change value (set to 0); dch_j_missing %s Z (%s)",
        n_miss, nrow(alts), if (target_missing) "enters" else "is NOT in",
        if (target_missing) "non-constant in this cell" else "constant in this cell")
@@ -219,6 +249,20 @@ assemble_cell <- function(SAMPLE, LAG, VARIANT, CENT = "pr", CONFLICT_HISTORY = 
     sy$y1 <- sy$.y1
   }
   sy <- sy |> select(-.y1)
+  ## pairs = originators | joiners: keep one group of event pairs and recompute y1 from the kept events (as --ww2=drop does), so the
+  ## stage-1 outcome and the stage-2 events describe the same group. is_joiner_pair is FALSE for a collapsed key with any originator
+  ## pair. Joiners-only is a stage-2 comparison (its stage 1 counts a state as initiating only when it joined).
+  if (PAIRS != "all") {
+    n_before <- nrow(ev_all); n_join_before <- sum(ev_all$is_joiner_pair); y1_before <- sum(sy$y1)
+    ev_all <- if (PAIRS == "originators") ev_all |> filter(!is_joiner_pair) else ev_all |> filter(is_joiner_pair)
+    if (nrow(ev_all) == 0) stop(sprintf("pairs = %s leaves no event in sample %s", PAIRS, SAMPLE))
+    y1_pairs <- ev_all |> distinct(ccode = initiator, year) |> mutate(.y1 = 1L)
+    sy <- sy |> left_join(y1_pairs, by = c("ccode", "year")) |> mutate(.y1 = coalesce(.y1, 0L))
+    stopifnot(all(sy$.y1 <= sy$y1), all(sy$.y1 %in% 0:1))
+    sy$y1 <- sy$.y1; sy <- sy |> select(-.y1)
+    logf("pairs = %s: sample %s %d -> %d events (%d originator pairs and %d joiner pairs before the filter); stage-1 initiations %d -> %d (%d state-years whose %s events were all in the other group now have y1 = 0)",
+         PAIRS, SAMPLE, n_before, nrow(ev_all), n_before - n_join_before, n_join_before, y1_before, sum(sy$y1), y1_before - sum(sy$y1), SAMPLE)
+  } else logf("pairs = all: %d events in sample %s (%d joiner pairs)", nrow(ev_all), SAMPLE, sum(ev_all$is_joiner_pair))
   ## one chosen alternative per (i, j, t): same-year duplicates were collapsed by the build (PI decision 2026-10-24)
   w_col <- paste0("w_", SAMPLE)
   ev_keys <- ev_all |> transmute(ccode1 = initiator, ccode2 = target, year, dispnum, dispnums, target_has_pos_tm1, fighting_at_ref, dir_flipped,
@@ -279,5 +323,12 @@ assemble_cell <- function(SAMPLE, LAG, VARIANT, CENT = "pr", CONFLICT_HISTORY = 
   list(sy = sy, alts = alts, ev = ev, W_cols = W_cols, X_cols = X_cols, Z_cols = Z_cols, state_codes = state_codes,
        x_ref = x_ref, n_full = n_full, sampled = sampled, n_orphan = n_orphan, manifest_path = manifest_path,
        n_ww2 = n_ww2, drop_ww2 = DROP_WW2, dy_peace_years = DY_PEACE_YEARS, full_controls = FULL_CONTROLS, n_fighting_at_ref = nrow(far_keys),
-       event_weights = EVENT_WEIGHTS, n_flipped = sum(ev_keys$dir_flipped), iv_null_cor_logn = cor(iv_null, sy$log_n_system_tm1))
+       event_weights = EVENT_WEIGHTS, n_flipped = sum(ev_keys$dir_flipped), iv_null_cor_logn = cor(iv_null, sy$log_n_system_tm1),
+       pairs = PAIRS, changes = CHANGES, winsor = winsor)
+}
+## assemble_cell_spec(SAMPLE, LAG, spec, ...): the main-specification constants of spec.R plus the switches of `spec`
+assemble_cell_spec <- function(SAMPLE, LAG, spec, data_dir = spec_data_dir(spec, v2_root()), manifest = NULL) {
+  assemble_cell(SAMPLE, LAG, VARIANT, CENTRALITY, CONFLICT_HISTORY, SAMPLED_M, DISTANCE = DISTANCE, CONTIGUITY = CONTIGUITY,
+                DY_PEACE_YEARS = DY_PEACE_YEARS, DROP_WW2 = spec$ww2 == "drop", FULL_CONTROLS = spec$controls == "full",
+                EVENT_WEIGHTS = spec$weights, PAIRS = spec$pairs, CHANGES = spec$changes, data_dir = data_dir, manifest = manifest)
 }
