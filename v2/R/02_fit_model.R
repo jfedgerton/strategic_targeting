@@ -17,9 +17,10 @@
 ##   sampler: --chains --iter --warmup --adapt_delta --max_treedepth (defaults per family in spec.R, SAMPLER: M2 runs 4000 / 2000
 ##            with adapt_delta 0.95 since the PI decision of 2026-10-25)
 ##   init_from: (M2 only) the M1 fit whose posterior means start every chain (jittered; AME factors near 0; spec.R INIT_*). Default:
-##            the matching M1 fit of the same cell in v2/output (M2x from M1x, same sample, lag and switches). When no such fit exists
-##            the run falls back to Stan's random inits and says so in the log, the fit object and the summary. An explicitly named
-##            fit that fails the checks (production, current data, same cell, same D_mode / joint) is an error.
+##            the matching M1 fit of the same cell in v2/output (M2x from M1x, same sample, lag and switches). When no such FILE exists
+##            the run falls back to Stan's random inits and says so in the log, the fit object and the summary. A fit file that exists
+##            but fails the checks (readable, production, current data, same cell, same D_mode / joint) is an ERROR, whether auto-located
+##            or named with --init_from (audit fix 1, 2026-10-26).
 ##   pilot  : TRUE = 1 chain x 60 iterations (timing only); saved as fit_<cell>_pilot.rds, which every production tool refuses
 ##   dry_run: TRUE = assemble and validate the Stan data, write output/standata_<cell>.rds, do NOT sample
 ##   threads_per_chain: within-chain parallelism via reduce_sum over state-years (1 = serial, exact); Slurm cpus = chains x threads
@@ -138,7 +139,9 @@ logf("compiled %s matches %s (source sha256 %s)", family, basename(stan_src), st
 ## M1 fits use Stan's random inits. For M2 the matching M1 fit (M2x -> M1x, same cell otherwise) is located in out_dir, or named with
 ## --init_from; it must be a production fit of the CURRENT data that scores exactly this cell (C1 / C4) with the same D_mode and joint
 ## flag. m1_inits_for_m2() (helpers_model.R) copies every shared parameter, reconstructs z_re / z_b, jitters each chain and starts the
-## AME factors near 0. No M1 fit (or one that fails the checks, when auto-located): loud fallback to random inits, recorded everywhere.
+## AME factors near 0. ONLY "no M1 fit file found" falls back to random inits (loudly, recorded everywhere); an M1 file that exists
+## but is unusable (unreadable, pilot, stale, other data, other cell, other D_mode / joint, a failure inside the init construction) is an
+## ERROR: the run stops (audit fix 1, 2026-10-26; before, every rejection fell back silently to random inits with exit 0).
 init_arg <- "random"
 init_info <- list(source = "stan_random", m1_fit = NA_character_, m1_cell = NA_character_, reason = "M1 family: Stan's random inits",
                   jitter_sd = NA_real_, uv_range = NA_real_, n_copied = NA_integer_)
@@ -151,29 +154,23 @@ if (family == "m2_ame") {
     logf("WARNING: %s; the M2 fit starts from Stan's RANDOM inits (run the M1 cell first to start from its posterior means)", init_info$reason)
   } else {
     o1 <- tryCatch(readRDS(m1_path), error = function(e) NULL)
-    res <- tryCatch({
-      if (is.null(o1) || is.null(o1$fit) || is.null(o1$dat)) stop("unreadable fit or not a fit object")
-      if (!PILOT) assert_production_fit(o1, allow_stale = FALSE, what = "init_from M1 fit")
-      assert_fit_current(o1, manifest_path)
-      assert_fit_matches_cell(o1, dat, W_cols, X_cols, Z_cols, what = "init_from M1 fit")
-      if (o1$dat$D_mode != D_MODE || o1$dat$joint != joint) stop(sprintf("D_mode / joint of the M1 fit (%d / %d) differ from this cell (%d / %d)", o1$dat$D_mode, o1$dat$joint, D_MODE, joint))
-      if (model_family(o1$args$model) != "M1") stop("the init fit is not an M1 fit (", o1$args$model, ")")
-      m1_inits_for_m2(o1, dat, CHAINS, seed = V2_SEED, jitter_sd = INIT_JITTER_SD, uv_range = INIT_UV_RANGE)
-    }, error = function(e) e)
-    if (inherits(res, "error")) {
-      init_info$reason <- sprintf("M1 fit %s rejected: %s", basename(m1_path), conditionMessage(res))
-      if (explicit) stop("--init_from=", INIT_FROM, " cannot be used: ", conditionMessage(res))
-      logf("WARNING: %s; the M2 fit starts from Stan's RANDOM inits", init_info$reason)
-    } else {
-      init_arg <- res
-      init_info <- list(source = "m1_posterior_means", m1_fit = basename(m1_path), m1_cell = o1$cell, reason = if (explicit) "--init_from" else "auto-located in output/",
-                        jitter_sd = INIT_JITTER_SD, uv_range = INIT_UV_RANGE, n_copied = attr(res, "n_copied"),
-                        m1_git_commit = o1$args$git_commit, m1_saved = o1$args$saved)
-      logf("inits: %d chains start at the posterior means of %s (%s; %d parameter blocks copied, jitter sd %.3f, AME factors uniform on [%.2f, %.2f])",
-           CHAINS, basename(m1_path), init_info$reason, init_info$n_copied, INIT_JITTER_SD, INIT_UV_RANGE[1], INIT_UV_RANGE[2])
-    }
+    if (is.null(o1) || is.null(o1$fit) || is.null(o1$dat)) stop("the M1 fit ", m1_path, " exists but is unreadable or not a fit object; the M2 fit does NOT fall back to random inits (delete or refit the M1 file)")
+    if (!PILOT) assert_production_fit(o1, allow_stale = FALSE, what = "init_from M1 fit")
+    assert_fit_current(o1, manifest_path)
+    assert_fit_matches_cell(o1, dat, W_cols, X_cols, Z_cols, what = "init_from M1 fit")
+    if (o1$dat$D_mode != D_MODE || o1$dat$joint != joint) stop(sprintf("D_mode / joint of the M1 fit (%d / %d) differ from this cell (%d / %d)", o1$dat$D_mode, o1$dat$joint, D_MODE, joint))
+    if (is.null(o1$args$model) || model_family(o1$args$model) != "M1") stop("the init fit is not an M1 fit (", o1$args$model, ")")
+    res <- m1_inits_for_m2(o1, dat, CHAINS, seed = V2_SEED, jitter_sd = INIT_JITTER_SD, uv_range = INIT_UV_RANGE)
+    stopifnot(is.list(res), length(res) == CHAINS, !is.null(attr(res, "n_copied")))
+    init_arg <- res
+    init_info <- list(source = "m1_posterior_means", m1_fit = basename(m1_path), m1_cell = o1$cell, reason = if (explicit) "--init_from" else "auto-located in output/",
+                      jitter_sd = INIT_JITTER_SD, uv_range = INIT_UV_RANGE, n_copied = attr(res, "n_copied"),
+                      m1_git_commit = o1$args$git_commit, m1_saved = o1$args$saved)
+    logf("inits: %d chains start at the posterior means of %s (%s; %d parameter blocks copied, jitter sd %.3f, AME factors uniform on [%.2f, %.2f])",
+         CHAINS, basename(m1_path), init_info$reason, init_info$n_copied, INIT_JITTER_SD, INIT_UV_RANGE[1], INIT_UV_RANGE[2])
   }
 }
+stopifnot(identical(init_info$source, if (family == "m2_ame" && !is.na(init_info$m1_fit)) "m1_posterior_means" else "stan_random"))
 if (nzchar(INIT_FROM) && family != "m2_ame") stop("--init_from applies to the M2 family only")
 t0 <- Sys.time()
 fit <- sampling(sm, data = dat, chains = CHAINS, iter = ITER, warmup = WARMUP, seed = V2_SEED, init = init_arg,

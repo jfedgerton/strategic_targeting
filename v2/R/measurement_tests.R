@@ -421,20 +421,8 @@ measurement_error_check <- function(sy, alts, ev, W_cols, X_cols, Z_cols, recent
   bind_rows(rows)
 }
 
-## ---- fit / cell consistency (review 2026-10-25, C4) ------------------------------------------------------------------------------
-## assert_fit_matches_cell(obj, dat): the saved fit must score exactly the assembled cell (E, N1, S, Z / W / X columns, D_mode,
-## event identities = (state-year, chosen target) pairs, event weights)
-assert_fit_matches_cell <- function(obj, dat, W_cols, X_cols, Z_cols, what = "fit") {
-  d <- obj$dat
-  if (d$E != dat$E) stop(sprintf("%s %s has E = %d, the assembled cell %d", what, obj$cell, d$E, dat$E))
-  if (d$N1 != dat$N1 || d$S != dat$S) stop(sprintf("%s %s: N1 / S %d / %d differ from the cell's %d / %d", what, obj$cell, d$N1, d$S, dat$N1, dat$S))
-  if (!identical(obj$Z_cols, Z_cols)) stop(sprintf("%s %s: Z columns (%s) differ from the cell's (%s)", what, obj$cell, paste(obj$Z_cols, collapse = ","), paste(Z_cols, collapse = ",")))
-  if (!identical(obj$W_cols, W_cols) || !identical(obj$X_cols, X_cols)) stop(sprintf("%s %s: W / X columns differ from the cell's", what, obj$cell))
-  if (!identical(as.integer(d$ev_sy), as.integer(dat$ev_sy)) || !identical(as.integer(d$alt_target[d$ev_row]), as.integer(dat$alt_target[dat$ev_row])))
-    stop(sprintf("%s %s: the events (state-year, chosen target) differ from the assembled cell", what, obj$cell))
-  if (!is.null(d$ev_w) && !is.null(dat$ev_w) && max(abs(d$ev_w - dat$ev_w)) > 1e-10) stop(sprintf("%s %s: the event weights differ from the assembled cell", what, obj$cell))
-  invisible(TRUE)
-}
+## assert_fit_matches_cell() (fit / cell consistency, C4) lives in helpers_model.R since 2026-10-26 (audit fix 1: 02_fit_model.R
+## needs it for the M2 init check and does not source this file).
 
 ## ---- CLI for fitted real-data cells (LOO and misclassification only; the refit-based tests
 ## are run through v2/slurm/04_robustness.sbatch, preset perm_error, which calls 05_robustness.R) -------------------------
