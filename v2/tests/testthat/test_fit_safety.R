@@ -67,17 +67,68 @@ test_that("C4: a fit must score exactly the assembled cell", {
   d4 <- dat; d4$ev_w <- c(1, 1, 1); expect_error(assert_fit_matches_cell(obj, d4, "w", "x", "z"), "weights")
 })
 
-test_that("audit fix 5: a fit must have been sampled with the compiled program's Stan source (stan/build/<family>.sha256)", {
+test_that("audit fix 5 / review P2: a fit must have been sampled with the source of the compiled program; source == sidecar == fit is required", {
+  ## a temporary v2 root with two toy sources, their sidecars = their source hashes, and fits stamped with those hashes
   td <- tempfile(); dir.create(file.path(td, "stan", "build"), recursive = TRUE)
-  sha1 <- paste(rep("a", 64), collapse = ""); sha2 <- paste(rep("b", 64), collapse = "")
+  writeLines(c("data { int N; }", "parameters { real a; }", "model { a ~ normal(0, 1); }"), file.path(td, "stan", "m1_latent_additive.stan"))
+  writeLines(c("data { int N; int K; }", "parameters { real a; }", "model { a ~ normal(0, 2); }"), file.path(td, "stan", "m2_ame.stan"))
+  sha1 <- stan_source_sha256(file.path(td, "stan", "m1_latent_additive.stan")); sha2 <- stan_source_sha256(file.path(td, "stan", "m2_ame.stan"))
+  expect_false(sha1 == sha2)
   writeLines(sha1, file.path(td, "stan", "build", "m1_latent_additive.sha256")); writeLines(sha2, file.path(td, "stan", "build", "m2_ame.sha256"))
   ok1 <- list(cell = "c1", args = list(model = "M1b", stan_source_sha256 = sha1)); ok2 <- list(cell = "c2", args = list(model = "M2b", stan_source_sha256 = sha2))
   expect_true(assert_fit_stan_current(ok1, root = td)); expect_true(assert_fit_stan_current(ok2, root = td))
   expect_error(assert_fit_stan_current(list(cell = "mix", args = list(model = "M1b", stan_source_sha256 = sha2)), root = td), "different programs")   # M1 fit of another program
   expect_error(assert_fit_stan_current(list(cell = "old", args = list(model = "M1b")), root = td), "records no Stan source hash")                   # pre-C3 fit
   expect_error(assert_fit_stan_current(list(cell = "nomodel", args = list(stan_source_sha256 = sha1)), root = td), "no model code")
+  ## review P2 (2026-10-26): the checked-out SOURCE is hashed too; an edited source with an unchanged sidecar and fit hash is refused
+  src1 <- file.path(td, "stan", "m1_latent_additive.stan"); keep <- readLines(src1)
+  writeLines(sub("normal(0, 1)", "normal(0, 5)", keep, fixed = TRUE), src1)
+  expect_error(assert_fit_stan_current(ok1, root = td), "checked-out source changed after compilation")
+  expect_true(assert_fit_stan_current(ok2, root = td))                                                   # the other family is untouched
+  writeLines(paste0(keep, "   "), src1); expect_true(assert_fit_stan_current(ok1, root = td))            # trailing whitespace does not count
+  writeLines(keep, src1); expect_true(assert_fit_stan_current(ok1, root = td))
+  file.remove(src1); expect_error(assert_fit_stan_current(ok1, root = td), "Stan source missing")
   file.remove(file.path(td, "stan", "build", "m2_ame.sha256")); expect_error(assert_fit_stan_current(ok2, root = td), "sidecar hash missing")
-  ## the real sidecars, when the models are compiled: a fit stamped with the current source hash passes
+  ## the real root, when the models are compiled: a fit stamped with the current source hash passes, and the source matches its sidecar
   side <- file.path(root, "stan", "build", "m1_latent_additive.sha256")
-  if (file.exists(side)) expect_true(assert_fit_stan_current(list(cell = "r", args = list(model = "M1a", stan_source_sha256 = trimws(readLines(side)[1]))), root = root))
+  if (file.exists(side)) {
+    expect_true(assert_fit_stan_current(list(cell = "r", args = list(model = "M1a", stan_source_sha256 = trimws(readLines(side)[1]))), root = root))
+    expect_equal(trimws(readLines(side)[1]), stan_source_sha256(file.path(root, "stan", "m1_latent_additive.stan")))
+  }
+})
+
+test_that("review minor (2026-10-26): the core count falls back to SLURM_CPUS_PER_TASK or 1 when detectCores() returns NA, with a log line", {
+  expect_equal(n_cores(8L, ""), 8L); expect_equal(n_cores(2, "4"), 2L)                                    # a detected count wins
+  expect_silent(n_cores(8L, ""))
+  out <- capture.output(n1 <- n_cores(NA_integer_, "")); expect_equal(n1, 1L); expect_true(any(grepl("WARNING: parallel::detectCores\\(\\) returned NA; using 1 core\\(s\\) \\(fallback 1\\)", out)))
+  out <- capture.output(n4 <- n_cores(NA_integer_, "4")); expect_equal(n4, 4L); expect_true(any(grepl("using 4 core\\(s\\) \\(SLURM_CPUS_PER_TASK\\)", out)))
+  out <- capture.output(n0 <- n_cores(0L, "garbage")); expect_equal(n0, 1L); expect_true(any(grepl("fallback 1", out)))
+  expect_true(n_cores() >= 1L)                                                                           # the real call always gives a usable count
+})
+
+test_that("review P1 (2026-10-26): a stanfit missing a requested chain, or draws of a chain, is not a production fit", {
+  sm <- skip_if_no_build("m1_latent_additive")
+  dat <- tiny_data("M1b", 1L); p <- make_pars(dat, FALSE); init_ok <- stan_inits(dat, p)
+  init_bad <- init_ok; init_bad$sigma_x <- array(c(-1, -1), dim = 2)                                      # Stan rejects this init
+  rstan_options(threads_per_chain = 1)
+  ## (a) both chains fine: 2 chains x 20 post-warmup draws
+  good <- suppressWarnings(sampling(sm, data = dat, chains = 2, iter = 40, warmup = 20, seed = 123, init = list(init_ok, init_ok), refresh = 0, cores = 1))
+  cs <- fit_chain_summary(good); expect_equal(cs$chains, 2L); expect_equal(cs$draws, c(20L, 20L)); expect_equal(cs$thin, 1L)
+  expect_true(assert_fit_chains(good, chains = 2L, iter = 40L, warmup = 20L))
+  expect_error(assert_fit_chains(good, chains = 4L, iter = 40L, warmup = 20L), "holds 2 chain\\(s\\) but 4 were requested")
+  expect_error(assert_fit_chains(good, chains = 2L, iter = 60L, warmup = 20L), "post-warmup draws per chain 20/20, expected 40")
+  expect_error(assert_fit_chains(good, chains = NULL, iter = 40L, warmup = 20L), "records no chains")
+  obj <- list(cell = "g", fit = good, args = list(pilot = FALSE, chains = 2L, iter = 40L, warmup = 20L))
+  expect_true(assert_production_fit(obj))
+  obj$args$chains <- 4L; expect_error(assert_production_fit(obj), "a chain failed")                       # the recorded request is not what the fit holds
+  ## (b) one of two PARALLEL chains fails (rejected init): rstan returns the surviving chain with mode 0; the check refuses it
+  skip_if(n_cores() < 2L, "needs 2 cores for parallel chains")
+  out <- capture.output(part <- suppressWarnings(sampling(sm, data = dat, chains = 2, iter = 40, warmup = 20, seed = 123, init = list(init_ok, init_bad), refresh = 0, cores = 2)), type = "message")
+  expect_equal(part@mode, 0L); expect_equal(fit_chain_summary(part)$chains, 1L)                           # the review's reproduction
+  expect_error(assert_fit_chains(part, chains = 2L, iter = 40L, warmup = 20L), "holds 1 chain\\(s\\) but 2 were requested")
+  expect_error(assert_production_fit(list(cell = "p", fit = part, args = list(pilot = FALSE, chains = 2L, iter = 40L, warmup = 20L))), "a chain failed")
+  ## a fit whose sampling did not run at all (mode 2) has no chains
+  none <- suppressWarnings(sampling(sm, data = dat, chains = 1, iter = 40, warmup = 20, seed = 123, init = list(init_bad), refresh = 0, cores = 1))
+  expect_true(none@mode != 0L); expect_equal(fit_chain_summary(none)$chains, 0L)
+  expect_error(assert_fit_chains(none, chains = 1L, iter = 40L, warmup = 20L), "holds 0 chain")
 })

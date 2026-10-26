@@ -813,6 +813,18 @@ date_earliest_by <- function(d, g) {
   stopifnot(nrow(tb) == length(unique(g)), !anyNA(tb$y), all(!is.na(tb$mkey[tb$res <= 2L])), all(!is.na(tb$dkey[tb$res == 1L])))
   tb
 }
+## date_latest_by(d, g): the latest date within each group g, by date_later() folded over the group's rows, so a tie at the coarser
+## resolution keeps that resolution (a month-dated date against a day-dated date in the same month gives the month; review 2026-10-26, P2).
+## One row per group (res, y, mkey, dkey), in the order of sort(unique(g)).
+date_latest_by <- function(d, g) {
+  stopifnot(length(g) == length(d$res), length(g) >= 1)
+  dd <- data.frame(res = as.integer(d$res), y = as.integer(d$y), mkey = as.integer(d$mkey), dkey = as.integer(d$dkey))
+  idx <- split(seq_along(g), g)
+  out <- bind_rows(lapply(idx, function(i) Reduce(date_later, lapply(i, function(k) dd[k, , drop = FALSE]))))
+  out$g <- sort(unique(g))
+  stopifnot(nrow(out) == length(idx), !anyNA(out$res), all(out$res %in% 1:3), all(!is.na(out$mkey[out$res <= 2L])), all(!is.na(out$dkey[out$res == 1L])))
+  out[, c("g", "res", "y", "mkey", "dkey")]
+}
 ## participant_spell_dates(dd, db, part): one row per (dispnum, ccode, spell), a spell being a run of consecutive COW years of the
 ## participant in the dispute, with the entry date (entry_res / entry_y / entry_m / entry_d and the keys) and the exit date. GML
 ## (part = gml_part) is used for a spell when the participant has at least one gml_part spell overlapping the COW spell's years: the entry
@@ -837,15 +849,23 @@ participant_spell_dates <- function(dd, db, part = NULL) {
                             g_ey = as.integer(endyear), g_em = as.integer(endmon), g_ed = as.integer(endday))
     stopifnot(!anyNA(ps), all(ps$g_sm %in% 1:12), all(ps$g_em %in% 1:12))
     ov <- sp |> mutate(.id = row_number()) |> select(.id, dispnum, ccode, spell_first, spell_last) |>
-      inner_join(ps, by = c("dispnum", "ccode"), relationship = "many-to-many") |> filter(g_ey >= spell_first, g_sy <= spell_last) |>
-      ## the latest GML end as ONE row: the sort key is computed in mutate() before summarise(), because inside summarise() the first
-      ## assignment reduces g_ey to a scalar and the later which.max() calls then indexed g_em / g_ed by another row (audit fix 18,
-      ## 2026-10-26: 8 of 5862 spells took the month and day from a different spell, e.g. Italy in 258, 1945-09-07 for 1945-05-07)
-      mutate(.xk = g_ey * 400L + g_em * 32L + pmax(g_ed, 1L)) |>
-      group_by(.id) |> arrange(g_sy, g_sm, pmax(g_sd, 1L), .by_group = TRUE) |>
-      summarise(n_gml = n(), g_sy = first(g_sy), g_sm = first(g_sm), g_sd = first(g_sd),
-                .ix = which.max(.xk), g_ey = g_ey[.ix], g_em = g_em[.ix], g_ed = g_ed[.ix], .groups = "drop") |> select(-.ix)
-    stopifnot(all(ov$g_em %in% 1:12), !anyNA(ov$g_ey))
+      inner_join(ps, by = c("dispnum", "ccode"), relationship = "many-to-many") |> filter(g_ey >= spell_first, g_sy <= spell_last)
+    ## the latest GML end as ONE date (audit fix 18, 2026-10-26: all three fields from the same spell), chosen with the resolution-aware
+    ## comparison of date_later() (review 2026-10-26, P2): a spell ending in the latest month with an UNKNOWN day against one ending in
+    ## that month on a known day is a tie at month resolution and keeps month resolution; before, the sort key pmax(g_ed, 1) put the unknown
+    ## day at day 1, selected the day-dated spell and reported day resolution. g_ed = -9 marks an unknown day (GML's code) in the result.
+    latest <- data.frame(.id = integer(0), g_ey = integer(0), g_em = integer(0), g_ed = integer(0))
+    if (nrow(ov) > 0) {
+      xk <- date_keys(ifelse(ov$g_ed > 0L, 1L, 2L), ov$g_ey, ov$g_em, ifelse(ov$g_ed > 0L, ov$g_ed, NA_integer_))
+      lt <- date_latest_by(xk, ov$.id)
+      latest <- data.frame(.id = lt$g, g_ey = lt$y, g_em = lt$mkey %% 12L + 1L,
+                           g_ed = ifelse(lt$res == 1L, as.integer(format(as.Date(lt$dkey, origin = "1970-01-01"), "%d")), -9L))
+      stopifnot(all(ym_year(lt$mkey) == latest$g_ey), all(latest$g_ed == -9L | latest$g_ed >= 1L))
+    }
+    ov <- ov |> group_by(.id) |> arrange(g_sy, g_sm, pmax(g_sd, 1L), .by_group = TRUE) |>
+      summarise(n_gml = n(), g_sy = first(g_sy), g_sm = first(g_sm), g_sd = first(g_sd), .groups = "drop") |>
+      inner_join(latest, by = ".id")
+    stopifnot(all(ov$g_em %in% 1:12), !anyNA(ov$g_ey), !anyNA(ov$g_ed))
     sp <- sp |> mutate(.id = row_number()) |> left_join(ov, by = ".id") |> mutate(n_gml = coalesce(n_gml, 0L), in_gml_disp = dispnum %in% ps$dispnum)
     cow_part <- sp |> distinct(dispnum, ccode); gml_part_tbl <- ps |> distinct(dispnum, ccode) |> filter(dispnum %in% cow_part$dispnum)
     membership <- bind_rows(cow_part |> filter(dispnum %in% ps$dispnum) |> anti_join(gml_part_tbl, by = c("dispnum", "ccode")) |> mutate(issue = "COW participant absent from gml_part"),

@@ -19,7 +19,7 @@ test_that("M1b recovers a known non-zero mu0 within its 90% interval", {
   expect_equal(dat$prior_mu0_sd, 2)
   rstan_options(threads_per_chain = 1)
   fit <- sampling(sm, data = dat, chains = 2, iter = 800, warmup = 400, seed = 123, refresh = 0,
-                  cores = min(2L, parallel::detectCores()), control = list(adapt_delta = 0.9),
+                  cores = min(2L, n_cores()), control = list(adapt_delta = 0.9),
                   pars = c("mu0", "beta", "sigma_x", "sd_re", "tau", "mu_state"))
   post <- rstan::extract(fit, pars = "mu0")$mu0           # [draws, 2]
   expect_equal(ncol(post), 2L)

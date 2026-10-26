@@ -31,7 +31,7 @@ WARMUP <- as.integer(get_arg(args, "warmup", if (TASK %in% c("main", "persistent
 ONLY <- { o <- get_arg(args, "only", ""); if (nzchar(o)) strsplit(o, ",")[[1]] else NULL }
 stopifnot(CHAINS >= 1, ITER > WARMUP, WARMUP >= 0)
 log_open(paste0("run_sim_", TASK)); set.seed(V2_SEED)
-rstan_options(auto_write = FALSE); options(mc.cores = min(CHAINS, parallel::detectCores()))
+rstan_options(auto_write = FALSE); options(mc.cores = min(CHAINS, n_cores()))      # n_cores(): detectCores() with a fallback when it returns NA (helpers_model.R)
 dir.create(file.path(sim_dir, "fits"), showWarnings = FALSE); res_dir <- file.path(sim_dir, "results"); dir.create(res_dir, showWarnings = FALSE)
 logf("task %s: chains %d, iter %d, warmup %d", TASK, CHAINS, ITER, WARMUP)
 R0 <- 0.5

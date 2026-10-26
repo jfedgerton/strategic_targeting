@@ -60,6 +60,31 @@ assert_production_fit <- function(obj, allow_stale = FALSE, what = "fit") {
     if (!allow_stale) stop(sprintf("%s %s is STALE (the data manifest changed while it sampled: %s); pass --allow_stale to use it anyway", what, obj$cell, paste(obj$stale$changed_files, collapse = ", ")))
     logf("WARNING: using STALE fit %s (manifest changed while sampling: %s) because --allow_stale was given", obj$cell, paste(obj$stale$changed_files, collapse = ", "))
   }
+  ## the stanfit must hold every requested chain with its full set of post-warmup draws (review 2026-10-26, P1; see assert_fit_chains)
+  if (!is.null(obj$fit)) assert_fit_chains(obj$fit, chains = a$chains, iter = a$iter, warmup = a$warmup, what = what, cell = obj$cell)
+  invisible(TRUE)
+}
+## ---- actual chains versus the requested configuration (review 2026-10-26, P1) -------------------------------------------------------
+## With parallel sampling rstan drops a chain that fails (e.g. a rejected init) and returns the surviving chains with fit@mode == 0, so a
+## job could save a "production" fit of 3 chains, record the 4 it requested and exit 0. fit_chain_summary(fit) reads the ACTUAL chains and
+## post-warmup draws per chain from the stanfit (fit@sim$n_save - fit@sim$warmup2); assert_fit_chains() requires them to equal the requested
+## chains and (iter - warmup) / thin, for each chain. 02_fit_model.R calls it before saving; assert_production_fit() repeats it downstream.
+fit_chain_summary <- function(fit) {
+  stopifnot(inherits(fit, "stanfit"))
+  if (fit@mode != 0L) return(list(chains = 0L, draws = integer(0), thin = NA_integer_))
+  n_save <- as.integer(fit@sim$n_save); warm <- as.integer(fit@sim$warmup2)
+  stopifnot(length(n_save) == fit@sim$chains, length(warm) == length(n_save))
+  list(chains = as.integer(fit@sim$chains), draws = n_save - warm, thin = as.integer(fit@sim$thin))
+}
+assert_fit_chains <- function(fit, chains, iter, warmup, what = "fit", cell = "") {
+  if (is.null(chains) || is.null(iter) || is.null(warmup)) stop(sprintf("%s %s records no chains / iter / warmup; cannot check the sampled chains", what, cell))
+  cs <- fit_chain_summary(fit)
+  if (cs$chains != chains) stop(sprintf("%s %s holds %d chain(s) but %d were requested: a chain failed (rstan drops a failed parallel chain and returns the rest with mode 0); not a production fit",
+                                        what, cell, cs$chains, as.integer(chains)))
+  expect_draws <- as.integer(ceiling((iter - warmup) / cs$thin))
+  if (length(cs$draws) != chains || any(cs$draws != expect_draws))
+    stop(sprintf("%s %s: post-warmup draws per chain %s, expected %d from each of %d chains (iter %d, warmup %d, thin %d)", what, cell,
+                 paste(cs$draws, collapse = "/"), expect_draws, as.integer(chains), as.integer(iter), as.integer(warmup), cs$thin))
   invisible(TRUE)
 }
 ## read_fit_or_null(path): readRDS wrapped so an unreadable / truncated fit is reported and treated as missing (C2)
@@ -87,8 +112,9 @@ assert_fit_matches_cell <- function(obj, dat, W_cols, X_cols, Z_cols, what = "fi
 ## ---- fit / program consistency (audit fix 5, 2026-10-26): a fit must come from the CURRENT Stan program -----------------------------
 ## 02_fit_model.R saves the sha256 of the .stan source it sampled with in obj$args$stan_source_sha256 (C3). The post-processing
 ## tools (03_extract.R, 04_compare.R, 05_robustness.R perm_error, 06_context_compare.R) compare it with the sidecar hash
-## stan/build/<family>.sha256 written by compile_models.R, so fits of an earlier program can never be mixed with fits of the current
-## one in the same output directory. A fit without the recorded hash (saved before C3) is refused as well.
+## stan/build/<family>.sha256 written by compile_models.R AND with the hash of the checked-out source stan/<family>.stan (review
+## 2026-10-26, P2: the sidecar alone does not notice an edited source), so fits of an earlier program can never be mixed with fits of
+## the current one in the same output directory. A fit without the recorded hash (saved before C3) is refused as well.
 assert_fit_stan_current <- function(obj, root = v2_root(), what = "fit") {
   sha <- obj$args$stan_source_sha256
   if (is.null(sha) || !is.character(sha) || length(sha) != 1 || !grepl("^[0-9a-f]{64}$", sha))
@@ -98,6 +124,11 @@ assert_fit_stan_current <- function(obj, root = v2_root(), what = "fit") {
   sidecar <- file.path(root, "stan", "build", paste0(family, ".sha256"))
   if (!file.exists(sidecar)) stop("compiled-model sidecar hash missing: ", sidecar, "; rerun v2/R/compile_models.R")
   side <- trimws(readLines(sidecar, warn = FALSE)[1])
+  src <- file.path(root, "stan", paste0(family, ".stan"))
+  if (!file.exists(src)) stop("Stan source missing: ", src)
+  src_sha <- stan_source_sha256(src)
+  if (!identical(side, src_sha))
+    stop(sprintf("sidecar hash %s does not match the source hash %s of %s: the checked-out source changed after compilation; rerun v2/R/compile_models.R and refit", side, src_sha, basename(src)))
   if (!identical(side, sha))
     stop(sprintf("%s %s was sampled with %s source %s, the compiled program is %s (stan/build/%s.sha256): fits of different programs in one output directory; deploy into a fresh clone or empty v2/output and refit",
                  what, obj$cell, family, substr(sha, 1, 12), substr(side, 1, 12), family))
@@ -451,9 +482,25 @@ m1_inits_for_m2 <- function(obj_m1, dat_m2, chains, seed = V2_SEED, jitter_sd = 
   attr(inits, "n_clamped") <- n_clamped
   inits
 }
-## locate_m1_fit(sample, lag, model_m2, spec, out_dir): the file of the matching M1 fit (M2x -> M1x, same cell otherwise), or NA
-locate_m1_fit <- function(sample, lag, model_m2, spec, out_dir) {
+## m1_cell_for_m2(sample, lag, model_m2, spec): the cell name of the matching M1 fit (M2x -> M1x, same switches, K dropped: m1_spec(), so
+## every AME K of a cell starts from the SAME M1 fit). locate_m1_fit(...): its file in out_dir, or NA when no such file exists.
+m1_cell_for_m2 <- function(sample, lag, model_m2, spec) {
   stopifnot(model_family(model_m2) == "M2")
-  f <- file.path(out_dir, paste0("fit_", cell_name(sample, lag, sub("^M2", "M1", model_m2), spec), ".rds"))
+  cell_name(sample, lag, sub("^M2", "M1", model_m2), m1_spec(spec))
+}
+locate_m1_fit <- function(sample, lag, model_m2, spec, out_dir) {
+  f <- file.path(out_dir, paste0("fit_", m1_cell_for_m2(sample, lag, model_m2, spec), ".rds"))
   if (file.exists(f)) f else NA_character_
+}
+
+## ---- usable cores (review 2026-10-26, minor): parallel::detectCores() can return NA (seen on a reviewer's Mac) ---------------------------
+## n_cores(detected, slurm): the detected count when it is a positive number; otherwise SLURM_CPUS_PER_TASK when set, else 1, with a log line
+n_cores <- function(detected = parallel::detectCores(), slurm = Sys.getenv("SLURM_CPUS_PER_TASK", unset = "")) {
+  n <- suppressWarnings(as.integer(detected))
+  if (length(n) == 1 && !is.na(n) && n >= 1L) return(n)
+  s <- suppressWarnings(as.integer(slurm))
+  out <- if (length(s) == 1 && !is.na(s) && s >= 1L) s else 1L
+  logf("WARNING: parallel::detectCores() returned %s; using %d core(s) (%s)", if (length(detected) == 1) as.character(detected) else "an invalid value", out,
+       if (out == 1L && (length(s) != 1 || is.na(s) || s < 1L)) "fallback 1" else "SLURM_CPUS_PER_TASK")
+  out
 }

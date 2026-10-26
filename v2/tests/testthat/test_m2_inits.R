@@ -84,6 +84,17 @@ test_that("dimension mismatches between the M1 fit and the M2 data are errors, a
   file.create(file.path(td, "fit_mid_lag3_all_pr_M1a_noww2.rds"))
   expect_equal(basename(locate_m1_fit("mid", 3L, "M2a", parse_spec("--ww2=drop"), td)), "fit_mid_lag3_all_pr_M1a_noww2.rds")
   expect_error(locate_m1_fit("mid", 3L, "M1b", spec, td))
+  ## review P2 (2026-10-26): a non-default --ame_K looks up the SAME K-free M1 fit (m1_spec()); before, cell_name() threw on the M1 name
+  for (k in c(1L, 3L)) {
+    sk <- parse_spec(sprintf("--ame_K=%d", k)); td2 <- tempfile("out"); dir.create(td2)
+    expect_equal(m1_cell_for_m2("mid", 3L, "M2b", sk), "mid_lag3_all_pr_M1b")
+    expect_true(is.na(locate_m1_fit("mid", 3L, "M2b", sk, td2)))                                   # absent: NA, no error
+    file.create(file.path(td2, "fit_mid_lag3_all_pr_M1b.rds"))
+    expect_equal(basename(locate_m1_fit("mid", 3L, "M2b", sk, td2)), "fit_mid_lag3_all_pr_M1b.rds")  # present: found
+    expect_equal(cell_name("mid", 3L, "M2b", sk), sprintf("mid_lag3_all_pr_M2b_K%d", k))              # the M2 cell keeps its K
+    expect_equal(m1_cell_for_m2("mid", 3L, "M2a", parse_spec(c(sprintf("--ame_K=%d", k), "--ww2=drop"))), "mid_lag3_all_pr_M1a_noww2")
+  }
+  expect_equal(m1_spec(parse_spec("--ame_K=3"))$ame_K, 2L); expect_true(spec_is_main(m1_spec(parse_spec("--ame_K=3"))))
 })
 
 test_that("audit fix 17: a binding correlation clamp in the M2 init construction is logged", {

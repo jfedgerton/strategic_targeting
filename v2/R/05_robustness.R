@@ -31,9 +31,11 @@
 ##   Rscript v2/R/05_robustness.R --preset=perm_error --family=m1|m2 [--tests=holdout,permutation,inflation] [--n_perm=50]
 ##          [--perm_mode=rescore|refit] [--deltas=0.25,0.5,1.0] [--cutoff=1990] [--r0=0.5] [--chains=4] [--iter=1500] [--warmup=750]
 ##          [--sample=mid --lag=5] [--allow_stale=FALSE] [switches]
-##       needs the production a / b fits of the cell (fit_<cell>_M1a / M1b or M2a_K2 / M2b_K2 with the switch suffix) from
+##       needs the production a / b fits of the cell (fit_<cell>_M1a / M1b or M2a_K<K> / M2b_K<K> with the switch suffix) from
 ##       02_fit_model.R; refuses pilots, stale fits and fits that do not score the assembled cell (C1 / C4)
-##       writes v2/output/measurement_<cell>_*.csv
+##       writes v2/output/measurement_<cell>_*.csv with <cell> = <sample>_lag<h>_all_pr_<M1|M2>[_K<K>]<suffix> (measurement_cell_name(),
+##       spec.R: the M2 name always carries its K, so --ame_K=3 never overwrites the K=2 files; review 2026-10-26 P2); every table
+##       carries family and ame_K columns
 ## --direction=sideA (and the sideA preset) read v2/data_sideA, built by `Rscript v2/R/01_build_data.R --direction=sideA`.
 ## ============================================================================
 suppressPackageStartupMessages({ library(dplyr) })
@@ -110,9 +112,9 @@ stopifnot(SAMPLE %in% ALL_SAMPLES, LAG %in% LAGS, all(TESTS %in% c("holdout", "p
 ## audit fix 15 (2026-10-26): the refit-based tests are not defined for winsorised changes or a pairs subset (see the header)
 if (spec$changes == "winsor") stop("perm_error refuses --changes=winsor: the inflation and holdout refits rebuild the changes from the raw levels and would not reproduce the winsorised cell")
 if (spec$pairs != "all") stop(sprintf("perm_error refuses --pairs=%s: the refit-based tests are defined on the full event sample (y1 of every initiating state-year)", spec$pairs))
-cell <- sprintf("%s_lag%d_%s_%s_%s%s", SAMPLE, LAG, VARIANT, CENTRALITY, toupper(FAMILY), spec_suffix(spec))
+cell <- measurement_cell_name(SAMPLE, LAG, FAMILY, spec)     # the M2 name carries its K (review 2026-10-26, P2); spec.R
 log_open(paste0("05_robustness_perm_error_", cell)); set.seed(V2_SEED)
-rstan_options(auto_write = FALSE); options(mc.cores = min(CHAINS, parallel::detectCores()))
+rstan_options(auto_write = FALSE); options(mc.cores = min(CHAINS, n_cores()))
 out_dir <- file.path(v2_root(), "output"); data_dir <- spec_data_dir(spec, v2_root())
 if (!dir.exists(data_dir)) stop("data directory ", data_dir, " does not exist")
 logf("perm_error on cell %s; tests %s; spec %s; data %s", cell, paste(TESTS, collapse = ","), spec_string(spec), basename(data_dir))
@@ -123,8 +125,9 @@ for (nm in names(models)) assert_compiled_current(models[[nm]], file.path(v2_roo
                                                   file.path(v2_root(), "stan", "build", paste0(c(m1 = "m1_latent_additive", m2 = "m2_ame")[nm], ".sha256")))
 A <- assemble_cell_spec(SAMPLE, LAG, spec, data_dir = data_dir)
 ## the a / b fits of the cell, named by 02_fit_model.R (cell_name())
-fa_path <- file.path(out_dir, paste0("fit_", cell_name(SAMPLE, LAG, paste0(toupper(FAMILY), "a"), spec), ".rds"))
-fb_path <- file.path(out_dir, paste0("fit_", cell_name(SAMPLE, LAG, paste0(toupper(FAMILY), "b"), spec), ".rds"))
+ma <- paste0(toupper(FAMILY), "a"); mb <- paste0(toupper(FAMILY), "b")    # cell_spec(): the M1 fits carry no K whatever --ame_K says (P2)
+fa_path <- file.path(out_dir, paste0("fit_", cell_name(SAMPLE, LAG, ma, cell_spec(ma, spec)), ".rds"))
+fb_path <- file.path(out_dir, paste0("fit_", cell_name(SAMPLE, LAG, mb, cell_spec(mb, spec)), ".rds"))
 if (ALLOW_STALE) { if (!file.exists(fa_path)) fa_path <- sub("\\.rds$", "_STALE.rds", fa_path); if (!file.exists(fb_path)) fb_path <- sub("\\.rds$", "_STALE.rds", fb_path) }
 if (!file.exists(fa_path) || !file.exists(fb_path)) stop("the a / b fits of the cell are missing: ", basename(fa_path), ", ", basename(fb_path), " (run 02_fit_model.R first)")
 obj_a <- readRDS(fa_path); obj_b <- readRDS(fb_path)
@@ -139,6 +142,8 @@ for (o in list(obj_a, obj_b)) {
 }
 stopifnot(obj_a$dat$joint == 0L, obj_b$dat$joint == 1L)
 logf("fits %s and %s verified: production, current data, same E = %d, same events, same W / X / Z", basename(fa_path), basename(fb_path), dat_chk$E)
+## every written table names the family and, for M2, the AME K it was computed with (metadata of the K-specific file names; P2)
+with_meta <- function(tab) cbind(family = toupper(FAMILY), ame_K = if (FAMILY == "m2") K else NA_integer_, tab)
 fit_a <- obj_a$fit; fit_b <- obj_b$fit
 ## positions (relational LEVELS) and the gap constant for the holdout freezing (B9) and the level perturbation (B8)
 pos <- assert_matches_manifest(file.path(data_dir, "sy_positions.rds"), file.path(data_dir, "manifest.csv"))
@@ -154,14 +159,14 @@ if ("holdout" %in% TESTS) {
                  ctrl_cent = setdiff(union(w_controls(FULL_CONTROLS = FULL), x_controls(FULL_CONTROLS = FULL)), W_LEVELS), z_cent = intersect(A$Z_cols, Z_CENTRED))
   th <- temporal_holdout(A$sy, A$alts, A$ev, A$W_cols, A$X_cols, A$Z_cols, cutoff = CUTOFF, family = FAMILY, K = K,
                          stan_models = models, chains = CHAINS, iter = ITER, warmup = WARMUP, x_ref = A$x_ref, freeze = freeze)
-  write.csv(th$summary, file.path(out_dir, sprintf("measurement_%s_temporal_holdout_%d.csv", cell, CUTOFF)), row.names = FALSE)
+  write.csv(with_meta(th$summary), file.path(out_dir, sprintf("measurement_%s_temporal_holdout_%d.csv", cell, CUTOFF)), row.names = FALSE)
   logf("temporal holdout written (cutoff %d)", CUTOFF)
 }
 ## ---- permutation (B7: refit mode = calibrated p-value; rescore mode = reliance diagnostic) ----------------------------------------
 if ("permutation" %in% TESTS) {
   pt <- permutation_test(A$sy, A$alts, A$ev, A$W_cols, A$X_cols, A$Z_cols, fit_a, fit_b, n_perm = N_PERM, mode = PERM_MODE,
                          family = FAMILY, K = K, stan_models = models, chains = CHAINS, iter = ITER, warmup = WARMUP, x_ref = A$x_ref)
-  write.csv(pt$summary, file.path(out_dir, sprintf("measurement_%s_permutation_%s.csv", cell, PERM_MODE)), row.names = FALSE)
+  write.csv(with_meta(pt$summary), file.path(out_dir, sprintf("measurement_%s_permutation_%s.csv", cell, PERM_MODE)), row.names = FALSE)
   write.csv(data.frame(perm = seq_along(pt$permuted_advantage), adv = pt$permuted_advantage, a = pt$permuted_a, b = pt$permuted_b),
             file.path(out_dir, sprintf("measurement_%s_permutation_%s_draws.csv", cell, PERM_MODE)), row.names = FALSE)
   logf("permutation (%s) written: %s", PERM_MODE, pt$summary$interpretation)
@@ -174,7 +179,7 @@ if ("inflation" %in% TESTS) {
   me <- measurement_error_check(A$sy, A$alts, A$ev, A$W_cols, A$X_cols, A$Z_cols, recent = recent, deltas = DELTAS,
                                 baseline_cls = cls_b, levels = levels, h = LAG, gap_scale_R = GAP_R, family = FAMILY, joint = 1L, K = K, stan_models = models,
                                 chains = CHAINS, iter = ITER, warmup = WARMUP, r0 = R0, x_ref = A$x_ref)
-  write.csv(me, file.path(out_dir, sprintf("measurement_%s_error_inflation.csv", cell)), row.names = FALSE)
+  write.csv(with_meta(me), file.path(out_dir, sprintf("measurement_%s_error_inflation.csv", cell)), row.names = FALSE)
   logf("measurement-error inflation written (deltas %s log points of R)", paste(DELTAS, collapse = ","))
 }
 logf("05_robustness preset perm_error finished")

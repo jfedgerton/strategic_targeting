@@ -168,6 +168,29 @@ cell_name <- function(sample, lag, model, spec) {
   sprintf("%s_lag%d_%s_%s_%s%s%s", sample, as.integer(lag), VARIANT, CENTRALITY, model,
           if (grepl("^M2", model)) sprintf("_K%d", spec$ame_K) else "", spec_suffix(spec))
 }
+## compare_group_name(sample, lag, spec): the <group> of 04_compare.R, <sample>_lag<h>_all_pr[_K<K>]<suffix>; "_K<K>" only for a non-default
+## ame_K, so the documented main-grid names (mid_lag5_all_pr, fmid_lag3_all_pr_noww2, ...) are unchanged and a K=3 comparison never
+## overwrites the K=2 one (review 2026-10-26, P2)
+compare_group_name <- function(sample, lag, spec) {
+  stopifnot(sample %in% ALL_SAMPLES, lag %in% LAGS)
+  sprintf("%s_lag%d_%s_%s%s%s", sample, as.integer(lag), VARIANT, CENTRALITY,
+          if (!identical(as.integer(spec$ame_K), SPEC_DEFAULTS$ame_K)) sprintf("_K%d", spec$ame_K) else "", spec_suffix(spec))
+}
+## measurement_cell_name(sample, lag, family, spec): the <cell> of the 05_robustness.R perm_error outputs (measurement_<cell>_*.csv),
+## <sample>_lag<h>_all_pr_<M1|M2>[_K<K>]<suffix>. The M2 name ALWAYS carries its K, as cell_name() does for M2 fits (review 2026-10-26,
+## P2: K=2 and K=3 wrote the same mid_lag5_all_pr_M2 files); the M1 name never does.
+measurement_cell_name <- function(sample, lag, family, spec) {
+  stopifnot(sample %in% ALL_SAMPLES, lag %in% LAGS, family %in% c("m1", "m2"))
+  sprintf("%s_lag%d_%s_%s_%s%s%s", sample, as.integer(lag), VARIANT, CENTRALITY, toupper(family),
+          if (family == "m2") sprintf("_K%d", spec$ame_K) else "", spec_suffix(spec))
+}
+## m1_spec(spec): the spec of the M1 cell that goes with an M2 cell, i.e. the same switches with ame_K reset to the default (K belongs to
+## the M2 family only; cell_name() refuses a non-default K with an M1 model). The M1 init lookup of an M2 fit and every M1 name in the
+## comparison / measurement tools derive their names from this (review 2026-10-26, P2: `--model=M2b --ame_K=3` threw before checking
+## whether the M1 file existed).
+m1_spec <- function(spec) { spec$ame_K <- SPEC_DEFAULTS$ame_K; spec }
+## cell_spec(model, spec): the spec whose cell name belongs to `model` under `spec`: m1_spec(spec) for the M1 family, spec for M2
+cell_spec <- function(model, spec) if (model_family(model) == "M1") m1_spec(spec) else spec
 ## model_family(model): "M1" or "M2"; model_D_mode(model): 1 (material), 2 (relational), 3 (both); model_joint(model): 1 for the b models
 model_family <- function(model) { stopifnot(model %in% MODELS); substr(model, 1, 2) }
 model_D_mode <- function(model) { stopifnot(model %in% MODELS); switch(substr(model, 3, 3), m = 1L, r = 2L, a = 3L, b = 3L) }

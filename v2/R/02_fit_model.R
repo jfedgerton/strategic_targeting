@@ -32,7 +32,9 @@
 ## Every input file is checked against <data dir>/manifest.csv (nrow + sha256) before use (audit F3/F8/F9). Output:
 ##   v2/output/fit_<cell>.rds    fit, Stan data, cell description, manifest rows, sampling configuration, compiled-model hashes
 ##                               (written atomically: fit_<cell>.rds.tmp then renamed; 2026-10-25 C2); fit_<cell>_STALE.rds
-##                               when the data manifest changed while sampling (downstream tools need --allow_stale)
+##                               when the data manifest changed while sampling (downstream tools need --allow_stale). Written ONLY
+##                               when the stanfit holds every requested chain with all its post-warmup draws (assert_fit_chains();
+##                               review 2026-10-26 P1: rstan drops a failed parallel chain and returns the rest with mode 0)
 ##   v2/output/summary_<cell>.csv posterior summaries of the structural parameters, labelled by axis and covariate (written AFTER
 ##                               the fit file)
 ## Cell name: <sample>_lag<h>_all_pr_<model>[_K<K>][_orig|_join][_bi|_co][_strict][_drop3][_noww2][_fullctrl][_w1][_winsor][_sideA][_pilot]
@@ -68,7 +70,7 @@ logf("sampler (%s family): chains %d, iter %d, warmup %d, adapt_delta %.3f, max_
 set.seed(V2_SEED)
 rstan_options(auto_write = FALSE)
 rstan_options(threads_per_chain = THREADS)                 # needs the model compiled with -DSTAN_THREADS (rstan 2.32 default)
-options(mc.cores = min(CHAINS, max(1L, parallel::detectCores() %/% THREADS)))
+options(mc.cores = min(CHAINS, max(1L, n_cores() %/% THREADS)))        # n_cores(): detectCores() with a fallback when it returns NA
 logf("threads_per_chain = %d; mc.cores = %d", THREADS, getOption("mc.cores"))
 data_dir <- spec_data_dir(spec, v2_root()); out_dir <- file.path(v2_root(), "output"); dir.create(out_dir, showWarnings = FALSE)
 if (!dir.exists(data_dir)) stop("data directory ", data_dir, " does not exist (for --direction=sideA run `Rscript v2/R/01_build_data.R --direction=sideA` first)")
@@ -150,7 +152,7 @@ if (family == "m2_ame") {
   explicit <- nzchar(INIT_FROM)
   m1_path <- if (explicit) INIT_FROM else locate_m1_fit(SAMPLE, LAG, MODEL, spec, out_dir)
   if (is.na(m1_path) || !file.exists(m1_path)) {
-    init_info$reason <- sprintf("no matching M1 fit (%s) in %s", basename(paste0("fit_", cell_name(SAMPLE, LAG, sub("^M2", "M1", MODEL), spec), ".rds")), out_dir)
+    init_info$reason <- sprintf("no matching M1 fit (%s) in %s", paste0("fit_", m1_cell_for_m2(SAMPLE, LAG, MODEL, spec), ".rds"), out_dir)
     if (explicit) stop("--init_from=", INIT_FROM, " does not exist")
     logf("WARNING: %s; the M2 fit starts from Stan's RANDOM inits (run the M1 cell first to start from its posterior means)", init_info$reason)
   } else {
@@ -173,13 +175,26 @@ if (family == "m2_ame") {
 }
 stopifnot(identical(init_info$source, if (family == "m2_ame" && !is.na(init_info$m1_fit)) "m1_posterior_means" else "stan_random"))
 if (nzchar(INIT_FROM) && family != "m2_ame") stop("--init_from applies to the M2 family only")
+## test hook (tests/testthat/test_fit_smoke.R; review 2026-10-26, P1): V2_TEST_REJECT_CHAIN=<k> gives chain k an init Stan must reject
+## (sigma_x < 0) so the test can check that a run with ONE failed parallel chain saves no production fit and exits non-zero. Never set it
+## outside the tests; the log says loudly when it is.
+reject_chain <- suppressWarnings(as.integer(Sys.getenv("V2_TEST_REJECT_CHAIN", unset = "")))
+if (length(reject_chain) == 1 && !is.na(reject_chain)) {
+  stopifnot(reject_chain >= 1L, reject_chain <= CHAINS)
+  logf("WARNING: TEST HOOK V2_TEST_REJECT_CHAIN=%d: chain %d gets an init Stan rejects (sigma_x < 0); this run must NOT produce a production fit", reject_chain, reject_chain)
+  if (identical(init_arg, "random")) init_arg <- lapply(seq_len(CHAINS), function(ch) list(alpha0 = 0))   # partial named inits: the rest stays random
+  init_arg[[reject_chain]]$sigma_x <- array(-1, dim = if (D_MODE == 3L) 2L else 1L)
+}
 t0 <- Sys.time()
 fit <- sampling(sm, data = dat, chains = CHAINS, iter = ITER, warmup = WARMUP, seed = V2_SEED, init = init_arg,
                 refresh = max(1L, ITER %/% 20L), control = list(adapt_delta = ADAPT_DELTA, max_treedepth = MAX_TD),
                 pars = c("z_re", "z_b", "V_raw", "U_free", "L_Om_joint", "L_Om", "re"), include = FALSE)
 elapsed <- as.numeric(difftime(Sys.time(), t0, units = "mins"))
 if (fit@mode != 0L) stop(sprintf("sampling did not run (stanfit mode %d: rstan reported an error above, e.g. inits rejected); nothing saved", fit@mode))
-logf("sampling finished in %.1f min", elapsed)
+## every requested chain must be in the stanfit with all its post-warmup draws (review 2026-10-26, P1): with parallel chains rstan drops a
+## failed chain and returns the rest with mode 0, which would otherwise be saved as a production fit and release the afterok dependents
+assert_fit_chains(fit, chains = CHAINS, iter = ITER, warmup = WARMUP, what = "sampled fit", cell = cell)
+logf("sampling finished in %.1f min; %d chains x %d post-warmup draws, as requested", elapsed, fit_chain_summary(fit)$chains, fit_chain_summary(fit)$draws[1])
 sp <- get_sampler_params(fit, inc_warmup = FALSE)
 logf("divergences: %d; max-treedepth hits: %d", sum(sapply(sp, function(m) sum(m[, "divergent__"]))),
      sum(sapply(sp, function(m) sum(m[, "treedepth__"] >= MAX_TD))))

@@ -29,14 +29,16 @@ SAMPLE <- get_arg(args, "sample", "mid"); LAG <- as.integer(get_arg(args, "lag",
 stopifnot(SAMPLE %in% ALL_SAMPLES, LAG %in% LAGS)
 spec <- parse_spec(args); R0 <- get_arg(args, "r0", R0); ALLOW_STALE <- get_arg(args, "allow_stale", FALSE)
 refuse_archived_options(args, "04_compare.R")            # the same archived flags 02_fit_model.R refuses (audit fix 14)
-group <- sprintf("%s_lag%d_%s_%s%s", SAMPLE, LAG, VARIANT, CENTRALITY, spec_suffix(spec))
+group <- compare_group_name(SAMPLE, LAG, spec)
 log_open(paste0("compare_", group))
 logf("group %s; spec: %s", group, spec_string(spec))
 out_dir <- file.path(v2_root(), "output")
 manifest_path <- file.path(spec_data_dir(spec, v2_root()), "manifest.csv")
 fits <- list(); loos <- list(); rows <- list()
 for (m in MODELS) {
-  f <- file.path(out_dir, paste0("fit_", cell_name(SAMPLE, LAG, m, spec), ".rds"))
+  ## the M1 fits carry no K (cell_spec(): m1_spec(spec) for the M1 family), so a non-default --ame_K compares the K=3 M2 fits with the
+  ## one set of M1 fits (review 2026-10-26, P2)
+  f <- file.path(out_dir, paste0("fit_", cell_name(SAMPLE, LAG, m, cell_spec(m, spec)), ".rds"))
   if (!file.exists(f) && ALLOW_STALE && file.exists(sub("\\.rds$", "_STALE.rds", f))) f <- sub("\\.rds$", "_STALE.rds", f)
   if (!file.exists(f)) { logf("missing fit: %s", basename(f)); next }
   obj <- read_fit_or_null(f)                       # C2: an unreadable fit is logged and treated as missing

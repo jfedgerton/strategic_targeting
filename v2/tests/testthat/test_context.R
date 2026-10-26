@@ -75,6 +75,40 @@ test_that("audit fix 18: several GML spells inside one COW spell take the exit y
   expect_equal(participant_spell_dates(dd, db, part3)[1, ]$exit_dkey, as.integer(as.Date("1941-09-07")))
 })
 
+test_that("review P2 (2026-10-26): the latest participant exit is chosen at the coarser resolution; a known-day and an unknown-day end in the same latest month keep MONTH resolution", {
+  dd <- dd_rows(1L, 10L, 20L, 1939:1941)
+  db <- dispute_date_bounds(disp_row(1L, 1939L, 3L, 800), dd)
+  ## 10 has two GML spells ending in 1941-05: one on the 7th, one with an unknown day (-9). The latest exit is 1941-05 at MONTH resolution
+  ## (a tie at the coarser resolution); before, the sort key put the unknown day at day 1 and reported 1941-05-07 at day resolution.
+  mixed <- bind_rows(part_row(1L, 10L, 1939L, 3L, 25L, 1941L, 5L, 7L), part_row(1L, 10L, 1940L, 7L, 1L, 1941L, 5L, -9L), part_row(1L, 20L, 1939L, 3L, 25L, 1941L, 9L, 7L))
+  for (ord in list(1:3, c(2L, 1L, 3L))) {
+    p10 <- participant_spell_dates(dd, db, mixed[ord, ]) |> filter(ccode == 10L)
+    expect_equal(nrow(p10), 1L); expect_equal(p10$exit_res, 2L); expect_equal(p10$exit_mkey, ym_index(1941L, 5L)); expect_true(is.na(p10$exit_dkey)); expect_true(is.na(p10$exit_d))
+    expect_equal(c(p10$exit_y, p10$exit_m), c(1941L, 5L)); expect_equal(p10$exit_src, "participant")
+  }
+  ## the unknown-day spell ends in an EARLIER month: the day-dated later end wins at day resolution
+  earlier <- mixed; earlier$endmon[2] <- 4L
+  p10 <- participant_spell_dates(dd, db, earlier) |> filter(ccode == 10L); expect_equal(p10$exit_res, 1L); expect_equal(p10$exit_dkey, as.integer(as.Date("1941-05-07")))
+  ## the unknown-day spell ends in a LATER month: it wins at month resolution
+  later <- mixed; later$endmon[2] <- 6L
+  p10 <- participant_spell_dates(dd, db, later) |> filter(ccode == 10L); expect_equal(p10$exit_res, 2L); expect_equal(p10$exit_mkey, ym_index(1941L, 6L))
+  ## two day-dated ends in the same month: the later day, at day resolution (audit fix 18 unchanged)
+  days <- mixed; days$endday[2] <- 20L
+  p10 <- participant_spell_dates(dd, db, days) |> filter(ccode == 10L); expect_equal(p10$exit_res, 1L); expect_equal(p10$exit_dkey, as.integer(as.Date("1941-05-20")))
+  ## the exit of a day-dated spell against the onset of a third state in that month is then a tie, not "exited" (context_present)
+  onset <- date_keys(1L, 1941L, 5L, 20L)
+  psd <- participant_spell_dates(dd, db, mixed)
+  pres <- context_present(tibble(.g = 1L, dispnum = 1L, initiator = 20L, res = onset$res, y = onset$y, mkey = onset$mkey, dkey = onset$dkey), psd)
+  expect_equal(pres$cmp_exit[pres$ccode == 10L], 0L); expect_false(pres$exited[pres$ccode == 10L])
+  ## date_latest_by() itself: the fold of date_later over a group, in group order
+  d25 <- date_keys(1L, 1939L, 3L, 25L); d31 <- date_keys(1L, 1939L, 3L, 31L); mar <- date_keys(2L, 1939L, 3L, NA); apr <- date_keys(2L, 1939L, 4L, NA); yr <- date_keys(3L, 1939L, NA, NA)
+  l <- date_latest_by(bind_rows(d25, d31, mar), c(1L, 1L, 1L)); expect_equal(l$res, 2L); expect_equal(l$mkey, mar$mkey); expect_true(is.na(l$dkey))
+  l <- date_latest_by(bind_rows(d25, d31), c(1L, 1L)); expect_equal(l$res, 1L); expect_equal(l$dkey, d31$dkey)
+  l <- date_latest_by(bind_rows(d31, apr, mar), c(1L, 1L, 1L)); expect_equal(l$res, 2L); expect_equal(l$mkey, apr$mkey)
+  l <- date_latest_by(bind_rows(d31, yr), c(1L, 1L)); expect_equal(l$res, 3L)
+  l <- date_latest_by(bind_rows(d25, apr, d31), c(2L, 1L, 2L)); expect_equal(l$g, c(1L, 2L)); expect_equal(l$res, c(2L, 1L)); expect_equal(l$dkey, c(NA_integer_, d31$dkey))
+})
+
 ## a Germany-1939-like dispute: 1 = initiator 10 (orig) vs 20 (orig, same day), 30 and 40 join on day 31 of the same month, 50 joins in
 ## September; the initiator's 1939 group has pairs with 20 (March 25), 30 and 40 (March 31) and 50 (September); 60 attacks 20 in 1940
 toy_context <- function(part_days = TRUE) {

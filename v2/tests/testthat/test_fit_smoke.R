@@ -2,7 +2,8 @@
 ## The audit found that 02_fit_model.R never loaded assert_fit_matches_cell(), so every M2 cell fell back to random inits with exit 0.
 ## This test runs the SCRIPT (not the helpers) as a subprocess in a throw-away v2 root: R/ copied, stan/ symlinked to the compiled
 ## programs, data/ = the toy cell of helper-toy-cell.R, output/ empty. Short chains (2 x 80), so it takes about a minute.
-## Needs the compiled models (Rscript v2/R/compile_models.R); skipped otherwise.
+## Needs the compiled models (Rscript v2/R/compile_models.R); skipped otherwise. Step (5) (review P1, 2026-10-26) makes one parallel chain
+## fail through the script's V2_TEST_REJECT_CHAIN hook and checks that no production fit is written and the exit is non-zero.
 suppressPackageStartupMessages({ library(testthat) })
 root <- Sys.getenv("V2_ROOT"); if (root == "") root <- normalizePath(file.path(getwd(), "v2"), mustWork = FALSE)
 
@@ -15,8 +16,8 @@ make_smoke_root <- function() {
   dir.create(file.path(tmp, "v2", "output")); dir.create(file.path(tmp, "v2", "logs"))
   file.path(tmp, "v2")
 }
-run_fit <- function(v2, ...) {
-  out <- suppressWarnings(system2("Rscript", c(file.path(v2, "R", "02_fit_model.R"), ...), stdout = TRUE, stderr = TRUE))
+run_fit <- function(v2, ..., env = character()) {
+  out <- suppressWarnings(system2("Rscript", c(file.path(v2, "R", "02_fit_model.R"), ...), stdout = TRUE, stderr = TRUE, env = env))
   list(status = if (is.null(attr(out, "status"))) 0L else attr(out, "status"), out = out)
 }
 short <- c("--sample=mid", "--lag=3", "--chains=2", "--iter=80", "--warmup=40", "--max_treedepth=6")
@@ -80,5 +81,23 @@ test_that("02_fit_model.R end to end on the toy cell: M1b, then M2b from the M1b
   expect_true(any(grepl("starts from Stan's RANDOM inits", r4$out, fixed = TRUE)))
   o4 <- readRDS(m2_file); expect_equal(o4$args$init_source, "stan_random"); expect_true(is.na(o4$args$init_from))
   expect_true(all(read.csv(file.path(out_dir, "summary_mid_lag3_all_pr_M2b_K2.csv"))$init_source == "stan_random"))
+  ## (5) review P1 (2026-10-26): ONE of the two parallel chains fails (its init is rejected through the V2_TEST_REJECT_CHAIN hook); rstan
+  ## returns the surviving chain with mode 0, and the run must save NO production fit (no fit file, no .tmp, no summary) and exit non-zero
+  expect_false(file.exists(m1_file)); file.remove(file.path(out_dir, "summary_mid_lag3_all_pr_M1b.csv"))      # step (1)'s summary
+  r5 <- run_fit(v2, short, "--model=M1b", env = "V2_TEST_REJECT_CHAIN=2")
+  expect_true(r5$status != 0L, info = paste(tail(r5$out, 30), collapse = "\n"))
+  expect_true(any(grepl("TEST HOOK V2_TEST_REJECT_CHAIN=2", r5$out, fixed = TRUE)))
+  expect_true(any(grepl("holds 1 chain(s) but 2 were requested", r5$out, fixed = TRUE)) || any(grepl("sampling did not run", r5$out, fixed = TRUE)))
+  expect_false(file.exists(m1_file)); expect_false(file.exists(paste0(m1_file, ".tmp"))); expect_false(file.exists(file.path(out_dir, "summary_mid_lag3_all_pr_M1b.csv")))
+  expect_length(list.files(out_dir, pattern = "^fit_mid_lag3_all_pr_M1b"), 0L)
+  ## the same run without the hook saves the fit, and the log reports the chains x draws it checked
+  r5b <- run_fit(v2, short, "--model=M1b"); expect_equal(r5b$status, 0L, info = paste(tail(r5b$out, 30), collapse = "\n"))
+  expect_true(file.exists(m1_file)); expect_true(any(grepl("2 chains x 40 post-warmup draws, as requested", r5b$out, fixed = TRUE)))
+  expect_equal(fit_chain_summary(readRDS(m1_file)$fit)$draws, c(40L, 40L))
+  ## the M2 path (init lists from the M1 fit) with chain 1 rejected: no M2 fit either
+  file.remove(m2_file); file.remove(file.path(out_dir, "summary_mid_lag3_all_pr_M2b_K2.csv"))
+  r6 <- run_fit(v2, short, "--model=M2b", env = "V2_TEST_REJECT_CHAIN=1")
+  expect_true(r6$status != 0L, info = paste(tail(r6$out, 30), collapse = "\n"))
+  expect_false(file.exists(m2_file)); expect_length(list.files(out_dir, pattern = "^(fit|summary)_mid_lag3_all_pr_M2b"), 0L)
   unlink(dirname(v2), recursive = TRUE)
 })
