@@ -1362,6 +1362,103 @@ test_that("pairs switch: originators / joiners filter the events and recompute y
   expect_error(quiet(assemble_cell("mid", 3L, "all", PAIRS = "both", data_dir = td0)))
 })
 
+## ---- D8 weights under pairs != all (PI decision 2026-10-26): split groups rescaled to sum 1 --------------------------------------------
+## toy events for the pairs x D8 interaction (all 1990, mid): dispute 1: 10 -> 20 (originator, collapsed with dispute 9, w 1), 10 -> 30 and
+## 10 -> 40 (joiners, 1/3 each; the group sums to 5/3 under pairs = all); dispute 2: 30 -> 20 (originator, 1/2), 30 -> 10 (joiner, 1/2);
+## dispute 7: 40 -> 20 (joiner, 1); dispute 8: 40 -> 10 (originator, 1). Groups (10, 1), (30, 2) are split by both filters; (40, 7) and
+## (40, 8) are kept whole by one filter and dropped whole by the other.
+pairs_d8_events <- function(e) {
+  stopifnot(e$initiator[1] == 10L, e$target[1] == 20L, e$dispnum[1] == 1L)           # the template row: a plain dispute-1 event
+  e[rep(1L, 7L), ] |>
+    mutate(initiator = c(10L, 10L, 10L, 30L, 30L, 40L, 40L), target = c(20L, 30L, 40L, 20L, 10L, 20L, 10L),
+           dispnum = c(1L, 1L, 1L, 2L, 2L, 7L, 8L), dispnums = c("1;9", "1", "1", "2", "2", "7", "8"), n_disputes = c(2L, 1L, 1L, 1L, 1L, 1L, 1L),
+           is_joiner_pair = c(FALSE, TRUE, TRUE, FALSE, TRUE, TRUE, FALSE),
+           w_mid = c(1, 1 / 3, 1 / 3, 0.5, 0.5, 1, 1), w_fmid = w_mid, w_fmidub = w_mid)
+}
+test_that("D8 x pairs (helpers): split groups are rescaled to sum 1, whole groups keep the build's weights, a collapsed key follows its dispnum", {
+  td <- write_toy_cell(tempfile("toycell"), events_edit = pairs_d8_events)
+  before <- readRDS(file.path(td, "events.rds"))
+  key <- function(x) paste(x$initiator, x$target)
+  ## originators: (10, 1) keeps the collapsed key alone (kept sum 1, factor 1), (30, 2) keeps 30 -> 20 (0.5 -> 1), (40, 8) whole, (40, 7) dropped
+  ko <- before |> filter(!is_joiner_pair); ro <- d8_rescale_split_groups(before, ko, "w_mid")
+  expect_equal(ro$w_mid[key(ro) == "10 20"], 1); expect_equal(ro$w_mid[key(ro) == "30 20"], 1); expect_equal(ro$w_mid[key(ro) == "40 10"], 1)
+  expect_equal(attr(ro, "n_groups_split"), 2L); expect_equal(attr(ro, "n_groups_rescaled"), 1L); expect_equal(attr(ro, "n_events_rescaled"), 1L)
+  expect_equal(attr(ro, "w_before"), 2.5); expect_equal(attr(ro, "w_after"), 3); expect_equal(attr(ro, "n_split_with_collapsed"), 1L)
+  ## joiners: (10, 1) keeps 10 -> 30 and 10 -> 40 (1/3 + 1/3 -> 1/2 each), (30, 2) keeps 30 -> 10 (0.5 -> 1), (40, 7) whole at 1
+  kj <- before |> filter(is_joiner_pair); rj <- d8_rescale_split_groups(before, kj, "w_mid")
+  expect_equal(rj$w_mid[key(rj) == "10 30"], 0.5); expect_equal(rj$w_mid[key(rj) == "10 40"], 0.5); expect_equal(rj$w_mid[key(rj) == "30 10"], 1); expect_equal(rj$w_mid[key(rj) == "40 20"], 1)
+  expect_equal(attr(rj, "n_groups_split"), 2L); expect_equal(attr(rj, "n_groups_rescaled"), 2L); expect_equal(attr(rj, "n_events_rescaled"), 3L)
+  g <- rj |> group_by(initiator, dispnum, year) |> summarise(s = sum(w_mid), .groups = "drop"); expect_true(all(abs(g$s - 1) < 1e-12))
+  ## the other weight columns are untouched; the row set and the column set are those of the kept frame
+  expect_equal(rj$w_fmid, kj$w_fmid); expect_equal(names(rj), names(kj)); expect_equal(nrow(rj), nrow(kj))
+  ## nothing filtered: no split group, weights identical (the (10, 1) group keeps its sum of 5/3)
+  r0 <- d8_rescale_split_groups(before, before, "w_mid"); expect_equal(r0$w_mid, before$w_mid); expect_equal(attr(r0, "n_groups_split"), 0L)
+  ## the group table and the whole-group assertion: dropping dispute 2 whole passes; dropping one single-dispute member of dispute 1 stops;
+  ## dropping the collapsed key alone (as the no-WWII flag can) is a split through a collapsed key, counted and not an error
+  g0 <- d8_group_table(before, before, "w_mid"); expect_equal(nrow(g0), 4L); expect_equal(sort(g0$w_before), c(1, 1, 1, 5 / 3))
+  ok <- d8_assert_groups_whole(before, before |> filter(dispnum != 2L), "w_mid", "toy"); expect_equal(c(ok$n_whole_kept, ok$n_whole_dropped, ok$n_split_collapsed), c(3L, 1L, 0L))
+  expect_error(d8_assert_groups_whole(before, before |> filter(!(initiator == 10L & target == 30L)), "w_mid", "toy"), "split among their single-dispute members")
+  cl <- d8_assert_groups_whole(before, before |> filter(!(initiator == 10L & target == 20L)), "w_mid", "toy"); expect_equal(cl$n_split_collapsed, 1L)
+  expect_error(d8_group_table(before |> filter(dispnum != 7L), before, "w_mid"), "not a subset")
+})
+
+test_that("D8 x pairs (assembly): originators / joiners rescale the split groups to sum 1; pairs = all and weights = none are unchanged", {
+  td <- write_toy_cell(tempfile("toycell"), events_edit = pairs_d8_events)
+  A  <- quiet(assemble_cell("mid", 3L, "all", data_dir = td))
+  Ao <- quiet(assemble_cell("mid", 3L, "all", PAIRS = "originators", data_dir = td))
+  Aj <- quiet(assemble_cell("mid", 3L, "all", PAIRS = "joiners", data_dir = td))
+  A1 <- quiet(assemble_cell("mid", 3L, "all", PAIRS = "joiners", EVENT_WEIGHTS = "none", data_dir = td))
+  chosen <- function(X) paste(X$alts$ccode1[X$ev$alt_row], X$alts$ccode2[X$ev$alt_row])
+  ## pairs = all: the build's weights, the (10, 1) group summing to 5/3 included
+  expect_equal(nrow(A$ev), 7L); expect_equal(sum(A$ev$w), 14 / 3); expect_equal(A$pairs_weights$n_groups_split, 0L)
+  expect_equal(A$ev$w[chosen(A) == "10 30"], 1 / 3); expect_equal(A$ev$w[chosen(A) == "30 10"], 0.5)
+  ## originators: 10 -> 20 (1), 30 -> 20 (0.5 -> 1), 40 -> 10 (1)
+  expect_setequal(chosen(Ao), c("10 20", "30 20", "40 10")); expect_equal(Ao$ev$w, rep(1, 3)); expect_equal(Ao$sy$y1, c(1L, 0L, 1L, 1L))
+  expect_equal(Ao$pairs_weights$n_groups_split, 2L); expect_equal(Ao$pairs_weights$n_groups_rescaled, 1L); expect_equal(Ao$pairs_weights$w_before, 2.5); expect_equal(Ao$pairs_weights$w_after, 3)
+  ## joiners: 10 -> 30 and 10 -> 40 (1/3 -> 1/2), 30 -> 10 (0.5 -> 1), 40 -> 20 (1)
+  expect_setequal(chosen(Aj), c("10 30", "10 40", "30 10", "40 20"))
+  expect_equal(Aj$ev$w[chosen(Aj) == "10 30"], 0.5); expect_equal(Aj$ev$w[chosen(Aj) == "10 40"], 0.5); expect_equal(Aj$ev$w[chosen(Aj) == "30 10"], 1); expect_equal(Aj$ev$w[chosen(Aj) == "40 20"], 1)
+  expect_equal(Aj$pairs_weights$n_groups_rescaled, 2L); expect_equal(Aj$pairs_weights$n_events_rescaled, 3L); expect_equal(Aj$pairs_weights$w_after, 3)
+  ## weights = none: weight 1 everywhere, no rescale reported
+  expect_true(all(A1$ev$w == 1)); expect_equal(A1$pairs_weights$n_groups_split, 0L); expect_true(is.na(A1$pairs_weights$w_before))
+  ## the rescale does not touch the alternatives, the stage-1 frame beyond y1, or the chosen rows
+  expect_equal(Aj$alts, A$alts); expect_equal(Aj$sy |> select(-y1), A$sy |> select(-y1)); expect_equal(sort(Aj$ev$alt_row), sort(A$ev$alt_row[chosen(A) %in% chosen(Aj)]))
+  ## ww2 = drop on the toy drops disputes 6 and 7 whole (the default fixture); the group assertion passes and reports no split
+  td0 <- write_toy_cell(tempfile("toycell"))
+  expect_error(quiet(assemble_cell("mid", 3L, "all", DROP_WW2 = TRUE, data_dir = td0)), NA)
+})
+
+test_that("D8 x pairs (real data, when present): fmid lag 3 split groups sum to 1 under originators and joiners; pairs = all carries the build's weights", {
+  man_path <- file.path(v2_root(), "data", "manifest.csv")
+  skip_if_not(file.exists(man_path) && file.exists(file.path(v2_root(), "data", "alts_lag3_all.rds")), "real data files not built")
+  events <- readRDS(file.path(v2_root(), "data", "events.rds")); e <- events |> filter(in_fmid)
+  chosen_keys <- function(X) X$alts[X$ev$alt_row, c("ccode1", "ccode2", "year")] |> mutate(w = X$ev$w)
+  check <- function(PAIRS) {
+    X <- quiet(assemble_cell_spec("fmid", 3L, parse_spec(paste0("--pairs=", PAIRS))))
+    kept <- if (PAIRS == "originators") e |> filter(!is_joiner_pair) else e |> filter(is_joiner_pair)
+    g <- d8_group_table(e, kept, "w_fmid"); split <- g |> filter(n_kept > 0L, n_kept < n)
+    ## the Stan-data weights of the kept events, matched back to the events file, sum to 1 in every split group whose members are all usable
+    ck <- chosen_keys(X) |> inner_join(kept |> select(ccode1 = initiator, ccode2 = target, year, dispnum, w_build = w_fmid), by = c("ccode1", "ccode2", "year"))
+    expect_equal(nrow(ck), nrow(X$ev))
+    s <- ck |> group_by(ccode1, dispnum, year) |> summarise(n_usable = n(), s = sum(w), .groups = "drop") |>
+      inner_join(split |> transmute(ccode1 = initiator, dispnum, year, n_kept), by = c("ccode1", "dispnum", "year"))
+    expect_true(nrow(s) > 0); expect_true(all(abs(s$s[s$n_usable == s$n_kept] - 1) < 1e-9))
+    ## untouched groups carry the build's weights
+    whole <- ck |> anti_join(split |> transmute(ccode1 = initiator, dispnum, year), by = c("ccode1", "dispnum", "year"))
+    expect_equal(whole$w, whole$w_build)
+    expect_equal(X$pairs_weights$n_groups_split, nrow(split)); expect_equal(X$pairs_weights$n_groups, nrow(g))
+    X
+  }
+  Xo <- check("originators"); Xj <- check("joiners")
+  expect_equal(Xo$pairs_weights$n_groups_split, 49L); expect_equal(Xj$pairs_weights$n_groups_split, 49L)
+  expect_equal(nrow(Xo$ev), 545L); expect_equal(round(sum(Xo$ev$w), 1), 529.1); expect_equal(round(Xo$pairs_weights$w_after, 1), 580.1)
+  expect_equal(nrow(Xj$ev), 510L); expect_equal(round(sum(Xj$ev$w), 1), 253.2); expect_equal(round(Xj$pairs_weights$w_after, 1), 266.5)
+  ## pairs = all: every usable event carries its build weight (the main-specification Stan data are unchanged)
+  Xa <- quiet(assemble_cell_spec("fmid", 3L, parse_spec(character(0))))
+  ca <- chosen_keys(Xa) |> inner_join(e |> select(ccode1 = initiator, ccode2 = target, year, w_build = w_fmid), by = c("ccode1", "ccode2", "year"))
+  expect_equal(nrow(ca), 1055L); expect_equal(ca$w, ca$w_build); expect_equal(round(sum(ca$w), 1), 741.0)
+})
+
 test_that("changes switch: winsor clips dM_i, dR_i, dM_j_h, dRpr_j_h at the panel's 1st / 99th percentiles before the Z centring; raw = unchanged", {
   td <- write_toy_cell(tempfile("toycell"))
   A  <- quiet(assemble_cell("mid", 3L, "all", data_dir = td))

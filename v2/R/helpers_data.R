@@ -482,6 +482,76 @@ collapse_duplicate_events <- function(events) {
   res
 }
 
+## ---- D8 groups at assembly (PI decision 2026-10-26; README "pairs" switch) ---------------------------------------------------------
+## The D8 weight group is (initiator, dispnum, year), the key event_weights() used on the pre-collapse rows. After the collapse a key
+## collapsed from several disputes carries ONE weight (the capped sum of its per-dispute weights) and ONE dispnum (the smallest), so at
+## assembly every event belongs to exactly one group, that of its dispnum column; the other disputes of a collapsed key form no group of
+## their own (their per-dispute weights are not recoverable from events.rds). The three helpers below all use this key.
+## d8_group_table(before, kept, w_col): one row per group of `before` (the sample's events before a filter) with the members that survived
+## the filter (`kept`, a subset of `before` on (initiator, target, year)): n, n_kept, w_before, w_kept (the kept members' BUILD weights),
+## n_single / n_single_kept (single-dispute members), n_collapsed / n_collapsed_kept (collapsed keys).
+d8_group_table <- function(before, kept, w_col) {
+  stopifnot(is.character(w_col), length(w_col) == 1L, all(c("initiator", "target", "year", "dispnum", "n_disputes", w_col) %in% names(before)),
+            all(c("initiator", "target", "year") %in% names(kept)), !anyNA(before[[w_col]]))
+  assert_no_dup_keys(before, c("initiator", "target", "year"), "d8_group_table: events before the filter")
+  assert_no_dup_keys(kept, c("initiator", "target", "year"), "d8_group_table: kept events")
+  k <- kept |> select(initiator, target, year) |> mutate(.kept = TRUE)
+  b <- before |> left_join(k, by = c("initiator", "target", "year")) |> mutate(.kept = coalesce(.kept, FALSE))
+  if (sum(b$.kept) != nrow(kept)) stop("d8_group_table: the kept events are not a subset of the events before the filter")
+  b |> group_by(initiator, dispnum, year) |>
+    summarise(n = n(), n_kept = sum(.kept), w_before = sum(.data[[w_col]]), w_kept = sum(.data[[w_col]][.kept]),
+              n_single = sum(n_disputes == 1L), n_single_kept = sum(.kept & n_disputes == 1L),
+              n_collapsed = sum(n_disputes > 1L), n_collapsed_kept = sum(.kept & n_disputes > 1L), .groups = "drop")
+}
+## d8_assert_groups_whole(before, kept, w_col, what): the filter `what` (ww2 = drop, coal_drop = top3) removes whole disputes, so every group
+## must be untouched or dropped whole. A split among SINGLE-dispute members means the flag is not constant within a dispute (stop). A split
+## through a collapsed key alone (a key kept by one of its other disputes, e.g. the no-WWII flag of a key mixing a WWII and a non-WWII
+## dispute, review P2-3) is the documented collapse behaviour: counted and returned (the caller logs a WARNING), weights NOT rescaled.
+## Returns list(groups, n_whole_kept, n_whole_dropped, n_split_collapsed).
+d8_assert_groups_whole <- function(before, kept, w_col, what) {
+  g <- d8_group_table(before, kept, w_col)
+  split <- g |> filter(n_kept > 0L, n_kept < n)
+  bad <- split |> filter(n_single_kept > 0L, n_single_kept < n_single)
+  if (nrow(bad) > 0) stop(sprintf("%s: %d (initiator, dispute, year) groups are split among their single-dispute members (%s); the flag is not constant within the dispute (rebuild the data)",
+                                  what, nrow(bad), paste(sprintf("%d/%d/%d", bad$initiator, bad$dispnum, bad$year), collapse = ", ")))
+  stopifnot(all(split$n_collapsed > 0L))
+  list(groups = g, n_whole_kept = sum(g$n_kept == g$n), n_whole_dropped = sum(g$n_kept == 0L), n_split_collapsed = nrow(split))
+}
+## d8_rescale_split_groups(before, kept, w_col): the pairs rule (PI decision 2026-10-26). In every group the pairs filter SPLIT (some members
+## kept, some dropped) the kept members' weights are divided by their kept sum, so the group sums to 1 again (w_new = w / sum(w kept));
+## a group kept whole keeps the build's weights exactly, whatever they sum to (a group of collapsed keys may sum to more or less than 1
+## under pairs = all and stays so). Groups fully dropped have no members left. Asserts: every split group sums to 1 after the rescale,
+## every weight is in (0, 1], weights outside the split groups are unchanged. Returns `kept` with w_col rescaled and the attributes
+## n_groups_split, n_groups_rescaled (split groups whose factor differs from 1), n_events_rescaled, w_before, w_after (sums over the kept
+## events), n_split_with_collapsed (split groups holding a collapsed key), groups (the table).
+d8_rescale_split_groups <- function(before, kept, w_col) {
+  g <- d8_group_table(before, kept, w_col)
+  split <- g |> filter(n_kept > 0L, n_kept < n)
+  stopifnot(all(split$w_kept > 0), !".fac" %in% names(kept))
+  out <- kept |> left_join(split |> transmute(initiator, dispnum, year, .fac = 1 / w_kept), by = c("initiator", "dispnum", "year")) |>
+    mutate(.fac = coalesce(.fac, 1))
+  w_old <- out[[w_col]]
+  stopifnot(all(is.finite(w_old)), all(w_old > 0), all(w_old <= 1), sum(out$.fac != 1) <= nrow(out))
+  out[[w_col]] <- w_old * out$.fac
+  in_split <- out |> semi_join(split, by = c("initiator", "dispnum", "year")) |> nrow()
+  chk <- out |> group_by(initiator, dispnum, year) |> summarise(.s = sum(.data[[w_col]]), .groups = "drop") |> semi_join(split, by = c("initiator", "dispnum", "year"))
+  stopifnot(nrow(chk) == nrow(split), all(abs(chk$.s - 1) < 1e-9),
+            all(is.finite(out[[w_col]])), all(out[[w_col]] > 0), all(out[[w_col]] <= 1 + 1e-12),
+            all(out[[w_col]][out$.fac == 1] == w_old[out$.fac == 1]))
+  out[[w_col]] <- pmin(out[[w_col]], 1)
+  n_resc <- sum(abs(out$.fac - 1) > 1e-12)
+  res <- out |> select(-.fac)
+  stopifnot(identical(names(res), names(kept)), nrow(res) == nrow(kept))
+  attr(res, "n_groups_split") <- nrow(split)
+  attr(res, "n_groups_rescaled") <- sum(abs(split$w_kept - 1) > 1e-12)
+  attr(res, "n_events_rescaled") <- n_resc
+  attr(res, "n_events_in_split") <- in_split
+  attr(res, "w_before") <- sum(w_old); attr(res, "w_after") <- sum(res[[w_col]])
+  attr(res, "n_split_with_collapsed") <- sum(split$n_collapsed > 0L)
+  attr(res, "groups") <- g
+  res
+}
+
 ## ---- initiator direction for war-level disputes (PI decision 2026-10-25; README "Initiator direction") -------------
 ## COW-MID Side A is the side that took the FIRST codable action, not the aggressor. In dispute 258 (the Second World War)
 ## Side A is Poland and the Allies, so the Side A rule gives Poland -> Germany and never Germany -> Poland. For disputes at

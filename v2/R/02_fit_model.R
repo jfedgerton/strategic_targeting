@@ -113,6 +113,9 @@ logf("Stan data: S=%d N1=%d N2=%d E=%d P1=%d P=%d Pz=%d joint=%d sampled=%d D_mo
      sum(dat$ev_w), min(dat$ev_w), sum(dat$ev_w == 1), paste(W_cols, collapse = ","), paste(X_cols, collapse = ","), paste(Z_cols, collapse = ","))
 logf("D2 levels in W: %s; D3 log system size in W: %s; D1 reversed events in the sample: %d", paste(intersect(W_cols, W_LEVELS), collapse = ","),
      "log_n_system_tm1" %in% W_cols, A$n_flipped)
+if (spec$pairs != "all" && spec$weights == "dispute") logf("pairs = %s D8 rescale (PI decision 2026-10-26): %d of %d (initiator, dispute, year) groups split by the filter, %d rescaled to sum 1, %d events rescaled; sum of weights over the kept events %.1f -> %.1f",
+                                                            spec$pairs, A$pairs_weights$n_groups_split, A$pairs_weights$n_groups, A$pairs_weights$n_groups_rescaled, A$pairs_weights$n_events_rescaled,
+                                                            A$pairs_weights$w_before, A$pairs_weights$w_after)
 if (spec$context != "all") logf("context = %s (%s%s): %d stage-2 events removed, %d D8 groups split through collapsed keys; stage 1 unchanged, %d state-years with y1 = 1 and no stage-2 event",
                                 spec$context, spec$coal_ties, if (spec$coal_drop == "top3") sprintf(", without disputes %s", paste(A$context_top3$dispnum, collapse = ", ")) else "",
                                 A$n_context_dropped, A$n_context_split_groups, A$n_orphan)

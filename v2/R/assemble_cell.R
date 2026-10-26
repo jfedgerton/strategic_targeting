@@ -9,7 +9,10 @@
 ##                   are filtered and y1 is recomputed from the kept events exactly as DROP_WW2 does, so a state-year whose
 ##                   only events were in the other group gets y1 = 0. Joiners-only is a STAGE-2 comparison: its stage 1 counts a
 ##                   state as initiating only when it joined (is_joiner_pair is FALSE for a collapsed key with any originator pair).
-##   CHANGES       = "raw" (main) | "winsor": the initiator changes dM_i, dR_i and the target changes dM_j_h, dRpr_j_h are clipped
+##                   D8 weights (PI decision 2026-10-26): in every (initiator, dispute, year) group the filter splits, the kept events'
+##                   weights are divided by their kept sum so the group sums to 1 again (EVENT_WEIGHTS = "dispute" only); groups kept
+##                   whole keep the build's weights; a collapsed key is grouped by its dispnum column (its smallest dispute).
+##   CHANGES      = "raw" (main) | "winsor": the initiator changes dM_i, dR_i and the target changes dM_j_h, dRpr_j_h are clipped
 ##                   at the WINSOR_PROBS (1st / 99th percentile) quantiles of the stage-1 panel's dM_h / dRpr_h for the cell's lag
 ##                   (the target change is the same state-year change table, so one pair of cut points per axis), BEFORE the Z
 ##                   centring; cut points and the number of clipped values are logged. A target without a change value stays 0.
@@ -240,14 +243,23 @@ assemble_cell <- function(SAMPLE, LAG, VARIANT, CENT = "pr", CONFLICT_HISTORY = 
   ev_all <- events |> filter(.data[[ev_flag]])
   stopifnot(!any(ev_all$escalation))
   n_ww2 <- sum(ev_all$is_ww2)
+  ## D8 weight column of the sample; every in-sample event carries a weight in (0, 1] from the build (the pairs rule below may rescale it)
+  w_col <- paste0("w_", SAMPLE)
+  stopifnot(!anyNA(ev_all[[w_col]]), all(ev_all[[w_col]] > 0), all(ev_all[[w_col]] <= 1))
   if (DROP_WW2) {
     ev_flag_noww2 <- paste0(ev_flag, "_noww2")
-    n_before <- nrow(ev_all)
+    n_before <- nrow(ev_all); ev_before <- ev_all
     ev_all <- events |> filter(.data[[ev_flag_noww2]])
     stopifnot(!any(ev_all$escalation), all(events[[ev_flag]][events[[ev_flag_noww2]]]), !any(ev_all$is_ww2 & ev_all$n_disputes == 1L))
     logf("--drop_ww2: sample %s %d -> %d events using %s (%d events flagged is_ww2 removed; %d events collapsed from a WWII and a non-WWII dispute kept because a non-WWII dispute qualifies, whereas in_%s & !is_ww2 would keep %d events); WWII disputes %s",
          SAMPLE, n_before, nrow(ev_all), ev_flag_noww2, n_before - nrow(ev_all), sum(ev_all$is_ww2), SAMPLE, sum(events[[ev_flag]] & !events$is_ww2),
          paste(sort(unique(events$dispnum[events$is_ww2])), collapse = ","))
+    ## D8 group integrity (2026-10-26): whole disputes leave, so every (initiator, dispute, year) group is untouched or dropped whole; a split
+    ## among single-dispute members stops the run; a split through a collapsed key kept by its non-WWII dispute is logged, NOT rescaled
+    ww <- d8_assert_groups_whole(ev_before, ev_all, w_col, "--ww2=drop")
+    logf("--ww2=drop D8 groups (initiator, dispute, year) of sample %s: %d kept whole, %d dropped whole, %d split through a collapsed key kept by its non-WWII dispute%s; weights %.1f -> %.1f, not rescaled",
+         SAMPLE, ww$n_whole_kept, ww$n_whole_dropped, ww$n_split_collapsed, if (ww$n_split_collapsed > 0) " (WARNING: these groups no longer sum to one decision)" else "",
+         sum(ev_before[[w_col]]), sum(ev_all[[w_col]]))
   } else logf("WWII events in sample %s: %d of %d (kept; --drop_ww2=TRUE removes them)", SAMPLE, n_ww2, nrow(ev_all))
   ## stage-1 outcome recounted from the kept events (independent path through the escalation and WWII columns). Without
   ## --drop_ww2 it must equal the panel's y1_<sample>; with it the recount IS y1, so WWII-only state-years get y1 = 0.
@@ -264,8 +276,15 @@ assemble_cell <- function(SAMPLE, LAG, VARIANT, CENT = "pr", CONFLICT_HISTORY = 
   ## pairs = originators | joiners: keep one group of event pairs and recompute y1 from the kept events (as --ww2=drop does), so the
   ## stage-1 outcome and the stage-2 events describe the same group. is_joiner_pair is FALSE for a collapsed key with any originator
   ## pair. Joiners-only is a stage-2 comparison (its stage 1 counts a state as initiating only when it joined).
+  ## D8 weights under pairs != all (PI decision 2026-10-26): the filter can keep part of an (initiator, dispute, year) group (a dispute
+  ## where the initiator faced originators AND joiners), so the kept members' weights are divided by their kept sum and every split group
+  ## sums to 1 again; groups kept whole keep the build's weights exactly. A collapsed key is grouped by its dispnum column (the smallest
+  ## of its disputes), the only group it can belong to after the collapse (d8_rescale_split_groups, helpers_data.R). Only this filter
+  ## rescales: ww2 = drop and coal_drop = top3 remove whole disputes (asserted); context keeps groups whole (asserted above / below); the
+  ## events that leave stage 2 through the choice set are logged, not rescaled. With weights = none every event has weight 1 anyway.
+  pairs_w <- list(n_groups = 0L, n_groups_split = 0L, n_groups_rescaled = 0L, n_events_rescaled = 0L, w_before = NA_real_, w_after = NA_real_)
   if (PAIRS != "all") {
-    n_before <- nrow(ev_all); n_join_before <- sum(ev_all$is_joiner_pair); y1_before <- sum(sy$y1)
+    n_before <- nrow(ev_all); n_join_before <- sum(ev_all$is_joiner_pair); y1_before <- sum(sy$y1); ev_before <- ev_all
     ev_all <- if (PAIRS == "originators") ev_all |> filter(!is_joiner_pair) else ev_all |> filter(is_joiner_pair)
     if (nrow(ev_all) == 0) stop(sprintf("pairs = %s leaves no event in sample %s", PAIRS, SAMPLE))
     y1_pairs <- ev_all |> distinct(ccode = initiator, year) |> mutate(.y1 = 1L)
@@ -274,8 +293,20 @@ assemble_cell <- function(SAMPLE, LAG, VARIANT, CENT = "pr", CONFLICT_HISTORY = 
     sy$y1 <- sy$.y1; sy <- sy |> select(-.y1)
     logf("pairs = %s: sample %s %d -> %d events (%d originator pairs and %d joiner pairs before the filter); stage-1 initiations %d -> %d (%d state-years whose %s events were all in the other group now have y1 = 0)",
          PAIRS, SAMPLE, n_before, nrow(ev_all), n_before - n_join_before, n_join_before, y1_before, sum(sy$y1), y1_before - sum(sy$y1), SAMPLE)
-  } else logf("pairs = all: %d events in sample %s (%d joiner pairs)", nrow(ev_all), SAMPLE, sum(ev_all$is_joiner_pair))
-  w_col <- paste0("w_", SAMPLE)
+    if (EVENT_WEIGHTS == "dispute") {
+      ev_all <- d8_rescale_split_groups(ev_before, ev_all, w_col)
+      g <- attr(ev_all, "groups")
+      pairs_w <- list(n_groups = nrow(g), n_groups_split = attr(ev_all, "n_groups_split"), n_groups_rescaled = attr(ev_all, "n_groups_rescaled"),
+                      n_events_rescaled = attr(ev_all, "n_events_rescaled"), w_before = attr(ev_all, "w_before"), w_after = attr(ev_all, "w_after"))
+      stopifnot(abs(pairs_w$w_before - sum(ev_before[[w_col]][ev_before$is_joiner_pair == (PAIRS == "joiners")])) < 1e-9, nrow(ev_all) == sum(ev_before$is_joiner_pair == (PAIRS == "joiners")))
+      logf("pairs = %s, D8 weights rescaled within the (initiator, dispute, year) groups the filter split (PI decision 2026-10-26; a collapsed key belongs to the group of its smallest dispute number): %d groups in sample %s, %d kept whole (build weights unchanged; %d of them do not sum to 1 through collapsed keys, as under pairs = all), %d dropped whole, %d split (%d holding a collapsed key); %d split groups rescaled to sum 1 (%d had a kept sum of 1 already), %d of %d kept events rescaled; sum of weights over the kept events %.1f -> %.1f",
+           PAIRS, pairs_w$n_groups, SAMPLE, sum(g$n_kept == g$n), sum(g$n_kept == g$n & abs(g$w_before - 1) > 1e-9), sum(g$n_kept == 0L),
+           pairs_w$n_groups_split, attr(ev_all, "n_split_with_collapsed"), pairs_w$n_groups_rescaled, pairs_w$n_groups_split - pairs_w$n_groups_rescaled,
+           pairs_w$n_events_rescaled, nrow(ev_all), pairs_w$w_before, pairs_w$w_after)
+      for (a in c("n_groups_split", "n_groups_rescaled", "n_events_rescaled", "n_events_in_split", "w_before", "w_after", "n_split_with_collapsed", "groups"))
+        attr(ev_all, a) <- NULL                                       # the helper's attributes do not travel on
+    } else logf("pairs = %s with weights = none: weight 1 on every event, no D8 rescale", PAIRS)
+  } else logf("pairs = all: %d events in sample %s (%d joiner pairs); D8 weights as built", nrow(ev_all), SAMPLE, sum(ev_all$is_joiner_pair))
   ## context = bilateral | coalition (dual typology stage a, 2026-10-25): STAGE-2 events of one coalition context only. y1 is NOT recomputed
   ## (stage 1 is unchanged by design; a state-year whose events are all in the other context keeps y1 = 1 and is counted as an orphan below).
   coal_col <- c(inclusive = "coal_incl", strict = "coal_strict")[[COAL_TIES]]
@@ -319,13 +350,18 @@ assemble_cell <- function(SAMPLE, LAG, VARIANT, CENT = "pr", CONFLICT_HISTORY = 
       context_top3 <- cnt[1:3, ]
       tie <- cnt$n_events[4] == cnt$n_events[3]
       in_top3 <- vapply(strsplit(ev_all$dispnums, ";", fixed = TRUE), function(z) any(as.integer(z) %in% context_top3$dispnum), logical(1))
-      n_b <- nrow(ev_all); w_b <- sum(ev_all[[w_col]])
+      n_b <- nrow(ev_all); w_b <- sum(ev_all[[w_col]]); ev_b <- ev_all
       ev_all <- ev_all[!in_top3, ]
       if (nrow(ev_all) == 0) stop("coal_drop = top3 leaves no event")
       n_context_dropped <- n_context_dropped + sum(in_top3)
       logf("coal_drop = top3: the 3 disputes with the most coalition events in sample %s are %s; %d -> %d events (%d removed, weights %.1f -> %.1f)%s",
            SAMPLE, paste(sprintf("%d (%d events)", context_top3$dispnum, context_top3$n_events), collapse = ", "), n_b, nrow(ev_all), sum(in_top3), w_b, sum(ev_all[[w_col]]),
            if (tie) sprintf("; WARNING: dispute %d ties with the third place (%d events) and is kept (smallest dispute numbers win ties)", cnt$dispnum[4], cnt$n_events[4]) else "")
+      ## D8 group integrity (2026-10-26): whole disputes leave, so groups are untouched or dropped whole; the only possible split is a collapsed
+      ## key leaving through its OTHER (top-3) dispute while its own group stays (none on the current data); logged, NOT rescaled
+      cd <- d8_assert_groups_whole(ev_b, ev_all, w_col, "coal_drop = top3")
+      logf("coal_drop = top3 D8 groups (initiator, dispute, year) of the coalition events: %d kept whole, %d dropped whole, %d split through a collapsed key%s; weights not rescaled",
+           cd$n_whole_kept, cd$n_whole_dropped, cd$n_split_collapsed, if (cd$n_split_collapsed > 0) " (WARNING: these groups no longer sum to one decision)" else "")
     }
   } else logf("context = all: %d events in sample %s (coalition context: %d inclusive, %d strict)", nrow(ev_all), SAMPLE, sum(ev_all$coal_incl), sum(ev_all$coal_strict))
   ## one chosen alternative per (i, j, t): same-year duplicates were collapsed by the build (PI decision 2026-10-24)
@@ -367,7 +403,7 @@ assemble_cell <- function(SAMPLE, LAG, VARIANT, CENT = "pr", CONFLICT_HISTORY = 
   n_orphan <- sum(sy$y1 == 1L & !(seq_len(nrow(sy)) %in% ev$sy_row))
   logf("state-years with y1 = 1 but no usable stage-2 event (kept in stage 1 only): %d", n_orphan)
   ## stage-2 event weights (D8): w_<sample> from the build (or 1 under EVENT_WEIGHTS = "none"); build_stan_data() passes them as ev_w
-  logf("event weights (D8, %s): %d usable events, sum of weights %.1f; weight 1 on %d events, min %.4f; weights of the events in the panel's (initiator, dispute, year) groups whose other targets left stage 2 no longer sum to 1 (logged, not rescaled)",
+  logf("event weights (D8, %s): %d usable events, sum of weights %.1f; weight 1 on %d events, min %.4f; weights of the events in the panel's (initiator, dispute, year) groups whose other targets left stage 2 through the choice set no longer sum to 1 (logged, not rescaled; only the pairs filter rescales, see above)",
        EVENT_WEIGHTS, nrow(ev), sum(ev$w), sum(ev$w == 1), min(ev$w))
   ev <- ev |> select(sy_row, alt_row, w)
   
@@ -388,7 +424,7 @@ assemble_cell <- function(SAMPLE, LAG, VARIANT, CENT = "pr", CONFLICT_HISTORY = 
        x_ref = x_ref, n_full = n_full, sampled = sampled, n_orphan = n_orphan, manifest_path = manifest_path,
        n_ww2 = n_ww2, drop_ww2 = DROP_WW2, dy_peace_years = DY_PEACE_YEARS, full_controls = FULL_CONTROLS, n_fighting_at_ref = nrow(far_keys),
        event_weights = EVENT_WEIGHTS, n_flipped = sum(ev_keys$dir_flipped), iv_null_cor_logn = cor(iv_null, sy$log_n_system_tm1),
-       pairs = PAIRS, changes = CHANGES, winsor = winsor, context = CONTEXT, coal_ties = COAL_TIES, coal_drop = COAL_DROP, context_top3 = context_top3,
+       pairs = PAIRS, pairs_weights = pairs_w, changes = CHANGES, winsor = winsor, context = CONTEXT, coal_ties = COAL_TIES, coal_drop = COAL_DROP, context_top3 = context_top3,
        n_context_dropped = n_context_dropped, n_context_split_groups = n_split_groups)
 }
 ## assemble_cell_spec(SAMPLE, LAG, spec, ...): the main-specification constants of spec.R plus the switches of `spec`
