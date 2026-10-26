@@ -33,6 +33,13 @@ test_that("02_fit_model.R end to end on the toy cell: M1b, then M2b from the M1b
   expect_equal(o1$args$init_source, "stan_random"); expect_equal(o1$init$source, "stan_random"); expect_equal(o1$args$model, "M1b"); expect_false(o1$args$pilot)
   s1 <- read.csv(file.path(out_dir, "summary_mid_lag3_all_pr_M1b.csv")); expect_true(all(s1$init_source == "stan_random")); expect_true(all(is.na(s1$init_from)))
   expect_match(o1$args$stan_source_sha256, "^[0-9a-f]{64}$")
+  ## (1b) 03_extract.R accepts the fit (current data AND current Stan program, audit fix 5) and refuses one stamped with another program's hash
+  run_extract <- function(f) { out <- suppressWarnings(system2("Rscript", c(file.path(v2, "R", "03_extract.R"), paste0("--fit=", f)), stdout = TRUE, stderr = TRUE))
+    list(status = if (is.null(attr(out, "status"))) 0L else attr(out, "status"), out = out) }
+  e1 <- run_extract(m1_file); expect_equal(e1$status, 0L, info = paste(tail(e1$out, 20), collapse = "\n"))
+  expect_true(file.exists(file.path(out_dir, "typology_mid_lag3_all_pr_M1b.csv")))
+  doctored <- o1; doctored$args$stan_source_sha256 <- paste(rep("0", 64), collapse = ""); doc_file <- file.path(out_dir, "fit_mid_lag3_all_pr_M1b_doctored.rds"); saveRDS(doctored, doc_file)
+  e2 <- run_extract(doc_file); expect_true(e2$status != 0L); expect_true(any(grepl("fits of different programs", e2$out, fixed = TRUE))); file.remove(doc_file)
   ## (2) M2b: every chain starts at the M1b posterior means (the file is auto-located in output/)
   r2 <- run_fit(v2, short, "--model=M2b")
   expect_equal(r2$status, 0L, info = paste(tail(r2$out, 30), collapse = "\n"))

@@ -55,9 +55,7 @@ CHAINS <- smp$chains; ITER <- smp$iter; WARMUP <- smp$warmup; ADAPT_DELTA <- smp
 PILOT <- get_arg(args, "pilot", FALSE); DRY_RUN <- get_arg(args, "dry_run", FALSE)
 THREADS <- as.integer(get_arg(args, "threads_per_chain", 1))
 INIT_FROM <- get_arg(args, "init_from", "")
-## archived options are refused instead of being ignored silently
-for (old in c("variant", "sampled_m", "centrality", "conflict_history", "distance", "contiguity", "dy_peace_years", "drop_ww2", "full_controls", "event_weights", "K"))
-  if (length(grep(paste0("^--", old, "="), args))) stop(sprintf("--%s is no longer an option of 02_fit_model.R; use the switches of spec.R (--ww2, --controls, --weights, --ame_K, ...) or see README 'Archived options'", old))
+refuse_archived_options(args, "02_fit_model.R")          # archived options are refused instead of being ignored silently (ARCHIVED_OPTIONS, spec.R)
 stopifnot(CHAINS >= 1, ITER > WARMUP, WARMUP >= 0, THREADS >= 1, is.finite(ADAPT_DELTA), ADAPT_DELTA > 0, ADAPT_DELTA < 1, MAX_TD >= 1)
 
 D_MODE <- model_D_mode(MODEL); joint <- model_joint(MODEL); family <- if (model_family(MODEL) == "M1") "m1_latent_additive" else "m2_ame"

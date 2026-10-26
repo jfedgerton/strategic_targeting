@@ -28,8 +28,7 @@ args <- commandArgs(trailingOnly = TRUE)
 SAMPLE <- get_arg(args, "sample", "mid"); LAG <- as.integer(get_arg(args, "lag", 5))
 stopifnot(SAMPLE %in% ALL_SAMPLES, LAG %in% LAGS)
 spec <- parse_spec(args); R0 <- get_arg(args, "r0", R0); ALLOW_STALE <- get_arg(args, "allow_stale", FALSE)
-for (old in c("variant", "centrality", "K", "event_weights")) if (length(grep(paste0("^--", old, "="), args)))
-  stop(sprintf("--%s is no longer an option of 04_compare.R; use the switches of spec.R (--ame_K, --weights, ...)", old))
+refuse_archived_options(args, "04_compare.R")            # the same archived flags 02_fit_model.R refuses (audit fix 14)
 group <- sprintf("%s_lag%d_%s_%s%s", SAMPLE, LAG, VARIANT, CENTRALITY, spec_suffix(spec))
 log_open(paste0("compare_", group))
 logf("group %s; spec: %s", group, spec_string(spec))
@@ -43,7 +42,8 @@ for (m in MODELS) {
   obj <- read_fit_or_null(f)                       # C2: an unreadable fit is logged and treated as missing
   if (is.null(obj)) next
   assert_production_fit(obj, allow_stale = ALLOW_STALE)        # C1 / C2
-  assert_fit_current(obj, manifest_path); fits[[m]] <- obj
+  assert_fit_current(obj, manifest_path); assert_fit_stan_current(obj)   # current data AND current Stan program (audit fix 5)
+  fits[[m]] <- obj
   l2 <- loo_from_fit(obj$fit, "log_lik_stage2"); l1 <- loo_from_fit(obj$fit, "log_lik_stage1"); lj <- loo_joint_sy(obj$fit, obj$dat)
   loos[[m]] <- list(l2 = l2, l1 = l1, lj = lj)
   rows[[m]] <- data.frame(model = m, D_mode = obj$dat$D_mode, joint = obj$dat$joint, E = obj$dat$E, N1 = obj$dat$N1, sum_event_weights = sum(obj$dat$ev_w),

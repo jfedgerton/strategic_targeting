@@ -85,3 +85,16 @@ test_that("dimension mismatches between the M1 fit and the M2 data are errors, a
   expect_equal(basename(locate_m1_fit("mid", 3L, "M2a", parse_spec("--ww2=drop"), td)), "fit_mid_lag3_all_pr_M1a_noww2.rds")
   expect_error(locate_m1_fit("mid", 3L, "M1b", spec, td))
 })
+
+test_that("audit fix 17: a binding correlation clamp in the M2 init construction is logged", {
+  sm1 <- skip_if_no_build("m1_latent_additive")
+  tp <- tiny_pair(1L, 3L); o1 <- tiny_m1_fit(sm1, tp$d1)
+  expect_silent_log <- function(expr) expect_false(any(grepl("clamp binds", capture.output(expr))))
+  expect_silent_log(m1_inits_for_m2(o1, tp$d2, chains = 2, seed = 123, jitter_sd = 0.05))                 # the default jitter never binds here
+  out <- capture.output(res <- m1_inits_for_m2(o1, tp$d2, chains = 2, seed = 123, jitter_sd = 4))          # N(0, 0.8) on the correlations: the clamp binds (seed 123)
+  expect_true(any(grepl("WARNING: m1_inits_for_m2 chain [12]: the .* init clamp binds", out)))
+  expect_true(any(grepl("correlation init\\(s\\) clamped to \\+/-0.95 over 2 chains", out)))
+  expect_true(attr(res, "n_clamped") >= length(grep("clamp binds", out)))                                  # one line per binding call, >= 1 value each
+  expect_equal(attr(m1_inits_for_m2(o1, tp$d2, chains = 1, seed = 123, jitter_sd = 0), "n_clamped"), 0L)
+  expect_true(all(abs(res[[1]]$rho_x) <= 0.95))
+})

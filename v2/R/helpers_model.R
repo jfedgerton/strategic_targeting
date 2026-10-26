@@ -399,7 +399,17 @@ m1_inits_for_m2 <- function(obj_m1, dat_m2, chains, seed = V2_SEED, jitter_sd = 
   if (D == 2L && joint == 1L) m$rho <- mean(ex$rho_x)
   if (D == 2L && joint == 0L) { m$r1 <- mean(ex$r_ca1); m$q2 <- mean(ex$q_ca2) }
   if (D == 1L) m$r1d <- mean(ex$r_ca_1d)
-  clamp <- function(x, lim = 0.95) pmin(pmax(x, -lim), lim)
+  ## the correlation clamps (jittered corr(c, a), rho_x, the q of the a models) are expected never to bind at jitter_sd = 0.05; when
+  ## one does, the M1 posterior mean sits near the boundary and the init was moved: say so in the log (audit fix 17, 2026-10-26)
+  n_clamped <- 0L
+  clamp <- function(x, lim = 0.95, what = "correlation") {
+    out <- pmin(pmax(x, -lim), lim)
+    hit <- which(abs(out - x) > 0)
+    if (length(hit)) { n_clamped <<- n_clamped + length(hit)
+      logf("WARNING: m1_inits_for_m2 chain %d: the %s init clamp binds (%s -> %s)", ch, what, paste(sprintf("%.4f", x[hit]), collapse = ", "), paste(sprintf("%.4f", out[hit]), collapse = ", ")) }
+    out
+  }
+  ch <- 0L
   lower_chol <- function(R) { R <- (R + t(R)) / 2; diag(R) <- 1; stopifnot(min(eigen(R, symmetric = TRUE, only.values = TRUE)$values) > 1e-8); t(chol(R)) }
   n_copied <- length(c("alpha0", "alpha", "tau", "mu0", "beta", "sigma_x", "sd_re", "sigma_b", "gamma", "z_re", "z_b",
                        if (D == 2L && joint == 1L) c("rho_x", "L_Om_joint"), if (D == 2L && joint == 0L) c("r_ca1", "q_ca2"), if (D == 1L) "r_ca_1d"))
@@ -408,7 +418,7 @@ m1_inits_for_m2 <- function(obj_m1, dat_m2, chains, seed = V2_SEED, jitter_sd = 
     set.seed(seed + ch)
     jit <- function(x) x + rnorm(length(x), 0, jitter_sd)
     pos <- function(x) x * exp(rnorm(length(x), 0, jitter_sd))
-    cj  <- function(x) clamp(x + rnorm(length(x), 0, jitter_sd / 5))
+    cj  <- function(x) clamp(x + rnorm(length(x), 0, jitter_sd / 5), what = "corr(c, a) / corr(a1, a2)")
     ## correlation of (c, a): jittered off-diagonals, kept PD; the a models fix corr(a1, a2) = 0 by construction
     R <- m$R_Om; R[upper.tri(R)] <- cj(R[upper.tri(R)]); R[lower.tri(R)] <- t(R)[lower.tri(R)]
     if (D == 2L && joint == 0L) R[2, 3] <- R[3, 2] <- 0
@@ -423,8 +433,8 @@ m1_inits_for_m2 <- function(obj_m1, dat_m2, chains, seed = V2_SEED, jitter_sd = 
     init <- list(alpha0 = jit(m$alpha0), alpha = as.array(jit(m$alpha)), tau = jit(m$tau), mu0 = as.array(jit(m$mu0)),
                  beta = matrix(jit(as.numeric(m$beta)), dat_m2$P, D), sigma_x = as.array(pos(m$sigma_x)), sd_re = as.array(sd_re),
                  sigma_b = sigma_b, gamma = as.array(jit(m$gamma)), z_re = z_re, z_b = as.array(z_b))
-    if (D == 2L && joint == 1L) { init$rho_x <- as.array(clamp(m$rho + rnorm(1, 0, jitter_sd / 5))); init$L_Om_joint <- array(L, dim = c(1L, Dre, Dre)) }
-    if (D == 2L && joint == 0L) { init$r_ca1 <- as.array(R[1, 2]); q <- R[1, 3] / sqrt(1 - R[1, 2]^2); init$q_ca2 <- as.array(clamp(q)) }
+    if (D == 2L && joint == 1L) { init$rho_x <- as.array(clamp(m$rho + rnorm(1, 0, jitter_sd / 5), what = "rho_x")); init$L_Om_joint <- array(L, dim = c(1L, Dre, Dre)) }
+    if (D == 2L && joint == 0L) { init$r_ca1 <- as.array(R[1, 2]); q <- R[1, 3] / sqrt(1 - R[1, 2]^2); init$q_ca2 <- as.array(clamp(q, what = "q_ca2 = r2 / sqrt(1 - r1^2)")) }
     if (D == 1L) init$r_ca_1d <- as.array(R[1, 2])
     ## AME factors near 0 (u_diag must be positive: the upper half of the range)
     init$u_diag <- as.array(runif(K, uv_range[2] / 2, uv_range[2]))
@@ -435,8 +445,10 @@ m1_inits_for_m2 <- function(obj_m1, dat_m2, chains, seed = V2_SEED, jitter_sd = 
               all(abs(init$U_free) <= max(abs(uv_range))), all(abs(init$V_raw) <= max(abs(uv_range))))
     inits[[ch]] <- init
   }
+  if (n_clamped > 0L) logf("WARNING: m1_inits_for_m2: %d correlation init(s) clamped to +/-0.95 over %d chains (see the lines above)", n_clamped, chains)
   attr(inits, "means") <- m
   attr(inits, "n_copied") <- n_copied
+  attr(inits, "n_clamped") <- n_clamped
   inits
 }
 ## locate_m1_fit(sample, lag, model_m2, spec, out_dir): the file of the matching M1 fit (M2x -> M1x, same cell otherwise), or NA

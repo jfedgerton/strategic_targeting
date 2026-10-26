@@ -66,3 +66,18 @@ test_that("C4: a fit must score exactly the assembled cell", {
   expect_error(assert_fit_matches_cell(obj, dat, "w", "x", c("z", "z2")), "Z columns")
   d4 <- dat; d4$ev_w <- c(1, 1, 1); expect_error(assert_fit_matches_cell(obj, d4, "w", "x", "z"), "weights")
 })
+
+test_that("audit fix 5: a fit must have been sampled with the compiled program's Stan source (stan/build/<family>.sha256)", {
+  td <- tempfile(); dir.create(file.path(td, "stan", "build"), recursive = TRUE)
+  sha1 <- paste(rep("a", 64), collapse = ""); sha2 <- paste(rep("b", 64), collapse = "")
+  writeLines(sha1, file.path(td, "stan", "build", "m1_latent_additive.sha256")); writeLines(sha2, file.path(td, "stan", "build", "m2_ame.sha256"))
+  ok1 <- list(cell = "c1", args = list(model = "M1b", stan_source_sha256 = sha1)); ok2 <- list(cell = "c2", args = list(model = "M2b", stan_source_sha256 = sha2))
+  expect_true(assert_fit_stan_current(ok1, root = td)); expect_true(assert_fit_stan_current(ok2, root = td))
+  expect_error(assert_fit_stan_current(list(cell = "mix", args = list(model = "M1b", stan_source_sha256 = sha2)), root = td), "different programs")   # M1 fit of another program
+  expect_error(assert_fit_stan_current(list(cell = "old", args = list(model = "M1b")), root = td), "records no Stan source hash")                   # pre-C3 fit
+  expect_error(assert_fit_stan_current(list(cell = "nomodel", args = list(stan_source_sha256 = sha1)), root = td), "no model code")
+  file.remove(file.path(td, "stan", "build", "m2_ame.sha256")); expect_error(assert_fit_stan_current(ok2, root = td), "sidecar hash missing")
+  ## the real sidecars, when the models are compiled: a fit stamped with the current source hash passes
+  side <- file.path(root, "stan", "build", "m1_latent_additive.sha256")
+  if (file.exists(side)) expect_true(assert_fit_stan_current(list(cell = "r", args = list(model = "M1a", stan_source_sha256 = trimws(readLines(side)[1]))), root = root))
+})

@@ -35,6 +35,7 @@ stopifnot(length(fit_path) == 1, file.exists(fit_path), is.finite(r0), r0 > 0, !
 obj <- readRDS(fit_path); fit <- obj$fit; cell <- obj$cell
 assert_production_fit(obj, allow_stale = allow_stale)
 assert_fit_current(obj, file.path(v2_root(), if (is.null(obj$data_dir)) "data" else obj$data_dir, "manifest.csv"))
+assert_fit_stan_current(obj)            # the fit's Stan source hash must be the compiled program's (stan/build/<family>.sha256; audit fix 5)
 out_dir <- dirname(fit_path)
 log_open(paste0("03_extract_", cell))
 logf("fit %s; r0 = %.2f", cell, r0)

@@ -99,6 +99,23 @@ CONTEXT_PRESET <- list(cells = c("mid:3:M1b", "fmid:3:M1b"),
 ROBUSTNESS_CELLS <- c("mid:3:M1b", "fmid:3:M1b", "war:3:M1b", "mid:3:M2b", "fmid:3:M2b", "war:3:M2b")
 ROBUSTNESS_MAIN_CELL <- list(sample = "mid", lag = 5L)   # the perm_error preset's cell (the a / b fits of both families)
 
+## ---- archived CLI options (README "Archived options"; audit fix 14, 2026-10-26) ---------------------------------------------------
+## Every script refuses the SAME list instead of ignoring an archived flag silently: the former --variant / --sampled_m / --centrality /
+## --conflict_history / --distance / --contiguity / --dy_peace_years options and the pre-spec.R spellings of today's switches
+## (--drop_ww2 -> --ww2=drop, --full_controls -> --controls=full, --event_weights -> --weights, --K -> --ame_K).
+ARCHIVED_OPTIONS <- c("variant", "sampled_m", "centrality", "conflict_history", "distance", "contiguity", "dy_peace_years",
+                      "drop_ww2", "full_controls", "event_weights", "K")
+## refuse_archived_options(args, script, also, also_msg): stop() when args hold --<archived>=... (or the bare flag); `also` adds
+## script-specific refusals with their own message (the build takes --direction only, so it refuses every other switch of SPEC_CHOICES)
+refuse_archived_options <- function(args, script, also = character(0), also_msg = "it is not an option of this script") {
+  for (old in ARCHIVED_OPTIONS)
+    if (length(grep(paste0("^--", old, "(=|$)"), args)))
+      stop(sprintf("--%s is not an option of %s (archived 2026-10-25); use the switches of spec.R (--ww2, --controls, --weights, --ame_K, ...) or see README 'Archived options'", old, script))
+  for (old in also)
+    if (length(grep(paste0("^--", old, "(=|$)"), args))) stop(sprintf("--%s is not an option of %s (%s)", old, script, also_msg))
+  invisible(TRUE)
+}
+
 ## ---- parsing -----------------------------------------------------------------------------------------------------------------
 ## get_arg(args, name, default): the value of --name=value in args, typed like default (logical / numeric / character)
 get_arg <- function(args, name, default) {
@@ -143,8 +160,11 @@ spec_string <- function(spec) paste(sprintf("%s=%s", names(spec), unlist(spec)),
 ## spec_coal_col(spec): the events.rds column the context switch filters on ("coal_incl" / "coal_strict")
 spec_coal_col <- function(spec) c(inclusive = "coal_incl", strict = "coal_strict")[[spec$coal_ties]]
 ## cell_name(sample, lag, model, spec): <sample>_lag<h>_all_pr_<model>[_K<K>]<suffix>, e.g. fmid_lag3_all_pr_M2b_K2_noww2
+## An M1 cell name carries no K, so ame_K != 2 with an M1 model would be dropped silently: refused (audit fix 16, 2026-10-26).
 cell_name <- function(sample, lag, model, spec) {
   stopifnot(sample %in% ALL_SAMPLES, lag %in% LAGS, model %in% MODELS)
+  if (model_family(model) == "M1" && !identical(as.integer(spec$ame_K), SPEC_DEFAULTS$ame_K))
+    stop(sprintf("cell_name: --ame_K=%s with the M1 model %s (K applies to the M2 family only and would not appear in the cell name)", spec$ame_K, model))
   sprintf("%s_lag%d_%s_%s_%s%s%s", sample, as.integer(lag), VARIANT, CENTRALITY, model,
           if (grepl("^M2", model)) sprintf("_K%d", spec$ame_K) else "", spec_suffix(spec))
 }

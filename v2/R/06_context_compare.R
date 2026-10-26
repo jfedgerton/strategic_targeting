@@ -20,6 +20,7 @@ source(file.path(R_DIR, "spec.R")); source(file.path(R_DIR, "helpers_data.R")); 
 source(file.path(R_DIR, "typology.R")); source(file.path(R_DIR, "context_compare.R"))
 Sys.setenv(V2_ROOT = normalizePath(file.path(R_DIR, "..")))
 args <- commandArgs(trailingOnly = TRUE)
+refuse_archived_options(args, "06_context_compare.R")    # audit fix 14
 SAMPLE <- get_arg(args, "sample", "mid"); LAG <- as.integer(get_arg(args, "lag", 3)); MODEL <- get_arg(args, "model", "M1b")
 R0 <- get_arg(args, "r0", R0); MIN_DEC <- get_arg(args, "min_decisions", 3); ALLOW_STALE <- get_arg(args, "allow_stale", FALSE)
 stopifnot(SAMPLE %in% ALL_SAMPLES, LAG %in% LAGS, MODEL %in% MODELS, model_D_mode(MODEL) == 3L, is.finite(R0), R0 > 0, MIN_DEC > 0)
@@ -40,7 +41,7 @@ load_fit <- function(spec, required) {
   if (!file.exists(f)) { if (required) stop("missing fit: ", basename(f)); logf("optional fit missing: %s", basename(f)); return(NULL) }
   obj <- read_fit_or_null(f)
   if (is.null(obj)) { if (required) stop("unreadable fit: ", basename(f)); return(NULL) }
-  assert_production_fit(obj, allow_stale = ALLOW_STALE); assert_fit_current(obj, manifest_path)
+  assert_production_fit(obj, allow_stale = ALLOW_STALE); assert_fit_current(obj, manifest_path); assert_fit_stan_current(obj)   # audit fix 5
   stopifnot(identical(obj$spec$context, spec$context), identical(obj$spec$coal_ties, spec$coal_ties), identical(obj$spec$coal_drop, spec$coal_drop))
   logf("loaded %s: E = %d, N1 = %d, sum(y1) = %d, weights %.1f", basename(f), obj$dat$E, obj$dat$N1, sum(obj$dat$y1), sum(obj$dat$ev_w))
   obj

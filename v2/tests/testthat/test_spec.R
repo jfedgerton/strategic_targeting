@@ -65,3 +65,18 @@ test_that("model codes and sampler settings", {
   expect_equal(expand(idx("M1_IDX")), which(model_family(MODELS[grid$model]) == "M1") - 1L)
   expect_equal(expand(idx("M2_IDX")), which(model_family(MODELS[grid$model]) == "M2") - 1L)
 })
+
+test_that("audit fixes 14 and 16: archived flags are refused by one shared helper; ame_K != 2 with an M1 model is an error", {
+  expect_true(refuse_archived_options(c("--sample=mid", "--ww2=drop", "--ame_K=2"), "x"))
+  for (old in ARCHIVED_OPTIONS) expect_error(refuse_archived_options(paste0("--", old, "=1"), "02_fit_model.R"), paste0("--", old, " is not an option"), fixed = TRUE)
+  expect_error(refuse_archived_options("--drop_ww2", "x"), "--drop_ww2")                                     # the bare flag form too
+  expect_error(refuse_archived_options("--ww2=drop", "01_build_data.R", also = setdiff(names(SPEC_CHOICES), "direction")), "--ww2 is not an option")
+  expect_true(refuse_archived_options("--direction=sideA", "01_build_data.R", also = setdiff(names(SPEC_CHOICES), "direction")))
+  ## every script that parses the switches calls the helper
+  for (f in c("01_build_data.R", "02_fit_model.R", "04_compare.R", "05_robustness.R", "06_context_compare.R"))
+    expect_true(any(grepl("refuse_archived_options(", readLines(file.path(root, "R", f)), fixed = TRUE)), info = f)
+  k3 <- parse_spec("--ame_K=3")
+  expect_equal(cell_name("mid", 3L, "M2b", k3), "mid_lag3_all_pr_M2b_K3")
+  expect_error(cell_name("mid", 3L, "M1b", k3), "K applies to the M2 family only")
+  expect_equal(cell_name("mid", 3L, "M1b", parse_spec("--ame_K=2")), "mid_lag3_all_pr_M1b")
+})

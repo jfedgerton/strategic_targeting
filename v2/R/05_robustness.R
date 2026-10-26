@@ -42,6 +42,7 @@ R_DIR <- dirname(this_file)
 source(file.path(R_DIR, "spec.R")); source(file.path(R_DIR, "helpers_data.R")); source(file.path(R_DIR, "helpers_model.R"))
 Sys.setenv(V2_ROOT = normalizePath(file.path(R_DIR, "..")))
 args <- commandArgs(trailingOnly = TRUE)
+refuse_archived_options(args, "05_robustness.R")         # the same archived flags 02_fit_model.R refuses (audit fix 14)
 PRESET <- get_arg(args, "preset", "")
 if (!PRESET %in% names(ROBUSTNESS_PRESETS)) stop("--preset must be one of ", paste(names(ROBUSTNESS_PRESETS), collapse = " | "), "; got '", PRESET, "'")
 ## the switches: whatever the command line says, with the preset's switch forced on top
@@ -132,6 +133,7 @@ dat_chk <- build_stan_data(A$sy, A$alts, A$ev, A$W_cols, A$X_cols, A$Z_cols, joi
 for (o in list(obj_a, obj_b)) {
   assert_production_fit(o, allow_stale = ALLOW_STALE)
   assert_fit_current(o, file.path(data_dir, "manifest.csv"))
+  assert_fit_stan_current(o)                                   # sampled with the compiled program's source (audit fix 5)
   assert_fit_matches_cell(o, dat_chk, A$W_cols, A$X_cols, A$Z_cols)
   stopifnot(o$dat$D_mode == 3L)
 }

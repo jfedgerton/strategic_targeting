@@ -95,6 +95,9 @@ set.seed(V2_SEED)
 ## still works). The two codings write to SEPARATE directories, v2/data (cowwar) and v2/data_sideA (sideA), each with its own
 ## manifest and build_log, so they never overwrite each other; 02_fit_model.R --direction=sideA reads the second one and
 ## suffixes its cells with _sideA. The direction is the only switch the build takes; every other switch acts at assembly.
+## the build takes --direction only: the archived flags and every other switch of spec.R are refused, not ignored (audit fix 14, 2026-10-26)
+refuse_archived_options(commandArgs(trailingOnly = TRUE), "01_build_data.R", also = setdiff(names(SPEC_CHOICES), "direction"),
+                        also_msg = "the build takes --direction only; every other switch acts at assembly, in 02_fit_model.R")
 DIRECTION <- parse_spec(c(commandArgs(trailingOnly = TRUE), paste0("--direction=", Sys.getenv("V2_DIRECTION", unset = "cowwar"))))$direction
 if (!DIRECTION %in% SPEC_CHOICES$direction) stop("--direction / V2_DIRECTION must be 'cowwar' (main) or 'sideA' (appendix); got ", DIRECTION)
 log_open(paste0("01_build_data", if (DIRECTION == "sideA") "_sideA" else ""))
