@@ -1,6 +1,6 @@
 # Simulation report (v2 pipeline)
 
-**SUPERSEDED (2026-10-25).** The results below were produced by the OLD simulated world (`simulate_targeting()`: z-scored positions, mu0 = 0, four X controls, no choice-set masks, no event weights, r0 = 0.8, x_ref = 0) and the programs before the review fixes of 2026-10-25 (disk prior on the "a" correlations, explicit rho_x prior, event weights). `run_sim.R`, `run_sim_1d.R` and `run_measurement_tests.R` now simulate the CURRENT model (`simulate_current()`, including a persistent-position variant) and must be rerun (`slurm/10_simulations.sbatch`, open account) before any conclusion here is cited; `write_sim_report.R` then regenerates this file. The conclusions below have not been rewritten.
+**SUPERSEDED (2026-10-25).** The results below were produced by the OLD simulated world (`simulate_targeting()`: z-scored positions, mu0 = 0, four X controls, no choice-set masks, no event weights, r0 = 0.8, x_ref = 0) and the programs before the review fixes of 2026-10-25 (disk prior on the "a" correlations, explicit rho_x prior, event weights). `sim/run_sim.R` (one driver, `--task=main|persistent|1d|measurement|benchmarks`; the former `run_sim_1d.R` and `run_measurement_tests.R` are in `archive/sim/`) now simulates the CURRENT model (`simulate_current()`, including a persistent-position variant) and must be rerun (`slurm/05_simulations.sbatch`, open account) before any conclusion here is cited; `write_sim_report.R` then regenerates this file. The conclusions below have not been rewritten.
 
 Generated 2026-10-22 16:44 by `v2/sim/write_sim_report.R` from `v2/sim/results/*.csv`. Seed 123 throughout.
 
@@ -288,7 +288,7 @@ Breakdown of one gradient evaluation on the 40-state cell (N1 = 1000 state-years
 | M1b | 18.34 | 18.15 | 0.16 | 0.03 | 0.99 | 0.01 | 0.00 |
 | M2b | 24.88 | 25.41 | -0.62 | 0.09 | 1.02 | -0.02 | 0.00 |
 
-Sampling time for 1 chain, fixed seed, by `threads_per_chain` (reduce_sum_static over state-years; grainsize = N1 for 1 thread, about N1 / (4 threads) otherwise). This container has 2 cores, so 4 threads is oversubscribed; the real speed-up curve must be read from the Roar pilot (04_pilot.sbatch with THREADS_PER_CHAIN = 1 vs 8).
+Sampling time for 1 chain, fixed seed, by `threads_per_chain` (reduce_sum_static over state-years; grainsize = N1 for 1 thread, about N1 / (4 threads) otherwise). This container has 2 cores, so 4 threads is oversubscribed; the real speed-up curve must be read from the Roar pilot (`02_fit_model.R --pilot=TRUE --threads_per_chain=1` vs `8`, inside a job; the former 04_pilot.sbatch is archived).
 
 | model | threads_per_chain | grainsize | cores_available | oversubscribed | iterations | elapsed_s | s_per_iteration | ms_per_gradient |
 |---|---|---|---|---|---|---|---|---|
