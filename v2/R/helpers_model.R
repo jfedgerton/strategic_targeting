@@ -326,3 +326,86 @@ procrustes_align <- function(U_draws, V_draws, ref_chain = 1) {
 
 ## grainsize for reduce_sum_static: with 1 thread one slice (serial); otherwise about 4 slices per thread
 choose_grainsize <- function(N1, threads) if (threads <= 1) N1 else max(1L, as.integer(ceiling(N1 / (4 * threads))))
+
+## ---- M2 initial values from the matching M1 fit (PI decision 2026-10-25) -------------------------------------------------------------
+## m1_inits_for_m2(obj_m1, dat_m2, chains, seed, jitter_sd, uv_range): one init list per chain for an M2 (AME) fit, built from the
+## posterior MEANS of the M1 fit of the same cell (same sample, lag, switches; M2x from M1x). Every parameter the two programs share
+## with identical dimensions is copied: alpha0, alpha, tau, mu0, beta, sigma_x, sd_re, sigma_b, gamma, the correlation parameters of
+## the model's variant (rho_x and L_Om_joint in the b models, r_ca1 / q_ca2 in the a models, r_ca_1d in the 1-D models) and the
+## random-effect standard-normals z_re / z_b. The M1 fits do not save z_re / z_b / L_Om_joint (excluded at sampling), so they are
+## reconstructed from the saved transformed quantities: re = (c_i, a_i) = (diag(sd_re) L_Om z_re)' gives z_re = (diag(sd_re) L_Om)^-1 re',
+## with L_Om the lower Cholesky factor of the posterior-mean correlation R_Om; b_j = sigma_b (z_b - mean z_b) gives z_b = b_j / sigma_b.
+## The AME factors (u_diag, u_lower, U_free, V_raw) start near 0: uniform on uv_range (u_diag, which must be positive, on the upper half
+## of the range), drawn with seed + chain. Each chain is jittered around the means (seed + chain): N(0, jitter_sd) added to the
+## unconstrained parameters, exp(N(0, jitter_sd)) multiplying the positive scales, N(0, jitter_sd / 5) added to the correlations with the
+## result kept inside (-0.95, 0.95) and positive definite, so the chains differ and R-hat stays meaningful.
+## Dimensions are asserted against dat_m2 (S, N1, P1, P, Pz, D_mode, joint, K); a mismatch is an error, never a silent partial init.
+m1_inits_for_m2 <- function(obj_m1, dat_m2, chains, seed = V2_SEED, jitter_sd = 0.05, uv_range = c(-0.1, 0.1)) {
+  stopifnot(!is.null(obj_m1$fit), !is.null(obj_m1$dat), !is.null(dat_m2$K), chains >= 1, is.finite(jitter_sd), jitter_sd >= 0,
+            length(uv_range) == 2, uv_range[1] < uv_range[2], uv_range[2] > 0)
+  d1 <- obj_m1$dat
+  for (nm in c("S", "N1", "P1", "P", "Pz", "D_mode", "joint")) if (!identical(as.integer(d1[[nm]]), as.integer(dat_m2[[nm]])))
+    stop(sprintf("m1_inits_for_m2: %s differs between the M1 fit (%s) and the M2 data (%s)", nm, d1[[nm]], dat_m2[[nm]]))
+  S <- as.integer(dat_m2$S); K <- as.integer(dat_m2$K); D <- if (dat_m2$D_mode == 3L) 2L else 1L; Dre <- D + 1L; joint <- as.integer(dat_m2$joint)
+  stopifnot(K >= 1, K <= S - 1)
+  fit <- obj_m1$fit
+  pars <- c("alpha0", "alpha", "tau", "mu0", "beta", "sigma_x", "sd_re", "sigma_b", "gamma", "c_i", "a_i", "b_j", "R_Om",
+            if (D == 2L && joint == 1L) "rho_x", if (D == 2L && joint == 0L) c("r_ca1", "q_ca2"), if (D == 1L) "r_ca_1d")
+  stopifnot(all(pars %in% fit@model_pars))
+  ex <- rstan::extract(fit, pars = pars, permuted = TRUE)
+  pm <- function(nm) { a <- ex[[nm]]; if (is.null(dim(a)) || length(dim(a)) == 1L) mean(a) else apply(a, seq_along(dim(a))[-1], mean) }
+  m <- list(alpha0 = pm("alpha0"), alpha = as.numeric(pm("alpha")), tau = pm("tau"), mu0 = as.numeric(pm("mu0")),
+            beta = matrix(pm("beta"), nrow = dat_m2$P, ncol = D), sigma_x = as.numeric(pm("sigma_x")), sd_re = as.numeric(pm("sd_re")),
+            sigma_b = pm("sigma_b"), gamma = as.numeric(pm("gamma")), c_i = as.numeric(pm("c_i")), a_i = matrix(pm("a_i"), nrow = S, ncol = D),
+            b_j = as.numeric(pm("b_j")), R_Om = matrix(pm("R_Om"), Dre, Dre))
+  stopifnot(length(m$alpha) == dat_m2$P1, length(m$mu0) == D, length(m$gamma) == dat_m2$Pz, length(m$sd_re) == Dre, length(m$sigma_x) == D,
+            length(m$c_i) == S, length(m$b_j) == S, all(m$sigma_x > 0), all(m$sd_re > 0), m$sigma_b > 0, all(is.finite(unlist(m))))
+  if (D == 2L && joint == 1L) m$rho <- mean(ex$rho_x)
+  if (D == 2L && joint == 0L) { m$r1 <- mean(ex$r_ca1); m$q2 <- mean(ex$q_ca2) }
+  if (D == 1L) m$r1d <- mean(ex$r_ca_1d)
+  clamp <- function(x, lim = 0.95) pmin(pmax(x, -lim), lim)
+  lower_chol <- function(R) { R <- (R + t(R)) / 2; diag(R) <- 1; stopifnot(min(eigen(R, symmetric = TRUE, only.values = TRUE)$values) > 1e-8); t(chol(R)) }
+  n_copied <- length(c("alpha0", "alpha", "tau", "mu0", "beta", "sigma_x", "sd_re", "sigma_b", "gamma", "z_re", "z_b",
+                       if (D == 2L && joint == 1L) c("rho_x", "L_Om_joint"), if (D == 2L && joint == 0L) c("r_ca1", "q_ca2"), if (D == 1L) "r_ca_1d"))
+  inits <- vector("list", chains)
+  for (ch in seq_len(chains)) {
+    set.seed(seed + ch)
+    jit <- function(x) x + rnorm(length(x), 0, jitter_sd)
+    pos <- function(x) x * exp(rnorm(length(x), 0, jitter_sd))
+    cj  <- function(x) clamp(x + rnorm(length(x), 0, jitter_sd / 5))
+    ## correlation of (c, a): jittered off-diagonals, kept PD; the a models fix corr(a1, a2) = 0 by construction
+    R <- m$R_Om; R[upper.tri(R)] <- cj(R[upper.tri(R)]); R[lower.tri(R)] <- t(R)[lower.tri(R)]
+    if (D == 2L && joint == 0L) R[2, 3] <- R[3, 2] <- 0
+    if (min(eigen((R + t(R)) / 2, symmetric = TRUE, only.values = TRUE)$values) <= 1e-6) R <- m$R_Om      # jitter broke PD: keep the means
+    L <- lower_chol(R)
+    sd_re <- pos(m$sd_re); sigma_b <- pos(m$sigma_b)
+    re <- cbind(m$c_i, m$a_i)                                                     # S x Dre, the posterior means of (c_i, a_i)
+    z_re <- solve(diag(sd_re, Dre) %*% L, t(re))                                  # Dre x S: re' = diag(sd_re) L z_re
+    z_re <- matrix(jit(as.numeric(z_re)), Dre, S)
+    z_b <- jit(m$b_j / sigma_b)
+    ## vectors as 1-d arrays, so a length-1 vector (mu0, sigma_x when D = 1) keeps its declared dimension in Stan
+    init <- list(alpha0 = jit(m$alpha0), alpha = as.array(jit(m$alpha)), tau = jit(m$tau), mu0 = as.array(jit(m$mu0)),
+                 beta = matrix(jit(as.numeric(m$beta)), dat_m2$P, D), sigma_x = as.array(pos(m$sigma_x)), sd_re = as.array(sd_re),
+                 sigma_b = sigma_b, gamma = as.array(jit(m$gamma)), z_re = z_re, z_b = as.array(z_b))
+    if (D == 2L && joint == 1L) { init$rho_x <- as.array(clamp(m$rho + rnorm(1, 0, jitter_sd / 5))); init$L_Om_joint <- array(L, dim = c(1L, Dre, Dre)) }
+    if (D == 2L && joint == 0L) { init$r_ca1 <- as.array(R[1, 2]); q <- R[1, 3] / sqrt(1 - R[1, 2]^2); init$q_ca2 <- as.array(clamp(q)) }
+    if (D == 1L) init$r_ca_1d <- as.array(R[1, 2])
+    ## AME factors near 0 (u_diag must be positive: the upper half of the range)
+    init$u_diag <- as.array(runif(K, uv_range[2] / 2, uv_range[2]))
+    init$u_lower <- array(runif(K * (K - 1L) / 2L, uv_range[1], uv_range[2]), dim = K * (K - 1L) / 2L)
+    init$U_free <- matrix(runif((S - K - 1L) * K, uv_range[1], uv_range[2]), S - K - 1L, K)
+    init$V_raw <- matrix(runif(S * K, uv_range[1], uv_range[2]), S, K)
+    stopifnot(all(is.finite(unlist(init))), all(init$sigma_x > 0), all(init$sd_re > 0), init$sigma_b > 0, all(abs(init$u_diag) <= uv_range[2]),
+              all(abs(init$U_free) <= max(abs(uv_range))), all(abs(init$V_raw) <= max(abs(uv_range))))
+    inits[[ch]] <- init
+  }
+  attr(inits, "means") <- m
+  attr(inits, "n_copied") <- n_copied
+  inits
+}
+## locate_m1_fit(sample, lag, model_m2, spec, out_dir): the file of the matching M1 fit (M2x -> M1x, same cell otherwise), or NA
+locate_m1_fit <- function(sample, lag, model_m2, spec, out_dir) {
+  stopifnot(model_family(model_m2) == "M2")
+  f <- file.path(out_dir, paste0("fit_", cell_name(sample, lag, sub("^M2", "M1", model_m2), spec), ".rds"))
+  if (file.exists(f)) f else NA_character_
+}

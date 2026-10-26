@@ -12,7 +12,12 @@
 ##   switches (spec.R; every non-default value adds a cell-name suffix, so variants never overwrite main outputs):
 ##     --pairs=all|originators|joiners  --direction=cowwar|sideA  --ww2=include|drop  --weights=dispute|none
 ##     --controls=minimal|full          --changes=raw|winsor      --ame_K=2
-##   sampler: --chains --iter --warmup --adapt_delta --max_treedepth (defaults per family in spec.R, SAMPLER)
+##   sampler: --chains --iter --warmup --adapt_delta --max_treedepth (defaults per family in spec.R, SAMPLER: M2 runs 4000 / 2000
+##            with adapt_delta 0.95 since the PI decision of 2026-10-25)
+##   init_from: (M2 only) the M1 fit whose posterior means start every chain (jittered; AME factors near 0; spec.R INIT_*). Default:
+##            the matching M1 fit of the same cell in v2/output (M2x from M1x, same sample, lag and switches). When no such fit exists
+##            the run falls back to Stan's random inits and says so in the log, the fit object and the summary. An explicitly named
+##            fit that fails the checks (production, current data, same cell, same D_mode / joint) is an error.
 ##   pilot  : TRUE = 1 chain x 60 iterations (timing only); saved as fit_<cell>_pilot.rds, which every production tool refuses
 ##   dry_run: TRUE = assemble and validate the Stan data, write output/standata_<cell>.rds, do NOT sample
 ##   threads_per_chain: within-chain parallelism via reduce_sum over state-years (1 = serial, exact); Slurm cpus = chains x threads
@@ -46,6 +51,7 @@ smp <- sampler_settings(MODEL, args)
 CHAINS <- smp$chains; ITER <- smp$iter; WARMUP <- smp$warmup; ADAPT_DELTA <- smp$adapt_delta; MAX_TD <- smp$max_treedepth
 PILOT <- get_arg(args, "pilot", FALSE); DRY_RUN <- get_arg(args, "dry_run", FALSE)
 THREADS <- as.integer(get_arg(args, "threads_per_chain", 1))
+INIT_FROM <- get_arg(args, "init_from", "")
 ## archived options are refused instead of being ignored silently
 for (old in c("variant", "sampled_m", "centrality", "conflict_history", "distance", "contiguity", "dy_peace_years", "drop_ww2", "full_controls", "event_weights", "K"))
   if (length(grep(paste0("^--", old, "="), args))) stop(sprintf("--%s is no longer an option of 02_fit_model.R; use the switches of spec.R (--ww2, --controls, --weights, --ame_K, ...) or see README 'Archived options'", old))
@@ -123,11 +129,53 @@ sm <- readRDS(file.path(v2_root(), "stan", "build", paste0(family, ".rds")))
 stan_src <- file.path(v2_root(), "stan", paste0(family, ".stan"))
 stan_prov <- assert_compiled_current(sm, stan_src, file.path(v2_root(), "stan", "build", paste0(family, ".sha256")))
 logf("compiled %s matches %s (source sha256 %s)", family, basename(stan_src), stan_prov$stan_source_sha256)
+## ---- initial values (PI decision 2026-10-25): an M2 fit starts at the posterior means of the matching M1 fit ------------------------
+## M1 fits use Stan's random inits. For M2 the matching M1 fit (M2x -> M1x, same cell otherwise) is located in out_dir, or named with
+## --init_from; it must be a production fit of the CURRENT data that scores exactly this cell (C1 / C4) with the same D_mode and joint
+## flag. m1_inits_for_m2() (helpers_model.R) copies every shared parameter, reconstructs z_re / z_b, jitters each chain and starts the
+## AME factors near 0. No M1 fit (or one that fails the checks, when auto-located): loud fallback to random inits, recorded everywhere.
+init_arg <- "random"
+init_info <- list(source = "stan_random", m1_fit = NA_character_, m1_cell = NA_character_, reason = "M1 family: Stan's random inits",
+                  jitter_sd = NA_real_, uv_range = NA_real_, n_copied = NA_integer_)
+if (family == "m2_ame") {
+  explicit <- nzchar(INIT_FROM)
+  m1_path <- if (explicit) INIT_FROM else locate_m1_fit(SAMPLE, LAG, MODEL, spec, out_dir)
+  if (is.na(m1_path) || !file.exists(m1_path)) {
+    init_info$reason <- sprintf("no matching M1 fit (%s) in %s", basename(paste0("fit_", cell_name(SAMPLE, LAG, sub("^M2", "M1", MODEL), spec), ".rds")), out_dir)
+    if (explicit) stop("--init_from=", INIT_FROM, " does not exist")
+    logf("WARNING: %s; the M2 fit starts from Stan's RANDOM inits (run the M1 cell first to start from its posterior means)", init_info$reason)
+  } else {
+    o1 <- tryCatch(readRDS(m1_path), error = function(e) NULL)
+    res <- tryCatch({
+      if (is.null(o1) || is.null(o1$fit) || is.null(o1$dat)) stop("unreadable fit or not a fit object")
+      if (!PILOT) assert_production_fit(o1, allow_stale = FALSE, what = "init_from M1 fit")
+      assert_fit_current(o1, manifest_path)
+      assert_fit_matches_cell(o1, dat, W_cols, X_cols, Z_cols, what = "init_from M1 fit")
+      if (o1$dat$D_mode != D_MODE || o1$dat$joint != joint) stop(sprintf("D_mode / joint of the M1 fit (%d / %d) differ from this cell (%d / %d)", o1$dat$D_mode, o1$dat$joint, D_MODE, joint))
+      if (model_family(o1$args$model) != "M1") stop("the init fit is not an M1 fit (", o1$args$model, ")")
+      m1_inits_for_m2(o1, dat, CHAINS, seed = V2_SEED, jitter_sd = INIT_JITTER_SD, uv_range = INIT_UV_RANGE)
+    }, error = function(e) e)
+    if (inherits(res, "error")) {
+      init_info$reason <- sprintf("M1 fit %s rejected: %s", basename(m1_path), conditionMessage(res))
+      if (explicit) stop("--init_from=", INIT_FROM, " cannot be used: ", conditionMessage(res))
+      logf("WARNING: %s; the M2 fit starts from Stan's RANDOM inits", init_info$reason)
+    } else {
+      init_arg <- res
+      init_info <- list(source = "m1_posterior_means", m1_fit = basename(m1_path), m1_cell = o1$cell, reason = if (explicit) "--init_from" else "auto-located in output/",
+                        jitter_sd = INIT_JITTER_SD, uv_range = INIT_UV_RANGE, n_copied = attr(res, "n_copied"),
+                        m1_git_commit = o1$args$git_commit, m1_saved = o1$args$saved)
+      logf("inits: %d chains start at the posterior means of %s (%s; %d parameter blocks copied, jitter sd %.3f, AME factors uniform on [%.2f, %.2f])",
+           CHAINS, basename(m1_path), init_info$reason, init_info$n_copied, INIT_JITTER_SD, INIT_UV_RANGE[1], INIT_UV_RANGE[2])
+    }
+  }
+}
+if (nzchar(INIT_FROM) && family != "m2_ame") stop("--init_from applies to the M2 family only")
 t0 <- Sys.time()
-fit <- sampling(sm, data = dat, chains = CHAINS, iter = ITER, warmup = WARMUP, seed = V2_SEED,
+fit <- sampling(sm, data = dat, chains = CHAINS, iter = ITER, warmup = WARMUP, seed = V2_SEED, init = init_arg,
                 refresh = max(1L, ITER %/% 20L), control = list(adapt_delta = ADAPT_DELTA, max_treedepth = MAX_TD),
                 pars = c("z_re", "z_b", "V_raw", "U_free", "L_Om_joint", "L_Om", "re"), include = FALSE)
 elapsed <- as.numeric(difftime(Sys.time(), t0, units = "mins"))
+if (fit@mode != 0L) stop(sprintf("sampling did not run (stanfit mode %d: rstan reported an error above, e.g. inits rejected); nothing saved", fit@mode))
 logf("sampling finished in %.1f min", elapsed)
 sp <- get_sampler_params(fit, inc_warmup = FALSE)
 logf("divergences: %d; max-treedepth hits: %d", sum(sapply(sp, function(m) sum(m[, "divergent__"]))),
@@ -156,13 +204,14 @@ if (!identical(git_commit_now, git_commit_at_load)) logf("WARNING: git HEAD move
 ## while sampling, the mismatch (C2)
 obj <- list(fit = fit, dat = dat, cell = cell, state_codes = state_codes, W_cols = W_cols, X_cols = X_cols, Z_cols = Z_cols,
             sy_keys = sy |> select(ccode, year, state_idx, y1), ev = ev, x_ref = x_ref, elapsed_min = elapsed,
-            manifest = manifest_cell, data_dir = basename(data_dir), stale = stale, spec = spec, winsor = A$winsor,
+            manifest = manifest_cell, data_dir = basename(data_dir), stale = stale, spec = spec, winsor = A$winsor, init = init_info,
             param_labels = label_parameters(rownames(sm_tab), W_cols, X_cols, Z_cols, D_MODE),
             args = list(sample = SAMPLE, lag = LAG, variant = VARIANT, model = MODEL, centrality = CENTRALITY, K = K, chains = CHAINS,
                         iter = ITER, warmup = WARMUP, pilot = PILOT, sampled_m = SAMPLED_M, conflict_history = CONFLICT_HISTORY,
                         distance = DISTANCE, contiguity = CONTIGUITY, dy_peace_years = DY_PEACE_YEARS, drop_ww2 = spec$ww2 == "drop",
                         full_controls = spec$controls == "full", event_weights = spec$weights, direction = spec$direction,
                         pairs = spec$pairs, changes = spec$changes, D_mode = D_MODE, threads_per_chain = THREADS,
+                        init_source = init_info$source, init_from = init_info$m1_fit,
                         grainsize = dat$grainsize, seed = V2_SEED, adapt_delta = ADAPT_DELTA, max_treedepth = MAX_TD,
                         stan_source_sha256 = stan_prov$stan_source_sha256, compiled_model_code_sha256 = stan_prov$compiled_model_code_sha256,
                         git_commit = git_commit_at_load, git_commit_at_save = git_commit_now, git_dirty_at_load = git_dirty_at_load,
@@ -179,5 +228,6 @@ if (!file.rename(tmp_path, fit_path)) stop("rename of ", tmp_path, " to ", fit_p
 rm(chk)
 logf("saved %s%s", fit_path, if (!is.null(stale)) " (STALE: the manifest changed while sampling; downstream tools need --allow_stale)" else "")
 ## the summary CSV AFTER the fit file (C2), labelled by axis and covariate (B2)
-write.csv(data.frame(obj$param_labels, sm_tab, check.names = FALSE), file.path(out_dir, paste0("summary_", cell, if (!is.null(stale)) "_STALE" else "", ".csv")), row.names = FALSE)
+write.csv(data.frame(obj$param_labels, sm_tab, init_source = init_info$source, init_from = init_info$m1_fit, check.names = FALSE),
+          file.path(out_dir, paste0("summary_", cell, if (!is.null(stale)) "_STALE" else "", ".csv")), row.names = FALSE)
 logf("summary written: %s", paste0("summary_", cell, if (!is.null(stale)) "_STALE" else "", ".csv"))

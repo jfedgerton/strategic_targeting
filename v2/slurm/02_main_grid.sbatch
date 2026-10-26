@@ -14,10 +14,16 @@
 # settings of SAMPLER per family), seed 123, within-chain parallelism via reduce_sum with THREADS_PER_CHAIN threads per
 # chain (default 8 -> 32 cpus; override with --export=ALL,THREADS_PER_CHAIN=k together with --cpus-per-task=4k and --mem=<16k>G).
 #
-# Real run      : sbatch v2/slurm/02_main_grid.sbatch
-# Roar DRY RUN  : sbatch --export=ALL,DRY_RUN=TRUE --time=00:30:00 --mem=16G --cpus-per-task=1 v2/slurm/02_main_grid.sbatch
+# Real run      : bash v2/slurm/submit_main_grid.sh
+#                 = two arrays of this script: the 48 M1 cells (indices 0-11,24-35,48-59,72-83), then the 48 M2 cells
+#                 (12-23,36-47,60-71,84-95) with --dependency=afterok on the M1 array, so each M2 task starts its chains at the
+#                 posterior means of its cell's M1 fit (02_fit_model.R --init_from default; PI decision 2026-10-25). A plain
+#                 `sbatch v2/slurm/02_main_grid.sbatch` runs all 96 at once; an M2 task whose M1 fit is not there yet falls
+#                 back to random inits (logged loudly, recorded in the fit).
+# Roar DRY RUN  : bash v2/slurm/submit_main_grid.sh --export=ALL,DRY_RUN=TRUE --time=00:30:00 --mem=16G --cpus-per-task=1
 #                 (every task assembles and validates its Stan data with --dry_run=TRUE and exits; no sampling.
 #                  Command-line sbatch options override the directives above, so the dry run is cheap.)
+# The M2 cells run 4000 iterations (2000 warmup, adapt_delta 0.95; SAMPLER in spec.R) and need about twice the M1 walltime.
 # Variants are NOT run from this script (their cells would carry a switch suffix); use 04_robustness.sbatch.
 # Submit from the repo root; nothing in this file submits anything by itself.
 # Slurm runs a spooled copy of this script, so locate the repo via the submit dir.

@@ -54,11 +54,20 @@ DY_PEACE_YEARS <- FALSE                              # dyadic peace years in Z (
 R0           <- 0.5                                  # typology peer radius in scaled gap units (03_extract.R default)
 
 ## ---- sampler settings per model family (02_fit_model.R defaults; --chains / --iter / --warmup / --adapt_delta / --max_treedepth
-## override them) ---------------------------------------------------------------------------------------------------------------
+## override them). PI decision 2026-10-25 (M2 convergence): the M2 family runs 4000 iterations with 2000 warmup and adapt_delta 0.95;
+## M1 and max_treedepth unchanged. The main-spec M2 cell names stay the same. ----------------------------------------------------
 SAMPLER <- list(
   M1 = list(chains = 4L, iter = 2000L, warmup = 1000L, adapt_delta = 0.90, max_treedepth = 10L),
-  M2 = list(chains = 4L, iter = 2000L, warmup = 1000L, adapt_delta = 0.90, max_treedepth = 10L)
+  M2 = list(chains = 4L, iter = 4000L, warmup = 2000L, adapt_delta = 0.95, max_treedepth = 10L)
 )
+## M2 initial values (PI decision 2026-10-25): every M2 chain starts at the posterior means of the matching M1 fit (same sample, lag
+## and switches; M2x from M1x), each chain jittered by N(0, INIT_JITTER_SD) on the unconstrained parameters (exp(N(0, INIT_JITTER_SD))
+## on the positive scales, N(0, INIT_JITTER_SD / 5) on the correlations) and the AME factors drawn uniformly from INIT_UV_RANGE
+## (u_diag on its positive upper half), seed V2_SEED + chain. 02_fit_model.R --init_from=<fit file> names the M1 fit; by default it is
+## located in v2/output (fit_<cell with M1x>.rds); when none is found the fit falls back to Stan's random inits and says so loudly in the
+## log, the fit object (obj$init) and the summary (init_source).
+INIT_JITTER_SD <- 0.05
+INIT_UV_RANGE  <- c(-0.1, 0.1)
 
 ## ---- robustness presets (05_robustness.R): preset -> the switch it flips ------------------------------------------------------
 ROBUSTNESS_PRESETS <- list(

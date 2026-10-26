@@ -219,3 +219,17 @@ No main-specification result changes. For the main spec the restructured code re
 | archived options | politically relevant choice sets, sampled alternatives, capital distance, contiguity off, eigenvector centrality, conflict history off, dyadic peace years: no longer CLI options; the helpers and their tests remain (README "Archived options"). |
 | tests | sourcing updated to the new layout; `test_spec.R` (switch parsing, suffixes, cell names, sampler settings); `test_data_coding.R` adds the pairs and winsor switches on the toy cell and `assemble_cell_spec()`; the string assertions on `02_fit_model.R` now look in `spec.R` where the option moved. No assertion deleted. |
 | README | rewritten in the ten agreed sections; the decision documentation is kept in full, reorganised under "Data decisions". |
+
+## M2 convergence: longer chains and M1-based initial values (2026-10-25; PI decision)
+
+| change | detail |
+|---|---|
+| sampler | `SAMPLER$M2` in `spec.R`: 4 chains × 4000 iterations, 2000 warmup, adapt_delta 0.95 (was 2000 / 1000 / 0.9); max_treedepth 10 and the M1 settings unchanged. Main-spec M2 cell names unchanged. Overrides the earlier "do not change the defaults" for M2 only. |
+| inits | `m1_inits_for_m2()` (`helpers_model.R`): every M2 chain starts at the posterior means of the matching M1 fit (M2x from M1x, same sample, lag and switches; `locate_m1_fit()` or `02_fit_model.R --init_from=`). Shared parameters copied with identical dimensions (α0, α, τ, μ0, β, γ, σ_x, sd_re, σ_b, rho_x / L_Om_joint, r_ca1 / q_ca2, r_ca_1d as the variant has them); z_re / z_b reconstructed from the saved c_i, a_i, b_j, sd_re, σ_b, R_Om (the M1 fits do not save them). AME factors uniform on (−0.1, 0.1) (u_diag on (0.05, 0.1)), seed 123 + chain. Per-chain jitter N(0, 0.05) on the unconstrained parameters, multiplicative on the scales, N(0, 0.01) on the correlations with the PD check. Dimensions asserted against the M2 data. |
+| fit script | the M1 fit must be a production fit of the current data scoring exactly the cell with the same D_mode / joint; auto-located fits that fail fall back to random inits with a loud log line; an explicit `--init_from` that fails is an error. `obj$init`, `obj$args$init_source` / `init_from` and the `init_source` / `init_from` columns of `summary_<cell>.csv` record the source. `02_fit_model.R` now stops when rstan returns a fit that did not sample (`fit@mode != 0`, e.g. rejected inits) instead of failing later. |
+| slurm | `submit_main_grid.sh`: the main grid as two arrays of `02_main_grid.sbatch`, the 48 M1 cells (indices 0-11, 24-35, 48-59, 72-83) then the 48 M2 cells (12-23, 36-47, 60-71, 84-95) with `--dependency=afterok` on the M1 array (one dependency on the whole array, the simpler scheme). The 0-95 index mapping is unchanged. |
+| tests | `test_m2_inits.R`: tiny synthetic M1 fits (S = 6) for the b, a and 1-D variants; the init list names every non-empty M2 parameter with its dimensions, a Fixed_param draw of the M2 program at the unjittered init reproduces the M1 posterior means of c_i, a_i, b_j, R_Om, α, μ0, the factors lie within (−0.1, 0.1), jittered chains differ and are accepted, mismatches are errors, `locate_m1_fit()` follows the cell names. |
+
+Not changed: the M2 program, its priors and constraints; the M1 family.
+
+Not verified here: an end-to-end M2 fit of a real cell through `02_fit_model.R` with the M1-based inits (a 60-iteration pilot on the full choice sets takes over 30 minutes on this machine); the init path is covered by the unit tests and a code review.

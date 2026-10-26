@@ -23,6 +23,9 @@
 #   sbatch --export=ALL,PRESET=noww2,DRY_RUN=TRUE --time=00:30:00 --mem=16G --cpus-per-task=1 v2/slurm/04_robustness.sbatch
 #   sbatch --export=ALL,PRESET=perm_error --array=0-1 --account=open --cpus-per-task=4 --mem=32G --time=47:00:00 v2/slurm/04_robustness.sbatch
 # Post-processing of a refit preset: 03_post.sbatch with --export=ALL,SWITCHES="--ww2=drop" (the preset's switch).
+# M2 cells start from the M1 fit of the same cell and switches when it exists in v2/output (02_fit_model.R --init_from default), so
+# submit the M1 cells of a preset first (e.g. CELLS=mid:3:M1b,fmid:3:M1b,war:3:M1b --array=0-2) and the M2 cells with
+# --dependency=afterok:<that job>; an M2 cell without its M1 fit falls back to random inits (logged loudly, recorded in the fit).
 source "${SLURM_SUBMIT_DIR:?submit from the repo root}/v2/slurm/00_env.sh" || exit 1
 cd "$V2_ROOT/.." || exit 1
 i=${SLURM_ARRAY_TASK_ID:?run as an array}
