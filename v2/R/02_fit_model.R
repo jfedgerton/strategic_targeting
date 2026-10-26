@@ -12,6 +12,8 @@
 ##   switches (spec.R; every non-default value adds a cell-name suffix, so variants never overwrite main outputs):
 ##     --pairs=all|originators|joiners  --direction=cowwar|sideA  --ww2=include|drop  --weights=dispute|none
 ##     --controls=minimal|full          --changes=raw|winsor      --ame_K=2
+##     --context=all|bilateral|coalition (STAGE-2 events of one coalition context; stage 1 unchanged)  --coal_ties=inclusive|strict
+##     --coal_drop=none|top3 (context=coalition only: without the 3 disputes contributing the most coalition events)
 ##   sampler: --chains --iter --warmup --adapt_delta --max_treedepth (defaults per family in spec.R, SAMPLER: M2 runs 4000 / 2000
 ##            with adapt_delta 0.95 since the PI decision of 2026-10-25)
 ##   init_from: (M2 only) the M1 fit whose posterior means start every chain (jittered; AME factors near 0; spec.R INIT_*). Default:
@@ -32,7 +34,7 @@
 ##                               when the data manifest changed while sampling (downstream tools need --allow_stale)
 ##   v2/output/summary_<cell>.csv posterior summaries of the structural parameters, labelled by axis and covariate (written AFTER
 ##                               the fit file)
-## Cell name: <sample>_lag<h>_all_pr_<model>[_K<K>][_orig|_join][_noww2][_fullctrl][_w1][_winsor][_sideA][_pilot]
+## Cell name: <sample>_lag<h>_all_pr_<model>[_K<K>][_orig|_join][_bi|_co][_strict][_drop3][_noww2][_fullctrl][_w1][_winsor][_sideA][_pilot]
 ## Seed 123 everywhere (audit F11).
 ## ============================================================================
 suppressPackageStartupMessages({ library(rstan); library(dplyr); library(tidyr) })
@@ -112,6 +114,9 @@ logf("Stan data: S=%d N1=%d N2=%d E=%d P1=%d P=%d Pz=%d joint=%d sampled=%d D_mo
      sum(dat$ev_w), min(dat$ev_w), sum(dat$ev_w == 1), paste(W_cols, collapse = ","), paste(X_cols, collapse = ","), paste(Z_cols, collapse = ","))
 logf("D2 levels in W: %s; D3 log system size in W: %s; D1 reversed events in the sample: %d", paste(intersect(W_cols, W_LEVELS), collapse = ","),
      "log_n_system_tm1" %in% W_cols, A$n_flipped)
+if (spec$context != "all") logf("context = %s (%s%s): %d stage-2 events removed, %d D8 groups split through collapsed keys; stage 1 unchanged, %d state-years with y1 = 1 and no stage-2 event",
+                                spec$context, spec$coal_ties, if (spec$coal_drop == "top3") sprintf(", without disputes %s", paste(A$context_top3$dispnum, collapse = ", ")) else "",
+                                A$n_context_dropped, A$n_context_split_groups, A$n_orphan)
 if (DRY_RUN) {
   saveRDS(list(dat = dat, cell = cell, state_codes = state_codes, W_cols = W_cols, X_cols = X_cols, Z_cols = Z_cols,
                manifest = manifest_cell, git_commit = git_commit_at_load, spec = spec, winsor = A$winsor,
@@ -210,7 +215,8 @@ obj <- list(fit = fit, dat = dat, cell = cell, state_codes = state_codes, W_cols
                         iter = ITER, warmup = WARMUP, pilot = PILOT, sampled_m = SAMPLED_M, conflict_history = CONFLICT_HISTORY,
                         distance = DISTANCE, contiguity = CONTIGUITY, dy_peace_years = DY_PEACE_YEARS, drop_ww2 = spec$ww2 == "drop",
                         full_controls = spec$controls == "full", event_weights = spec$weights, direction = spec$direction,
-                        pairs = spec$pairs, changes = spec$changes, D_mode = D_MODE, threads_per_chain = THREADS,
+                        pairs = spec$pairs, changes = spec$changes, context = spec$context, coal_ties = spec$coal_ties, coal_drop = spec$coal_drop,
+                        context_top3 = A$context_top3, D_mode = D_MODE, threads_per_chain = THREADS,
                         init_source = init_info$source, init_from = init_info$m1_fit,
                         grainsize = dat$grainsize, seed = V2_SEED, adapt_delta = ADAPT_DELTA, max_treedepth = MAX_TD,
                         stan_source_sha256 = stan_prov$stan_source_sha256, compiled_model_code_sha256 = stan_prov$compiled_model_code_sha256,

@@ -6,6 +6,8 @@
 ## main-spec output, and (d) the sampler settings per model family. Nothing here has a side effect; the scripts call
 ## parse_spec() on their command-line arguments and read the constants.
 ##
+## Switches added 2026-10-25 (dual typology stage a): context (all | bilateral | coalition, STAGE-2 events only), coal_ties
+## (inclusive | strict), coal_drop (none | top3, context = coalition only); suffixes _bi / _co, _strict, _drop3.
 ## Main specification (PI decisions through 2026-10-25; README "The main specification"):
 ##   sample in {mid, fmid, war} x lag in {1, 3, 5, 10} x model in {M1m, M1r, M1a, M1b, M2m, M2r, M2a, M2b}
 ##   choice set = every other system member at t with positions at t-1 (variant "all"), full sets (no sampled alternatives)
@@ -17,6 +19,9 @@ V2_SEED <- 123L
 ## ---- switches: name -> allowed values; the FIRST value is the main specification ---------------------------------------------
 SPEC_CHOICES <- list(
   pairs     = c("all", "originators", "joiners"),   # event pairs: all | originator pairs only | joiner pairs only (stage-2 comparison)
+  context   = c("all", "bilateral", "coalition"),   # STAGE-2 events by coalition context of their D8 group (coal_<ties> in events.rds): all | bilateral only | coalition only; stage 1 unchanged
+  coal_ties = c("inclusive", "strict"),             # tie convention of the context flag: same-date entrants present (coal_incl) | strictly earlier entrants only (coal_strict); inert with context = all
+  coal_drop = c("none", "top3"),                    # context = coalition only: drop the 3 disputes contributing the most coalition events of the sample (leverage check)
   direction = c("cowwar", "sideA"),                 # initiator direction: COW war initiator in war-level disputes (v2/data) | MID Side A (v2/data_sideA)
   ww2       = c("include", "drop"),                 # the Second World War events: kept | removed from stage 2 and stage 1
   weights   = c("dispute", "none"),                 # stage-2 event weights: 1 / (initiator's targets in the dispute-year) | 1 everywhere
@@ -27,8 +32,13 @@ SPEC_DEFAULTS <- lapply(SPEC_CHOICES, function(v) v[1])
 SPEC_DEFAULTS$ame_K <- 2L                            # latent dimensions of the M2 (AME) family; "_K<K>" is always in an M2 cell name
 ## cell-name suffix of every NON-default value, in the order they are appended. The four that existed before 2026-10-25
 ## (_noww2, _fullctrl, _w1, _sideA) keep their names and relative order, so earlier output files still match.
+## The context switches (2026-10-25, dual typology stage a) follow pairs: _bi / _co, then _strict (only with context != all; coal_ties is
+## normalised to inclusive under context = all, so the main cell name never carries it), then _drop3 (context = coalition only).
 SPEC_SUFFIX <- list(
   pairs     = c(originators = "_orig", joiners = "_join"),
+  context   = c(bilateral = "_bi", coalition = "_co"),
+  coal_ties = c(strict = "_strict"),
+  coal_drop = c(top3 = "_drop3"),
   ww2       = c(drop = "_noww2"),
   controls  = c(full = "_fullctrl"),
   weights   = c(none = "_w1"),
@@ -76,8 +86,15 @@ ROBUSTNESS_PRESETS <- list(
   noweights    = list(weights = "none"),
   fullcontrols = list(controls = "full"),
   winsor       = list(changes = "winsor"),
-  perm_error   = list()                              # the permutation and measurement-error tests on the main cell (no switch)
+  perm_error   = list(),                             # the permutation and measurement-error tests on the main cell (no switch)
+  context      = list()                              # the context split (CONTEXT_PRESET below): three switch combinations x two cells
 )
+## context preset (dual typology stage a, 2026-10-25): M1b, lag 3, samples mid and fmid, default tie convention; the three variants are
+## context = bilateral, context = coalition, and context = coalition without the top-3 coalition disputes (coal_drop = top3). 05_robustness.R
+## maps --cell_index = 0..5 onto variant (slowest) x cell: 0-1 bilateral, 2-3 coalition, 4-5 coalition_drop3. No war sample.
+CONTEXT_PRESET <- list(cells = c("mid:3:M1b", "fmid:3:M1b"),
+                       variants = list(bilateral = list(context = "bilateral"), coalition = list(context = "coalition"),
+                                       coalition_drop3 = list(context = "coalition", coal_drop = "top3")))
 ## default cell list of the refit presets, "sample:lag:model"; override with --cells=
 ROBUSTNESS_CELLS <- c("mid:3:M1b", "fmid:3:M1b", "war:3:M1b", "mid:3:M2b", "fmid:3:M2b", "war:3:M2b")
 ROBUSTNESS_MAIN_CELL <- list(sample = "mid", lag = 5L)   # the perm_error preset's cell (the a / b fits of both families)
@@ -102,6 +119,10 @@ parse_spec <- function(args = character(0)) {
   }
   spec$ame_K <- as.integer(get_arg(args, "ame_K", SPEC_DEFAULTS$ame_K))
   if (is.na(spec$ame_K) || spec$ame_K < 1L) stop("--ame_K must be a positive integer")
+  ## context switches: coal_drop needs the coalition context; coal_ties has no effect without a context filter and is normalised to its
+  ## default there, so context = all is byte-identical to the main specification whatever --coal_ties says
+  if (spec$coal_drop != "none" && spec$context != "coalition") stop(sprintf("--coal_drop=%s needs --context=coalition (got context=%s)", spec$coal_drop, spec$context))
+  if (spec$context == "all") spec$coal_ties <- SPEC_DEFAULTS$coal_ties
   spec
 }
 ## spec_suffix(spec): the cell-name suffix of the non-default switch values, in SPEC_SUFFIX order ("" for the main specification)
@@ -119,6 +140,8 @@ spec_is_main <- function(spec) all(vapply(names(SPEC_CHOICES), function(nm) iden
 spec_data_dir <- function(spec, root) file.path(root, if (spec$direction == "sideA") "data_sideA" else "data")
 ## spec_string(spec): one line for the logs
 spec_string <- function(spec) paste(sprintf("%s=%s", names(spec), unlist(spec)), collapse = " ")
+## spec_coal_col(spec): the events.rds column the context switch filters on ("coal_incl" / "coal_strict")
+spec_coal_col <- function(spec) c(inclusive = "coal_incl", strict = "coal_strict")[[spec$coal_ties]]
 ## cell_name(sample, lag, model, spec): <sample>_lag<h>_all_pr_<model>[_K<K>]<suffix>, e.g. fmid_lag3_all_pr_M2b_K2_noww2
 cell_name <- function(sample, lag, model, spec) {
   stopifnot(sample %in% ALL_SAMPLES, lag %in% LAGS, model %in% MODELS)

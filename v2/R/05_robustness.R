@@ -8,12 +8,17 @@
 ##   noweights    weights = none      every stage-2 event with weight 1                                       suffix _w1
 ##   fullcontrols controls = full     the full base control sets of commit 8bf0ce1                            suffix _fullctrl
 ##   winsor       changes = winsor    power changes winsorised at the 1st / 99th panel percentiles             suffix _winsor
+## Context preset (dual typology stage a, 2026-10-25; CONTEXT_PRESET in spec.R): M1b, lag 3, samples mid and fmid, default tie convention,
+##   three switch combinations: context = bilateral (_bi), context = coalition (_co), context = coalition + coal_drop = top3 (_co_drop3).
+##   --cell_index = 0..5 maps variant (slowest) x cell: 0-1 bilateral, 2-3 coalition, 4-5 coalition_drop3; without it all six run in sequence.
+##   Post-processing: 06_context_compare.R --sample=mid --lag=3 (needs the _bi and _co fits; _co_drop3 optional).
 ## Test preset (no switch; the existing permutation and systematic-measurement-error tests on the main cell's a / b fits):
 ##   perm_error   permutation test (rescore = reliance diagnostic, refit = calibrated p-value) and the relational-level error
 ##                inflation, per family, on ROBUSTNESS_MAIN_CELL (mid, lag 5); --tests=holdout adds the temporal holdout
 ##
 ## Usage:
 ##   Rscript v2/R/05_robustness.R --preset=noww2 [--cells=mid:3:M1b,fmid:3:M1b,...] [--cell_index=i] [--dry_run=TRUE]
+##   Rscript v2/R/05_robustness.R --preset=context [--cell_index=0..5] [--dry_run=TRUE] [--threads_per_chain=k]
 ##          [--threads_per_chain=k] [--chains= --iter= --warmup=] [other switches]
 ##       cells      : "sample:lag:model" list; default ROBUSTNESS_CELLS (spec.R). --cell_index=i (0-based) runs ONE cell of the
 ##                    list (the Slurm array of 04_robustness.sbatch); without it every cell runs in sequence.
@@ -41,23 +46,36 @@ switch_args <- c(sprintf("--%s=%s", names(SPEC_CHOICES), unlist(spec[names(SPEC_
 
 if (PRESET != "perm_error") {
   ## ---- refit presets: one 02_fit_model.R call per cell --------------------------------------------------------------------------
-  cells <- strsplit(get_arg(args, "cells", paste(ROBUSTNESS_CELLS, collapse = ",")), ",")[[1]]
-  parts <- strsplit(cells, ":", fixed = TRUE)
-  if (any(lengths(parts) != 3L)) stop("--cells entries must be sample:lag:model, e.g. mid:3:M1b")
-  cells_tab <- data.frame(sample = vapply(parts, `[`, "", 1), lag = as.integer(vapply(parts, `[`, "", 2)), model = vapply(parts, `[`, "", 3), stringsAsFactors = FALSE)
+  if (PRESET == "context") {
+    ## the context preset is a fixed table of (variant, cell): the three switch combinations of CONTEXT_PRESET x its two cells
+    if (length(grep("^--(cells|context|coal_ties|coal_drop)=", args))) stop("the context preset fixes --cells, --context, --coal_ties and --coal_drop (CONTEXT_PRESET in spec.R); pass other switches only")
+    parts <- strsplit(CONTEXT_PRESET$cells, ":", fixed = TRUE)
+    cells_tab <- expand.grid(k = seq_along(CONTEXT_PRESET$cells), v = seq_along(CONTEXT_PRESET$variants))      # cell fastest, variant slowest
+    cells_tab <- data.frame(sample = vapply(parts, `[`, "", 1)[cells_tab$k], lag = as.integer(vapply(parts, `[`, "", 2))[cells_tab$k], model = vapply(parts, `[`, "", 3)[cells_tab$k],
+                            variant = names(CONTEXT_PRESET$variants)[cells_tab$v], stringsAsFactors = FALSE)
+  } else {
+    cells <- strsplit(get_arg(args, "cells", paste(ROBUSTNESS_CELLS, collapse = ",")), ",")[[1]]
+    parts <- strsplit(cells, ":", fixed = TRUE)
+    if (any(lengths(parts) != 3L)) stop("--cells entries must be sample:lag:model, e.g. mid:3:M1b")
+    cells_tab <- data.frame(sample = vapply(parts, `[`, "", 1), lag = as.integer(vapply(parts, `[`, "", 2)), model = vapply(parts, `[`, "", 3), variant = NA_character_, stringsAsFactors = FALSE)
+  }
   stopifnot(all(cells_tab$sample %in% ALL_SAMPLES), all(cells_tab$lag %in% LAGS), all(cells_tab$model %in% MODELS))
   idx <- get_arg(args, "cell_index", -1)
   if (idx >= 0) { if (idx >= nrow(cells_tab)) stop(sprintf("--cell_index=%d is outside the %d-cell list", idx, nrow(cells_tab))); cells_tab <- cells_tab[idx + 1, , drop = FALSE] }
   log_open(paste0("05_robustness_", PRESET, if (idx >= 0) sprintf("_cell%d", idx) else ""))
   logf("preset %s -> switches %s (suffix %s); %d cell(s): %s", PRESET, spec_string(spec), spec_suffix(spec), nrow(cells_tab),
-       paste(sprintf("%s:%d:%s", cells_tab$sample, cells_tab$lag, cells_tab$model), collapse = " "))
-  if (spec_is_main(spec)) stop("the preset left every switch at its default; refusing to refit main-spec cells from the robustness driver")
+       paste(sprintf("%s:%d:%s%s", cells_tab$sample, cells_tab$lag, cells_tab$model, ifelse(is.na(cells_tab$variant), "", paste0(" [", cells_tab$variant, "]"))), collapse = " "))
+  if (PRESET != "context" && spec_is_main(spec)) stop("the preset left every switch at its default; refusing to refit main-spec cells from the robustness driver")
   ## pass-through of the fit script's own options
   passthrough <- grep("^--(dry_run|threads_per_chain|chains|iter|warmup|adapt_delta|max_treedepth|pilot)=", args, value = TRUE)
   fit_script <- file.path(R_DIR, "02_fit_model.R")
   for (k in seq_len(nrow(cells_tab))) {
     cl <- cells_tab[k, ]
-    cell <- cell_name(cl$sample, cl$lag, cl$model, spec)
+    spec_k <- spec
+    if (PRESET == "context") for (nm in names(CONTEXT_PRESET$variants[[cl$variant]])) spec_k[[nm]] <- CONTEXT_PRESET$variants[[cl$variant]][[nm]]
+    if (spec_is_main(spec_k)) stop("refusing to refit a main-spec cell from the robustness driver")
+    switch_args <- c(sprintf("--%s=%s", names(SPEC_CHOICES), unlist(spec_k[names(SPEC_CHOICES)])), sprintf("--ame_K=%d", spec_k$ame_K))
+    cell <- cell_name(cl$sample, cl$lag, cl$model, spec_k)
     cmd_args <- c(fit_script, sprintf("--sample=%s", cl$sample), sprintf("--lag=%d", cl$lag), sprintf("--model=%s", cl$model), switch_args, passthrough)
     logf("[%d/%d] cell %s: Rscript %s", k, nrow(cells_tab), cell, paste(cmd_args, collapse = " "))
     status <- system2("Rscript", cmd_args)

@@ -685,6 +685,245 @@ ww2_disputes <- function(disp, dd, war_inter) {
   cand |> select(dispnum, styear, stmon, y0, y1, n_states, hiact, hostlev, n_dyadyears_in_war139, is_ww2, reason)
 }
 
+## ---- coalition context (dual typology stage a, PI-approved spec 2026-10-25; the `context` switch) ----------------------------
+## Is a stage-2 event a BILATERAL or a COALITION decision? Context = the dispute has more than one state on either side at the
+## onset. The unit is the D8 weight group (initiator, dispute, onset year): the flag is evaluated ONCE per group at the GROUP ONSET,
+## the earliest pair onset among the initiator's pairs of that dispute-year (the date the initiator first faced an opponent in that
+## dispute-year), so it is constant within the group by construction (asserted) and a group is kept or dropped whole by the
+## `context` switch. Evaluating at every pair's own onset instead gives different flags inside 72 (inclusive) / 96 (strict) of the
+## 2874 groups of the COW data (Germany in dispute 258, 1939: the Poland pair starts 1939-03-25 with no third state, the UK and
+## France pairs 1939-03-31 with Poland present); the build logs that per-event heterogeneity as a diagnostic, it does not use it.
+## Dates have three resolutions, res 1 = day, 2 = month, 3 = year, and two dates are compared at the COARSER of the two (date_cmp();
+## a day-dated entry against a month-dated onset in the same month is a tie), so the tie conventions below act at whatever resolution
+## the pair of dates has. Participant dates come from gml_part (D5) where the dispnum and the participant match and the GML years
+## agree with the COW years (participant_spell_dates(), the participant-level analogue of pair_dispute_intervals()); otherwise the
+## dispute-level bounds (dispute start month for a first-year originator, else the year). Membership is COW's (cow_mid_dirdisps).
+## Two tie conventions (both stored, the `coal_ties` switch selects): INCLUSIVE counts a state entering on the same date as the
+## onset as present; STRICT counts only strictly earlier entrants. A state whose spell ended before the onset for sure is absent.
+## coal_incl   : at least one state besides the initiator and ONE onset-defining target is present (entry <= onset, not exited)
+## coal_strict : the same with entry < onset; an onset-defining target that itself entered strictly before the onset (the initiator
+##               joined an existing pair) is the pair and does not count
+## date_cmp(a, b): a and b are lists / data.frames with res, y, mkey (ym_index, NA at year resolution), dkey (as.integer(Date), NA
+## below day resolution); returns cmp in {-1, 0, 1} (a before / same / after b at the coarser resolution) and the resolution used.
+date_keys <- function(res, y, m, d) {
+  stopifnot(all(res %in% 1:3), !anyNA(y), all(!is.na(m[res <= 2L])), all(!is.na(d[res == 1L])))
+  mkey <- ifelse(res <= 2L, ym_index(y, ifelse(res <= 2L, m, 1L)), NA_integer_)
+  dstr <- sprintf("%d-%02d-%02d", y, ifelse(res <= 2L, m, 1L), ifelse(res == 1L, d, 1L))
+  dkey <- ifelse(res == 1L, as.integer(as.Date(dstr, optional = TRUE)), NA_integer_)
+  if (any(res == 1L & is.na(dkey))) stop("date_keys: invalid calendar day in ", paste(dstr[res == 1L & is.na(dkey)], collapse = ", "))
+  data.frame(res = as.integer(res), y = as.integer(y), mkey = as.integer(mkey), dkey = as.integer(dkey))
+}
+date_cmp <- function(a, b) {
+  n <- length(a$res); stopifnot(length(b$res) == n)
+  r <- pmax(a$res, b$res)
+  ka <- ifelse(r == 1L, a$dkey, ifelse(r == 2L, a$mkey, a$y)); kb <- ifelse(r == 1L, b$dkey, ifelse(r == 2L, b$mkey, b$y))
+  stopifnot(!anyNA(ka), !anyNA(kb))
+  list(cmp = as.integer(sign(ka - kb)), res = as.integer(r))
+}
+## date_later(a, b): the later of two dates; a tie at the coarser resolution returns that date at the coarser resolution
+date_later <- function(a, b) {
+  cc <- date_cmp(a, b)
+  tie <- cc$cmp == 0L
+  data.frame(res = ifelse(cc$cmp > 0L, a$res, ifelse(cc$cmp < 0L, b$res, cc$res)),
+             y = ifelse(cc$cmp >= 0L, a$y, b$y),
+             mkey = ifelse(cc$cmp > 0L, a$mkey, ifelse(cc$cmp < 0L, b$mkey, ifelse(cc$res <= 2L, a$mkey, NA_integer_))),
+             dkey = ifelse(cc$cmp > 0L, a$dkey, ifelse(cc$cmp < 0L, b$dkey, ifelse(cc$res == 1L, a$dkey, NA_integer_))))
+}
+## date_earliest_by(d, g): the earliest date within each group g, with ties resolved at the coarsest tied resolution (the group's
+## minimum year; if any date of that year is year-dated the result is that year, else the minimum month; if any date of that month is
+## month-dated the result is that month, else the minimum day). One row per group, in the order of sort(unique(g)).
+date_earliest_by <- function(d, g) {
+  stopifnot(length(g) == length(d$res))
+  tb <- tibble(g = g, res = d$res, y = d$y, mkey = d$mkey, dkey = d$dkey) |> group_by(g) |> filter(y == min(y)) |>
+    mutate(.yr = any(res == 3L)) |> filter(.yr | mkey == min(mkey)) |> mutate(.mo = .yr | any(res == 2L)) |>
+    filter(.mo | dkey == min(dkey)) |>
+    summarise(res = if (first(.yr)) 3L else if (first(.mo)) 2L else 1L, y = first(y),
+              mkey = if (first(.yr)) NA_integer_ else first(mkey), dkey = if (first(.yr) || first(.mo)) NA_integer_ else first(dkey), .groups = "drop") |>
+    arrange(g)
+  stopifnot(nrow(tb) == length(unique(g)), !anyNA(tb$y), all(!is.na(tb$mkey[tb$res <= 2L])), all(!is.na(tb$dkey[tb$res == 1L])))
+  tb
+}
+## participant_spell_dates(dd, db, part): one row per (dispnum, ccode, spell), a spell being a run of consecutive COW years of the
+## participant in the dispute, with the entry date (entry_res / entry_y / entry_m / entry_d and the keys) and the exit date. GML
+## (part = gml_part) is used for a spell when the participant has at least one gml_part spell overlapping the COW spell's years: the entry
+## is the EARLIEST GML start (several overlapping GML spells, e.g. France in dispute 258 switching sides in 1940, are one COW spell) when
+## its year does not exceed the COW spell's first year (a GML start before the first COW year is clamped to January of it, at month
+## resolution, as in D5); the exit is the LATEST GML end when its year is not before the last COW year (a later end is clamped to December).
+## Day resolution needs a known day (stday / endday > 0). Fallback entry: the dispute start month for an originator whose spell begins
+## in the dispute's first year (start month known), else the spell's first year; fallback exit: the dispute's end month when the spell
+## ends in the dispute's last year and that end is an exact month, else the spell's last year. attr(, "membership") lists the
+## (dispnum, ccode) where COW and GML disagree on who took part (part = NULL: no GML dates at all).
+participant_spell_dates <- function(dd, db, part = NULL) {
+  stopifnot(all(c("dispnum", "ccode1", "year", "orig1") %in% names(dd)), all(c("dispnum", "y0", "y1", "start_month_known", "stmon", "end_lo", "end_hi") %in% names(db)))
+  sp <- dd |> distinct(dispnum, ccode = ccode1, year, orig1) |> arrange(dispnum, ccode, year) |> group_by(dispnum, ccode) |>
+    mutate(spell = cumsum(c(1L, diff(year) != 1L))) |> group_by(dispnum, ccode, spell) |>
+    summarise(spell_first = min(year), spell_last = max(year), orig = as.integer(orig1[1]), n_orig = n_distinct(orig1), .groups = "drop") |>
+    inner_join(db |> select(dispnum, y0, y1, start_month_known, stmon, end_lo, end_hi), by = "dispnum")
+  if (any(sp$n_orig != 1L)) stop("participant_spell_dates: originator status differs across a participant's dispute-years")
+  g_entry <- g_exit <- NULL
+  if (!is.null(part)) {
+    stopifnot(all(c("dispnum", "ccode", "styear", "stmon", "stday", "endyear", "endmon", "endday") %in% names(part)))
+    ps <- part |> transmute(dispnum = as.integer(dispnum), ccode = as.integer(ccode), g_sy = as.integer(styear), g_sm = as.integer(stmon), g_sd = as.integer(stday),
+                            g_ey = as.integer(endyear), g_em = as.integer(endmon), g_ed = as.integer(endday))
+    stopifnot(!anyNA(ps), all(ps$g_sm %in% 1:12), all(ps$g_em %in% 1:12))
+    ov <- sp |> mutate(.id = row_number()) |> select(.id, dispnum, ccode, spell_first, spell_last) |>
+      inner_join(ps, by = c("dispnum", "ccode"), relationship = "many-to-many") |> filter(g_ey >= spell_first, g_sy <= spell_last) |>
+      group_by(.id) |> arrange(g_sy, g_sm, pmax(g_sd, 1L), .by_group = TRUE) |>
+      summarise(n_gml = n(), g_sy = first(g_sy), g_sm = first(g_sm), g_sd = first(g_sd),
+                g_ey = g_ey[which.max(g_ey * 400L + g_em * 32L + pmax(g_ed, 1L))], g_em = g_em[which.max(g_ey * 400L + g_em * 32L + pmax(g_ed, 1L))],
+                g_ed = g_ed[which.max(g_ey * 400L + g_em * 32L + pmax(g_ed, 1L))], .groups = "drop")
+    sp <- sp |> mutate(.id = row_number()) |> left_join(ov, by = ".id") |> mutate(n_gml = coalesce(n_gml, 0L), in_gml_disp = dispnum %in% ps$dispnum)
+    cow_part <- sp |> distinct(dispnum, ccode); gml_part_tbl <- ps |> distinct(dispnum, ccode) |> filter(dispnum %in% cow_part$dispnum)
+    membership <- bind_rows(cow_part |> filter(dispnum %in% ps$dispnum) |> anti_join(gml_part_tbl, by = c("dispnum", "ccode")) |> mutate(issue = "COW participant absent from gml_part"),
+                            gml_part_tbl |> anti_join(cow_part, by = c("dispnum", "ccode")) |> mutate(issue = "gml_part participant absent from COW"))
+  } else {
+    sp <- sp |> mutate(.id = row_number(), n_gml = 0L, g_sy = NA_integer_, g_sm = NA_integer_, g_sd = NA_integer_, g_ey = NA_integer_, g_em = NA_integer_, g_ed = NA_integer_, in_gml_disp = FALSE)
+    membership <- tibble(dispnum = integer(0), ccode = integer(0), issue = character(0))
+  }
+  sp <- sp |> mutate(
+    entry_src = case_when(n_gml >= 1L & g_sy == spell_first ~ "participant", n_gml >= 1L & g_sy < spell_first ~ "participant (entry clamped to January)",
+                          !in_gml_disp ~ "dispute (not in gml_part)", n_gml == 0L ~ "dispute (participant has no overlapping gml_part spell)",
+                          TRUE ~ "dispute (GML entry after the first COW year)"),
+    entry_res = case_when(entry_src == "participant" & g_sd > 0L ~ 1L, startsWith(entry_src, "participant") ~ 2L,
+                          spell_first == y0 & orig == 1L & start_month_known ~ 2L, TRUE ~ 3L),
+    entry_y = spell_first,
+    entry_m = case_when(entry_src == "participant" ~ g_sm, startsWith(entry_src, "participant") ~ 1L, entry_res == 2L ~ stmon, TRUE ~ NA_integer_),
+    entry_d = ifelse(entry_res == 1L, g_sd, NA_integer_),
+    exit_src = case_when(n_gml >= 1L & g_ey == spell_last ~ "participant", n_gml >= 1L & g_ey > spell_last ~ "participant (exit clamped to December)",
+                         !in_gml_disp ~ "dispute (not in gml_part)", n_gml == 0L ~ "dispute (participant has no overlapping gml_part spell)",
+                         TRUE ~ "dispute (GML exit before the last COW year)"),
+    exit_res = case_when(exit_src == "participant" & g_ed > 0L ~ 1L, startsWith(exit_src, "participant") ~ 2L,
+                         spell_last == y1 & end_lo == end_hi ~ 2L, TRUE ~ 3L),
+    exit_y = spell_last,
+    exit_m = case_when(exit_src == "participant" ~ g_em, startsWith(exit_src, "participant") ~ 12L, exit_res == 2L ~ end_lo %% 12L + 1L, TRUE ~ NA_integer_),
+    exit_d = ifelse(exit_res == 1L, g_ed, NA_integer_))
+  ek <- date_keys(sp$entry_res, sp$entry_y, sp$entry_m, sp$entry_d); xk <- date_keys(sp$exit_res, sp$exit_y, sp$exit_m, sp$exit_d)
+  sp <- sp |> mutate(entry_mkey = ek$mkey, entry_dkey = ek$dkey, exit_mkey = xk$mkey, exit_dkey = xk$dkey)
+  ## the entry never lies after the exit at the coarser resolution
+  cx <- date_cmp(list(res = sp$entry_res, y = sp$entry_y, mkey = sp$entry_mkey, dkey = sp$entry_dkey), list(res = sp$exit_res, y = sp$exit_y, mkey = sp$exit_mkey, dkey = sp$exit_dkey))
+  bad <- cx$cmp > 0L
+  if (any(bad)) {
+    ## a GML spell ending before it started within the COW years cannot be used: year resolution for both
+    sp$entry_res[bad] <- 3L; sp$entry_m[bad] <- NA_integer_; sp$entry_d[bad] <- NA_integer_; sp$entry_mkey[bad] <- NA_integer_; sp$entry_dkey[bad] <- NA_integer_
+    sp$exit_res[bad] <- 3L; sp$exit_m[bad] <- NA_integer_; sp$exit_d[bad] <- NA_integer_; sp$exit_mkey[bad] <- NA_integer_; sp$exit_dkey[bad] <- NA_integer_
+    sp$entry_src[bad] <- "dispute (GML entry after exit)"; sp$exit_src[bad] <- "dispute (GML entry after exit)"
+  }
+  out <- sp |> select(dispnum, ccode, spell, spell_first, spell_last, orig, entry_src, entry_res, entry_y, entry_m, entry_d, entry_mkey, entry_dkey,
+                      exit_src, exit_res, exit_y, exit_m, exit_d, exit_mkey, exit_dkey)
+  stopifnot(all(out$entry_y == out$spell_first), all(out$exit_y == out$spell_last), !anyNA(out$entry_res), !anyNA(out$exit_res))
+  assert_no_dup_keys(out, c("dispnum", "ccode", "spell"), "participant spell dates")
+  attr(out, "membership") <- membership
+  attr(out, "n_entry_after_exit_fixed") <- sum(bad)
+  out
+}
+## context_present(onsets, psd): for every onset row (dispnum, initiator, onset date keys, .g) the participants p != initiator whose
+## spell is present at the onset. Returns one row per (onset row, participant spell) with cmp_entry, cmp_exit, the comparison
+## resolution and the presence flags under both conventions.
+context_present <- function(onsets, psd) {
+  stopifnot(all(c(".g", "dispnum", "initiator", "res", "y", "mkey", "dkey") %in% names(onsets)))
+  cand <- onsets |> select(.g, dispnum, initiator, o_res = res, o_y = y, o_mkey = mkey, o_dkey = dkey) |>
+    inner_join(psd |> select(dispnum, ccode, spell, entry_res, entry_y, entry_mkey, entry_dkey, exit_res, exit_y, exit_mkey, exit_dkey), by = "dispnum", relationship = "many-to-many") |>
+    filter(ccode != initiator)
+  ce <- date_cmp(list(res = cand$entry_res, y = cand$entry_y, mkey = cand$entry_mkey, dkey = cand$entry_dkey), list(res = cand$o_res, y = cand$o_y, mkey = cand$o_mkey, dkey = cand$o_dkey))
+  cx <- date_cmp(list(res = cand$exit_res, y = cand$exit_y, mkey = cand$exit_mkey, dkey = cand$exit_dkey), list(res = cand$o_res, y = cand$o_y, mkey = cand$o_mkey, dkey = cand$o_dkey))
+  cand |> mutate(cmp_entry = ce$cmp, cmp_res = ce$res, cmp_exit = cx$cmp, exited = cmp_exit < 0L,
+                 present_incl = cmp_entry <= 0L & !exited, present_strict = cmp_entry < 0L & !exited)
+}
+## context_flags(onsets, targets, psd): the flags of every onset row. onsets: .g, dispnum, initiator, res, y, mkey, dkey; targets: the
+## onset-defining targets (.g, ccode), which ARE the pair and are present by construction whatever their GML exit says (two COW pairs of
+## the data have the target's GML exit a few days before the initiator's GML entry in the same month; counted in n_target_exit_before_onset);
+## their entry must not be after the onset (asserted). A participant with several spells is present when ANY spell is. Per onset row:
+## n_incl / n_strict = the participants other than the initiator present under each convention, target_strict = an onset-defining target
+## entered strictly before the onset (the initiator joined an existing pair, so that target does not make a coalition), coal_incl =
+## n_incl >= 2, coal_strict = n_strict - target_strict >= 1, coal_res = the resolution of the entry comparisons (day / month / year / mixed).
+context_flags <- function(onsets, targets, psd) {
+  stopifnot(all(c(".g", "ccode") %in% names(targets)), !anyDuplicated(onsets$.g))
+  pres <- context_present(onsets, psd)
+  jt <- targets |> inner_join(pres |> group_by(.g, ccode) |> summarise(entry_ok = any(cmp_entry <= 0L), present_incl = any(present_incl), entered_before = any(cmp_entry < 0L), .groups = "drop"),
+                              by = c(".g", "ccode"))
+  if (nrow(jt) != nrow(targets) || !all(jt$entry_ok)) stop(sprintf("context_flags: %d onset-defining targets entered after their own onset or have no spell", nrow(targets) - sum(jt$entry_ok)))
+  pres <- pres |> left_join(jt |> transmute(.g, ccode, .force = TRUE), by = c(".g", "ccode")) |>
+    mutate(.force = coalesce(.force, FALSE), present_incl = present_incl | .force, present_strict = present_strict | (.force & cmp_entry < 0L))
+  agg <- pres |> group_by(.g) |>
+    summarise(n_incl = n_distinct(ccode[present_incl]), n_strict = n_distinct(ccode[present_strict]), res_set = paste(sort(unique(cmp_res)), collapse = ""), .groups = "drop") |>
+    left_join(jt |> group_by(.g) |> summarise(target_strict = any(entered_before), n_target_exit_before_onset = sum(!present_incl), .groups = "drop"), by = ".g")
+  out <- onsets |> select(.g) |> left_join(agg, by = ".g") |>
+    mutate(n_incl = coalesce(n_incl, 0L), n_strict = coalesce(n_strict, 0L), target_strict = coalesce(target_strict, FALSE), n_target_exit_before_onset = coalesce(n_target_exit_before_onset, 0L),
+           coal_incl = n_incl >= 2L, coal_strict = (n_strict - as.integer(target_strict)) >= 1L,
+           coal_res = case_when(res_set == "1" ~ "day", res_set == "2" ~ "month", res_set == "3" ~ "year", TRUE ~ "mixed"))
+  stopifnot(nrow(out) == nrow(onsets), all(out$n_incl >= 1L), !anyNA(out$coal_incl), !anyNA(out$coal_strict), all(out$coal_incl >= out$coal_strict))
+  out |> select(.g, n_incl, n_strict, target_strict, n_target_exit_before_onset, coal_incl, coal_strict, coal_res)
+}
+## coalition_context(pairs, psd): pairs = the PRE-collapse non-escalation event rows (dispnum, initiator, target, year, ev_start_lo,
+## ev_start_hi, the pair's month-level entry interval from flag_escalations_month()); psd = participant_spell_dates(). Returns pairs with
+##   coal_incl, coal_strict      : the group's flag (constant within (dispnum, initiator, year), asserted)
+##   coal_onset_ambiguous        : the pair onset derived from the two participants' entries (the later of the two, within their spells
+##                                 containing the onset year) lies in an EARLIER year than the pair's COW onset year (both states were in the
+##                                 dispute before they were opposed: a side switch), so the onset is ambiguous across a year boundary and the
+##                                 COW onset year is used at year resolution; ev_start_lo / ev_start_hi (the escalation rule's month interval)
+##                                 enter only the logged diagnostic onset_vs_pdi (attr "events")
+##   coal_res                    : the resolution of the group's entry comparisons: "day" / "month" / "year" / "mixed"
+## attr(, "groups") is the group table (onset, counts, flags, resolution, n_events, and the per-event heterogeneity diagnostic
+## n_event_flags_incl / n_event_flags_strict = the number of distinct per-event flags when every pair is evaluated at its own onset).
+coalition_context <- function(pairs, psd) {
+  stopifnot(all(c("dispnum", "initiator", "target", "year", "ev_start_lo", "ev_start_hi") %in% names(pairs)))
+  assert_no_dup_keys(pairs, c("dispnum", "initiator", "target"), "coalition_context: pairs")
+  n_in <- nrow(pairs)
+  pr <- pairs |> mutate(.e = row_number())
+  spell_at <- function(code_col, pre) {
+    pr |> select(.e, dispnum, ccode = all_of(code_col), year) |>
+      inner_join(psd |> select(dispnum, ccode, spell_first, spell_last, entry_res, entry_y, entry_mkey, entry_dkey), by = c("dispnum", "ccode"), relationship = "many-to-many") |>
+      filter(year >= spell_first, year <= spell_last) |> select(.e, entry_res, entry_y, entry_mkey, entry_dkey) |> rename_with(~ paste0(pre, .x), -.e)
+  }
+  si <- spell_at("initiator", "i_"); sj <- spell_at("target", "j_")
+  if (nrow(si) != n_in || nrow(sj) != n_in) stop("coalition_context: a pair's initiator or target has no participant spell containing the onset year (or several)")
+  pr <- pr |> inner_join(si, by = ".e") |> inner_join(sj, by = ".e")
+  on <- date_later(list(res = pr$i_entry_res, y = pr$i_entry_y, mkey = pr$i_entry_mkey, dkey = pr$i_entry_dkey),
+                   list(res = pr$j_entry_res, y = pr$j_entry_y, mkey = pr$j_entry_mkey, dkey = pr$j_entry_dkey))
+  ## the participants' entries are dated within the spells containing the onset year, so the later entry is in year t or EARLIER; earlier
+  ## means both were in the dispute before they were opposed (a side switch, e.g. France and the USSR in dispute 258) and the pair's
+  ## onset date is ambiguous: the COW onset year at year resolution is used
+  stopifnot(all(on$y <= pr$year))
+  amb <- on$y != pr$year
+  on$res[amb] <- 3L; on$y[amb] <- pr$year[amb]; on$mkey[amb] <- NA_integer_; on$dkey[amb] <- NA_integer_
+  stopifnot(all(on$y == pr$year), all(!is.na(on$mkey[on$res <= 2L])), all(!is.na(on$dkey[on$res == 1L])))
+  ## diagnostic only: does the participant-derived onset month agree with the pair's month interval of flag_escalations_month()?
+  onset_vs_pdi <- case_when(amb ~ "ambiguous (year fallback)", on$res == 3L ~ "year resolution",
+                            on$mkey >= pr$ev_start_lo & on$mkey <= pr$ev_start_hi ~ "inside the pair interval", TRUE ~ "outside the pair interval")
+  pr <- pr |> mutate(o_res = on$res, o_y = on$y, o_mkey = on$mkey, o_dkey = on$dkey, coal_onset_ambiguous = amb, onset_vs_pdi = onset_vs_pdi)
+  ## group onsets: the earliest pair onset of (dispnum, initiator, year), ties at the coarsest tied resolution
+  pr <- pr |> mutate(.g = as.integer(factor(paste(dispnum, initiator, year))))
+  gon <- date_earliest_by(list(res = pr$o_res, y = pr$o_y, mkey = pr$o_mkey, dkey = pr$o_dkey), pr$.g) |> rename(.g = g)
+  grp <- pr |> group_by(.g, dispnum, initiator, year) |> summarise(n_events = n(), .groups = "drop") |> inner_join(gon, by = ".g")
+  stopifnot(nrow(grp) == n_distinct(pr$.g), all(grp$y == grp$year))
+  ## the pair onsets that define the group onset (ties at the coarser resolution)
+  pg <- pr |> inner_join(grp |> select(.g, g_res = res, g_y = y, g_mkey = mkey, g_dkey = dkey), by = ".g")
+  cg <- date_cmp(list(res = pg$o_res, y = pg$o_y, mkey = pg$o_mkey, dkey = pg$o_dkey), list(res = pg$g_res, y = pg$g_y, mkey = pg$g_mkey, dkey = pg$g_dkey))
+  stopifnot(all(cg$cmp >= 0L))                                     # no pair starts before its group
+  pr$onset_defining <- cg$cmp == 0L
+  ## presence of every other participant at the group onset; the onset-defining targets are the pair (context_flags())
+  fl <- context_flags(grp, pr |> filter(onset_defining) |> select(.g, ccode = target), psd)
+  grp <- grp |> inner_join(fl, by = ".g")
+  stopifnot(nrow(grp) == n_distinct(pr$.g), all(grp$n_incl >= 1L), all(grp$n_strict <= grp$n_incl), !anyNA(grp$coal_incl), !anyNA(grp$coal_strict), all(grp$coal_incl >= grp$coal_strict))
+  ## diagnostic: the flag at every pair's OWN onset (not used); how many groups would carry different flags
+  fl_e <- context_flags(pr |> transmute(.g = .e, dispnum, initiator, res = o_res, y = o_y, mkey = o_mkey, dkey = o_dkey), pr |> select(.g = .e, ccode = target), psd)
+  pr <- pr |> left_join(fl_e |> select(.e = .g, ev_incl = coal_incl, ev_strict = coal_strict), by = ".e")
+  stopifnot(!anyNA(pr$ev_incl), !anyNA(pr$ev_strict))
+  het <- pr |> group_by(.g) |> summarise(n_event_flags_incl = n_distinct(ev_incl), n_event_flags_strict = n_distinct(ev_strict), .groups = "drop")
+  grp <- grp |> left_join(het, by = ".g")
+  out <- pr |> inner_join(grp |> select(.g, coal_incl, coal_strict, coal_res), by = ".g")
+  stopifnot(nrow(out) == n_in, !anyNA(out$coal_incl), !anyNA(out$coal_strict))
+  ## constant within every (dispnum, initiator, year) group: by construction, asserted on the output
+  chk <- out |> group_by(dispnum, initiator, year) |> summarise(a = n_distinct(coal_incl), b = n_distinct(coal_strict), .groups = "drop")
+  if (any(chk$a != 1L) || any(chk$b != 1L)) stop("coalition_context: the coalition flag is not constant within an (initiator, dispute, year) group")
+  res <- pairs |> left_join(out |> select(dispnum, initiator, target, coal_incl, coal_strict, coal_onset_ambiguous, coal_res), by = c("dispnum", "initiator", "target"))
+  stopifnot(nrow(res) == n_in, !anyNA(res$coal_incl))
+  attr(res, "groups") <- grp |> select(dispnum, initiator, year, n_events, onset_res = res, onset_y = y, onset_mkey = mkey, onset_dkey = dkey, n_incl, n_strict, target_strict,
+                                       n_target_exit_before_onset, coal_incl, coal_strict, coal_res, n_event_flags_incl, n_event_flags_strict)
+  attr(res, "events") <- out |> select(dispnum, initiator, target, year, o_res, o_mkey, o_dkey, onset_defining, onset_vs_pdi, ev_incl, ev_strict)
+  res
+}
+
 ## ---- gap scale (PI decision 2026-10-23): SD of the within-year gap v_i - v_j over all ordered pairs i != j ----
 ## Exact, without forming the pairs. Per year with n values and SS = sum((v - mean(v))^2), sum over ordered pairs of
 ## (v_i - v_j)^2 = 2 n SS and there are n (n - 1) pairs; the pairs' mean is exactly 0. Years with one state add nothing.

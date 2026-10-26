@@ -21,7 +21,9 @@
 ##                                 level) and war_disp (dispute level), is_ww2 (appendix option --drop_ww2),
 ##                                 target_has_pos_tm1, sample flags in_mid / in_fmid / in_fmidcow / in_fmidub / in_war
 ##                                 (+ fatal_source), and in_*_noww2 (the sample flags of the non-WWII disputes only,
-##                                 used by --drop_ww2; Codex review P2-3)
+##                                 used by --drop_ww2; Codex review P2-3); coal_incl / coal_strict (coalition context of the
+##                                 event's D8 group under the inclusive / strict tie convention, NA on escalation rows) and
+##                                 coal_onset_ambiguous (the `context` switch; dual typology stage a, 2026-10-25)
 ##   changes_lag{h}.rds            ONE state-level change table per lag (build_change_table() in helpers_data.R):
 ##                                 raw change dM_raw_h / dRpr_raw_h = level(t-1) - level(t-1-h), and the transformed
 ##                                 change dM_h / dRpr_h = (raw - year mean) / one pooled SD per lag. Feeds BOTH the
@@ -551,6 +553,63 @@ blog("  event weights, KFOR / Yugoslavia 2000 (disputes 4186 and 4343): %s",
                    tapply(kfor$initiator, kfor$dispnum, length), tapply(kfor$n_targets, kfor$dispnum, max),
                    kfor$initiator[match(unique(kfor$dispnum), kfor$dispnum)], kfor$w_mid[match(unique(kfor$dispnum), kfor$dispnum)]), collapse = "; "))
 rm(kfor)
+## ---- coalition context (dual typology stage a, PI-approved spec 2026-10-25; the `context` switch; helpers in helpers_data.R) -----------
+## Per D8 weight group (initiator, dispute, onset year): is the dispute multilateral at the GROUP onset (the initiator's earliest pair
+## onset in that dispute-year)? Participant entry / exit dates from gml_part at day resolution where the day is known, month otherwise,
+## dispute-level bounds where GML and COW disagree; comparisons at the coarser resolution of the two dates. Both tie conventions are
+## stored: coal_incl (same-date entrants present) and coal_strict (strictly earlier entrants only). Computed on the pre-collapse rows and
+## joined to the collapsed events below (ORed over a key's source disputes).
+psd <- participant_spell_dates(dd, disp_dates, part = part_tbl)
+pairs_pre <- events |> filter(!escalation) |> select(dispnum, initiator, target, year, ev_start_lo, ev_start_hi)
+coal <- coalition_context(pairs_pre, psd)
+coal_grp <- attr(coal, "groups"); coal_ev <- attr(coal, "events"); coal_mem <- attr(psd, "membership")
+stopifnot(nrow(coal) == nrow(pairs_pre), identical(coal$dispnum, pairs_pre$dispnum), identical(coal$initiator, pairs_pre$initiator), identical(coal$target, pairs_pre$target),
+          !anyNA(coal$coal_incl), !anyNA(coal$coal_strict), all(coal$coal_incl >= coal$coal_strict), all(coal_grp$coal_incl >= coal_grp$coal_strict))
+## the D8 groups are exactly the coalition groups, and the flag is constant within each (asserted again on the joined rows)
+w_grp <- events |> filter(!escalation) |> distinct(dispnum, initiator, year)
+stopifnot(nrow(w_grp) == nrow(coal_grp), nrow(anti_join(w_grp, coal_grp, by = c("dispnum", "initiator", "year"))) == 0)
+chk_c <- coal |> group_by(dispnum, initiator, year) |> summarise(a = n_distinct(coal_incl), b = n_distinct(coal_strict), .groups = "drop")
+stopifnot(all(chk_c$a == 1L), all(chk_c$b == 1L))
+blog("coalition context: %d pre-collapse non-escalation pairs in %d (initiator, dispute, year) groups (= the D8 weight groups); groups with a coalition context: inclusive %d, strict %d; pairs: inclusive %d, strict %d; the flag is constant within every group (asserted)",
+     nrow(coal), nrow(coal_grp), sum(coal_grp$coal_incl), sum(coal_grp$coal_strict), sum(coal$coal_incl), sum(coal$coal_strict))
+blog("coalition context: participant spells %d (entry dated from gml_part %d, of which day resolution %d, month %d; dispute-level fallback %d: %s); exit from gml_part %d (day %d, month %d), fallback %d",
+     nrow(psd), sum(startsWith(psd$entry_src, "participant")), sum(psd$entry_res == 1L), sum(psd$entry_res == 2L & startsWith(psd$entry_src, "participant")), sum(!startsWith(psd$entry_src, "participant")),
+     paste(names(table(psd$entry_src[!startsWith(psd$entry_src, "participant")])), table(psd$entry_src[!startsWith(psd$entry_src, "participant")]), sep = "=", collapse = "; "),
+     sum(startsWith(psd$exit_src, "participant")), sum(psd$exit_res == 1L), sum(psd$exit_res == 2L & startsWith(psd$exit_src, "participant")), sum(!startsWith(psd$exit_src, "participant")))
+blog("coalition context: resolution of the entry comparisons per group: day %d, month %d, year %d, mixed (day and month, or coarser, within one group) %d; group onset itself at day / month / year resolution %d / %d / %d",
+     sum(coal_grp$coal_res == "day"), sum(coal_grp$coal_res == "month"), sum(coal_grp$coal_res == "year"), sum(coal_grp$coal_res == "mixed"),
+     sum(coal_grp$onset_res == 1L), sum(coal_grp$onset_res == 2L), sum(coal_grp$onset_res == 3L))
+blog("coalition context: COW and GML disagree on membership in %d disputes: %d COW participants absent from gml_part (dispute present in it), %d gml_part participants absent from COW; GML dates are used for the participants both sources have, COW membership decides who is in the dispute (listed below)",
+     n_distinct(coal_mem$dispnum), sum(coal_mem$issue == "COW participant absent from gml_part"), sum(coal_mem$issue == "gml_part participant absent from COW"))
+for (d in sort(unique(coal_mem$dispnum)))
+  cat(sprintf("  membership disagreement: dispute %d: %s\n", d, paste(sprintf("%d (%s)", coal_mem$ccode[coal_mem$dispnum == d], coal_mem$issue[coal_mem$dispnum == d]), collapse = "; ")), file = build_log, append = TRUE)
+blog("coalition context: pairs whose participant-derived onset year differs from the COW pair onset year (both states in the dispute before they were opposed; onset ambiguous across a year boundary, COW onset year used at year resolution): %d in %d groups; participant-derived onset month against the pair's escalation-rule interval: %s; onset-defining targets whose GML exit precedes the initiator's GML entry in the same month (present by construction): %d",
+     sum(coal$coal_onset_ambiguous), nrow(coal |> filter(coal_onset_ambiguous) |> distinct(dispnum, initiator, year)),
+     paste(names(table(coal_ev$onset_vs_pdi)), table(coal_ev$onset_vs_pdi), sep = "=", collapse = "; "), sum(coal_grp$n_target_exit_before_onset))
+for (r in which(coal$coal_onset_ambiguous)) cat(sprintf("  ambiguous onset: %d -> %d %d dispute %d (coal_incl %s, coal_strict %s)\n", coal$initiator[r], coal$target[r], coal$year[r], coal$dispnum[r], coal$coal_incl[r], coal$coal_strict[r]), file = build_log, append = TRUE)
+## diagnostic for the PI (not used): evaluating every pair at its OWN onset instead of the group onset
+blog("coalition context: DIAGNOSTIC, flag at every pair's own onset instead of the group onset: pairs coalition inclusive %d / strict %d (group-level %d / %d); groups whose pairs would carry different flags: inclusive %d, strict %d of %d (the group-level flag keeps a D8 group whole)",
+     sum(coal_ev$ev_incl), sum(coal_ev$ev_strict), sum(coal$coal_incl), sum(coal$coal_strict), sum(coal_grp$n_event_flags_incl > 1L), sum(coal_grp$n_event_flags_strict > 1L), nrow(coal_grp))
+het_g <- coal_grp |> filter(n_event_flags_incl > 1L | n_event_flags_strict > 1L) |> arrange(dispnum, year, initiator)
+for (r in seq_len(nrow(het_g))) cat(sprintf("  per-event flags differ within group: dispute %d, initiator %d, %d (%d pairs; group flag inclusive %s / strict %s)\n", het_g$dispnum[r], het_g$initiator[r], het_g$year[r], het_g$n_events[r], het_g$coal_incl[r], het_g$coal_strict[r]), file = build_log, append = TRUE)
+## the review's headline case under both conventions
+gp39 <- coal |> filter(initiator == 255L, target == 290L, year == 1939L, dispnum == 258L); gg39 <- coal_grp |> filter(dispnum == 258L, initiator == 255L, year == 1939L)
+if (DIRECTION == "cowwar") {
+  stopifnot(nrow(gp39) == 1L, nrow(gg39) == 1L)
+  blog("coalition context: Germany -> Poland 1939 (dispute 258): group onset %s (%s resolution; Germany's %d pairs of 1939), states present besides Germany: inclusive %d, strict %d -> coal_incl = %s, coal_strict = %s; at the pair's own onset the per-event flags would be inclusive %s / strict %s; the group's per-event flags differ: inclusive %s, strict %s",
+       if (gg39$onset_res == 1L) as.character(as.Date(gg39$onset_dkey, origin = "1970-01-01")) else if (gg39$onset_res == 2L) ym_label(gg39$onset_mkey) else as.character(gg39$onset_y),
+       c("day", "month", "year")[gg39$onset_res], gg39$n_events, gg39$n_incl, gg39$n_strict, gp39$coal_incl, gp39$coal_strict,
+       coal_ev$ev_incl[coal_ev$initiator == 255L & coal_ev$target == 290L & coal_ev$year == 1939L & coal_ev$dispnum == 258L],
+       coal_ev$ev_strict[coal_ev$initiator == 255L & coal_ev$target == 290L & coal_ev$year == 1939L & coal_ev$dispnum == 258L],
+       gg39$n_event_flags_incl > 1L, gg39$n_event_flags_strict > 1L)
+} else blog("coalition context: Germany -> Poland 1939 does not exist under DIRECTION = sideA (Poland -> Germany: coal_incl %s, coal_strict %s)",
+            coal$coal_incl[coal$initiator == 290L & coal$target == 255L & coal$year == 1939L & coal$dispnum == 258L], coal$coal_strict[coal$initiator == 290L & coal$target == 255L & coal$year == 1939L & coal$dispnum == 258L])
+for (s in c("mid", "fmid", "fmidcow", "fmidub", "war")) {
+  f <- events[[paste0("in_", s)]][!events$escalation]
+  blog("  coalition context, sample %-7s (pre-collapse): %4d events; coalition inclusive %4d (%.1f%%), strict %4d (%.1f%%); ambiguous onsets %d", s, sum(f),
+       sum(coal$coal_incl[f]), 100 * mean(coal$coal_incl[f]), sum(coal$coal_strict[f]), 100 * mean(coal$coal_strict[f]), sum(coal$coal_onset_ambiguous[f]))
+}
+rm(w_grp, chk_c, het_g, gp39, gg39)
 ## target has positions at t-1 and is a system member at t: the conditions for its alternative row to exist in the
 ## "all" choice set (besides not already fighting); assemble_cell() asserts every such event is in its choice set
 events <- events |> left_join(pos |> transmute(target = ccode, year = year + 1L, .pos = 1L), by = c("target", "year")) |>
@@ -626,6 +685,31 @@ for (s in c("mid", "fmid", "fmidcow", "fmidub", "war"))
 blog("is_joiner_pair after the collapse: %d of %d non-escalation events (an event is a joiner pair only when every collapsed dispute pair was one)",
      sum(events$is_joiner_pair & !events$escalation), sum(!events$escalation))
 stopifnot(!anyNA(events$fighting_at_ref), !any(events$fighting_at_ref & events$escalation))
+## ---- coalition context after the collapse: ORed over a key's source disputes (a key collapsed from a bilateral and a coalition dispute is a
+## coalition event; such keys are the only way a D8 group can be split by the `context` switch, counted here and asserted at assembly) ----
+## (.mixed_* come FIRST: inside summarise() a later expression would see the already-reduced flag)
+coal_key <- coal |> group_by(initiator, target, year) |>
+  summarise(.n_src = n(), .mixed_incl = n_distinct(coal_incl) > 1L, .mixed_strict = n_distinct(coal_strict) > 1L,
+            coal_incl = any(coal_incl), coal_strict = any(coal_strict), coal_onset_ambiguous = any(coal_onset_ambiguous), .groups = "drop")
+stopifnot(all(coal_key$.mixed_incl <= (coal_key$.n_src > 1L)), all(coal_key$coal_incl[coal_key$.mixed_incl]))
+n_ev_c <- nrow(events)
+events <- events |> left_join(coal_key, by = c("initiator", "target", "year")) |>
+  mutate(across(c(coal_incl, coal_strict, coal_onset_ambiguous, .mixed_incl, .mixed_strict), ~ ifelse(escalation, NA, .x)), .n_src = ifelse(escalation, NA_integer_, .n_src))   # escalation rows (in no sample) carry NA
+stopifnot(nrow(events) == n_ev_c, all(is.na(events$coal_incl) == events$escalation), all(is.na(events$coal_strict) == events$escalation),
+          all(events$.n_src[!events$escalation] == events$n_disputes[!events$escalation]), all(events$coal_incl[!events$escalation] >= events$coal_strict[!events$escalation]))
+blog("coalition context after the collapse: %d non-escalation events; coalition inclusive %d, strict %d; collapsed keys whose source disputes disagree (inclusive / strict; the ORed flag makes them coalition events): %d / %d of %d collapsed keys",
+     sum(!events$escalation), sum(events$coal_incl, na.rm = TRUE), sum(events$coal_strict, na.rm = TRUE), sum(events$.mixed_incl, na.rm = TRUE), sum(events$.mixed_strict, na.rm = TRUE), sum(events$n_disputes > 1L & !events$escalation))
+mixed_c <- events |> filter(!escalation, .mixed_incl | .mixed_strict)
+for (r in seq_len(nrow(mixed_c))) cat(sprintf("  context differs across the collapsed disputes of %d -> %d %d (disputes %s): coal_incl %s (mixed %s), coal_strict %s (mixed %s)\n", mixed_c$initiator[r], mixed_c$target[r], mixed_c$year[r], mixed_c$dispnums[r],
+                                            mixed_c$coal_incl[r], mixed_c$.mixed_incl[r], mixed_c$coal_strict[r], mixed_c$.mixed_strict[r]), file = build_log, append = TRUE)
+for (s in c("mid", "fmid", "fmidcow", "fmidub", "war")) {
+  f <- events[[paste0("in_", s)]]
+  blog("  coalition context, sample %-7s (after the collapse, what the context switch sees): %4d events; coalition inclusive %4d (%.1f%%), strict %4d (%.1f%%); bilateral inclusive %4d, strict %4d; ambiguous onsets %d; collapsed keys with disagreeing source contexts (inclusive / strict) %d / %d",
+       s, sum(f), sum(events$coal_incl[f]), 100 * mean(events$coal_incl[f]), sum(events$coal_strict[f]), 100 * mean(events$coal_strict[f]), sum(!events$coal_incl[f]), sum(!events$coal_strict[f]),
+       sum(events$coal_onset_ambiguous[f]), sum(events$.mixed_incl[f]), sum(events$.mixed_strict[f]))
+}
+events <- events |> select(-.n_src, -.mixed_incl, -.mixed_strict)
+rm(coal_key, mixed_c, n_ev_c, psd, pairs_pre, coal, coal_grp, coal_ev, coal_mem)
 ## no-WWII flags after the collapse (review P2-3): a subset of the sample flag; equal to in_* & !is_ww2 on every event from a
 ## single dispute; on mixed keys (a WWII and a non-WWII dispute) the old rule in_* & !is_ww2 dropped the event, the new flag
 ## keeps it when a non-WWII dispute qualifies
@@ -787,7 +871,7 @@ add_manifest <- function(obj, fname, note) {
   blog("wrote %s: %d x %d", fname, nrow(obj), ncol(obj))
 }
 add_manifest(pos, "sy_positions.rds", "state-year positions: M = log CINC share, R_pr = log PageRank (raw log shares), R_eig std within year")
-add_manifest(events, "events.rds", sprintf("directed events (Side A x Side B pairs; DIRECTION=%s: war-level disputes follow COW's war-initiating side, dir_flipped / dir_source / war_link), joiners %s (is_joiner_pair); month-rule escalation flag with participant-level dates where gml_part matches (excluded from all in_* flags); pair-level war; same-year duplicates collapsed (dispnums); fighting_at_ref; is_ww2; target_has_pos_tm1; stage-2 weights w_<sample>",
+add_manifest(events, "events.rds", sprintf("directed events (Side A x Side B pairs; DIRECTION=%s: war-level disputes follow COW's war-initiating side, dir_flipped / dir_source / war_link), joiners %s (is_joiner_pair); month-rule escalation flag with participant-level dates where gml_part matches (excluded from all in_* flags); pair-level war; same-year duplicates collapsed (dispnums); fighting_at_ref; is_ww2; target_has_pos_tm1; stage-2 weights w_<sample>; coalition context coal_incl / coal_strict / coal_onset_ambiguous",
                                            DIRECTION, if (INCLUDE_JOINERS) "included" else "excluded"))
 ## number of system states per year, for the system-growth diagnostic on the change variables (item 4 of the
 ## 2026-10-23 decision): g3 at t-1 = log n_system(t-1) - log n_system(t-4), constant within a year

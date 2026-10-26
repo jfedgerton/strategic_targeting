@@ -5,7 +5,7 @@ source(file.path(root, "R", "spec.R"))
 
 test_that("the defaults are the main specification and every switch value is validated", {
   main <- parse_spec(character(0))
-  expect_equal(main[names(SPEC_CHOICES)], list(pairs = "all", direction = "cowwar", ww2 = "include", weights = "dispute", controls = "minimal", changes = "raw"))
+  expect_equal(main[names(SPEC_CHOICES)], list(pairs = "all", context = "all", coal_ties = "inclusive", coal_drop = "none", direction = "cowwar", ww2 = "include", weights = "dispute", controls = "minimal", changes = "raw"))
   expect_equal(main$ame_K, 2L); expect_true(spec_is_main(main)); expect_equal(spec_suffix(main), "")
   expect_equal(parse_spec("--pairs=joiners")$pairs, "joiners"); expect_false(spec_is_main(parse_spec("--pairs=joiners")))
   expect_error(parse_spec("--pairs=both"), "--pairs must be one of")
