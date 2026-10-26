@@ -26,6 +26,10 @@
 #                  open credits, not jfe4_cr_default. Command-line sbatch options override the directives above, so the dry run is
 #                  cheap; a dry run needs no M1 fits, so the plain 96-task array is enough.)
 # The M2 cells run 4000 iterations (2000 warmup, adapt_delta 0.95; SAMPLER in spec.R) and need about twice the M1 walltime.
+# SWITCHES (PI request 2026-10-26, AME K = 1 beside the main K = 2): --export=ALL,SWITCHES="--ame_K=1" appends spec.R switches to every
+#                 task's 02_fit_model.R call. Meant for an M2-only array (M2_SWITCHES in submit_main_grid.sh): the K = 1 cells are named
+#                 <cell>_K1 (cell_name()), never collide with the K = 2 main grid, and start from the SAME K-free M1 fits (m1_spec()).
+#                 An M1 task refuses --ame_K != 2 (cell_name(), audit fix 16), so SWITCHES with a K must not reach the M1 array.
 # Variants are NOT run from this script (their cells would carry a switch suffix); use 04_robustness.sbatch.
 # Submit from the repo root; nothing in this file submits anything by itself.
 # Slurm runs a spooled copy of this script, so locate the repo via the submit dir.
@@ -134,5 +138,6 @@ case $i in
 esac
 DRY=${DRY_RUN:-FALSE}
 THR=${THREADS_PER_CHAIN:-8}
-echo "task $i -> sample=$s model=$m lag=$l (main specification; sampler defaults of spec.R) threads_per_chain=$THR cpus=${SLURM_CPUS_PER_TASK:-?} dry_run=$DRY"
-Rscript v2/R/02_fit_model.R --sample=$s --lag=$l --model=$m --dry_run=$DRY --threads_per_chain=$THR
+SW=${SWITCHES:-}      # extra spec.R switches, e.g. "--ame_K=1" for the K = 1 M2 array (empty = the main specification)
+echo "task $i -> sample=$s model=$m lag=$l (${SW:-main specification}; sampler defaults of spec.R) threads_per_chain=$THR cpus=${SLURM_CPUS_PER_TASK:-?} dry_run=$DRY"
+Rscript v2/R/02_fit_model.R --sample=$s --lag=$l --model=$m --dry_run=$DRY --threads_per_chain=$THR $SW

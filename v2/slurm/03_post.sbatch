@@ -13,7 +13,9 @@
 # independent, M1 vs M2, a-vs-b misclassification). 12 tasks = 3 samples x 4 lags.
 # Submit from the repo root: sbatch v2/slurm/03_post.sbatch
 # Variant groups: --export=ALL,SWITCHES="--ww2=drop" runs the same for the _noww2 fits (any switches of spec.R; the fit names come
-# from cell_name() in spec.R, so the K suffix and the switch suffixes are never hand-written here).
+# from cell_name() in spec.R, so the K suffix and the switch suffixes are never hand-written here). --export=ALL,SWITCHES="--ame_K=1"
+# post-processes the K = 1 group (PI request 2026-10-26): the four K-free M1 fits with the four _K1 M2 fits (cell_spec(): the M1 names
+# never carry a K), and 04_compare.R writes compare_*_<sample>_lag<h>_all_pr_K1.csv (compare_group_name()), beside the K = 2 tables.
 # Audit fix 4 (2026-10-26): the task FAILS (exit 1) unless all eight fits of the group are present, so 04_compare.R never writes
 # compare_* CSVs of a partial group unnoticed; --export=ALL,ALLOW_PARTIAL=TRUE runs on the fits that exist (04_compare.R skips the
 # missing ones and says so). A SWITCHES value spec.R rejects, a failed extraction or a failed comparison also exit 1 (set -e).
@@ -27,7 +29,7 @@ s=${SAMPLES[$(( i % 3 ))]}; l=${LAGS[$(( i / 3 ))]}
 SW=${SWITCHES:-}; PARTIAL=${ALLOW_PARTIAL:-FALSE}
 echo "task $i -> sample=$s lag=$l switches='$SW' allow_partial=$PARTIAL"
 # the eight cell names of the group from spec.R itself (parse_spec() stops on a bad switch value, which stops this task)
-CELLS=$(Rscript -e 'source("v2/R/spec.R"); a <- commandArgs(TRUE); spec <- parse_spec(a); s <- get_arg(a, "sample", ""); l <- as.integer(get_arg(a, "lag", 0)); writeLines(vapply(MODELS, function(m) cell_name(s, l, m, spec), ""))' --sample=$s --lag=$l $SW) \
+CELLS=$(Rscript -e 'source("v2/R/spec.R"); a <- commandArgs(TRUE); spec <- parse_spec(a); s <- get_arg(a, "sample", ""); l <- as.integer(get_arg(a, "lag", 0)); writeLines(vapply(MODELS, function(m) cell_name(s, l, m, cell_spec(m, spec)), ""))' --sample=$s --lag=$l $SW) \
   || { echo "ERROR: spec.R rejected SWITCHES='$SW' (or the sample / lag); nothing run" >&2; exit 1; }
 n_cells=$(wc -l <<< "$CELLS"); [ "$n_cells" -eq 8 ] || { echo "ERROR: expected 8 cell names, got $n_cells" >&2; exit 1; }
 found=0; missing=""
