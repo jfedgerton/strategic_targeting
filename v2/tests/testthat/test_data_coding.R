@@ -774,40 +774,27 @@ test_that("control sets: minimal main W / X / Z, and --full_controls restores th
   expect_false("cowmaj_tm1" %in% w_controls()); expect_false("log_peace_years" %in% w_controls())
   expect_equal(z_columns(), c("contig_land", "joint_dem", "log_dy_prior_mids", "dy_mid_tm1", "dM_j_h", "dRpr_j_h"))
   expect_false(any(c("alliance_def_off", "major_count") %in% z_columns()))
-  ## --full_controls (review P2-4) is EXACTLY the base specification of commit 8bf0ce1 (git show 8bf0ce1:v2/R/assemble_cell.R):
-  ##   ctrl_sy <- c("cowmaj_tm1", "dem_tm1", if (CONFLICT_HISTORY) c("log_prior_mids", "log_peace_years")); W_cols = X_cols = dM_i, dR_i, ctrl_sy
-  ##   z_columns: c(if (CONTIGUITY) "contig_land", "alliance_def_off", "joint_dem", "major_count",
-  ##               if (CONFLICT_HISTORY) c("log_dy_prior_mids", "log_dy_peace_years"), if (DISTANCE) "log_capdist", "dM_j_h", "dRpr_j_h", if (TARGET_MISSING) "dch_j_missing")
-  ## (no ongoing_tm1 in W / X, no dy_mid_tm1 in Z: both postdate 8bf0ce1)
-  base_ctrl <- c("cowmaj_tm1", "dem_tm1", "log_prior_mids", "log_peace_years")
-  base_z <- function(CONFLICT_HISTORY = TRUE, DISTANCE = FALSE, CONTIGUITY = TRUE, TARGET_MISSING = FALSE)
-    c(if (CONTIGUITY) "contig_land", "alliance_def_off", "joint_dem", "major_count", if (CONFLICT_HISTORY) c("log_dy_prior_mids", "log_dy_peace_years"),
+  ## controls = full (PI decision 2026-10-27, item 7): the MAIN sets plus the controls the minimal sets dropped, WITHOUT major-power status
+  ## (its own switch): W = main W + log_peace_years; X = main X (no controls); Z = main Z + alliance_def_off + log_dy_peace_years after
+  ## dy_mid_tm1. Until then `full` reproduced the 8bf0ce1 base (cowmaj_tm1 / major_count, no D2 / D3 columns, no ongoing_tm1, no dy_mid_tm1).
+  full_w <- c("M_lvl", "R_lvl", "ongoing_tm1", "log_prior_mids", "dem_tm1", "log_n_system_tm1", "log_peace_years")
+  full_z <- function(CONFLICT_HISTORY = TRUE, DISTANCE = FALSE, CONTIGUITY = TRUE, TARGET_MISSING = FALSE)
+    c(if (CONTIGUITY) "contig_land", "joint_dem", if (CONFLICT_HISTORY) "log_dy_prior_mids", "dy_mid_tm1", "alliance_def_off", "log_dy_peace_years",
       if (DISTANCE) "log_capdist", "dM_j_h", "dRpr_j_h", if (TARGET_MISSING) "dch_j_missing")
-  expect_equal(w_controls(FULL_CONTROLS = TRUE), base_ctrl); expect_equal(x_controls(FULL_CONTROLS = TRUE), base_ctrl)
-  expect_equal(c("dM_i", "dR_i", w_controls(FULL_CONTROLS = TRUE)), c("dM_i", "dR_i", "cowmaj_tm1", "dem_tm1", "log_prior_mids", "log_peace_years"))
-  expect_equal(w_controls(CONFLICT_HISTORY = FALSE, FULL_CONTROLS = TRUE), c("cowmaj_tm1", "dem_tm1")); expect_equal(x_controls(CONFLICT_HISTORY = FALSE, FULL_CONTROLS = TRUE), c("cowmaj_tm1", "dem_tm1"))
-  expect_false("ongoing_tm1" %in% w_controls(FULL_CONTROLS = TRUE)); expect_false("dy_mid_tm1" %in% z_columns(FULL_CONTROLS = TRUE))
-  expect_false(any(c("M_lvl", "R_lvl", "log_n_system_tm1") %in% w_controls(FULL_CONTROLS = TRUE)))     # D2 / D3 columns never enter the 8bf0ce1 set
-  for (ch in c(TRUE, FALSE)) for (di in c(TRUE, FALSE)) for (co in c(TRUE, FALSE)) for (tm in c(TRUE, FALSE))
-    expect_equal(z_columns(ch, di, co, TARGET_MISSING = tm, FULL_CONTROLS = TRUE), base_z(ch, di, co, tm))
-  expect_equal(z_columns(FULL_CONTROLS = TRUE), c("contig_land", "alliance_def_off", "joint_dem", "major_count", "log_dy_prior_mids", "log_dy_peace_years", "dM_j_h", "dRpr_j_h"))
-  ## under the full set the dyadic peace years are already in Z when CONFLICT_HISTORY is on; --dy_peace_years adds nothing then and
-  ## restores the column at its base position when CONFLICT_HISTORY is off
+  expect_equal(w_controls(FULL_CONTROLS = TRUE), full_w); expect_equal(x_controls(FULL_CONTROLS = TRUE), character(0))
+  expect_equal(w_controls(FULL_CONTROLS = TRUE), c(w_controls(), "log_peace_years"))                                   # main + one column, appended
+  expect_equal(w_controls(CONFLICT_HISTORY = FALSE, FULL_CONTROLS = TRUE), w_controls(CONFLICT_HISTORY = FALSE))      # the peace years are conflict history
+  expect_false(any(c("cowmaj_tm1", "major_count") %in% c(w_controls(FULL_CONTROLS = TRUE), z_columns(FULL_CONTROLS = TRUE))))   # no major-power status in `full`
+  expect_true(all(c("ongoing_tm1", "M_lvl", "R_lvl", "log_n_system_tm1") %in% w_controls(FULL_CONTROLS = TRUE))); expect_true("dy_mid_tm1" %in% z_columns(FULL_CONTROLS = TRUE))
+  for (ch in c(TRUE, FALSE)) for (di in c(TRUE, FALSE)) for (co in c(TRUE, FALSE)) for (tm in c(TRUE, FALSE)) {
+    expect_equal(z_columns(ch, di, co, TARGET_MISSING = tm, FULL_CONTROLS = TRUE), full_z(ch, di, co, tm))
+    expect_equal(setdiff(z_columns(ch, di, co, TARGET_MISSING = tm, FULL_CONTROLS = TRUE), z_columns(ch, di, co, TARGET_MISSING = tm)), Z_FULL_EXTRA)   # exactly the two extras
+  }
+  expect_equal(z_columns(FULL_CONTROLS = TRUE), c("contig_land", "joint_dem", "log_dy_prior_mids", "dy_mid_tm1", "alliance_def_off", "log_dy_peace_years", "dM_j_h", "dRpr_j_h"))
+  ## under the full set the dyadic peace years are already in Z; DY_PEACE_YEARS adds nothing then and never duplicates the column
   expect_equal(z_columns(FULL_CONTROLS = TRUE, DY_PEACE_YEARS = TRUE), z_columns(FULL_CONTROLS = TRUE))
-  expect_equal(z_columns(CONFLICT_HISTORY = FALSE, FULL_CONTROLS = TRUE, DY_PEACE_YEARS = TRUE), c("contig_land", "alliance_def_off", "joint_dem", "major_count", "log_dy_peace_years", "dM_j_h", "dRpr_j_h"))
-  ## the lists against the base commit itself when the git history is available
-  src_base <- tryCatch(suppressWarnings(system2("git", c("-C", v2_root(), "show", "8bf0ce1:v2/R/assemble_cell.R"), stdout = TRUE, stderr = FALSE)), error = function(e) character(0))
-  if (length(src_base) > 10) {
-    expect_true(any(grepl('ctrl_sy <- c("cowmaj_tm1", "dem_tm1", if (CONFLICT_HISTORY) c("log_prior_mids", "log_peace_years"))', src_base, fixed = TRUE)))
-    expect_true(any(grepl('X_cols <- c("dM_i", "dR_i", ctrl_sy)', src_base, fixed = TRUE))); expect_true(any(grepl('W_cols <- c("dM_i", "dR_i", ctrl_sy)', src_base, fixed = TRUE)))
-    expect_true(any(grepl('c(if (CONTIGUITY) "contig_land", "alliance_def_off", "joint_dem", "major_count",', src_base, fixed = TRUE)))
-    expect_true(any(grepl('if (CONFLICT_HISTORY) c("log_dy_prior_mids", "log_dy_peace_years"),', src_base, fixed = TRUE)))
-    expect_false(any(grepl("ongoing_tm1", src_base, fixed = TRUE))); expect_false(any(grepl("dy_mid_tm1", src_base, fixed = TRUE)))
-    ## evaluate the base z_columns() itself and compare the full ordered list for every flag combination
-    env_base <- new.env(); eval(parse(text = src_base[grep("^z_columns <- function", src_base):grep("^}", src_base)[which(grep("^}", src_base) > grep("^z_columns <- function", src_base))[1]]]), envir = env_base)
-    for (ch in c(TRUE, FALSE)) for (di in c(TRUE, FALSE)) for (co in c(TRUE, FALSE)) for (tm in c(TRUE, FALSE))
-      expect_equal(z_columns(ch, di, co, TARGET_MISSING = tm, FULL_CONTROLS = TRUE), env_base$z_columns(ch, di, co, TARGET_MISSING = tm))
-  }   # without the git history the hard-coded base lists above are the check
+  expect_equal(z_columns(DY_PEACE_YEARS = TRUE), c("contig_land", "joint_dem", "log_dy_prior_mids", "dy_mid_tm1", "log_dy_peace_years", "dM_j_h", "dRpr_j_h"))
+  expect_true("log_dy_peace_years" %in% Z_CENTRED); expect_false("alliance_def_off" %in% Z_CENTRED)                 # continuous centred, 0/1 not
   ## the option flags combine with either control set the same way
   for (fc in c(TRUE, FALSE)) {
     expect_false("contig_land" %in% z_columns(CONTIGUITY = FALSE, FULL_CONTROLS = fc))
@@ -817,7 +804,7 @@ test_that("control sets: minimal main W / X / Z, and --full_controls restores th
     expect_true(all(x_controls(FULL_CONTROLS = fc) %in% w_controls(FULL_CONTROLS = fc)))
   }
   ## every W / X control is one the build writes and the centring list covers the 0/1 indicators that enter
-  expect_true(all(w_controls(FULL_CONTROLS = TRUE) %in% c(SY_INDICATORS, "log_prior_mids", "log_peace_years")))
+  expect_true(all(w_controls(FULL_CONTROLS = TRUE) %in% c(SY_INDICATORS, W_LEVELS, "log_prior_mids", "log_n_system_tm1", "log_peace_years")))
   expect_true(all(w_controls() %in% c(SY_INDICATORS, W_LEVELS, "log_prior_mids", "log_n_system_tm1")))
   src <- readLines(file.path(v2_root(), "R", "02_fit_model.R")); spec_src <- readLines(file.path(v2_root(), "R", "spec.R"))
   ## the full-controls option is the `controls` switch of spec.R (suffix _fullctrl) and reaches assemble_cell() through assemble_cell_spec()
@@ -1069,15 +1056,18 @@ test_that("Codex re-check P2: the manifest check hashes and loads the same bytes
   expect_equal(digest::digest(b, algo = "sha256", serialize = FALSE), file_digest(p))
 })
 
-test_that("assembly with --full_controls returns exactly the 8bf0ce1 column lists, in order", {
+test_that("assembly with controls = full returns exactly the main lists plus log_peace_years (W) and alliance_def_off, log_dy_peace_years (Z), in order", {
   td <- write_toy_cell(tempfile("toycell"))
   A <- quiet(assemble_cell("mid", 3L, "all", FULL_CONTROLS = TRUE, data_dir = td))
-  expect_equal(A$W_cols, c("dM_i", "dR_i", "cowmaj_tm1", "dem_tm1", "log_prior_mids", "log_peace_years"))
-  expect_equal(A$X_cols, A$W_cols)
-  expect_equal(A$Z_cols, c("contig_land", "alliance_def_off", "joint_dem", "major_count", "log_dy_prior_mids", "log_dy_peace_years", "dM_j_h", "dRpr_j_h", "dch_j_missing"))
-  expect_true(all(abs(colMeans(as.matrix(A$sy[, c("cowmaj_tm1", "dem_tm1", "log_prior_mids", "log_peace_years")]))) < 1e-8))   # centred like the base
-  expect_equal(length(A$x_ref), 6L)
+  expect_equal(A$W_cols, c("dM_i", "dR_i", "M_lvl", "R_lvl", "ongoing_tm1", "log_prior_mids", "dem_tm1", "log_n_system_tm1", "log_peace_years"))
+  expect_equal(A$X_cols, c("dM_i", "dR_i"))
+  expect_equal(A$Z_cols, c("contig_land", "joint_dem", "log_dy_prior_mids", "dy_mid_tm1", "alliance_def_off", "log_dy_peace_years", "dM_j_h", "dRpr_j_h", "dch_j_missing"))
+  expect_true(all(abs(colMeans(as.matrix(A$sy[, c("ongoing_tm1", "dem_tm1", "log_prior_mids", "log_n_system_tm1", "log_peace_years")]))) < 1e-8))   # grand-centred like the main controls
+  expect_equal(length(A$x_ref), 2L)
+  iv <- A$alts$in_iv == 1L; expect_lt(abs(mean(A$alts$log_dy_peace_years[iv])), 1e-8); expect_true(all(A$alts$alliance_def_off %in% 0:1))   # continuous extra centred over the IV rows, 0/1 extra not
   M <- quiet(assemble_cell("mid", 3L, "all", data_dir = td))
+  ## the full assembly differs from the main one in the three extra columns only
+  expect_identical(A$ev, M$ev); expect_identical(A$sy$y1, M$sy$y1); expect_identical(A$sy[, M$W_cols], M$sy[, M$W_cols]); expect_identical(A$alts[, M$Z_cols], M$alts[, M$Z_cols])
   expect_equal(M$W_cols, c("dM_i", "dR_i", "M_lvl", "R_lvl", "ongoing_tm1", "log_prior_mids", "dem_tm1", "log_n_system_tm1")); expect_equal(M$X_cols, c("dM_i", "dR_i"))
   expect_equal(M$Z_cols, c("contig_land", "joint_dem", "log_dy_prior_mids", "dy_mid_tm1", "dM_j_h", "dRpr_j_h", "dch_j_missing"))
 })

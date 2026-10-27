@@ -17,6 +17,8 @@ test_that("spec: major and interact default to none, add _major / _ix after _ful
   all_on <- parse_spec(c("--pairs=originators", "--context=coalition", "--coal_ties=strict", "--coal_drop=top3", "--ww2=drop", "--controls=full",
                          "--major=joint", "--interact=prefixed", "--weights=none", "--changes=winsor", "--direction=sideA"))
   expect_equal(spec_suffix(all_on), "_orig_co_strict_drop3_noww2_fullctrl_major_ix_w1_winsor_sideA")
+  ## controls = full with major = joint parses (PI 2026-10-27, item 7: the full set carries no major-power status, so nothing is collinear)
+  expect_equal(parse_spec(c("--controls=full", "--major=joint"))[c("controls", "major")], list(controls = "full", major = "joint"))
   expect_equal(names(SPEC_SUFFIX), c("pairs", "context", "coal_ties", "coal_drop", "ww2", "controls", "major", "interact", "weights", "changes", "direction"))
   ## uniqueness against every other suffix, the fixed ones and the archived ones; no suffix is a prefix of another followed by a letter run
   all_suffixes <- c(unlist(SPEC_SUFFIX), "_K2", "_pilot", "_STALE", "_samp10", "_dist", "_noCH", "_polrel")
@@ -41,14 +43,14 @@ test_that("spec: major and interact default to none, add _major / _ix after _ful
 test_that("column lists: W gains exactly cowmaj_tm1 only under major = joint; Z appends the indicators and the products in a fixed order", {
   expect_equal(w_controls(MAJOR = "joint"), c(w_controls(), "cowmaj_tm1"))
   expect_equal(w_controls(), c("M_lvl", "R_lvl", "ongoing_tm1", "log_prior_mids", "dem_tm1", "log_n_system_tm1"))
-  expect_equal(w_controls(FULL_CONTROLS = TRUE, MAJOR = "joint"), w_controls(FULL_CONTROLS = TRUE))      # the full set already holds it, not twice
-  expect_equal(sum(w_controls(FULL_CONTROLS = TRUE, MAJOR = "joint") == "cowmaj_tm1"), 1L)
+  expect_equal(w_controls(FULL_CONTROLS = TRUE, MAJOR = "joint"), c(w_controls(FULL_CONTROLS = TRUE), "cowmaj_tm1"))   # appended to the full set too (it holds no major-power status)
+  expect_equal(sum(w_controls(FULL_CONTROLS = TRUE, MAJOR = "joint") == "cowmaj_tm1"), 1L); expect_false("cowmaj_tm1" %in% w_controls(FULL_CONTROLS = TRUE))
   expect_equal(x_controls(), character(0))
   expect_equal(z_columns(TARGET_MISSING = TRUE), c("contig_land", "joint_dem", "log_dy_prior_mids", "dy_mid_tm1", "dM_j_h", "dRpr_j_h", "dch_j_missing"))
   expect_equal(z_columns(TARGET_MISSING = TRUE, MAJOR = "joint"), c(z_columns(TARGET_MISSING = TRUE), "one_major", "both_major"))
   expect_equal(z_columns(TARGET_MISSING = TRUE, INTERACT = "prefixed"), c(z_columns(TARGET_MISSING = TRUE), "ix_dMj_dRj", "ix_dMi_dMj", "ix_dRi_dRj", "ix_dMi_dRj"))
   expect_equal(z_columns(MAJOR = "joint", INTERACT = "prefixed"), c(z_columns(), Z_MAJOR, Z_INTERACT))
-  expect_equal(z_columns(FULL_CONTROLS = TRUE, MAJOR = "joint"), c(z_columns(FULL_CONTROLS = TRUE), Z_MAJOR))   # major_count (the count) stays, the indicators follow
+  expect_equal(z_columns(FULL_CONTROLS = TRUE, MAJOR = "joint"), c(z_columns(FULL_CONTROLS = TRUE), Z_MAJOR)); expect_false("major_count" %in% z_columns(FULL_CONTROLS = TRUE, MAJOR = "joint"))   # no count beside the indicators
   expect_true(all(Z_INTERACT %in% Z_CENTRED)); expect_false(any(Z_MAJOR %in% Z_CENTRED))                      # continuous products centred, 0/1 indicators not
   expect_error(w_controls(MAJOR = "both")); expect_error(z_columns(INTERACT = "all"))
 })
@@ -125,10 +127,16 @@ test_that("assembly on the toy cell: indicators from the 0 / 1 / 2 major counts,
   expect_equal(d(MI)$Pz, d(A)$Pz + 6L); expect_equal(d(MI)$P1, d(A)$P1 + 1L)
   ## assemble_cell_spec() passes both switches through
   S <- quiet(assemble_cell_spec("mid", 3L, parse_spec(c("--major=joint", "--interact=prefixed")), data_dir = td)); expect_identical(d(S), d(MI))
-  ## under full controls cowmaj_tm1 is not duplicated and the count stays beside the indicators
+  ## controls = full with major = joint (PI 2026-10-27, item 7): assembles with exactly the full lists plus cowmaj_tm1 (W, last) and the two
+  ## indicators (Z, after the full extras); no major_count anywhere, so nothing is collinear
   F <- quiet(assemble_cell("mid", 3L, "all", MAJOR = "joint", FULL_CONTROLS = TRUE, data_dir = td))
-  expect_equal(sum(F$W_cols == "cowmaj_tm1"), 1L); expect_true(all(c("major_count", Z_MAJOR) %in% F$Z_cols))
-  expect_equal(F$W_cols, quiet(assemble_cell("mid", 3L, "all", FULL_CONTROLS = TRUE, data_dir = td))$W_cols)
+  expect_equal(F$W_cols, c("dM_i", "dR_i", "M_lvl", "R_lvl", "ongoing_tm1", "log_prior_mids", "dem_tm1", "log_n_system_tm1", "log_peace_years", "cowmaj_tm1"))
+  expect_equal(F$Z_cols, c("contig_land", "joint_dem", "log_dy_prior_mids", "dy_mid_tm1", "alliance_def_off", "log_dy_peace_years", "dM_j_h", "dRpr_j_h", "dch_j_missing", "one_major", "both_major"))
+  expect_equal(F$X_cols, c("dM_i", "dR_i")); expect_false("major_count" %in% F$Z_cols)
+  Fs <- quiet(assemble_cell_spec("mid", 3L, parse_spec(c("--controls=full", "--major=joint")), data_dir = td)); expect_identical(d(Fs), d(F))
+  expect_equal(cell_name("mid", 3L, "M1b", parse_spec(c("--controls=full", "--major=joint"))), "mid_lag3_all_pr_M1b_fullctrl_major")
+  FI <- quiet(assemble_cell("mid", 3L, "all", FULL_CONTROLS = TRUE, MAJOR = "joint", INTERACT = "prefixed", data_dir = td))
+  expect_equal(FI$Z_cols, c(F$Z_cols, Z_INTERACT)); expect_equal(FI$W_cols, F$W_cols)
 })
 
 test_that("robustness driver: the major_ix preset expands to the six (variant, cell) calls of 02_fit_model.R; the fixed switches are refused", {
@@ -158,6 +166,12 @@ test_that("robustness driver: the major_ix preset expands to the six (variant, c
   expect_true(any(grepl("cell mid_lag3_all_pr_M1b_noww2_major_ix:", r5$out, fixed = TRUE)))      # _noww2 precedes _major_ix in SPEC_SUFFIX order
   expect_true(run("--preset=major_ix", "--cell_index=6")$status != 0L)
   for (bad in c("--cells=mid:3:M1b", "--major=joint", "--interact=prefixed")) expect_true(run("--preset=major_ix", bad)$status != 0L, info = bad)
+  ## audit fix 4 (2026-10-27): perm_error refuses --major / --interact (its refits would leave ix_* stale and cowmaj_tm1 un-re-centred), as it
+  ## refuses --changes=winsor and --pairs != all (audit fix 15); the refusal comes before any fit or data file is touched
+  for (bad in c("--major=joint", "--interact=prefixed", "--changes=winsor", "--pairs=joiners")) {
+    rb <- run("--preset=perm_error", "--family=m1", bad)
+    expect_true(rb$status != 0L, info = bad); expect_true(any(grepl(sprintf("perm_error refuses %s", bad), rb$out, fixed = TRUE)), info = paste(bad, paste(tail(rb$out, 5), collapse = "\n")))
+  }
   ## the sbatch dispatches the preset
   sb <- readLines(file.path(root, "slurm", "04_robustness.sbatch")); expect_true(any(grepl("^  major_ix)", sb))); expect_true(any(grepl("--preset=major_ix --cell_index=\\$i", sb)))
   unlink(tmp, recursive = TRUE)

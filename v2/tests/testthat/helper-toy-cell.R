@@ -13,8 +13,9 @@ source(file.path(root, "R", "spec.R")); source(file.path(root, "R", "helpers_dat
 ## Events (mid): 10 -> 20 (dispute 1); 10 -> 30 (disputes 4;5, one of them WWII: is_ww2 TRUE, in_mid_noww2 TRUE, in_fmid_noww2 FALSE);
 ##   30 -> 20 (dispute 2); 30 -> 40 (dispute 3, fighting_at_ref: stage 1 only, its row is IV only); 30 -> 10 (dispute 6, pure WWII);
 ##   40 -> 20 (dispute 7, pure WWII: under --drop_ww2 state-year 40 loses y1)
-## Stage-b (2026-10-27): the panel carries multi_mid_jan / n_multi_jan (the M1c stage-1 control); with the default flags (no joiner pairs) the
-##   stage-2 groups are 10 -> 20 and 30 -> 40 bilateral, the four coalition events leaders; test_context_model.R sets joiner pairs via events_edit
+## Stage-b (2026-10-27): the panel carries multi_mid_jan / n_multi_jan (the M1c stage-1 control); with the default flags (every initiator an
+##   originator, orig1 = 1) the stage-2 groups are 10 -> 20 and 30 -> 40 bilateral, the four coalition events leaders; test_context_model.R
+##   makes 30 a joiner (orig1 = 0 on its events) via events_edit
 write_toy_cell <- function(dir, alts_edit = identity, events_edit = identity) {
   dir.create(dir, showWarnings = FALSE, recursive = TRUE)
   panel <- tibble(ccode = c(10L, 20L, 30L, 40L), year = 1990L, h = 3L, y1_mid = c(1L, 0L, 1L, 1L), y1_fmid = c(1L, 0L, 1L, 1L),
@@ -35,7 +36,7 @@ write_toy_cell <- function(dir, alts_edit = identity, events_edit = identity) {
     mutate(dM_j_h = ifelse(dch_j_missing == 1L, 0, dM_j_h), dRpr_j_h = ifelse(dch_j_missing == 1L, 0, dRpr_j_h)) |> alts_edit()
   ev <- tibble(initiator = c(10L, 10L, 30L, 30L, 30L, 40L), target = c(20L, 30L, 20L, 40L, 10L, 20L), year = 1990L,
                dispnum = c(1L, 4L, 2L, 3L, 6L, 7L), dispnums = c("1", "4;5", "2", "3", "6", "7"), n_disputes = c(1L, 2L, 1L, 1L, 1L, 1L),
-               escalation = FALSE, is_joiner_pair = FALSE, is_ww2 = c(FALSE, TRUE, FALSE, FALSE, TRUE, TRUE), target_has_pos_tm1 = TRUE,
+               escalation = FALSE, is_joiner_pair = FALSE, orig1 = 1L, orig2 = 1L, is_ww2 = c(FALSE, TRUE, FALSE, FALSE, TRUE, TRUE), target_has_pos_tm1 = TRUE,
                fighting_at_ref = c(FALSE, FALSE, FALSE, TRUE, FALSE, FALSE), war_disp = FALSE,
                in_mid = TRUE, in_fmid = TRUE, in_fmidcow = FALSE, in_fmidub = TRUE, in_war = FALSE,
                in_mid_noww2 = c(TRUE, TRUE, TRUE, TRUE, FALSE, FALSE), in_fmid_noww2 = c(TRUE, FALSE, TRUE, TRUE, FALSE, FALSE),

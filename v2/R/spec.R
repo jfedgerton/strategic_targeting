@@ -29,7 +29,7 @@ SPEC_CHOICES <- list(
   direction = c("cowwar", "sideA"),                 # initiator direction: COW war initiator in war-level disputes (v2/data) | MID Side A (v2/data_sideA)
   ww2       = c("include", "drop"),                 # the Second World War events: kept | removed from stage 2 and stage 1
   weights   = c("dispute", "none"),                 # stage-2 event weights: 1 / (initiator's targets in the dispute-year) | 1 everywhere
-  controls  = c("minimal", "full"),                 # control sets: minimal (main) | the full base specification of commit 8bf0ce1
+  controls  = c("minimal", "full"),                 # control sets: minimal (main) | full = main + log_peace_years (W), alliance_def_off + log_dy_peace_years (Z); no major-power status (PI 2026-10-27)
   major     = c("none", "joint"),                   # major-power status (2026-10-27): none (main) | joint = Z gains one_major / both_major (dyad's major count, 0 = reference) and W gains cowmaj_tm1
   interact  = c("none", "prefixed"),                # change interactions in Z (2026-10-27): none (main) | prefixed = the four products dM_j x dRpr_j, dM_i x dM_j, dR_i x dRpr_j, dM_i x dRpr_j
   changes   = c("raw", "winsor")                    # initiator and target power changes: as built | winsorised at WINSOR_PROBS of the panel

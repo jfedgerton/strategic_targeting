@@ -6,7 +6,7 @@
 ##   noww2        ww2 = drop          the Second World War events and their initiations removed            suffix _noww2
 ##   sideA        direction = sideA   MID Side A as the initiator everywhere (needs v2/data_sideA, see below)   suffix _sideA
 ##   noweights    weights = none      every stage-2 event with weight 1                                       suffix _w1
-##   fullcontrols controls = full     the full base control sets of commit 8bf0ce1                            suffix _fullctrl
+##   fullcontrols controls = full     main + log_peace_years (W), alliance_def_off + log_dy_peace_years (Z)    suffix _fullctrl
 ##   winsor       changes = winsor    power changes winsorised at the 1st / 99th panel percentiles             suffix _winsor
 ## Context preset (dual typology stage a, 2026-10-25; CONTEXT_PRESET in spec.R): M1b, lag 3, samples mid and fmid, default tie convention,
 ##   three switch combinations: context = bilateral (_bi), context = coalition (_co), context = coalition + coal_drop = top3 (_co_drop3).
@@ -27,6 +27,8 @@
 ##                Refused with --changes=winsor or --pairs != all (audit fix 15): the inflation and holdout refits rebuild the
 ##                changes and the frozen constants from the raw levels, which does not reproduce a winsorised cell, and the pairs
 ##                cells recompute y1 from a subset of the events; neither case has been checked for the refit-based tests.
+##                Refused with --major != none or --interact != none as well (audit fix 4, 2026-10-27): the refits would leave the
+##                ix_* products stale and cowmaj_tm1 un-re-centred.
 ##
 ## Usage:
 ##   Rscript v2/R/05_robustness.R --preset=noww2 [--cells=mid:3:M1b,fmid:3:M1b,...] [--cell_index=i] [--dry_run=TRUE]
@@ -137,6 +139,10 @@ stopifnot(SAMPLE %in% ALL_SAMPLES, LAG %in% LAGS, all(TESTS %in% c("holdout", "p
 ## audit fix 15 (2026-10-26): the refit-based tests are not defined for winsorised changes or a pairs subset (see the header)
 if (spec$changes == "winsor") stop("perm_error refuses --changes=winsor: the inflation and holdout refits rebuild the changes from the raw levels and would not reproduce the winsorised cell")
 if (spec$pairs != "all") stop(sprintf("perm_error refuses --pairs=%s: the refit-based tests are defined on the full event sample (y1 of every initiating state-year)", spec$pairs))
+## audit fix 4 (2026-10-27): the refits (holdout, inflation, permutation refit mode) rebuild the changes and re-centre the controls from the
+## raw levels (freeze$ctrl_cent / z_cent below), which would leave the ix_* products of --interact stale and cowmaj_tm1 of --major un-re-centred
+if (spec$major != "none") stop(sprintf("perm_error refuses --major=%s: the refits re-centre the W controls from w_controls() without the switch, so cowmaj_tm1 would not be re-centred (the switch has not been wired into the refit-based tests)", spec$major))
+if (spec$interact != "none") stop(sprintf("perm_error refuses --interact=%s: the refits rebuild the changes but not the ix_* products in Z, which would stay at their original values (the switch has not been wired into the refit-based tests)", spec$interact))
 cell <- measurement_cell_name(SAMPLE, LAG, FAMILY, spec)     # the M2 name carries its K (review 2026-10-26, P2); spec.R
 log_open(paste0("05_robustness_perm_error_", cell)); set.seed(V2_SEED)
 rstan_options(auto_write = FALSE); options(mc.cores = min(CHAINS, n_cores()))

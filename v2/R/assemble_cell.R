@@ -33,8 +33,9 @@
 ##                   IV set and within some stage-2 set of an initiating state-year, and logs how many sets vary and the shares of
 ##                   alternatives and of stage-2 events in each category. W gains the initiator's own indicator cowmaj_tm1 (the panel's
 ##                   major-power status at t-1, the same source and lag as major1 in major_count), appended after the minimal W controls
-##                   and grand-centred like the other 0/1 W controls (dem_tm1, ongoing_tm1; SY_INDICATORS); under FULL_CONTROLS it is
-##                   already in W and is not added twice. X is unchanged. Its mean and its correlation with M_lvl are logged.
+##                   and grand-centred like the other 0/1 W controls (dem_tm1, ongoing_tm1; SY_INDICATORS); it is in neither control set by
+##                   itself (since 2026-10-27 the full set carries no major-power status), so it is appended under either. X is unchanged.
+##                   Its mean and its correlation with M_lvl are logged.
 ##   INTERACT      = "none" (main) | "prefixed" (PI-approved 2026-10-27, cell suffix _ix): Z gains four products of the change columns
 ##                   already in the data, in the scaled change units of X / Z: ix_dMj_dRj = dM_j_h x dRpr_j_h, ix_dMi_dMj = dM_i x dM_j_h,
 ##                   ix_dRi_dRj = dR_i x dRpr_j_h, ix_dMi_dRj = dM_i x dRpr_j_h, with dM_i / dR_i the initiator changes of the row's
@@ -48,66 +49,57 @@
 ##                   column multi_mid_jan (a multilateral MID the state had not entered is active at 1 January of t) is appended to W as
 ##                   its last column, grand-centred like the other 0/1 controls. Nothing else changes, so the main specification's W is
 ##                   untouched. The three stage-2 event groups (bilateral / coalition leader / joiner; stage2_groups() in helpers_data.R,
-##                   from coal_incl and is_joiner_pair; COAL_TIES applies to the context filter only) are computed, asserted and logged for EVERY model and returned as ev$grp;
+##                   from coal_incl and the initiator's orig1 (joiner = orig1 == 0, PI 2026-10-27); COAL_TIES applies to the context filter only) are computed, asserted and logged for EVERY model and returned as ev$grp;
 ##                   only the M1c model passes them to Stan (02_fit_model.R), so the Stan data of the existing models are unchanged.
 ## Control sets (PI decision 2026-10-24, minimal controls). Major-power status and alliance are components of material
 ## and relational power, so they are bad controls and left the main specification; the main sets are as small as the
 ## design allows.
-##   W (stage 1), main : dM_i, dR_i, ongoing_tm1, log1p(monadic prior MIDs) [CONFLICT_HISTORY], dem_tm1
+##   W (stage 1), main : dM_i, dR_i, M_lvl, R_lvl (D2), ongoing_tm1, log1p(monadic prior MIDs) [CONFLICT_HISTORY], dem_tm1, log_n_system_tm1 (D3)
 ##   X (mu shifters), main : dM_i, dR_i only (no monadic controls)
 ##   Z (dyadic), main : land contiguity [CONTIGUITY], joint democracy, log1p(dyadic prior MIDs) [CONFLICT_HISTORY],
 ##                      dy_mid_tm1, [log1p dyadic peace years, DY_PEACE_YEARS], [log1p capital distance, DISTANCE],
 ##                      the target's power changes dM_j_h, dRpr_j_h, [dch_j_missing when non-constant, TARGET_MISSING]
-## FULL_CONTROLS = TRUE (fit option --full_controls, cell suffix _fullctrl) reproduces EXACTLY the base specification of
-## commit 8bf0ce1 (`git show 8bf0ce1:v2/R/assemble_cell.R`; Codex review P2-4, 2026-10-24), same columns in the same order:
-##   W = X = dM_i, dR_i, cowmaj_tm1, dem_tm1, [log_prior_mids, log_peace_years : CONFLICT_HISTORY]        (P1 = P = 6)
-##   Z     = [contig_land : CONTIGUITY], alliance_def_off, joint_dem, major_count,
-##           [log_dy_prior_mids, log_dy_peace_years : CONFLICT_HISTORY], [log_capdist : DISTANCE],
-##           dM_j_h, dRpr_j_h, [dch_j_missing : TARGET_MISSING]                                           (Pz = 8 or 9)
-## The base had no ongoing_tm1 in W / X and no dy_mid_tm1 in Z (both were added on 2026-10-24, after 8bf0ce1), and its
-## dyadic peace years followed CONFLICT_HISTORY. Under FULL_CONTROLS, DY_PEACE_YEARS therefore adds nothing when
-## CONFLICT_HISTORY is TRUE (the column is already there) and restores log_dy_peace_years at its base position when
-## CONFLICT_HISTORY is FALSE. The lists below are hard-coded per set (no shared abstraction) so that each one can be
-## read off and tested against the base commit. w_controls() / x_controls() return the monadic controls (the columns
-## after dM_i, dR_i) so that assemble_cell(), benchmarks.R and the tests share one list.
+## FULL_CONTROLS = TRUE (switch controls = full, cell suffix _fullctrl; PI decision 2026-10-27, item 7) is the MAIN specification plus
+## the controls the minimal sets dropped, WITHOUT major-power status (which has its own switch, MAJOR):
+##   W     = main W + log_peace_years (log1p monadic peace years) [CONFLICT_HISTORY], appended after log_n_system_tm1   (P1 = 9)
+##   X     = main X (dM_i, dR_i; the mu shifters carry no controls in either set)
+##   Z     = main Z + alliance_def_off (0/1, uncentred) + log_dy_peace_years (continuous, centred), inserted after dy_mid_tm1 and
+##           before the target changes; DY_PEACE_YEARS adds nothing under FULL_CONTROLS (the column is already there)      (Pz = 8 or 9)
+## Until 2026-10-27 `full` reproduced the base specification of commit 8bf0ce1 (W = X = dM_i, dR_i, cowmaj_tm1, dem_tm1,
+## log_prior_mids, log_peace_years; Z = contig_land, alliance_def_off, joint_dem, major_count, log_dy_prior_mids, log_dy_peace_years,
+## dM_j_h, dRpr_j_h), which lacked the D2 / D3 stage-1 columns, ongoing_tm1 and dy_mid_tm1, so it was NOT main + extra controls, and its
+## major_count was exactly collinear with the MAJOR = joint indicators. That set is no longer reachable (CHANGELOG). The lists below are
+## hard-coded per set (no shared abstraction) so that each one can be read off and tested. w_controls() / x_controls() return the monadic
+## controls (the columns after dM_i, dR_i) so that assemble_cell(), benchmarks.R and the tests share one list.
 ## Main W since 2026-10-25 (PI decisions D2 and D3): the initiator's power LEVELS at t-1, M_lvl and R_lvl (within-year centred log
 ## CINC share / log PageRank divided by the gap constants, built by 01_build_data.R; 0 = the system-average level that year, so
 ## they are NOT grand-centred here), and the centred log system size at t-1, log_n_system_tm1 (the IV grows with the number of
-## alternatives, so tau * IV carried a system-size trend). Neither enters X. FULL_CONTROLS stays exactly 8bf0ce1.
+## alternatives, so tau * IV carried a system-size trend). Neither enters X.
 W_LEVELS <- c("M_lvl", "R_lvl")
-## MAJOR = "joint" (2026-10-27) appends the initiator's major-power indicator cowmaj_tm1 to the minimal W; the full set of 8bf0ce1 holds it already
+## MAJOR = "joint" (2026-10-27) appends the initiator's major-power indicator cowmaj_tm1 LAST to either W set (it is in neither by itself)
 w_controls <- function(CONFLICT_HISTORY = TRUE, FULL_CONTROLS = FALSE, MAJOR = "none") {
   stopifnot(MAJOR %in% c("none", "joint"))
-  if (FULL_CONTROLS) c("cowmaj_tm1", "dem_tm1", if (CONFLICT_HISTORY) c("log_prior_mids", "log_peace_years"))
-  else c("M_lvl", "R_lvl", "ongoing_tm1", if (CONFLICT_HISTORY) "log_prior_mids", "dem_tm1", "log_n_system_tm1", if (MAJOR == "joint") "cowmaj_tm1")
+  c("M_lvl", "R_lvl", "ongoing_tm1", if (CONFLICT_HISTORY) "log_prior_mids", "dem_tm1", "log_n_system_tm1",
+    if (FULL_CONTROLS && CONFLICT_HISTORY) "log_peace_years", if (MAJOR == "joint") "cowmaj_tm1")
 }
-x_controls <- function(CONFLICT_HISTORY = TRUE, FULL_CONTROLS = FALSE) {
-  if (FULL_CONTROLS) c("cowmaj_tm1", "dem_tm1", if (CONFLICT_HISTORY) c("log_prior_mids", "log_peace_years"))
-  else character(0)
-}
+x_controls <- function(CONFLICT_HISTORY = TRUE, FULL_CONTROLS = FALSE) character(0)     # the mu shifters carry no controls in either set (2026-10-27)
 ## the Z columns the 2026-10-27 switches append (after the base list, major indicators first): Z_MAJOR under MAJOR = "joint" (0/1, not centred),
 ## Z_INTERACT under INTERACT = "prefixed" (continuous, centred over the IV rows after the products are formed)
 Z_MAJOR    <- c("one_major", "both_major")
 Z_INTERACT <- c("ix_dMj_dRj", "ix_dMi_dMj", "ix_dRi_dRj", "ix_dMi_dRj")
+## the two dyadic controls the full set adds to the main Z (2026-10-27): alliance_def_off (0/1, uncentred), log_dy_peace_years (centred)
+Z_FULL_EXTRA <- c("alliance_def_off", "log_dy_peace_years")
 z_columns <- function(CONFLICT_HISTORY = TRUE, DISTANCE = FALSE, CONTIGUITY = TRUE, TARGET_MISSING = FALSE, DY_PEACE_YEARS = FALSE,
                       FULL_CONTROLS = FALSE, MAJOR = "none", INTERACT = "none") {
   stopifnot(MAJOR %in% c("none", "joint"), INTERACT %in% c("none", "prefixed"))
-  base <- if (FULL_CONTROLS) {
-    ## the base Z of 8bf0ce1, verbatim order
-    c(if (CONTIGUITY) "contig_land", "alliance_def_off", "joint_dem", "major_count",
-      if (CONFLICT_HISTORY) c("log_dy_prior_mids", "log_dy_peace_years") else if (DY_PEACE_YEARS) "log_dy_peace_years",
-      if (DISTANCE) "log_capdist",
-      "dM_j_h", "dRpr_j_h",
-      if (TARGET_MISSING) "dch_j_missing")
-  } else {
-    c(if (CONTIGUITY) "contig_land", "joint_dem",
-      if (CONFLICT_HISTORY) "log_dy_prior_mids",
-      "dy_mid_tm1",
-      if (DY_PEACE_YEARS) "log_dy_peace_years",
-      if (DISTANCE) "log_capdist",
-      "dM_j_h", "dRpr_j_h",
-      if (TARGET_MISSING) "dch_j_missing")
-  }
+  base <- c(if (CONTIGUITY) "contig_land", "joint_dem",
+            if (CONFLICT_HISTORY) "log_dy_prior_mids",
+            "dy_mid_tm1",
+            if (FULL_CONTROLS) Z_FULL_EXTRA else if (DY_PEACE_YEARS) "log_dy_peace_years",
+            if (DISTANCE) "log_capdist",
+            "dM_j_h", "dRpr_j_h",
+            if (TARGET_MISSING) "dch_j_missing")
+  stopifnot(!anyDuplicated(base))
   c(base, if (MAJOR == "joint") Z_MAJOR, if (INTERACT == "prefixed") Z_INTERACT)
 }
 ## continuous Z columns that assemble_cell() centres over the assembled alternative rows (the 0/1 indicators, dy_mid_tm1
@@ -209,16 +201,14 @@ assemble_cell <- function(SAMPLE, LAG, VARIANT, CENT = "pr", CONFLICT_HISTORY = 
   if (MAJOR == "joint") {
     stopifnot("cowmaj_tm1" %in% ctrl_w, "cowmaj_tm1" %in% names(sy), all(sy$cowmaj_tm1 %in% c(0L, 1L)))
     if (length(unique(sy$cowmaj_tm1)) < 2) stop("major = joint: cowmaj_tm1 is constant over the stage-1 panel of this cell; it cannot enter W")
-    logf("major = joint: cowmaj_tm1 in W (%s): mean %.4f over %d state-years (%d major-power state-years); cor(cowmaj_tm1, M_lvl) = %.3f; grand-centred like the other 0/1 W controls",
-         if (FULL_CONTROLS) "already in the full control set of 8bf0ce1, not added twice" else "appended to the minimal controls",
-         mean(sy$cowmaj_tm1), nrow(sy), sum(sy$cowmaj_tm1), cor(sy$cowmaj_tm1, sy$M_lvl))
+    logf("major = joint: cowmaj_tm1 in W (appended to the %s controls): mean %.4f over %d state-years (%d major-power state-years); cor(cowmaj_tm1, M_lvl) = %.3f; grand-centred like the other 0/1 W controls",
+         if (FULL_CONTROLS) "full" else "minimal", mean(sy$cowmaj_tm1), nrow(sy), sum(sy$cowmaj_tm1), cor(sy$cowmaj_tm1, sy$M_lvl))
   }
   ## centre every stage-1 / mu control that enters W or X (the 0/1 indicators as well as the conflict-history counts; PI
   ## decisions 2026-10-23 / 2026-10-24) so that alpha0 in stage 1 is the log-odds at zero power change and average
-  ## controls, and (under --full_controls) the mu intercept mu0 is the ideal gap at those averages. In the main
-  ## specification X has no controls, so mu0 is the ideal gap of a state with zero power change. dM_i and dR_i are NOT
-  ## centred (zero power change is the reference).
-  stopifnot(all(ctrl_sy %in% names(sy)), all(ctrl_x %in% ctrl_w), setequal(ctrl_x, if (FULL_CONTROLS) ctrl_w else character(0)))
+  ## controls. X has no controls in either control set (2026-10-27), so mu0 is the ideal gap of a state with zero power
+  ## change. dM_i and dR_i are NOT centred (zero power change is the reference).
+  stopifnot(all(ctrl_sy %in% names(sy)), all(ctrl_x %in% ctrl_w), length(ctrl_x) == 0L)
   for (cc in SY_INDICATORS) stopifnot(!anyNA(sy[[cc]]), all(sy[[cc]] %in% c(0, 1)))
   logf("ongoing_tm1: mean %.4f over %d state-years (%d in a MID active at t-1)", mean(sy$ongoing_tm1), nrow(sy), sum(sy$ongoing_tm1))
   ## the power levels (D2) are already centred within year over every state with positions (0 = the system average that year) and
@@ -229,8 +219,8 @@ assemble_cell <- function(SAMPLE, LAG, VARIANT, CENT = "pr", CONFLICT_HISTORY = 
   if (any(W_LEVELS %in% ctrl_sy)) logf("power levels in W (D2, within-year centred over all states with positions, gap-scaled, NOT grand-centred): M_lvl mean %.4f SD %.3f, R_lvl mean %.4f SD %.3f",
                                         mean(sy$M_lvl), sd(sy$M_lvl), mean(sy$R_lvl), sd(sy$R_lvl))
   W_cols <- c("dM_i", "dR_i", ctrl_w)      # PI decision 2026-10-22: initiator power changes also enter stage 1 directly
-  X_cols <- c("dM_i", "dR_i", ctrl_x)      # main: power changes only; --full_controls: the same controls as W
-  logf("control set: %s%s; W = %s; X = %s", if (FULL_CONTROLS) "FULL (base specification of commit 8bf0ce1)" else "MINIMAL (main)", if (CONTEXT_MODEL) " + multi_mid_jan (M1c)" else "", paste(W_cols, collapse = ","), paste(X_cols, collapse = ","))
+  X_cols <- c("dM_i", "dR_i", ctrl_x)      # power changes only (both control sets)
+  logf("control set: %s%s; W = %s; X = %s", if (FULL_CONTROLS) "FULL (main + log_peace_years in W, alliance_def_off + log_dy_peace_years in Z; 2026-10-27)" else "MINIMAL (main)", if (CONTEXT_MODEL) " + multi_mid_jan (M1c)" else "", paste(W_cols, collapse = ","), paste(X_cols, collapse = ","))
   
   ## ---- alternatives -----------------------------------------------------------------------------
   sy_key <- sy |> transmute(ccode1 = ccode, year, sy_row = row_number())
@@ -298,8 +288,7 @@ assemble_cell <- function(SAMPLE, LAG, VARIANT, CENT = "pr", CONFLICT_HISTORY = 
   for (cc in z_cent) alts[[cc]] <- alts[[cc]] - mean(alts[[cc]][iv_rows])
   stopifnot(all(abs(colMeans(as.matrix(alts[iv_rows, z_cent, drop = FALSE]))) < 1e-8))
   logf("Z centring: %d continuous Z columns centred over the %d stage-1 IV rows (of %d assembled rows)", length(z_cent), sum(iv_rows), nrow(alts))
-  ## dyadic lagged DV (PI decision 2026-10-24): 0/1, not centred, must vary within the assembled cell when it is in Z (it is
-  ## not under --full_controls, whose Z is the base specification of 8bf0ce1)
+  ## dyadic lagged DV (PI decision 2026-10-24): 0/1, not centred, must vary within the assembled cell when it is in Z (both control sets since 2026-10-27)
   stopifnot(!anyNA(alts$dy_mid_tm1), all(alts$dy_mid_tm1 %in% c(0L, 1L)))
   if ("dy_mid_tm1" %in% Z_cols && length(unique(alts$dy_mid_tm1)) < 2)
     stop(sprintf("dy_mid_tm1 is constant (%d) over the %d assembled alternative rows of this cell (sample %s, lag %d, variant %s); it cannot enter Z",
@@ -450,16 +439,18 @@ assemble_cell <- function(SAMPLE, LAG, VARIANT, CENT = "pr", CONFLICT_HISTORY = 
   } else logf("context = all: %d events in sample %s (coalition context: %d inclusive, %d strict)", nrow(ev_all), SAMPLE, sum(ev_all$coal_incl), sum(ev_all$coal_strict))
   ## one chosen alternative per (i, j, t): same-year duplicates were collapsed by the build (PI decision 2026-10-24)
   ## stage-2 event groups (dual typology stage b, 2026-10-27): bilateral / coalition leader / joiner from coal_incl (the spec's column; the
-  ## stage-a tie convention COAL_TIES applies to the context FILTER only) and is_joiner_pair (stage2_groups(): exactly one group per event,
-  ## asserted); counted with their D8 weight sums here and again on the usable events below
+  ## stage-a tie convention COAL_TIES applies to the context FILTER only) and the initiator's originator flag orig1 (joiner = orig1 == 0,
+  ## PI decision 2026-10-27; stage2_groups(): exactly one group per event, asserted); counted with their D8 weight sums here and again on
+  ## the usable events below. The pair-level is_joiner_pair (the `pairs` switch) is logged beside it for the comparison.
+  stopifnot("orig1" %in% names(ev_all), !anyNA(ev_all$orig1), all(ev_all$orig1 %in% c(0L, 1L)))
   grp_all <- stage2_groups(ev_all, "coal_incl")
   ev_keys <- ev_all |> transmute(ccode1 = initiator, ccode2 = target, year, dispnum, dispnums, target_has_pos_tm1, fighting_at_ref, dir_flipped,
                                  w = if (EVENT_WEIGHTS == "dispute") .data[[w_col]] else 1, grp = grp_all)
   assert_no_dup_keys(ev_keys, c("ccode1", "ccode2", "year"), sprintf("events of sample %s", SAMPLE))
   stopifnot(all(ev_keys$grp %in% 0:2), sum(ev_keys$grp == 0L) + sum(ev_keys$grp == 1L) + sum(ev_keys$grp == 2L) == nrow(ev_keys))
-  logf("stage-2 event groups (stage b; coalition column %s, joiner flag is_joiner_pair) over the %d sample events: bilateral %d (weights %.1f), coalition leader %d (%.1f), joiner %d (%.1f); joiner pairs whose initiator is an originator (orig1 = 1, target a joiner) %d",
+  logf("stage-2 event groups (stage b; coalition column %s, joiner = the initiator's orig1 == 0) over the %d sample events: bilateral %d (weights %.1f), coalition leader %d (%.1f), joiner %d (%.1f); pair-level joiner pairs (is_joiner_pair, the `pairs` switch) %d, of which the initiator is an originator (orig1 = 1, target a joiner; bilateral or leader here) %d",
        "coal_incl", nrow(ev_keys), sum(ev_keys$grp == 0L), sum(ev_keys$w[ev_keys$grp == 0L]), sum(ev_keys$grp == 1L), sum(ev_keys$w[ev_keys$grp == 1L]), sum(ev_keys$grp == 2L), sum(ev_keys$w[ev_keys$grp == 2L]),
-       if ("orig1" %in% names(ev_all)) sum(ev_all$is_joiner_pair & ev_all$orig1 == 1L) else NA_integer_)
+       sum(ev_all$is_joiner_pair), sum(ev_all$is_joiner_pair & ev_all$orig1 == 1L))
   stopifnot(all(is.finite(ev_keys$w)), all(ev_keys$w > 0), all(ev_keys$w <= 1))
   logf("direction (D1): %d of %d events in sample %s have the reversed direction (COW war initiator)", sum(ev_keys$dir_flipped), nrow(ev_keys), SAMPLE)
   ## an event whose pair was already fighting at the state-year's reference date (its earlier dispute ended before the

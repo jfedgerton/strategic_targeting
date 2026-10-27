@@ -5,8 +5,9 @@ root <- Sys.getenv("V2_ROOT"); if (root == "") root <- normalizePath(file.path(g
 source(file.path(root, "R", "typology.R")); source(file.path(root, "R", "context_model.R")); source(file.path(root, "R", "assemble_cell.R"))
 ## write_toy_cell(), quiet() from helper-toy-cell.R; skip_if_no_build(), tiny_data() from helper-fixed-draw.R
 
-## the toy cell with joiner pairs: 30 -> 20 (coalition) and 30 -> 40 (bilateral, fighting_at_ref) become joiner pairs
-toy_joiners <- function(e) e |> mutate(is_joiner_pair = initiator == 30L & target %in% c(20L, 40L))
+## the toy cell with a joiner initiator: 30 joined disputes 2 and 3 after their onset (orig1 = 0 on 30 -> 20 (coalition) and 30 -> 40 (bilateral,
+## fighting_at_ref)); the pair-level flag is set on the same rows so the two definitions agree on the toy
+toy_joiners <- function(e) e |> mutate(orig1 = ifelse(initiator == 30L & target %in% c(20L, 40L), 0L, 1L), is_joiner_pair = orig1 == 0L)
 
 test_that("spec: M1c is a model code outside the main grid with its own Stan program, cell names that collide with nothing, and the context_b preset", {
   expect_false("M1c" %in% MODELS); expect_true("M1c" %in% ALL_MODELS); expect_equal(CONTEXT_MODELS, "M1c")
@@ -24,58 +25,78 @@ test_that("spec: M1c is a model code outside the main grid with its own Stan pro
   expect_equal(cell_name("war", 3L, "M2b", main), "war_lag3_all_pr_M2b_K2"); expect_equal(cell_name("fmid", 3L, "M1b", main), "fmid_lag3_all_pr_M1b")
 })
 
-test_that("stage2_groups(): bilateral / leader / joiner partition from coal_incl x is_joiner_pair; role decides; errors on NA", {
-  e <- data.frame(coal_incl = c(FALSE, TRUE, FALSE, TRUE), coal_strict = c(FALSE, FALSE, FALSE, TRUE), is_joiner_pair = c(FALSE, FALSE, TRUE, TRUE))
-  expect_equal(stage2_groups(e), c(0L, 1L, 2L, 2L))                      # a bilateral joiner pair is a joiner (role decides)
+test_that("stage2_groups(): bilateral / leader / joiner partition from coal_incl x the initiator's orig1 (initiator-role-only, PI 2026-10-27); role decides; errors on NA", {
+  e <- data.frame(coal_incl = c(FALSE, TRUE, FALSE, TRUE), coal_strict = c(FALSE, FALSE, FALSE, TRUE), orig1 = c(1L, 1L, 0L, 0L), is_joiner_pair = c(FALSE, TRUE, TRUE, TRUE))
+  expect_equal(stage2_groups(e), c(0L, 1L, 2L, 2L))                      # a joiner initiator in a bilateral pair is a joiner (role decides)
   expect_equal(stage2_groups(e, "coal_strict"), c(0L, 0L, 2L, 2L))
   expect_equal(STAGE2_GROUPS, c("bilateral", "leader", "joiner"))
+  ## the pair-level flag plays no part: an originator initiator facing a joiner target (is_joiner_pair TRUE, orig1 = 1) is bilateral / leader
+  expect_equal(stage2_groups(e |> mutate(is_joiner_pair = TRUE)), c(0L, 1L, 2L, 2L)); expect_equal(stage2_groups(e |> select(-is_joiner_pair)), c(0L, 1L, 2L, 2L))
   expect_error(stage2_groups(e |> mutate(coal_incl = c(NA, TRUE, FALSE, TRUE))))
-  expect_error(stage2_groups(e |> mutate(is_joiner_pair = c(1L, 0L, 1L, 0L))))
-  ## every row in exactly one group on the real events file when present
+  expect_error(stage2_groups(e |> mutate(orig1 = c(1L, NA, 0L, 0L)))); expect_error(stage2_groups(e |> mutate(orig1 = c(2L, 1L, 0L, 0L)))); expect_error(stage2_groups(e |> select(-orig1)))
+  ## every row in exactly one group on the real events file when present; the counts differ from the pair-level definition exactly by the
+  ## originator-initiator / joiner-target pairs
   f <- file.path(v2_root(), "data", "events.rds")
   if (file.exists(f)) {
     ev <- readRDS(f) |> filter(!escalation)
     g <- stage2_groups(ev)
     expect_equal(length(g), nrow(ev)); expect_true(all(g %in% 0:2))
-    expect_equal(sum(g == 2L), sum(ev$is_joiner_pair)); expect_equal(sum(g == 1L), sum(ev$coal_incl & !ev$is_joiner_pair)); expect_equal(sum(g == 0L), sum(!ev$coal_incl & !ev$is_joiner_pair))
+    expect_equal(sum(g == 2L), sum(ev$orig1 == 0L)); expect_equal(sum(g == 1L), sum(ev$coal_incl & ev$orig1 == 1L)); expect_equal(sum(g == 0L), sum(!ev$coal_incl & ev$orig1 == 1L))
+    expect_true(all(g[ev$orig1 == 0L] == 2L)); expect_true(all(ev$is_joiner_pair[g == 2L]))                        # a joiner initiator always makes a joiner pair, not conversely
+    expect_equal(sum(ev$is_joiner_pair) - sum(g == 2L), sum(ev$is_joiner_pair & ev$orig1 == 1L))
   }
 })
 
-test_that("multilateral_jan_flags(): the W column on a toy world (presence at 1 January, sides, not-yet-participant, side switch, inclusive ties)", {
+test_that("multilateral_jan_flags(): the W column on a toy world (presence at 1 January, sides, not-yet-participant, former participants, coarse entries in t, side switch)", {
   ## dispute 1: 10 vs 20 (both sides single) 1990-01-01 .. 1990-06-30 -> bilateral, never counts
-  ## dispute 2: side A 10 (enters 1991-03-10), 30 (enters 1992-01-01); side B 20 (1991-03-10 .. 1992-12-31), 40 (enters 1991-11-05) -> at 1 Jan 1992
-  ##            present 10, 20, 40 (+ 30 entering on 1 January: inclusive tie counts) -> side A 2, side B 2: multilateral and active; at 1 Jan 1991
-  ##            nobody present (entries in March 1991) -> not active; at 1 Jan 1993 the dispute has ended
-  ## dispute 3: side A 50 (year resolution 1995), side B 60 (1995) and 70 (month resolution 1995-01) -> at 1 Jan 1995 ties at year / month
-  ##            resolution count as present (inclusive): side B 2 -> multilateral; 80 never joins
-  psd <- data.frame(dispnum = c(1L, 1L, 2L, 2L, 2L, 2L, 3L, 3L, 3L), ccode = c(10L, 20L, 10L, 30L, 20L, 40L, 50L, 60L, 70L), spell = 1L,
-                    spell_first = c(1990L, 1990L, 1991L, 1992L, 1991L, 1991L, 1995L, 1995L, 1995L), spell_last = c(1990L, 1990L, 1992L, 1992L, 1992L, 1992L, 1995L, 1995L, 1995L),
-                    entry_res = c(1L, 1L, 1L, 1L, 1L, 1L, 3L, 3L, 2L), entry_y = c(1990L, 1990L, 1991L, 1992L, 1991L, 1991L, 1995L, 1995L, 1995L),
-                    entry_m = c(1L, 1L, 3L, 1L, 3L, 11L, NA, NA, 1L), entry_d = c(1L, 1L, 10L, 1L, 10L, 5L, NA, NA, NA),
-                    exit_res = c(1L, 1L, 1L, 1L, 1L, 1L, 3L, 3L, 3L), exit_y = c(1990L, 1990L, 1992L, 1992L, 1992L, 1992L, 1995L, 1995L, 1995L),
-                    exit_m = c(6L, 6L, 12L, 12L, 12L, 12L, NA, NA, NA), exit_d = c(30L, 30L, 31L, 31L, 31L, 31L, NA, NA, NA))
+  ## dispute 2: side A 10 (enters 1991-03-10), 30 (enters 1992-01-01), 90 (1991-03-10 .. 1991-08-01, a FORMER participant at 1 Jan 1992);
+  ##            side B 20 (1991-03-10 .. 1992-12-31), 40 (enters 1991-11-05) -> at 1 Jan 1992 present 10, 20, 40 and 30 (day-dated ON 1 January
+  ##            counts) -> side A 2, side B 2: multilateral and active; 90 is not present but ALREADY IN (fix 2: its flag is 0, not 1); at
+  ##            1 Jan 1991 nobody present (entries in March 1991) -> not active; at 1 Jan 1993 the dispute has ended
+  ## dispute 3 (1994-1995): side A 50 (year resolution 1994); side B 60 (year resolution 1994), 70 (month resolution 1994-01), 90 (year
+  ##            resolution 1995) -> at 1 Jan 1994 nobody present (coarse entries IN 1994 do not count: fix 1) -> not active; at 1 Jan 1995
+  ##            50, 60, 70 present (entered in 1994) -> side A 1, side B 2: multilateral; 90's year-resolution entry in 1995 is NOT an entry
+  ##            before 1 January 1995, so 90 is "not yet" and its flag is 1 (its own entry during t must not zero the flag); 80 never joins
+  psd <- data.frame(dispnum = c(1L, 1L, 2L, 2L, 2L, 2L, 2L, 3L, 3L, 3L, 3L), ccode = c(10L, 20L, 10L, 30L, 90L, 20L, 40L, 50L, 60L, 70L, 90L), spell = 1L,
+                    spell_first = c(1990L, 1990L, 1991L, 1992L, 1991L, 1991L, 1991L, 1994L, 1994L, 1994L, 1995L), spell_last = c(1990L, 1990L, 1992L, 1992L, 1991L, 1992L, 1992L, 1995L, 1995L, 1995L, 1995L),
+                    entry_res = c(1L, 1L, 1L, 1L, 1L, 1L, 1L, 3L, 3L, 2L, 3L), entry_y = c(1990L, 1990L, 1991L, 1992L, 1991L, 1991L, 1991L, 1994L, 1994L, 1994L, 1995L),
+                    entry_m = c(1L, 1L, 3L, 1L, 3L, 3L, 11L, NA, NA, 1L, NA), entry_d = c(1L, 1L, 10L, 1L, 10L, 10L, 5L, NA, NA, NA, NA),
+                    exit_res = c(1L, 1L, 1L, 1L, 1L, 1L, 1L, 3L, 3L, 3L, 3L), exit_y = c(1990L, 1990L, 1992L, 1992L, 1991L, 1992L, 1992L, 1995L, 1995L, 1995L, 1995L),
+                    exit_m = c(6L, 6L, 12L, 12L, 8L, 12L, 12L, NA, NA, NA, NA), exit_d = c(30L, 30L, 31L, 31L, 1L, 31L, 31L, NA, NA, NA, NA))
   ek <- date_keys(psd$entry_res, psd$entry_y, psd$entry_m, psd$entry_d); xk <- date_keys(psd$exit_res, psd$exit_y, psd$exit_m, psd$exit_d)
   psd$entry_mkey <- ek$mkey; psd$entry_dkey <- ek$dkey; psd$exit_mkey <- xk$mkey; psd$exit_dkey <- xk$dkey
   dd <- bind_rows(data.frame(dispnum = 1L, ccode1 = c(10L, 20L), year = 1990L, sidea1 = c(1, 0)),
                   tidyr::expand_grid(dispnum = 2L, ccode1 = c(10L, 20L, 40L), year = 1991:1992) |> mutate(sidea1 = ifelse(ccode1 == 10L, 1, 0)),
-                  data.frame(dispnum = 2L, ccode1 = 30L, year = 1992L, sidea1 = 1),
-                  data.frame(dispnum = 3L, ccode1 = c(50L, 60L, 70L), year = 1995L, sidea1 = c(1, 0, 0)))
-  sy <- tidyr::expand_grid(ccode = c(10L, 20L, 30L, 40L, 50L, 60L, 70L, 80L), year = 1990:1995L)
+                  data.frame(dispnum = 2L, ccode1 = c(30L, 90L), year = c(1992L, 1991L), sidea1 = 1),
+                  tidyr::expand_grid(dispnum = 3L, ccode1 = c(50L, 60L, 70L), year = 1994:1995) |> mutate(sidea1 = ifelse(ccode1 == 50L, 1, 0)),
+                  data.frame(dispnum = 3L, ccode1 = 90L, year = 1995L, sidea1 = 0))
+  sy <- tidyr::expand_grid(ccode = c(10L, 20L, 30L, 40L, 50L, 60L, 70L, 80L, 90L), year = 1990:1995L)
   out <- multilateral_jan_flags(sy, psd, dd)
   expect_equal(nrow(out), nrow(sy)); expect_true(all(out$multi_mid_jan %in% 0:1))
   md <- as.data.frame(attr(out, "disputes")); expect_equal(md[, c("dispnum", "year")], data.frame(dispnum = c(2L, 3L), year = c(1992L, 1995L)))
   expect_equal(md$n_side_a, c(2L, 1L)); expect_equal(md$n_side_b, c(2L, 2L))
   flag <- function(c, y) out$multi_mid_jan[out$ccode == c & out$year == y]
   expect_equal(flag(10L, 1992L), 0L); expect_equal(flag(20L, 1992L), 0L); expect_equal(flag(40L, 1992L), 0L)    # participants of dispute 2
-  expect_equal(flag(30L, 1992L), 0L)                                                                              # entered ON 1 January 1992: inclusive tie = participant
+  expect_equal(flag(30L, 1992L), 0L)                                                                              # day-dated entry ON 1 January 1992: present and already in
+  expect_equal(flag(90L, 1992L), 0L)                                                                              # former participant (spell ended August 1991): already in, not "not yet" (fix 2)
   expect_equal(flag(50L, 1992L), 1L); expect_equal(flag(80L, 1992L), 1L)                                          # outsiders
-  expect_equal(flag(80L, 1995L), 1L); expect_equal(flag(50L, 1995L), 0L); expect_equal(flag(70L, 1995L), 0L)     # dispute 3 at year / month ties
+  expect_true(all(out$multi_mid_jan[out$year == 1994L] == 0L))                                                    # coarse entries IN 1994 are not present at 1 January 1994 (fix 1)
+  expect_equal(flag(80L, 1995L), 1L); expect_equal(flag(50L, 1995L), 0L); expect_equal(flag(70L, 1995L), 0L)     # dispute 3 at 1 Jan 1995: 50, 60, 70 entered in 1994
+  expect_equal(flag(90L, 1995L), 1L)                                                                              # 90's year-resolution entry in 1995 is during t: still "not yet" (fix 1)
   expect_true(all(out$multi_mid_jan[out$year %in% c(1990L, 1991L, 1993L, 1994L)] == 0L))                          # nothing multilateral open in those years
-  expect_equal(sum(out$multi_mid_jan), 4L + 5L)                                                                   # 1992: 50, 60, 70, 80 (the outsiders of dispute 2); 1995: 10, 20, 30, 40, 80
+  expect_equal(sum(out$multi_mid_jan), 4L + 6L)                                                                   # 1992: 50, 60, 70, 80; 1995: 10, 20, 30, 40, 80, 90
+  ## the change counts against the pre-fix rule: legacy had dispute 3 multilateral at 1 Jan 1994 too (year / month entries in 1994 present), 90-1995
+  ## already in (year entry in 1995 <= reference) and 90-1992 "not yet" (spell-year rows only): fix 1 flips 90-1995 and the 1994 outsiders, fix 2 flips 90-1992
+  chg <- attr(out, "changed_vs_prefix")
+  expect_equal(unname(chg[c("n_multi_dispute_years_legacy", "n_multi_dispute_years", "n_multi_dispute_years_lost", "n_multi_dispute_years_gained")]), c(3L, 2L, 1L, 0L))
+  expect_equal(unname(chg[["n_spell_years_coarse_entry_in_t"]]), 4L)                                              # 50, 60, 70 in 1994 and 90 in 1995
+  expect_equal(unname(chg[["n_former_participant_triples"]]), 1L)                                                  # (2, 90, 1992)
+  expect_equal(unname(chg[c("n_flags_changed_fix1", "n_flags_changed_fix2", "n_flags_changed_total")]), c(6L + 1L, 1L, 8L))   # 1994: 10..40, 80, 90 lose their flag; 90-1995 gains it; 90-1992 loses it
+  expect_equal(unname(chg[c("n_flags_legacy", "n_flags")]), c(16L, 10L))                                        # legacy: 1992 five (90 too), 1994 six, 1995 five (90 already in)
   ## a side switch within a year: 40 listed on both sides of dispute 2 in 1992 takes its side of 1991 (side B); without a 1991 row it is an error
   dd2 <- bind_rows(dd, data.frame(dispnum = 2L, ccode1 = 40L, year = 1992L, sidea1 = 1))
   o2 <- multilateral_jan_flags(sy, psd, dd2); expect_equal(attr(o2, "n_side_switch_years"), 1L); expect_identical(o2$multi_mid_jan, out$multi_mid_jan)
-  expect_error(multilateral_jan_flags(sy, psd, bind_rows(dd, data.frame(dispnum = 3L, ccode1 = 70L, year = 1995L, sidea1 = 1))), "no single side in the year before")
+  expect_error(multilateral_jan_flags(sy, psd, bind_rows(dd, data.frame(dispnum = 3L, ccode1 = 90L, year = 1995L, sidea1 = 1))), "no single side in the year before")
   ## a present participant without a dispute-year row is an error
   expect_error(multilateral_jan_flags(sy, psd, dd |> filter(!(dispnum == 2L & ccode1 == 30L))), "no dispute-year row")
 })
@@ -311,5 +332,61 @@ test_that("02_fit_model.R --model=M1c end to end on the toy cell: dry run, a sho
   for (bad in c("--cells=mid:3:M1c", "--ww2=drop", "--context=bilateral")) expect_true(run("05_robustness.R", "--preset=context_b", bad)$status != 0L, info = bad)
   sb <- readLines(file.path(root, "slurm", "04_robustness.sbatch")); expect_true(any(grepl("^  context_b)", sb)))
   sh <- readLines(file.path(root, "slurm", "submit_robustness.sh")); expect_true(any(grepl("^  context_b)", sh))); expect_true(any(grepl("--array=0-1", sh, fixed = TRUE)))
+  unlink(tmp, recursive = TRUE)
+})
+
+test_that("sim/summarise_context_b.R: the coverage table over replicate files; too few, mixed-settings and duplicated replicates are refused; the sbatch runs 20 replicates by --rep", {
+  ## a temporary v2 with the real R/ and sim/ scripts and synthetic replicate files written the way sim_context_b.R writes them
+  tmp <- tempfile("simsum_v2_"); v2 <- file.path(tmp, "v2"); dir.create(v2, recursive = TRUE)
+  file.copy(file.path(root, "R"), v2, recursive = TRUE); file.copy(file.path(root, "sim"), v2, recursive = TRUE); dir.create(file.path(v2, "logs"))
+  res <- file.path(v2, "sim", "results", "context_b"); unlink(res, recursive = TRUE); dir.create(res, recursive = TRUE)
+  for (f in list.files(file.path(v2, "sim", "results"), pattern = "\\.csv$", full.names = TRUE)) file.remove(f)
+  pars <- c("mu0[1]", "mu0[2]", "delta_lead[1]", "sigma_g[1,1]", "rho_x", "beta[1,1]", "gamma[1]", "alpha0", "alpha[1]", "tau", "sd_re[1]", "sigma_b")
+  blk <- c(rep("stage_b", 5), "stage_2", "stage_2", rep("stage_1", 3), "re_scales", "re_scales")
+  truth <- c(-1, 0.3, -1.2, 1.2, 0.4, 0.3, 1, -2, 0.2, 0.5, 0.9, 0.6)
+  write_rep <- function(r, dir = res, iter = 500L, covered_all = FALSE) {
+    set.seed(1000 + r)
+    m <- truth + rnorm(length(truth), 0, 0.2); sdv <- rep(0.3, length(truth)); lo <- m - 1.645 * sdv; hi <- m + 1.645 * sdv
+    if (covered_all) { lo <- truth - 1; hi <- truth + 1 }
+    rec <- data.frame(parameter = pars, truth = truth, mean = m, sd = sdv, lo = lo, hi = hi, Rhat = 1.001, n_eff = 400, covered = truth >= lo & truth <= hi, bias = m - truth, z = (m - truth) / sdv,
+                      block = blk, recovery_target = TRUE, stringsAsFactors = FALSE)
+    rec <- rbind(rec, data.frame(parameter = "mu_state 90% coverage over states with events x axes", truth = 0.9, mean = 0.88, sd = NA, lo = NA, hi = NA, Rhat = NA, n_eff = NA, covered = NA, bias = NA, z = NA, block = "mu_state", recovery_target = TRUE))
+    rec$rep <- r; rec$seed <- 123L + r; rec$n_init <- 250L; rec$n_noninit <- 250L; rec$chains <- 4L; rec$iter <- iter; rec$warmup <- iter %/% 2L; rec$elapsed_min <- 30; rec$divergences <- 0L; rec$treedepth_hits <- 0L; rec$sample <- "fmid"; rec$lag <- 3L
+    write.csv(rec, file.path(dir, sprintf("context_b_recovery_r%d.csv", r)), row.names = FALSE)
+    write.csv(data.frame(group = c("bilateral", "leader", "joiner"), n_events = c(100L, 60L, 40L), w_sum = c(90, 30, 20), n_states = c(40L, 20L, 15L), n_state_years = c(90L, 40L, 30L), rep = r, seed = 123L + r,
+                         N1 = 500L, N2 = 60000L, E = 200L, S = 217L, sum_y1 = 150L, alpha0_true = -2, n_states_with_events = 60L, n_pattern_redraws = 0L),
+              file.path(dir, sprintf("context_b_design_r%d.csv", r)), row.names = FALSE)
+  }
+  run <- function(...) { out <- suppressWarnings(system2("Rscript", c(file.path(v2, "sim", "summarise_context_b.R"), ...), stdout = TRUE, stderr = TRUE)); list(status = if (is.null(attr(out, "status"))) 0L else attr(out, "status"), out = out) }
+  for (r in 0:4) write_rep(r)
+  expect_true(run()$status != 0L)                                                                   # 5 < 20 replicates by default
+  r5 <- run("--min_reps=5"); expect_equal(r5$status, 0L, info = paste(tail(r5$out, 20), collapse = "\n"))
+  cov <- read.csv(file.path(v2, "sim", "results", "context_b_coverage.csv"), stringsAsFactors = FALSE)
+  expect_equal(nrow(cov), length(pars) + 1L); expect_true(all(cov$n_reps == 5L))
+  expect_equal(cov$parameter[seq_along(pars)], c("mu0[1]", "mu0[2]", "delta_lead[1]", "sigma_g[1,1]", "rho_x", "beta[1,1]", "gamma[1]", "alpha0", "alpha[1]", "tau", "sd_re[1]", "sigma_b"))   # fixed parameter order
+  ## the coverage rate and bias are recomputed from the files
+  all_rec <- do.call(rbind, lapply(0:4, function(r) read.csv(file.path(res, sprintf("context_b_recovery_r%d.csv", r)), stringsAsFactors = FALSE)))
+  for (pp in pars) { d <- all_rec[all_rec$parameter == pp, ]; expect_equal(cov$coverage90[cov$parameter == pp], mean(d$covered)); expect_equal(cov$mean_bias[cov$parameter == pp], mean(d$bias)); expect_equal(cov$rmse[cov$parameter == pp], sqrt(mean(d$bias^2))) }
+  expect_true(all(cov$coverage90[seq_along(pars)] >= 0 & cov$coverage90[seq_along(pars)] <= 1)); expect_equal(cov$mean_over_reps[cov$block == "mu_state"], 0.88)
+  bl <- read.csv(file.path(v2, "sim", "results", "context_b_coverage_blocks.csv"), stringsAsFactors = FALSE)
+  expect_equal(bl$block, c("re_scales", "stage_1", "stage_2", "stage_b", "all")); expect_equal(bl$n_params[bl$block == "all"], length(pars)); expect_equal(bl$n_reps, rep(5L, 5))
+  expect_equal(bl$coverage90[bl$block == "all"], mean(all_rec$covered[!is.na(all_rec$covered)]))
+  rt <- read.csv(file.path(v2, "sim", "results", "context_b_replicates.csv")); expect_equal(rt$rep, 0:4); expect_equal(rt$seed, 123:127); expect_equal(rt$n_leader, rep(60L, 5))
+  ## every interval covering -> coverage 1 everywhere
+  for (r in 0:4) write_rep(r, covered_all = TRUE); r5 <- run("--min_reps=5"); expect_equal(r5$status, 0L)
+  expect_true(all(read.csv(file.path(v2, "sim", "results", "context_b_coverage.csv"))$coverage90[seq_along(pars)] == 1))
+  ## a replicate with other settings, and a duplicated replicate index, are refused
+  write_rep(5, iter = 2000L); expect_true(run("--min_reps=5")$status != 0L); file.remove(file.path(res, c("context_b_recovery_r5.csv", "context_b_design_r5.csv")))
+  write_rep(0); file.copy(file.path(res, "context_b_recovery_r0.csv"), file.path(res, "context_b_recovery_r00.csv")); expect_true(run("--min_reps=5")$status != 0L)
+  ## the sbatch: open account, array 0-19, every task calls sim_context_b.R with --rep=<task id> and 4 x 2000 / 1000; the summariser is named
+  sb <- readLines(file.path(root, "slurm", "06_sim_context_b.sbatch"))
+  expect_true(any(grepl("^#SBATCH --account=open", sb))); expect_true(any(grepl("^#SBATCH --array=0-19", sb)))
+  expect_true(any(grepl('Rscript v2/sim/sim_context_b.R --rep="\\$r"', sb))); expect_true(any(grepl("--chains=4 --iter=2000 --warmup=1000", sb, fixed = TRUE)))
+  expect_true(any(grepl("summarise_context_b.R", sb, fixed = TRUE))); expect_true(any(grepl("r=\\$\\{SLURM_ARRAY_TASK_ID", sb)))
+  ## sim_context_b.R refuses --seed (the seed is 123 + rep) and documents --rep / --smoke
+  src <- readLines(file.path(root, "sim", "sim_context_b.R"))
+  expect_true(any(grepl("SEED <- V2_SEED + REP", src, fixed = TRUE))); expect_true(any(grepl('"--seed is not an option', src, fixed = TRUE))); expect_true(any(grepl("context_b_smoke", src, fixed = TRUE)))
+  expect_true(any(grepl("y1_sim <- rbinom(N1, 1L, plogis(TRUTH$alpha0 + lin))", src, fixed = TRUE)))                 # y1 is simulated from the model
+  expect_true(any(grepl("rec$recovery_target <- TRUE", src, fixed = TRUE)))
   unlink(tmp, recursive = TRUE)
 })

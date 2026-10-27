@@ -872,12 +872,17 @@ blog("power levels (D2): M_lvl = (log CINC share - year mean) / %.6f, R_lvl = (l
      GAP_SCALE_M, GAP_SCALE_R, nrow(pos_lvl), sd(pos_lvl$M_lvl), sd(pos_lvl$R_lvl), quantile(pos_lvl$M_lvl, .05), median(pos_lvl$M_lvl), quantile(pos_lvl$M_lvl, .95),
      quantile(pos_lvl$R_lvl, .05), median(pos_lvl$R_lvl), quantile(pos_lvl$R_lvl, .95))
 ## ---- multilateral MID open at January of t (dual typology stage b, 2026-10-27; the M1c stage-1 control; helper in helpers_data.R) --------
-## multi_mid_jan(i, t) = 1 when a MID with more than one state on a side (present participants by their spell dates, inclusive ties, COW
-## sides in year t) is active at 1 January of t and i has not entered it at or before that date. Same participant spells (psd) and date
-## logic as the coalition flag. Computed once on every system state-year and joined to each lag's panel below; outcome-blind by
-## construction (January precedes every event of t). It enters W in the M1c model ONLY (assemble_cell(CONTEXT_MODEL = TRUE)).
+## multi_mid_jan(i, t) = 1 when a MID with more than one state on a side (participants present by their spell dates: entered in a year
+## before t or day-dated on or before 1 January of t, not exited; COW sides in year t) is active at 1 January of t and i has no spell in
+## it entered before that date (audit fixes 1-2, 2026-10-27: a coarse-dated entry in t never counts, a former participant is "already
+## in"). Same participant spells (psd) and date keys as the coalition flag. Computed once on every system state-year and joined to each
+## lag's panel below; outcome-blind by construction (nothing dated in t enters). It enters W in the M1c model ONLY (assemble_cell(CONTEXT_MODEL = TRUE)).
 multi_jan <- multilateral_jan_flags(states |> select(ccode, year), psd, dd)
 multi_disp <- attr(multi_jan, "disputes")
+mmj_chg <- attr(multi_jan, "changed_vs_prefix")
+blog("multi_mid_jan audit fixes 1-2 (2026-10-27), against the pre-fix rule: %d spell-years were present at 1 January only through a year- or month-resolution entry in t; multilateral dispute-years %d before, %d after (%d lost, %d gained); %d (dispute, state, year) former-participant triples now count as already in; state-year flags changed by fix 1 (coarse entries) %d, by fix 2 (former participants) %d, total %d of %d; flags set %d before, %d after",
+     mmj_chg[["n_spell_years_coarse_entry_in_t"]], mmj_chg[["n_multi_dispute_years_legacy"]], mmj_chg[["n_multi_dispute_years"]], mmj_chg[["n_multi_dispute_years_lost"]], mmj_chg[["n_multi_dispute_years_gained"]],
+     mmj_chg[["n_former_participant_triples"]], mmj_chg[["n_flags_changed_fix1"]], mmj_chg[["n_flags_changed_fix2"]], mmj_chg[["n_flags_changed_total"]], nrow(multi_jan), mmj_chg[["n_flags_legacy"]], mmj_chg[["n_flags"]])
 blog("multi_mid_jan (stage b): active multilateral dispute-years at 1 January %d (of %d active dispute-years), in %d distinct years; state-years with at least one such dispute they had not entered: %d of %d (mean %.4f); max disputes per state-year %d; participants on both sides within a dispute-year (side of t-1 used at 1 January) %d",
      nrow(multi_disp), attr(multi_jan, "n_active_dispute_years"), n_distinct(multi_disp$year), sum(multi_jan$multi_mid_jan), nrow(multi_jan), mean(multi_jan$multi_mid_jan), max(multi_jan$n_multi_jan), attr(multi_jan, "n_side_switch_years"))
 blog("multi_mid_jan: the 10 largest active multilateral disputes at a 1 January (dispute, year, states present on side A / side B): %s",
