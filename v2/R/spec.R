@@ -10,6 +10,8 @@
 ## (inclusive | strict), coal_drop (none | top3, context = coalition only); suffixes _bi / _co, _strict, _drop3.
 ## Model code added 2026-10-27 (dual typology stage b): M1c (CONTEXT_MODELS, stan/m1_context.stan), outside MODELS and the main grid;
 ## the context_b preset runs it at lag 3 on mid and fmid (CONTEXT_B_PRESET).
+## Switches added 2026-10-27 (PI-approved stage-2 extensions): major (none | joint: one_major / both_major in Z, cowmaj_tm1 in W) and
+## interact (none | prefixed: four change products in Z); suffixes _major, _ix; preset major_ix (MAJOR_IX_PRESET).
 ## Main specification (PI decisions through 2026-10-25; README "The main specification"):
 ##   sample in {mid, fmid, war} x lag in {1, 3, 5, 10} x model in {M1m, M1r, M1a, M1b, M2m, M2r, M2a, M2b}
 ##   choice set = every other system member at t with positions at t-1 (variant "all"), full sets (no sampled alternatives)
@@ -28,6 +30,8 @@ SPEC_CHOICES <- list(
   ww2       = c("include", "drop"),                 # the Second World War events: kept | removed from stage 2 and stage 1
   weights   = c("dispute", "none"),                 # stage-2 event weights: 1 / (initiator's targets in the dispute-year) | 1 everywhere
   controls  = c("minimal", "full"),                 # control sets: minimal (main) | the full base specification of commit 8bf0ce1
+  major     = c("none", "joint"),                   # major-power status (2026-10-27): none (main) | joint = Z gains one_major / both_major (dyad's major count, 0 = reference) and W gains cowmaj_tm1
+  interact  = c("none", "prefixed"),                # change interactions in Z (2026-10-27): none (main) | prefixed = the four products dM_j x dRpr_j, dM_i x dM_j, dR_i x dRpr_j, dM_i x dRpr_j
   changes   = c("raw", "winsor")                    # initiator and target power changes: as built | winsorised at WINSOR_PROBS of the panel
 )
 SPEC_DEFAULTS <- lapply(SPEC_CHOICES, function(v) v[1])
@@ -36,6 +40,7 @@ SPEC_DEFAULTS$ame_K <- 2L                            # latent dimensions of the 
 ## (_noww2, _fullctrl, _w1, _sideA) keep their names and relative order, so earlier output files still match.
 ## The context switches (2026-10-25, dual typology stage a) follow pairs: _bi / _co, then _strict (only with context != all; coal_ties is
 ## normalised to inclusive under context = all, so the main cell name never carries it), then _drop3 (context = coalition only).
+## The stage-2 switches of 2026-10-27 follow controls (they extend the control sets): _major, then _ix, so both together give _major_ix.
 SPEC_SUFFIX <- list(
   pairs     = c(originators = "_orig", joiners = "_join"),
   context   = c(bilateral = "_bi", coalition = "_co"),
@@ -43,6 +48,8 @@ SPEC_SUFFIX <- list(
   coal_drop = c(top3 = "_drop3"),
   ww2       = c(drop = "_noww2"),
   controls  = c(full = "_fullctrl"),
+  major     = c(joint = "_major"),
+  interact  = c(prefixed = "_ix"),
   weights   = c(none = "_w1"),
   changes   = c(winsor = "_winsor"),
   direction = c(sideA = "_sideA")
@@ -99,7 +106,8 @@ ROBUSTNESS_PRESETS <- list(
   winsor       = list(changes = "winsor"),
   perm_error   = list(),                             # the permutation and measurement-error tests on the main cell (no switch)
   context      = list(),                             # the context split (CONTEXT_PRESET below): three switch combinations x two cells
-  context_b    = list()                              # dual typology stage (b): the M1c model on the main-spec cells of CONTEXT_B_PRESET (no switch)
+  context_b    = list(),                             # dual typology stage (b): the M1c model on the main-spec cells of CONTEXT_B_PRESET (no switch)
+  major_ix     = list()                              # the major-power and interaction switches (MAJOR_IX_PRESET below): three combinations x two cells
 )
 ## context_b preset (dual typology stage b, 2026-10-27): the M1c model (one model, group-specific shifts) at lag 3 on mid and fmid with every
 ## switch at its default; 05_robustness.R maps --cell_index = 0..1 onto the cell list (0 mid, 1 fmid). M1b family only, no war sample.
@@ -110,6 +118,12 @@ CONTEXT_B_PRESET <- list(cells = c("mid:3:M1c", "fmid:3:M1c"))
 CONTEXT_PRESET <- list(cells = c("mid:3:M1b", "fmid:3:M1b"),
                        variants = list(bilateral = list(context = "bilateral"), coalition = list(context = "coalition"),
                                        coalition_drop3 = list(context = "coalition", coal_drop = "top3")))
+## major_ix preset (PI-approved stage-2 switches, 2026-10-27): M1b, lag 3, samples fmid and mid; the three variants are major = joint alone
+## (_major), interact = prefixed alone (_ix), and both (_major_ix). 05_robustness.R maps --cell_index = 0..5 onto variant (slowest) x cell:
+## 0-1 major (fmid, mid), 2-3 interact, 4-5 both. M1b only, so no M1 -> M2 dependency; one Slurm array.
+MAJOR_IX_PRESET <- list(cells = c("fmid:3:M1b", "mid:3:M1b"),
+                        variants = list(major = list(major = "joint"), interact = list(interact = "prefixed"),
+                                        both = list(major = "joint", interact = "prefixed")))
 ## default cell list of the refit presets, "sample:lag:model"; override with --cells=
 ROBUSTNESS_CELLS <- c("mid:3:M1b", "fmid:3:M1b", "war:3:M1b", "mid:3:M2b", "fmid:3:M2b", "war:3:M2b")
 ROBUSTNESS_MAIN_CELL <- list(sample = "mid", lag = 5L)   # the perm_error preset's cell (the a / b fits of both families)

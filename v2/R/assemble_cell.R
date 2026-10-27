@@ -24,6 +24,25 @@
 ##                   dispute (ORed to coalition), asserted and logged. COAL_DROP = "top3" (CONTEXT = "coalition" only) also removes the
 ##                   events of the 3 disputes contributing the most coalition events of the sample (a collapsed key counts for each of its
 ##                   disputes and leaves when any of them is in the top 3; ties at the third place are logged).
+##   MAJOR         = "none" (main) | "joint" (PI-approved 2026-10-27, cell suffix _major): Z gains two 0/1 indicators built from the
+##                   alternatives' major_count (COW major-power status of both states at t-1, major1 + major2 from the build), one_major =
+##                   (major_count == 1) and both_major = (major_count == 2), zero majors the reference; appended after the main Z columns,
+##                   NOT centred (the convention for every 0/1 Z column, contig_land, joint_dem, dy_mid_tm1, dch_j_missing; only the
+##                   continuous Z columns in Z_CENTRED are centred over the IV rows). They are identified only through within-choice-set
+##                   variation (b_j absorbs time-invariant target attractiveness), so the assembly stops unless each varies within some
+##                   IV set and within some stage-2 set of an initiating state-year, and logs how many sets vary and the shares of
+##                   alternatives and of stage-2 events in each category. W gains the initiator's own indicator cowmaj_tm1 (the panel's
+##                   major-power status at t-1, the same source and lag as major1 in major_count), appended after the minimal W controls
+##                   and grand-centred like the other 0/1 W controls (dem_tm1, ongoing_tm1; SY_INDICATORS); under FULL_CONTROLS it is
+##                   already in W and is not added twice. X is unchanged. Its mean and its correlation with M_lvl are logged.
+##   INTERACT      = "none" (main) | "prefixed" (PI-approved 2026-10-27, cell suffix _ix): Z gains four products of the change columns
+##                   already in the data, in the scaled change units of X / Z: ix_dMj_dRj = dM_j_h x dRpr_j_h, ix_dMi_dMj = dM_i x dM_j_h,
+##                   ix_dRi_dRj = dR_i x dRpr_j_h, ix_dMi_dRj = dM_i x dRpr_j_h, with dM_i / dR_i the initiator changes of the row's
+##                   state-year exactly as they enter X and dM_j_h / dRpr_j_h the target changes exactly as they enter Z (both after the
+##                   winsor clipping when CHANGES = "winsor"). The products are formed from the UNCENTRED scaled values (before the Z
+##                   centring of dM_j_h / dRpr_j_h) and then centred over the IV rows like every continuous Z column (Z_CENTRED); forming
+##                   them from the centred target changes instead would be the same model up to a reparameterisation absorbed by the Z
+##                   main effects, alpha0 and alpha (dM_i, dR_i are in W). Appended after the major indicators when both switches are on.
 ##   DROP_WW2, FULL_CONTROLS, EVENT_WEIGHTS: the ww2, controls and weights switches (below).
 ##   CONTEXT_MODEL = FALSE (every model of MODELS) | TRUE (the M1c model of dual typology stage b, 2026-10-27): the build's state-year
 ##                   column multi_mid_jan (a multilateral MID the state had not entered is active at 1 January of t) is appended to W as
@@ -56,17 +75,24 @@
 ## they are NOT grand-centred here), and the centred log system size at t-1, log_n_system_tm1 (the IV grows with the number of
 ## alternatives, so tau * IV carried a system-size trend). Neither enters X. FULL_CONTROLS stays exactly 8bf0ce1.
 W_LEVELS <- c("M_lvl", "R_lvl")
-w_controls <- function(CONFLICT_HISTORY = TRUE, FULL_CONTROLS = FALSE) {
+## MAJOR = "joint" (2026-10-27) appends the initiator's major-power indicator cowmaj_tm1 to the minimal W; the full set of 8bf0ce1 holds it already
+w_controls <- function(CONFLICT_HISTORY = TRUE, FULL_CONTROLS = FALSE, MAJOR = "none") {
+  stopifnot(MAJOR %in% c("none", "joint"))
   if (FULL_CONTROLS) c("cowmaj_tm1", "dem_tm1", if (CONFLICT_HISTORY) c("log_prior_mids", "log_peace_years"))
-  else c("M_lvl", "R_lvl", "ongoing_tm1", if (CONFLICT_HISTORY) "log_prior_mids", "dem_tm1", "log_n_system_tm1")
+  else c("M_lvl", "R_lvl", "ongoing_tm1", if (CONFLICT_HISTORY) "log_prior_mids", "dem_tm1", "log_n_system_tm1", if (MAJOR == "joint") "cowmaj_tm1")
 }
 x_controls <- function(CONFLICT_HISTORY = TRUE, FULL_CONTROLS = FALSE) {
   if (FULL_CONTROLS) c("cowmaj_tm1", "dem_tm1", if (CONFLICT_HISTORY) c("log_prior_mids", "log_peace_years"))
   else character(0)
 }
+## the Z columns the 2026-10-27 switches append (after the base list, major indicators first): Z_MAJOR under MAJOR = "joint" (0/1, not centred),
+## Z_INTERACT under INTERACT = "prefixed" (continuous, centred over the IV rows after the products are formed)
+Z_MAJOR    <- c("one_major", "both_major")
+Z_INTERACT <- c("ix_dMj_dRj", "ix_dMi_dMj", "ix_dRi_dRj", "ix_dMi_dRj")
 z_columns <- function(CONFLICT_HISTORY = TRUE, DISTANCE = FALSE, CONTIGUITY = TRUE, TARGET_MISSING = FALSE, DY_PEACE_YEARS = FALSE,
-                      FULL_CONTROLS = FALSE) {
-  if (FULL_CONTROLS) {
+                      FULL_CONTROLS = FALSE, MAJOR = "none", INTERACT = "none") {
+  stopifnot(MAJOR %in% c("none", "joint"), INTERACT %in% c("none", "prefixed"))
+  base <- if (FULL_CONTROLS) {
     ## the base Z of 8bf0ce1, verbatim order
     c(if (CONTIGUITY) "contig_land", "alliance_def_off", "joint_dem", "major_count",
       if (CONFLICT_HISTORY) c("log_dy_prior_mids", "log_dy_peace_years") else if (DY_PEACE_YEARS) "log_dy_peace_years",
@@ -82,10 +108,11 @@ z_columns <- function(CONFLICT_HISTORY = TRUE, DISTANCE = FALSE, CONTIGUITY = TR
       "dM_j_h", "dRpr_j_h",
       if (TARGET_MISSING) "dch_j_missing")
   }
+  c(base, if (MAJOR == "joint") Z_MAJOR, if (INTERACT == "prefixed") Z_INTERACT)
 }
 ## continuous Z columns that assemble_cell() centres over the assembled alternative rows (the 0/1 indicators, dy_mid_tm1
-## included, stay as is)
-Z_CENTRED <- c("log_dy_prior_mids", "log_dy_peace_years", "log_capdist", "dM_j_h", "dRpr_j_h")
+## included, stay as is); the interaction products (2026-10-27) are continuous and centred like the target changes they are built from
+Z_CENTRED <- c("log_dy_prior_mids", "log_dy_peace_years", "log_capdist", "dM_j_h", "dRpr_j_h", Z_INTERACT)
 ## Monadic 0/1 indicators available in the panel (major power, democracy, ongoing_tm1 = participant in any MID active at
 ## t-1). Those that enter W or X are centred like the conflict-history counts; the main W uses dem_tm1 and ongoing_tm1.
 SY_INDICATORS <- c("cowmaj_tm1", "dem_tm1", "ongoing_tm1")
@@ -98,13 +125,18 @@ SY_INDICATORS <- c("cowmaj_tm1", "dem_tm1", "ongoing_tm1")
 assemble_cell <- function(SAMPLE, LAG, VARIANT, CENT = "pr", CONFLICT_HISTORY = TRUE, SAMPLED_M = 0L,
                           DISTANCE = FALSE, CONTIGUITY = TRUE, DY_PEACE_YEARS = FALSE, DROP_WW2 = FALSE, FULL_CONTROLS = FALSE,
                           EVENT_WEIGHTS = "dispute", PAIRS = "all", CHANGES = "raw", CONTEXT = "all", COAL_TIES = "inclusive", COAL_DROP = "none",
+                          MAJOR = "none", INTERACT = "none",
                           CONTEXT_MODEL = FALSE, data_dir = file.path(v2_root(), "data"), manifest = NULL) {
   stopifnot(SAMPLE %in% c("mid", "fmid", "fmidcow", "fmidub", "war"), LAG %in% c(1L, 3L, 5L, 10L), VARIANT %in% c("all", "polrel"), CENT %in% c("pr", "eig"),
             EVENT_WEIGHTS %in% c("dispute", "none"), PAIRS %in% c("all", "originators", "joiners"), CHANGES %in% c("raw", "winsor"),
-            CONTEXT %in% c("all", "bilateral", "coalition"), COAL_TIES %in% c("inclusive", "strict"), COAL_DROP %in% c("none", "top3"))
+            CONTEXT %in% c("all", "bilateral", "coalition"), COAL_TIES %in% c("inclusive", "strict"), COAL_DROP %in% c("none", "top3"),
+            MAJOR %in% c("none", "joint"), INTERACT %in% c("none", "prefixed"))
   if (COAL_DROP != "none" && CONTEXT != "coalition") stop("COAL_DROP = top3 needs CONTEXT = coalition")
   stopifnot(is.logical(CONTEXT_MODEL), length(CONTEXT_MODEL) == 1L, !is.na(CONTEXT_MODEL))
   if (CONTEXT_MODEL && FULL_CONTROLS) stop("CONTEXT_MODEL (M1c) is defined on the minimal control set only (FULL_CONTROLS = TRUE not supported)")
+  ## merge 2026-10-27: the M1c model and the major / interact switches were developed independently; their combination is not specified
+  ## (W would carry cowmaj_tm1 before multi_mid_jan, Z the extra columns), so it is refused here until the PI decides
+  if (CONTEXT_MODEL && (MAJOR != "none" || INTERACT != "none")) stop("CONTEXT_MODEL (M1c) with MAJOR != none or INTERACT != none is not specified; run M1c with MAJOR = none, INTERACT = none")
   manifest_path <- file.path(data_dir, "manifest.csv")
   stopifnot(file.exists(manifest_path))
   if (is.null(manifest)) { manifest <- read.csv(manifest_path, stringsAsFactors = FALSE); manifest_source <- "read now" }
@@ -161,15 +193,26 @@ assemble_cell <- function(SAMPLE, LAG, VARIANT, CENT = "pr", CONFLICT_HISTORY = 
   ## state index: union of initiators (panel) and targets (alts), sorted by ccode (index only; anchors are NOT taken from this order)
   state_codes <- sort(unique(c(sy$ccode, alts$ccode2)))
   sy$state_idx <- match(sy$ccode, state_codes)
-  ctrl_w <- w_controls(CONFLICT_HISTORY, FULL_CONTROLS); ctrl_x <- x_controls(CONFLICT_HISTORY, FULL_CONTROLS)
+  ctrl_w <- w_controls(CONFLICT_HISTORY, FULL_CONTROLS, MAJOR = MAJOR); ctrl_x <- x_controls(CONFLICT_HISTORY, FULL_CONTROLS)
+  stopifnot(!anyDuplicated(ctrl_w))
   if (CONTEXT_MODEL) {
     ## stage b: the outcome-blind multilateral-opportunity control, LAST in W (0/1 from the build; grand-centred below like the other indicators)
     if (!"multi_mid_jan" %in% names(sy)) stop("CONTEXT_MODEL (M1c) needs the panel column multi_mid_jan (rebuild the data with 01_build_data.R of 2026-10-27 or later)")
     stopifnot(!anyNA(sy$multi_mid_jan), all(sy$multi_mid_jan %in% c(0, 1)))
     logf("multi_mid_jan (stage b, M1c): mean %.4f over %d state-years (%d with a multilateral MID they had not entered active at 1 January of t); among initiators (y1 = 1) %.4f", mean(sy$multi_mid_jan), nrow(sy), sum(sy$multi_mid_jan), mean(sy$multi_mid_jan[sy$y1 == 1L]))
     ctrl_w <- c(ctrl_w, "multi_mid_jan")
+    stopifnot(!anyDuplicated(ctrl_w))
   }
   ctrl_sy <- union(ctrl_w, ctrl_x)
+  ## major = joint (2026-10-27): the initiator's own major-power indicator at t-1 enters W (grand-centred below like dem_tm1 and ongoing_tm1);
+  ## logged BEFORE the centring with its correlation with the material level M_lvl, which it is bound to track
+  if (MAJOR == "joint") {
+    stopifnot("cowmaj_tm1" %in% ctrl_w, "cowmaj_tm1" %in% names(sy), all(sy$cowmaj_tm1 %in% c(0L, 1L)))
+    if (length(unique(sy$cowmaj_tm1)) < 2) stop("major = joint: cowmaj_tm1 is constant over the stage-1 panel of this cell; it cannot enter W")
+    logf("major = joint: cowmaj_tm1 in W (%s): mean %.4f over %d state-years (%d major-power state-years); cor(cowmaj_tm1, M_lvl) = %.3f; grand-centred like the other 0/1 W controls",
+         if (FULL_CONTROLS) "already in the full control set of 8bf0ce1, not added twice" else "appended to the minimal controls",
+         mean(sy$cowmaj_tm1), nrow(sy), sum(sy$cowmaj_tm1), cor(sy$cowmaj_tm1, sy$M_lvl))
+  }
   ## centre every stage-1 / mu control that enters W or X (the 0/1 indicators as well as the conflict-history counts; PI
   ## decisions 2026-10-23 / 2026-10-24) so that alpha0 in stage 1 is the log-odds at zero power change and average
   ## controls, and (under --full_controls) the mu intercept mu0 is the ideal gap at those averages. In the main
@@ -215,8 +258,34 @@ assemble_cell <- function(SAMPLE, LAG, VARIANT, CENT = "pr", CONFLICT_HISTORY = 
   logf("target changes: %d of %d alternative rows have a target without a change value (set to 0); dch_j_missing %s Z (%s)",
        n_miss, nrow(alts), if (target_missing) "enters" else "is NOT in",
        if (target_missing) "non-constant in this cell" else "constant in this cell")
-  Z_cols <- z_columns(CONFLICT_HISTORY, DISTANCE, CONTIGUITY, TARGET_MISSING = target_missing, DY_PEACE_YEARS = DY_PEACE_YEARS, FULL_CONTROLS = FULL_CONTROLS)
-  stopifnot(all(Z_cols %in% names(alts)))
+  ## major = joint (2026-10-27): the dyad's number of major powers at t-1 (major_count = major1 + major2 from the build, COW majors lagged like
+  ## every dyadic control) as two 0/1 indicators with zero majors as the reference. Shares over the alternative rows are logged here; the
+  ## within-choice-set variation (the only source of identification next to b_j) and the event shares are checked below, once ev exists.
+  major_stats <- NULL
+  if (MAJOR == "joint") {
+    stopifnot("major_count" %in% names(alts), !anyNA(alts$major_count), all(alts$major_count %in% 0:2))
+    alts <- alts |> mutate(one_major = as.integer(major_count == 1L), both_major = as.integer(major_count == 2L))
+    stopifnot(all(alts$one_major + alts$both_major <= 1L), all((alts$one_major == 1L) == (alts$major_count == 1L)), all((alts$both_major == 1L) == (alts$major_count == 2L)))
+    sh_alt <- tabulate(alts$major_count + 1L, nbins = 3L) / nrow(alts)
+    logf("major = joint: alternative rows by the dyad's major-power count at t-1: 0 majors %.4f, 1 major (one_major) %.4f, 2 majors (both_major) %.4f of %d rows; the indicators enter Z uncentred (0/1 convention)",
+         sh_alt[1], sh_alt[2], sh_alt[3], nrow(alts))
+    major_stats <- list(share_alts = setNames(sh_alt, c("zero", "one", "both")))
+  }
+  ## interact = prefixed (2026-10-27): four products of the change columns, formed from the UNCENTRED scaled values exactly as they stand after
+  ## the winsor step (dM_i / dR_i of the row's state-year as in X, dM_j_h / dRpr_j_h of the target as in Z before its centring), then centred
+  ## over the IV rows with the other continuous Z columns below (Z_INTERACT is in Z_CENTRED)
+  if (INTERACT == "prefixed") {
+    stopifnot(!anyNA(alts$sy_row), all(alts$sy_row %in% seq_len(nrow(sy))))
+    dMi <- sy$dM_i[alts$sy_row]; dRi <- sy$dR_i[alts$sy_row]
+    stopifnot(all(is.finite(dMi)), all(is.finite(dRi)), all(is.finite(alts$dM_j_h)), all(is.finite(alts$dRpr_j_h)))
+    alts <- alts |> mutate(ix_dMj_dRj = dM_j_h * dRpr_j_h, ix_dMi_dMj = .env$dMi * dM_j_h, ix_dRi_dRj = .env$dRi * dRpr_j_h, ix_dMi_dRj = .env$dMi * dRpr_j_h)
+    stopifnot(all(is.finite(as.matrix(alts[, Z_INTERACT]))))
+    logf("interact = prefixed: four change products in Z, formed before the Z centring (%s): SD before centring ix_dMj_dRj %.4f, ix_dMi_dMj %.4f, ix_dRi_dRj %.4f, ix_dMi_dRj %.4f over %d rows; a target without a change value contributes 0 to every product",
+         if (CHANGES == "winsor") "winsorised changes" else "raw changes", sd(alts$ix_dMj_dRj), sd(alts$ix_dMi_dMj), sd(alts$ix_dRi_dRj), sd(alts$ix_dMi_dRj), nrow(alts))
+  }
+  Z_cols <- z_columns(CONFLICT_HISTORY, DISTANCE, CONTIGUITY, TARGET_MISSING = target_missing, DY_PEACE_YEARS = DY_PEACE_YEARS, FULL_CONTROLS = FULL_CONTROLS,
+                      MAJOR = MAJOR, INTERACT = INTERACT)
+  stopifnot(all(Z_cols %in% names(alts)), !anyDuplicated(Z_cols))
   ## centre the continuous Z columns (conflict history, distance, target changes). The centring constants are the means over
   ## the stage-1 IV rows (in_iv = 1) ONLY (Codex re-check P2, 2026-10-24): the IV set is defined at January of t and does
   ## not depend on year-t events, whereas the stage-2-only rows do. Centring over the whole union block let a stage-2-only
@@ -432,6 +501,32 @@ assemble_cell <- function(SAMPLE, LAG, VARIANT, CENT = "pr", CONFLICT_HISTORY = 
        n_distinct(ev$sy_row), min(n_s2_sy$n_s2[n_s2_sy$sy_row %in% ev$sy_row]), as.integer(median(n_s2_sy$n_s2[n_s2_sy$sy_row %in% ev$sy_row])),
        nrow(sy), min(n_iv_sy$n_iv), as.integer(median(n_iv_sy$n_iv)))
   logf("dy_mid_tm1: %d of %d alternative rows = 1; chosen events with dy_mid_tm1 = 1: %d of %d", sum(alts$dy_mid_tm1), nrow(alts), sum(ev$dy_mid_tm1), nrow(ev))
+  ## major = joint: the event shares per category and the within-choice-set variation of each indicator. one_major / both_major are identified
+  ## only by variation INSIDE a choice set (b_j absorbs anything constant per target; a constant per state-year drops from the softmax), so
+  ## each must vary within some IV set (it enters the IV of stage 1) and within some stage-2 set of an initiating state-year with a usable
+  ## event (the sets the stage-2 likelihood runs over); otherwise the run stops. For a major initiator one_major marks the non-major targets
+  ## and both_major the major ones; for a non-major initiator one_major marks the major targets and both_major is 0 throughout its set.
+  if (MAJOR == "joint") {
+    mc_ev <- alts$major_count[ev$alt_row]
+    sh_ev <- tabulate(mc_ev + 1L, nbins = 3L) / nrow(ev)
+    var_in <- function(rows) {
+      g <- alts[rows, c("sy_row", "one_major", "both_major")] |> group_by(sy_row) |>
+        summarise(v1 = n_distinct(one_major) > 1L, v2 = n_distinct(both_major) > 1L, .groups = "drop")
+      c(n_sets = nrow(g), one_major = sum(g$v1), both_major = sum(g$v2))
+    }
+    v_iv <- var_in(alts$in_iv == 1L)
+    v_s2 <- var_in(alts$in_s2 == 1L & alts$sy_row %in% ev$sy_row)
+    logf("major = joint: stage-2 events by the dyad's major-power count: 0 majors %.4f (%d), 1 major %.4f (%d), 2 majors %.4f (%d) of %d usable events",
+         sh_ev[1], sum(mc_ev == 0L), sh_ev[2], sum(mc_ev == 1L), sh_ev[3], sum(mc_ev == 2L), nrow(ev))
+    logf("major = joint: within-choice-set variation: IV sets (all %d state-years) with variation in one_major %d, in both_major %d; stage-2 sets of the %d initiating state-years with a usable event: one_major %d, both_major %d (both_major varies only in a major initiator's set)",
+         v_iv[["n_sets"]], v_iv[["one_major"]], v_iv[["both_major"]], v_s2[["n_sets"]], v_s2[["one_major"]], v_s2[["both_major"]])
+    if (v_iv[["one_major"]] == 0L || v_iv[["both_major"]] == 0L || v_s2[["one_major"]] == 0L || v_s2[["both_major"]] == 0L)
+      stop(sprintf("major = joint: an indicator does not vary within any choice set (IV sets: one_major %d, both_major %d; event-bearing stage-2 sets: one_major %d, both_major %d); it is not identified in this cell",
+                   v_iv[["one_major"]], v_iv[["both_major"]], v_s2[["one_major"]], v_s2[["both_major"]]))
+    major_stats$share_events <- setNames(sh_ev, c("zero", "one", "both"))
+    major_stats$n_events <- setNames(c(sum(mc_ev == 0L), sum(mc_ev == 1L), sum(mc_ev == 2L)), c("zero", "one", "both"))
+    major_stats$var_iv_sets <- v_iv; major_stats$var_s2_sets <- v_s2
+  }
   n_orphan <- sum(sy$y1 == 1L & !(seq_len(nrow(sy)) %in% ev$sy_row))
   logf("state-years with y1 = 1 but no usable stage-2 event (kept in stage 1 only): %d", n_orphan)
   ## stage-2 event weights (D8): w_<sample> from the build (or 1 under EVENT_WEIGHTS = "none"); build_stan_data() passes them as ev_w
@@ -457,7 +552,8 @@ assemble_cell <- function(SAMPLE, LAG, VARIANT, CENT = "pr", CONFLICT_HISTORY = 
        n_ww2 = n_ww2, drop_ww2 = DROP_WW2, dy_peace_years = DY_PEACE_YEARS, full_controls = FULL_CONTROLS, n_fighting_at_ref = nrow(far_keys),
        event_weights = EVENT_WEIGHTS, n_flipped = sum(ev_keys$dir_flipped), iv_null_cor_logn = cor(iv_null, sy$log_n_system_tm1),
        pairs = PAIRS, pairs_weights = pairs_w, changes = CHANGES, winsor = winsor, context = CONTEXT, coal_ties = COAL_TIES, coal_drop = COAL_DROP, context_top3 = context_top3,
-       n_context_dropped = n_context_dropped, n_context_split_groups = n_split_groups, context_model = CONTEXT_MODEL, group_table = group_table)
+       n_context_dropped = n_context_dropped, n_context_split_groups = n_split_groups, context_model = CONTEXT_MODEL, group_table = group_table,
+       major = MAJOR, major_stats = major_stats, interact = INTERACT)
 }
 ## assemble_cell_spec(SAMPLE, LAG, spec, ...): the main-specification constants of spec.R plus the switches of `spec`
 ## model = NULL or a model code: the M1c model (CONTEXT_MODELS) switches CONTEXT_MODEL on; every other model leaves it off
@@ -466,5 +562,6 @@ assemble_cell_spec <- function(SAMPLE, LAG, spec, data_dir = spec_data_dir(spec,
   assemble_cell(SAMPLE, LAG, VARIANT, CENTRALITY, CONFLICT_HISTORY, SAMPLED_M, DISTANCE = DISTANCE, CONTIGUITY = CONTIGUITY,
                 DY_PEACE_YEARS = DY_PEACE_YEARS, DROP_WW2 = spec$ww2 == "drop", FULL_CONTROLS = spec$controls == "full",
                 EVENT_WEIGHTS = spec$weights, PAIRS = spec$pairs, CHANGES = spec$changes, CONTEXT = spec$context, COAL_TIES = spec$coal_ties,
-                COAL_DROP = spec$coal_drop, CONTEXT_MODEL = !is.null(model) && model %in% CONTEXT_MODELS, data_dir = data_dir, manifest = manifest)
+                COAL_DROP = spec$coal_drop, MAJOR = spec$major, INTERACT = spec$interact,
+                CONTEXT_MODEL = !is.null(model) && model %in% CONTEXT_MODELS, data_dir = data_dir, manifest = manifest)
 }

@@ -16,6 +16,9 @@
 ##   group-specific ideal-point shifts and tolerance scales over bilateral / coalition leader / joiner events) at lag 3 on mid and fmid with
 ##   every switch at its default (the model itself is the variant; cells <sample>_lag3_all_pr_M1c). --cell_index = 0 mid, 1 fmid.
 ##   Post-processing: 03_extract.R --fit=v2/output/fit_<sample>_lag3_all_pr_M1c.rds (context_model_*.csv, typology_*_<group>.csv).
+## major_ix preset (PI-approved stage-2 switches, 2026-10-27; MAJOR_IX_PRESET in spec.R): M1b, lag 3, samples fmid and mid, three switch
+##   combinations: major = joint (_major), interact = prefixed (_ix), both (_major_ix). --cell_index = 0..5 maps variant (slowest) x cell:
+##   0-1 major (fmid, mid), 2-3 interact, 4-5 both; without it all six run in sequence. M1b only: no M1 -> M2 dependency.
 ## Test preset (no switch; the existing permutation and systematic-measurement-error tests on the main cell's a / b fits):
 ##   perm_error   the temporal holdout (B9, constants frozen on the training years; --cutoff), the permutation test (rescore =
 ##                reliance diagnostic, refit = calibrated p-value) and the relational-level error inflation, per family, on
@@ -29,6 +32,7 @@
 ##   Rscript v2/R/05_robustness.R --preset=noww2 [--cells=mid:3:M1b,fmid:3:M1b,...] [--cell_index=i] [--dry_run=TRUE]
 ##   Rscript v2/R/05_robustness.R --preset=context [--cell_index=0..5] [--dry_run=TRUE] [--threads_per_chain=k]
 ##   Rscript v2/R/05_robustness.R --preset=context_b [--cell_index=0..1] [--dry_run=TRUE] [--threads_per_chain=k]
+##   Rscript v2/R/05_robustness.R --preset=major_ix [--cell_index=0..5] [--dry_run=TRUE] [--threads_per_chain=k]
 ##          [--threads_per_chain=k] [--chains= --iter= --warmup=] [other switches]
 ##       cells      : "sample:lag:model" list; default ROBUSTNESS_CELLS (spec.R). --cell_index=i (0-based) runs ONE cell of the
 ##                    list (the Slurm array of 04_robustness.sbatch); without it every cell runs in sequence.
@@ -69,11 +73,18 @@ if (PRESET != "perm_error") {
   } else if (PRESET == "context_b") {
     ## the M1c model on its fixed cells, every switch at its default: no --cells and no switch may be passed (the cell names would still be
     ## unique through the model code, but the stage-b run is defined on the main specification)
-    if (length(grep("^--(cells|pairs|context|coal_ties|coal_drop|direction|ww2|weights|controls|changes|ame_K)=", args)))
+    if (length(grep("^--(cells|pairs|context|coal_ties|coal_drop|direction|ww2|weights|controls|major|interact|changes|ame_K)=", args)))
       stop("the context_b preset fixes its cells (CONTEXT_B_PRESET in spec.R) and runs M1c on the main specification; no --cells and no switch may be passed")
     parts <- strsplit(CONTEXT_B_PRESET$cells, ":", fixed = TRUE)
     cells_tab <- data.frame(sample = vapply(parts, `[`, "", 1), lag = as.integer(vapply(parts, `[`, "", 2)), model = vapply(parts, `[`, "", 3), variant = NA_character_, stringsAsFactors = FALSE)
     stopifnot(all(cells_tab$model %in% CONTEXT_MODELS))
+  } else if (PRESET == "major_ix") {
+    ## the major_ix preset (2026-10-27) is a fixed table as well: the three switch combinations of MAJOR_IX_PRESET x its two cells
+    if (length(grep("^--(cells|major|interact)=", args))) stop("the major_ix preset fixes --cells, --major and --interact (MAJOR_IX_PRESET in spec.R); pass other switches only")
+    parts <- strsplit(MAJOR_IX_PRESET$cells, ":", fixed = TRUE)
+    cells_tab <- expand.grid(k = seq_along(MAJOR_IX_PRESET$cells), v = seq_along(MAJOR_IX_PRESET$variants))      # cell fastest, variant slowest
+    cells_tab <- data.frame(sample = vapply(parts, `[`, "", 1)[cells_tab$k], lag = as.integer(vapply(parts, `[`, "", 2))[cells_tab$k], model = vapply(parts, `[`, "", 3)[cells_tab$k],
+                            variant = names(MAJOR_IX_PRESET$variants)[cells_tab$v], stringsAsFactors = FALSE)
   } else {
     cells <- strsplit(get_arg(args, "cells", paste(ROBUSTNESS_CELLS, collapse = ",")), ",")[[1]]
     parts <- strsplit(cells, ":", fixed = TRUE)
@@ -86,7 +97,7 @@ if (PRESET != "perm_error") {
   log_open(paste0("05_robustness_", PRESET, if (idx >= 0) sprintf("_cell%d", idx) else ""))
   logf("preset %s -> switches %s (suffix %s); %d cell(s): %s", PRESET, spec_string(spec), spec_suffix(spec), nrow(cells_tab),
        paste(sprintf("%s:%d:%s%s", cells_tab$sample, cells_tab$lag, cells_tab$model, ifelse(is.na(cells_tab$variant), "", paste0(" [", cells_tab$variant, "]"))), collapse = " "))
-  if (!PRESET %in% c("context", "context_b") && spec_is_main(spec)) stop("the preset left every switch at its default; refusing to refit main-spec cells from the robustness driver")
+  if (!PRESET %in% c("context", "context_b", "major_ix") && spec_is_main(spec)) stop("the preset left every switch at its default; refusing to refit main-spec cells from the robustness driver")
   ## pass-through of the fit script's own options
   passthrough <- grep("^--(dry_run|threads_per_chain|chains|iter|warmup|adapt_delta|max_treedepth|pilot)=", args, value = TRUE)
   fit_script <- file.path(R_DIR, "02_fit_model.R")
@@ -94,6 +105,7 @@ if (PRESET != "perm_error") {
     cl <- cells_tab[k, ]
     spec_k <- spec
     if (PRESET == "context") for (nm in names(CONTEXT_PRESET$variants[[cl$variant]])) spec_k[[nm]] <- CONTEXT_PRESET$variants[[cl$variant]][[nm]]
+    if (PRESET == "major_ix") for (nm in names(MAJOR_IX_PRESET$variants[[cl$variant]])) spec_k[[nm]] <- MAJOR_IX_PRESET$variants[[cl$variant]][[nm]]
     if (spec_is_main(spec_k) && PRESET != "context_b") stop("refusing to refit a main-spec cell from the robustness driver")   # context_b: the M1c model IS the variant
     switch_args <- c(sprintf("--%s=%s", names(SPEC_CHOICES), unlist(spec_k[names(SPEC_CHOICES)])), sprintf("--ame_K=%d", spec_k$ame_K))
     cell <- cell_name(cl$sample, cl$lag, cl$model, spec_k)

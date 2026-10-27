@@ -26,6 +26,9 @@
 #                  delta_join and tolerance scales sigma_g over bilateral / coalition leader / joiner events, shared rho, multi_mid_jan in W)
 #                  at lag 3 on mid and fmid, every switch at its default; 2 tasks (array 0-1: 0 mid, 1 fmid; cells <sample>_lag3_all_pr_M1c).
 #                  M1 family only (M1 sampler settings), no dependency, no war. Post: 03_extract.R --fit=v2/output/fit_<sample>_lag3_all_pr_M1c.rds
+#   major_ix       the PI-approved stage-2 switches of 2026-10-27: M1b, lag 3, fmid and mid, for major=joint (_major), interact=prefixed (_ix)
+#                  and both (_major_ix); 6 tasks (array 0-5: 0-1 major, 2-3 interact, 4-5 both; cell order fmid, mid). M1b only: no
+#                  dependency needed. Post: 03_post.sbatch is for whole groups; read the fits with 03_extract.R --fit=<file> per cell.
 #   perm_error     the permutation, measurement-error and temporal-holdout tests on the main cell (ROBUSTNESS_MAIN_CELL: mid, lag 5),
 #                  the task layout of the former 06_measurement.sbatch (restored 2026-10-26, audit fix 6):
 #                    0 = m1 permutation + inflation      1 = m2 permutation + inflation
@@ -44,6 +47,7 @@
 #   PRESET=context bash v2/slurm/submit_robustness.sh                                        # 6 tasks, then Rscript v2/R/06_context_compare.R --sample=mid --lag=3
 #   PRESET=context_b bash v2/slurm/submit_robustness.sh                                      # 2 M1c tasks (mid, fmid; lag 3), then 03_extract.R on each fit
 #   PRESET=context_b bash v2/slurm/submit_robustness.sh --account=open --export=ALL,DRY_RUN=TRUE --time=00:30:00 --mem=16G --cpus-per-task=1   # assembly check
+#   PRESET=major_ix bash v2/slurm/submit_robustness.sh                                       # 6 M1b tasks (fmid, mid x _major, _ix, _major_ix)
 #   PRESET=noww2 bash v2/slurm/submit_robustness.sh --account=open --export=ALL,DRY_RUN=TRUE --time=00:30:00 --mem=16G --cpus-per-task=1
 #   sbatch --export=ALL,PRESET=perm_error --account=open --cpus-per-task=4 --mem=32G --time=47:00:00 v2/slurm/04_robustness.sbatch
 #   sbatch --export=ALL,PRESET=perm_error,PERM_MODE=refit,N_PERM=20 --cpus-per-task=4 --mem=32G --time=7-00:00:00 v2/slurm/04_robustness.sbatch   # basic
@@ -51,7 +55,7 @@
 source "${SLURM_SUBMIT_DIR:?submit from the repo root}/v2/slurm/00_env.sh" || exit 1
 cd "$V2_ROOT/.." || exit 1
 i=${SLURM_ARRAY_TASK_ID:?run as an array}
-P=${PRESET:?set --export=ALL,PRESET=<noww2|sideA|noweights|fullcontrols|winsor|context|context_b|perm_error>}
+P=${PRESET:?set --export=ALL,PRESET=<noww2|sideA|noweights|fullcontrols|winsor|context|context_b|major_ix|perm_error>}
 THR=${THREADS_PER_CHAIN:-8}; DRY=${DRY_RUN:-FALSE}
 case $P in
   perm_error)
@@ -77,5 +81,8 @@ case $P in
     [ "$i" -le 1 ] || { echo "context_b: array index $i out of range 0-1 (0 mid, 1 fmid)" >&2; exit 1; }
     echo "task $i: preset context_b (the M1c model, lag 3; cell index $i of 2: 0 mid, 1 fmid) threads_per_chain=$THR dry_run=$DRY"
     Rscript v2/R/05_robustness.R --preset=context_b --cell_index=$i --dry_run=$DRY --threads_per_chain=$THR ;;
+  major_ix)
+    echo "task $i: preset major_ix (variant x cell index $i of 6: 0-1 major, 2-3 interact, 4-5 both; fmid, mid) threads_per_chain=$THR dry_run=$DRY"
+    Rscript v2/R/05_robustness.R --preset=major_ix --cell_index=$i --dry_run=$DRY --threads_per_chain=$THR ;;
   *) echo "unknown PRESET $P" >&2; exit 1 ;;
 esac
