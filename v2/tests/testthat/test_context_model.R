@@ -388,5 +388,10 @@ test_that("sim/summarise_context_b.R: the coverage table over replicate files; t
   expect_true(any(grepl("SEED <- V2_SEED + REP", src, fixed = TRUE))); expect_true(any(grepl('"--seed is not an option', src, fixed = TRUE))); expect_true(any(grepl("context_b_smoke", src, fixed = TRUE)))
   expect_true(any(grepl("y1_sim <- rbinom(N1, 1L, plogis(TRUTH$alpha0 + lin))", src, fixed = TRUE)))                 # y1 is simulated from the model
   expect_true(any(grepl("rec$recovery_target <- TRUE", src, fixed = TRUE)))
+  ## Codex review 2026-10-27: targets are drawn from the FULL stage-2 set every slot (no removal), and smoke fits have their own directory
+  expect_false(any(grepl("setdiff(rows", src, fixed = TRUE)))
+  expect_true(any(grepl("picks[k] <- rows_all[sample.int(length(rows_all), 1L, prob = p)]", src, fixed = TRUE)))
+  expect_true(any(grepl('fit_dir <- file.path(sim_dir, "fits", if (SMOKE) "context_b_smoke" else "context_b")', src, fixed = TRUE)))
+  expect_true(any(grepl("file.path(fit_dir, sprintf(\"context_b_sim_%s.rds\", tag))", src, fixed = TRUE)))
   unlink(tmp, recursive = TRUE)
 })

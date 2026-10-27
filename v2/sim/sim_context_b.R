@@ -23,12 +23,12 @@
 ##                   rate; y1_n ~ Bernoulli(inv_logit(eta_n))
 ##   event slots     every simulated initiator draws one slot pattern from the pool of the kept observed initiators' patterns (with
 ##                   replacement; a pattern with more slots than the state-year's stage-2 rows minus one is redrawn)
-##   stage 2         each slot's target is drawn from the softmax of its GROUP's utility (mu0 + delta_g, Sigma_g) over the state-year's
-##                   in_s2 rows, without replacement within the state-year
+##   stage 2         each slot's target is drawn independently from the softmax of its GROUP's utility (mu0 + delta_g, Sigma_g) over the
+##                   state-year's FULL in_s2 set (with replacement, matching the likelihood, which scores every event against the complete set)
 ## Recovery targets: EVERY parameter the fit reports (mu0, delta_lead, delta_join, mu0 + delta_g, sigma_g (3 x 2), rho, beta, gamma,
 ## alpha0, alpha, tau, sd_re (3), sigma_b) plus mu_state (bilateral ideal points of the states with events: correlation and coverage).
 ## Output: v2/sim/results/context_b/context_b_recovery_r<r>.csv (parameter, truth, posterior mean, sd, 5 / 95%, covered, bias, z, Rhat,
-##         n_eff, rep, seed, run settings), context_b_design_r<r>.csv (the realised design counts), v2/sim/fits/context_b_sim_r<r>.rds
+##         n_eff, rep, seed, run settings), context_b_design_r<r>.csv (the realised design counts), v2/sim/fits/context_b[_smoke]/context_b_sim_r<r>.rds
 ##         (gitignored), a log in v2/logs. The fit uses the compiled m1_context program (compile_models.R) with the default M1 adapt_delta
 ##         / max_treedepth. Smoke check (a 2-core container, ~1 h): --smoke=TRUE --n_init=160 --n_noninit=140 --chains=2 --iter=500 --warmup=250.
 ## ============================================================================
@@ -47,7 +47,7 @@ if (length(grep("^--seed=", args))) stop("--seed is not an option: the seed is V
 stopifnot(REP >= 0, N_INIT >= 10, N_NONINIT >= 0, CHAINS >= 1, ITER > WARMUP, SAMPLE %in% ALL_SAMPLES, LAG %in% LAGS)
 log_open(sprintf("sim_context_b_r%d", REP)); set.seed(SEED)
 rstan_options(auto_write = FALSE); options(mc.cores = min(CHAINS, n_cores()))
-dir.create(file.path(sim_dir, "fits"), showWarnings = FALSE); res_dir <- file.path(sim_dir, "results", if (SMOKE) "context_b_smoke" else "context_b"); dir.create(res_dir, showWarnings = FALSE, recursive = TRUE)
+fit_dir <- file.path(sim_dir, "fits", if (SMOKE) "context_b_smoke" else "context_b"); dir.create(fit_dir, showWarnings = FALSE, recursive = TRUE); res_dir <- file.path(sim_dir, "results", if (SMOKE) "context_b_smoke" else "context_b"); dir.create(res_dir, showWarnings = FALSE, recursive = TRUE)
 tag <- sprintf("r%d", REP)
 logf("M1c simulation recovery on the observed %s lag-%d design, replicate %d (seed %d): n_init %d, n_noninit %d, chains %d, iter %d, warmup %d%s", SAMPLE, LAG, REP, SEED, N_INIT, N_NONINIT, CHAINS, ITER, WARMUP, if (SMOKE) " (SMOKE: results go to results/context_b_smoke/)" else "")
 
@@ -122,25 +122,26 @@ if (sum(y1_sim) < 5L) stop("fewer than 5 simulated initiators; raise --n_init")
 logf("stage 1 simulated: IV mean %.3f SD %.3f; alpha0 calibrated to %.3f; %d of %d state-years initiate (rate %.3f; observed initiators among them %d)",
      mean(IV), sd(IV), TRUTH$alpha0, sum(y1_sim), N1, mean(y1_sim), sum(y1_sim == 1L & sy_s$y1 == 1L))
 sy_sim <- sy_s; sy_sim$y1 <- as.integer(y1_sim)
-## ---- event slots and stage 2: a pattern per simulated initiator, targets from the group softmax without replacement -------------------
+## ---- event slots and stage 2: a pattern per simulated initiator; each event drawn independently from its group softmax over the FULL stage-2 set
+## (with replacement, as the likelihood scores every event against the complete set; Codex review 2026-10-27, P2)
 set.seed(SEED + 3L)
 ev_list <- vector("list", N1); n_redraw <- 0L
 for (n in which(y1_sim == 1L)) {
   rows_all <- dat0$cs_start[n]:dat0$cs_end[n]; rows_all <- rows_all[dat0$in_s2[rows_all] == 1L]
+  stopifnot(length(rows_all) >= 2L)
   pat <- pool[[sample.int(length(pool), 1L)]]
-  tries <- 0L
-  while (nrow(pat) > length(rows_all) - 1L) { pat <- pool[[sample.int(length(pool), 1L)]]; n_redraw <- n_redraw + 1L; tries <- tries + 1L; if (tries > 1000L) stop("no slot pattern fits state-year ", n) }
-  rows <- rows_all; picks <- integer(nrow(pat))
+  picks <- integer(nrow(pat))
   for (k in seq_len(nrow(pat))) {
-    u <- util_rows(rows, n, pat$grp[k]); p <- exp(u - max(u)); p <- p / sum(p)
-    picks[k] <- rows[sample.int(length(rows), 1L, prob = p)]
-    rows <- setdiff(rows, picks[k])
+    u <- util_rows(rows_all, n, pat$grp[k]); p <- exp(u - max(u)); p <- p / sum(p)
+    picks[k] <- rows_all[sample.int(length(rows_all), 1L, prob = p)]   # full set every slot: no removal of earlier picks
   }
   ev_list[[n]] <- data.frame(sy_row = n, alt_row = picks, grp = pat$grp, w = pat$w)
 }
 ev_sim <- bind_rows(ev_list)
-stopifnot(nrow(ev_sim) >= 1L, all(dat0$in_s2[ev_sim$alt_row] == 1L), all(alts_s$sy_row[ev_sim$alt_row] == ev_sim$sy_row), !anyDuplicated(paste(ev_sim$sy_row, ev_sim$alt_row)),
+stopifnot(nrow(ev_sim) >= 1L, all(dat0$in_s2[ev_sim$alt_row] == 1L), all(alts_s$sy_row[ev_sim$alt_row] == ev_sim$sy_row),
           all(sy_sim$y1[ev_sim$sy_row] == 1L), setequal(unique(ev_sim$sy_row), which(y1_sim == 1L)), all(ev_sim$w > 0), all(ev_sim$w <= 1))
+n_dup_events <- sum(duplicated(paste(ev_sim$sy_row, ev_sim$alt_row)))   # repeated (state-year, target) pairs: allowed under independent draws, logged
+logf("stage 2 simulated: %d events; %d repeat an earlier (state-year, target) pair", nrow(ev_sim), n_dup_events)
 for (g in 0:2) if (sum(ev_sim$grp == g) == 0L) stop("no simulated event in group ", STAGE2_GROUPS[g + 1L], "; raise --n_init")
 dat_sim <- build_stan_data(sy_sim, alts_s, ev_sim, A$W_cols, A$X_cols, A$Z_cols, joint = 1L, x_ref = x_ref, allow_orphan_initiations = FALSE, D_mode = 3L, S = S)
 dat_sim$ev_grp <- as.integer(ev_sim$grp)
@@ -212,10 +213,10 @@ rec$rep <- REP; rec$seed <- SEED; rec$n_init <- N_INIT; rec$n_noninit <- N_NONIN
 rec$elapsed_min <- elapsed; rec$divergences <- n_div; rec$treedepth_hits <- n_td; rec$sample <- SAMPLE; rec$lag <- LAG
 write.csv(rec, file.path(res_dir, sprintf("context_b_recovery_%s.csv", tag)), row.names = FALSE)
 write.csv(design |> mutate(rep = REP, seed = SEED, N1 = dat_sim$N1, N2 = dat_sim$N2, E = dat_sim$E, S = dat_sim$S, sum_y1 = sum(dat_sim$y1), alpha0_true = TRUTH$alpha0,
-                           n_states_with_events = length(with_ev), n_pattern_redraws = n_redraw),
+                           n_states_with_events = length(with_ev), n_pattern_redraws = n_redraw, n_dup_events = n_dup_events),
           file.path(res_dir, sprintf("context_b_design_%s.csv", tag)), row.names = FALSE)
 saveRDS(list(fit = fit, dat = dat_sim, truth = TRUTH, design = design, keep = keep, args = list(rep = REP, seed = SEED, n_init = N_INIT, n_noninit = N_NONINIT, chains = CHAINS, iter = ITER, warmup = WARMUP, sample = SAMPLE, lag = LAG)),
-        file.path(sim_dir, "fits", sprintf("context_b_sim_%s.rds", tag)))
+        file.path(fit_dir, sprintf("context_b_sim_%s.rds", tag)))   # smoke fits never overwrite production fits (Codex review 2026-10-27, P2)
 tg <- rec |> filter(!is.na(covered))
 logf("recovery over the %d parameters: 90%% coverage %.2f, mean |bias| %.3f, max |z| %.2f, max Rhat %.3f, min n_eff %.0f", nrow(tg), mean(tg$covered), mean(abs(tg$bias)), max(abs(tg$z)), max(tg$Rhat), min(tg$n_eff))
 for (b in c("stage_b", "stage_2", "stage_1", "re_scales")) { tb <- tg |> filter(block == b); logf("  block %-9s %2d parameters: coverage %.2f, mean |bias| %.3f, max |z| %.2f", b, nrow(tb), mean(tb$covered), mean(abs(tb$bias)), max(abs(tb$z))) }
