@@ -1,2 +1,2 @@
 "group","n_events","w_sum","n_states","n_state_years","rep","seed","N1","N2","E","S","sum_y1","alpha0_true","n_states_with_events","n_pattern_redraws","n_dup_events"
-"all",253,174.266666666667,88,162,0,123,300,34301,253,217,162,-1.79663020916845,88,0,7
+"all",323,184.375,82,160,0,123,300,32817,323,217,160,-1.8684041138341,82,0,24

@@ -6,9 +6,11 @@
 ##        [--sample=fmid] [--lag=3] [--pilot=FALSE] [--smoke=FALSE] [--model=M1c|M1b]
 ##   --model=M1b  (PI request 2026-10-27, after the M1c recovery bias) runs the SAME recovery test on the main-specification model M1b
 ##                (stan/m1_latent_additive.stan, joint "b" variant): the design is the real <sample> lag-<lag> M1b cell
-##                (assemble_cell_spec(model = "M1b"): W without multi_mid_jan, P1 = 8, no groups), the subsample keeps --n_init observed
-##                initiating state-years at random (the leader-first rule has no groups to apply to) plus --n_noninit non-initiators, the
-##                truth is the M1c BILATERAL truth trimmed to the M1b dimensions (mu0 = (-1.0, 0.3), sigma_x = (1.2, 0.9), rho = 0.4, the
+##                (assemble_cell_spec(model = "M1b"): W without multi_mid_jan, P1 = 8, no groups), the subsample is EXACTLY the M1c one
+##                (the same leader-first keep_init / keep_non selection from the same seed; the groups are computed for every model), so
+##                that for a given --rep both models get the same kept state-years, pattern pool, random effects z_re and b_j and only
+##                the likelihood differs (a paired design; with --n_init >= the number of observed initiators both rules keep every
+##                initiator anyway), the truth is the M1c BILATERAL truth trimmed to the M1b dimensions (mu0 = (-1.0, 0.3), sigma_x = (1.2, 0.9), rho = 0.4, the
 ##                same beta, gamma, alpha, tau, sd_re, R_Om, sigma_b), y1 and every event's target come from the single softmax over the
 ##                full in_s2 set, the slot patterns are the observed (weight) multisets of the kept initiators, and the fit uses the
 ##                compiled m1_latent_additive program with the M1 sampler settings. Outputs never collide with the M1c files:
@@ -62,12 +64,13 @@ stopifnot(REP >= 0, N_INIT >= 10, N_NONINIT >= 0, CHAINS >= 1, ITER > WARMUP, SA
 M1C <- MODEL == "M1c"
 log_open(if (M1C) sprintf("sim_context_b_r%d", REP) else sprintf("sim_m1b_r%d", REP)); set.seed(SEED)
 rstan_options(auto_write = FALSE); options(mc.cores = min(CHAINS, n_cores()))
+## the result / fit directories are named here and created only after the PILOT exit (a pilot leaves the production directories untouched)
 if (M1C) {
-  fit_dir <- file.path(sim_dir, "fits", if (SMOKE) "context_b_smoke" else "context_b"); dir.create(fit_dir, showWarnings = FALSE, recursive = TRUE); res_dir <- file.path(sim_dir, "results", if (SMOKE) "context_b_smoke" else "context_b"); dir.create(res_dir, showWarnings = FALSE, recursive = TRUE)
-  prefix <- "context_b"; fit_stem <- "context_b_sim"
+  fit_dir <- file.path(sim_dir, "fits", if (SMOKE) "context_b_smoke" else "context_b"); res_dir <- file.path(sim_dir, "results", if (SMOKE) "context_b_smoke" else "context_b")
+  prefix <- "context_b"
 } else {
-  fit_dir <- file.path(sim_dir, "fits", if (SMOKE) "m1b_recovery_smoke" else "m1b_recovery"); dir.create(fit_dir, showWarnings = FALSE, recursive = TRUE); res_dir <- file.path(sim_dir, "results", if (SMOKE) "m1b_recovery_smoke" else "m1b_recovery"); dir.create(res_dir, showWarnings = FALSE, recursive = TRUE)
-  prefix <- "m1b"; fit_stem <- "m1b_sim"
+  fit_dir <- file.path(sim_dir, "fits", if (SMOKE) "m1b_recovery_smoke" else "m1b_recovery"); res_dir <- file.path(sim_dir, "results", if (SMOKE) "m1b_recovery_smoke" else "m1b_recovery")
+  prefix <- "m1b"
 }
 tag <- sprintf("r%d", REP)
 logf("%s simulation recovery on the observed %s lag-%d design, replicate %d (seed %d): n_init %d, n_noninit %d, chains %d, iter %d, warmup %d%s", MODEL, SAMPLE, LAG, REP, SEED, N_INIT, N_NONINIT, CHAINS, ITER, WARMUP, if (SMOKE) sprintf(" (SMOKE: results go to results/%s/)", basename(res_dir)) else "")
@@ -79,14 +82,10 @@ stopifnot("grp" %in% names(ev), all(ev$grp %in% 0:2))                           
 if (M1C) stopifnot(tail(A$W_cols, 1) == "multi_mid_jan") else stopifnot(!"multi_mid_jan" %in% A$W_cols, identical(A$W_cols, c("dM_i", "dR_i", w_controls())))
 S <- length(A$state_codes)
 init_sy <- sort(unique(ev$sy_row)); lead_sy <- sort(unique(ev$sy_row[ev$grp == 1L]))
-if (M1C) {
-  keep_lead <- if (length(lead_sy) <= N_INIT) lead_sy else sort(sample(lead_sy, N_INIT))
-  keep_init <- sort(c(keep_lead, sample(setdiff(init_sy, keep_lead), N_INIT - length(keep_lead))))
-} else {
-  ## M1b has no groups, so the leader-first rule does not apply: N_INIT observed initiating state-years at random
-  stopifnot(length(init_sy) >= N_INIT)
-  keep_lead <- integer(0); keep_init <- sort(sample(init_sy, N_INIT))
-}
+## the same selection for both models (audit of 39232d3, 2026-10-27): M1b reuses the leader-first rule so that replicate r of the two models
+## shares the kept state-years, the pattern pool, z_re and b_j (paired design; only the likelihood differs)
+keep_lead <- if (length(lead_sy) <= N_INIT) lead_sy else sort(sample(lead_sy, N_INIT))
+keep_init <- sort(c(keep_lead, sample(setdiff(init_sy, keep_lead), N_INIT - length(keep_lead))))
 non_init <- setdiff(seq_len(nrow(sy)), init_sy)
 keep_non <- sort(sample(non_init, min(N_NONINIT, length(non_init))))
 keep <- sort(c(keep_init, keep_non))
@@ -222,6 +221,7 @@ sp <- get_sampler_params(fit, inc_warmup = FALSE)
 n_div <- sum(sapply(sp, function(m) sum(m[, "divergent__"]))); n_td <- sum(sapply(sp, function(m) sum(m[, "treedepth__"] >= SAMPLER$M1$max_treedepth)))
 logf("sampling finished in %.1f min; divergences %d; max-treedepth hits %d", elapsed, n_div, n_td)
 if (PILOT) { logf("PILOT done; no recovery table"); quit(save = "no", status = 0) }
+dir.create(fit_dir, showWarnings = FALSE, recursive = TRUE); dir.create(res_dir, showWarnings = FALSE, recursive = TRUE)
 
 ## ---- recovery table ---------------------------------------------------------------------------------------------------------------
 ## M1b (2026-10-27): sigma_x[1], sigma_x[2], rho_x[1] as the program names them, plus the generated Sigma (Sigma[1,2] is the PI's question;
@@ -258,6 +258,7 @@ rec <- bind_rows(rec, data.frame(parameter = c("mu_state[material] cor(post mean
                                  truth = c(1, 1, 0.9), mean = c(cor_ms, cov_ms), sd = NA, lo = NA, hi = NA, Rhat = NA, n_eff = NA, covered = NA, bias = NA, z = NA, block = "mu_state", recovery_target = TRUE))
 rec$rep <- REP; rec$seed <- SEED; rec$n_init <- N_INIT; rec$n_noninit <- N_NONINIT; rec$chains <- CHAINS; rec$iter <- ITER; rec$warmup <- WARMUP
 rec$elapsed_min <- elapsed; rec$divergences <- n_div; rec$treedepth_hits <- n_td; rec$sample <- SAMPLE; rec$lag <- LAG
+if (!M1C) rec$model <- MODEL                                  # the M1b CSV names its model; the M1c CSV keeps its columns (byte-identical)
 rec_file <- file.path(res_dir, sprintf("%s_recovery_%s.csv", prefix, tag)); dsn_file <- file.path(res_dir, sprintf("%s_design_%s.csv", prefix, tag))
 if (M1C) stopifnot(rec_file == file.path(res_dir, sprintf("context_b_recovery_%s.csv", tag)), dsn_file == file.path(res_dir, sprintf("context_b_design_%s.csv", tag)))
 write.csv(rec, rec_file, row.names = FALSE)

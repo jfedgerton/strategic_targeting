@@ -31,6 +31,7 @@ if (length(files) < MIN_REPS) stop(sprintf("%d replicate file(s) in %s; at least
 rec <- bind_rows(lapply(files, read.csv, stringsAsFactors = FALSE))
 stopifnot(all(c("parameter", "truth", "mean", "sd", "lo", "hi", "covered", "bias", "z", "Rhat", "n_eff", "block", "rep", "seed", "n_init", "n_noninit", "chains", "iter", "warmup",
                 "elapsed_min", "divergences", "treedepth_hits", "sample", "lag") %in% names(rec)))
+if (!M1C) { if (!"model" %in% names(rec)) stop("the M1b replicate files must carry a model column (sim_context_b.R --model=M1b writes it)"); stopifnot(all(rec$model == "M1b")) }
 reps <- rec |> distinct(rep, seed, n_init, n_noninit, chains, iter, warmup, sample, lag, elapsed_min, divergences, treedepth_hits)
 if (anyDuplicated(reps$rep)) stop("a replicate index appears in more than one file")
 if (nrow(distinct(reps, n_init, n_noninit, chains, iter, warmup, sample, lag)) != 1L) stop("the replicates were run with different settings (n_init / n_noninit / chains / iter / warmup / sample / lag); summarise one design at a time")
