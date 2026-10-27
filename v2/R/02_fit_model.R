@@ -14,6 +14,7 @@
 ##     --controls=minimal|full          --changes=raw|winsor      --ame_K=2
 ##     --context=all|bilateral|coalition (STAGE-2 events of one coalition context; stage 1 unchanged)  --coal_ties=inclusive|strict
 ##     --coal_drop=none|top3 (context=coalition only: without the 3 disputes contributing the most coalition events)
+##     --major=none|joint (one_major / both_major in Z, cowmaj_tm1 in W)  --interact=none|prefixed (four change products in Z)
 ##   sampler: --chains --iter --warmup --adapt_delta --max_treedepth (defaults per family in spec.R, SAMPLER: M2 runs 4000 / 2000
 ##            with adapt_delta 0.95 since the PI decision of 2026-10-25)
 ##   init_from: (M2 only) the M1 fit whose posterior means start every chain (jittered; AME factors near 0; spec.R INIT_*). Default:
@@ -37,7 +38,7 @@
 ##                               review 2026-10-26 P1: rstan drops a failed parallel chain and returns the rest with mode 0)
 ##   v2/output/summary_<cell>.csv posterior summaries of the structural parameters, labelled by axis and covariate (written AFTER
 ##                               the fit file)
-## Cell name: <sample>_lag<h>_all_pr_<model>[_K<K>][_orig|_join][_bi|_co][_strict][_drop3][_noww2][_fullctrl][_w1][_winsor][_sideA][_pilot]
+## Cell name: <sample>_lag<h>_all_pr_<model>[_K<K>][_orig|_join][_bi|_co][_strict][_drop3][_noww2][_fullctrl][_major][_ix][_w1][_winsor][_sideA][_pilot]
 ## Seed 123 everywhere (audit F11).
 ## ============================================================================
 suppressPackageStartupMessages({ library(rstan); library(dplyr); library(tidyr) })
@@ -121,6 +122,13 @@ if (spec$pairs != "all" && spec$weights == "dispute") logf("pairs = %s D8 rescal
 if (spec$context != "all") logf("context = %s (%s%s): %d stage-2 events removed, %d D8 groups split through collapsed keys; stage 1 unchanged, %d state-years with y1 = 1 and no stage-2 event",
                                 spec$context, spec$coal_ties, if (spec$coal_drop == "top3") sprintf(", without disputes %s", paste(A$context_top3$dispnum, collapse = ", ")) else "",
                                 A$n_context_dropped, A$n_context_split_groups, A$n_orphan)
+if (spec$major == "joint") logf("major = joint (2026-10-27): cowmaj_tm1 in W; one_major / both_major in Z; alternatives by major count (0 / 1 / 2) %.4f / %.4f / %.4f, stage-2 events %.4f / %.4f / %.4f (%d / %d / %d of %d); choice sets with within-set variation: IV sets one_major %d, both_major %d of %d; event-bearing stage-2 sets one_major %d, both_major %d of %d",
+                                A$major_stats$share_alts[["zero"]], A$major_stats$share_alts[["one"]], A$major_stats$share_alts[["both"]],
+                                A$major_stats$share_events[["zero"]], A$major_stats$share_events[["one"]], A$major_stats$share_events[["both"]],
+                                A$major_stats$n_events[["zero"]], A$major_stats$n_events[["one"]], A$major_stats$n_events[["both"]], dat$E,
+                                A$major_stats$var_iv_sets[["one_major"]], A$major_stats$var_iv_sets[["both_major"]], A$major_stats$var_iv_sets[["n_sets"]],
+                                A$major_stats$var_s2_sets[["one_major"]], A$major_stats$var_s2_sets[["both_major"]], A$major_stats$var_s2_sets[["n_sets"]])
+if (spec$interact == "prefixed") logf("interact = prefixed (2026-10-27): Z carries %s (products of the uncentred %s changes, centred over the IV rows)", paste(Z_INTERACT, collapse = ","), spec$changes)
 if (DRY_RUN) {
   saveRDS(list(dat = dat, cell = cell, state_codes = state_codes, W_cols = W_cols, X_cols = X_cols, Z_cols = Z_cols,
                manifest = manifest_cell, git_commit = git_commit_at_load, spec = spec, winsor = A$winsor,
@@ -229,7 +237,8 @@ obj <- list(fit = fit, dat = dat, cell = cell, state_codes = state_codes, W_cols
                         distance = DISTANCE, contiguity = CONTIGUITY, dy_peace_years = DY_PEACE_YEARS, drop_ww2 = spec$ww2 == "drop",
                         full_controls = spec$controls == "full", event_weights = spec$weights, direction = spec$direction,
                         pairs = spec$pairs, changes = spec$changes, context = spec$context, coal_ties = spec$coal_ties, coal_drop = spec$coal_drop,
-                        context_top3 = A$context_top3, D_mode = D_MODE, threads_per_chain = THREADS,
+                        context_top3 = A$context_top3, major = spec$major, major_stats = A$major_stats, interact = spec$interact,
+                        D_mode = D_MODE, threads_per_chain = THREADS,
                         init_source = init_info$source, init_from = init_info$m1_fit,
                         grainsize = dat$grainsize, seed = V2_SEED, adapt_delta = ADAPT_DELTA, max_treedepth = MAX_TD,
                         stan_source_sha256 = stan_prov$stan_source_sha256, compiled_model_code_sha256 = stan_prov$compiled_model_code_sha256,
