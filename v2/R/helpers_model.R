@@ -40,6 +40,10 @@ label_parameters <- function(pars, W_cols, X_cols, Z_cols, D_mode) {
   w <- base %in% c("Omega", "R_Om"); cov[w] <- paste(pick(re, i1[w]), pick(re, i2[w]), sep = " x ")
   w <- base == "Sigma"; axis[w] <- paste(pick(ax, i1[w]), pick(ax, i2[w]), sep = " x ")
   w <- base == "u_diag"; cov[w] <- paste0("latent_dim_", i1[w])
+  ## M1c (stage b): delta_lead / delta_join / mu0_lead / mu0_join per axis; sigma_g[g, d] -> group g, axis d; Sigma_g[g, i, j] is not summarised
+  w <- base %in% c("delta_lead", "delta_join", "mu0_lead", "mu0_join"); axis[w] <- pick(ax, i1[w])
+  w <- base == "sigma_g"; axis[w] <- pick(ax, i2[w]); cov[w] <- pick(STAGE2_GROUPS, i1[w])
+  w <- base == "rho_x"; axis[w] <- paste(ax, collapse = " x ")
   w <- base == "tau"; cov[w] <- "IV"
   w <- base == "alpha0"; cov[w] <- "intercept"
   out <- data.frame(parameter = pars, axis = axis, covariate = cov, stringsAsFactors = FALSE)
@@ -120,7 +124,7 @@ assert_fit_stan_current <- function(obj, root = v2_root(), what = "fit") {
   if (is.null(sha) || !is.character(sha) || length(sha) != 1 || !grepl("^[0-9a-f]{64}$", sha))
     stop(sprintf("%s %s records no Stan source hash (args$stan_source_sha256; saved before 2026-10-25 C3); refit it with the current program", what, obj$cell))
   if (is.null(obj$args$model)) stop(sprintf("%s %s records no model code (args$model)", what, obj$cell))
-  family <- if (model_family(obj$args$model) == "M1") "m1_latent_additive" else "m2_ame"
+  family <- stan_program(obj$args$model)          # m1_latent_additive | m2_ame | m1_context (M1c, stage b)
   sidecar <- file.path(root, "stan", "build", paste0(family, ".sha256"))
   if (!file.exists(sidecar)) stop("compiled-model sidecar hash missing: ", sidecar, "; rerun v2/R/compile_models.R")
   side <- trimws(readLines(sidecar, warn = FALSE)[1])

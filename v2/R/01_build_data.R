@@ -31,7 +31,9 @@
 ##   change_scale.csv              the pooled SD constants per lag and variable
 ##   stage1_panel_lag{h}.rds       state-year panel for h in LAGS: y1_{mid,fmid,fmidcow,fmidub,war} (escalations
 ##                                 excluded), W, X, ongoing_tm1 (participant in any MID active at t-1), the power levels M_lvl /
-##                                 R_lvl at t-1 (within-year centred, gap-scaled; D2) and log_n_system_tm1 (D3)
+##                                 R_lvl at t-1 (within-year centred, gap-scaled; D2) and log_n_system_tm1 (D3); multi_mid_jan /
+##                                 n_multi_jan (a multilateral MID the state had not entered is active at 1 January of t; the M1c
+##                                 stage-1 control of dual typology stage b, 2026-10-27; not in the main W)
 ##   alts_lag{h}_{all,polrel}.rds  flattened choice sets (one row per state-year x alternative): the UNION of the
 ##                                 stage-1 IV set (in_iv = 1: pair not already fighting at JANUARY of t, every state-year)
 ##                                 and the stage-2 set (in_s2 = 1: pair not already fighting at the state-year's reference
@@ -714,7 +716,7 @@ for (s in c("mid", "fmid", "fmidcow", "fmidub", "war")) {
        sum(events$coal_onset_ambiguous[f]), sum(events$.mixed_incl[f]), sum(events$.mixed_strict[f]))
 }
 events <- events |> select(-.n_src, -.mixed_incl, -.mixed_strict)
-rm(coal_key, mixed_c, n_ev_c, psd, pairs_pre, coal, coal_grp, coal_ev, coal_mem)
+rm(coal_key, mixed_c, n_ev_c, pairs_pre, coal, coal_grp, coal_ev, coal_mem)   # psd stays: multilateral_jan_flags() (stage b) uses it below
 ## no-WWII flags after the collapse (review P2-3): a subset of the sample flag; equal to in_* & !is_ww2 on every event from a
 ## single dispute; on mixed keys (a WWII and a non-WWII dispute) the old rule in_* & !is_ww2 dropped the event, the new flag
 ## keeps it when a non-WWII dispute qualifies
@@ -869,6 +871,21 @@ stopifnot(all(abs(lvl_chk$mM) < 1e-10), all(abs(lvl_chk$mR) < 1e-10), all(is.fin
 blog("power levels (D2): M_lvl = (log CINC share - year mean) / %.6f, R_lvl = (log PageRank - year mean) / %.6f over all %d state-years with positions; SD %.3f / %.3f, 5/50/95 pct %.2f/%.2f/%.2f and %.2f/%.2f/%.2f",
      GAP_SCALE_M, GAP_SCALE_R, nrow(pos_lvl), sd(pos_lvl$M_lvl), sd(pos_lvl$R_lvl), quantile(pos_lvl$M_lvl, .05), median(pos_lvl$M_lvl), quantile(pos_lvl$M_lvl, .95),
      quantile(pos_lvl$R_lvl, .05), median(pos_lvl$R_lvl), quantile(pos_lvl$R_lvl, .95))
+## ---- multilateral MID open at January of t (dual typology stage b, 2026-10-27; the M1c stage-1 control; helper in helpers_data.R) --------
+## multi_mid_jan(i, t) = 1 when a MID with more than one state on a side (present participants by their spell dates, inclusive ties, COW
+## sides in year t) is active at 1 January of t and i has not entered it at or before that date. Same participant spells (psd) and date
+## logic as the coalition flag. Computed once on every system state-year and joined to each lag's panel below; outcome-blind by
+## construction (January precedes every event of t). It enters W in the M1c model ONLY (assemble_cell(CONTEXT_MODEL = TRUE)).
+multi_jan <- multilateral_jan_flags(states |> select(ccode, year), psd, dd)
+multi_disp <- attr(multi_jan, "disputes")
+blog("multi_mid_jan (stage b): active multilateral dispute-years at 1 January %d (of %d active dispute-years), in %d distinct years; state-years with at least one such dispute they had not entered: %d of %d (mean %.4f); max disputes per state-year %d; participants on both sides within a dispute-year (side of t-1 used at 1 January) %d",
+     nrow(multi_disp), attr(multi_jan, "n_active_dispute_years"), n_distinct(multi_disp$year), sum(multi_jan$multi_mid_jan), nrow(multi_jan), mean(multi_jan$multi_mid_jan), max(multi_jan$n_multi_jan), attr(multi_jan, "n_side_switch_years"))
+blog("multi_mid_jan: the 10 largest active multilateral disputes at a 1 January (dispute, year, states present on side A / side B): %s",
+     paste(with(multi_disp |> arrange(desc(n_side_a + n_side_b), year) |> slice_head(n = 10), sprintf("%d/%d %d/%d", dispnum, year, n_side_a, n_side_b)), collapse = "; "))
+if (DIRECTION == "cowwar") {
+  ## the Second World War (dispute 258) is open and multilateral at 1 January 1940-1945, and the USA (2) had not entered it at 1 January 1941
+  stopifnot(all(1940:1945 %in% multi_disp$year[multi_disp$dispnum == 258L]), multi_jan$multi_mid_jan[multi_jan$ccode == 2L & multi_jan$year == 1941L] == 1L)
+}
 manifest <- list()
 add_manifest <- function(obj, fname, note) {
   p <- file.path(out_dir, fname); saveRDS(obj, p)
@@ -931,6 +948,10 @@ for (h in LAGS) {
   panel <- panel |> left_join(act_state |> transmute(ccode, year = year + 1L, ongoing_tm1 = active), by = c("ccode", "year")) |>
     mutate(ongoing_tm1 = coalesce(ongoing_tm1, 0L))
   stopifnot(all(panel$ongoing_tm1 %in% c(0L, 1L)))
+  ## multilateral MID open at January of t (stage b, 2026-10-27): every panel state-year is a system state-year, so the join is exact
+  n_panel <- nrow(panel)
+  panel <- panel |> inner_join(multi_jan |> select(ccode, year, multi_mid_jan, n_multi_jan), by = c("ccode", "year"))
+  stopifnot(nrow(panel) == n_panel, all(panel$multi_mid_jan %in% c(0L, 1L)), !anyNA(panel$n_multi_jan))
   ## initiation indicators per sample. The sample flags exclude escalations (PI decision 2026-10-24), so a state-year
   ## whose only events are escalations has y1 = 0 and n_ev = 0. n_ev_mid counts in_mid, not every event row.
   ev_sy <- events |> group_by(ccode = initiator, year) |>
@@ -956,8 +977,11 @@ for (h in LAGS) {
   chk_y1 <- panel |> select(ccode, year, y1_mid) |> left_join(y1_re, by = c("ccode", "year")) |> mutate(.y = coalesce(.y, 0L))
   stopifnot(all(chk_y1$y1_mid == chk_y1$.y))
   blog("  ongoing_tm1 h=%d: mean %.4f (%d of %d state-years in a MID active at t-1)", h, mean(panel$ongoing_tm1), sum(panel$ongoing_tm1), nrow(panel))
+  blog("  multi_mid_jan h=%d (stage b): mean %.4f (%d of %d state-years with a multilateral MID they had not entered active at 1 January of t); among initiators mid/fmid/war %.4f/%.4f/%.4f; cor with ongoing_tm1 %.3f",
+       h, mean(panel$multi_mid_jan), sum(panel$multi_mid_jan), nrow(panel), mean(panel$multi_mid_jan[panel$y1_mid == 1L]), mean(panel$multi_mid_jan[panel$y1_fmid == 1L]),
+       mean(panel$multi_mid_jan[panel$y1_war == 1L]), cor(panel$multi_mid_jan, panel$ongoing_tm1))
   assert_no_dup_keys(panel, c("ccode", "year"), sprintf("stage-1 panel h=%d", h))
-  assert_no_na(panel, c("dM_h", "dRpr_h", "dM_raw_h", "dRpr_raw_h", "dReig_h", "M_tm1", "Rpr_tm1", "M_lvl", "R_lvl", "log_n_system_tm1", "cowmaj_tm1", "dem_tm1", "ongoing_tm1",
+  assert_no_na(panel, c("dM_h", "dRpr_h", "dM_raw_h", "dRpr_raw_h", "dReig_h", "M_tm1", "Rpr_tm1", "M_lvl", "R_lvl", "log_n_system_tm1", "cowmaj_tm1", "dem_tm1", "ongoing_tm1", "multi_mid_jan",
                         "mon_prior_mids_h", "mon_peace_years_h", "y1_mid", "y1_fmid", "y1_fmidcow", "y1_fmidub", "y1_war"), "stage-1 panel")
   assert_finite(panel, c("dM_h", "dRpr_h", "dM_raw_h", "dRpr_raw_h", "M_tm1", "Rpr_tm1", "M_lvl", "R_lvl", "log_n_system_tm1"), sprintf("stage-1 panel h=%d", h))
   ## D2 levels on the panel rows: they are centred over ALL states with positions at t-1, so the panel mean is near but not exactly 0
@@ -986,7 +1010,7 @@ for (h in LAGS) {
   ev_lost <- events |> filter(in_mid) |> anti_join(panel, by = c("initiator" = "ccode", "year"))
   blog("  non-escalation events whose initiator state-year is NOT in the panel (no positions at t-1 / t-1-h): %d of %d", nrow(ev_lost), sum(events$in_mid))
   add_manifest(panel, sprintf("stage1_panel_lag%d.rds", h),
-               sprintf("stage-1 panel, h=%d; y1 excludes escalations; ongoing_tm1; levels M_lvl / R_lvl at t-1 (within-year centred / gap constants); log_n_system_tm1; dM_h / dRpr_h year-centred and scaled by pooled SD M=%.6f R_pr=%.6f", h, chg$scale$pooled_sd[1], chg$scale$pooled_sd[2]))
+               sprintf("stage-1 panel, h=%d; y1 excludes escalations; ongoing_tm1; multi_mid_jan (stage b); levels M_lvl / R_lvl at t-1 (within-year centred / gap constants); log_n_system_tm1; dM_h / dRpr_h year-centred and scaled by pooled SD M=%.6f R_pr=%.6f", h, chg$scale$pooled_sd[1], chg$scale$pooled_sd[2]))
 
   ## ---- choice sets: panel state-year x every other system member at t with positions at t-1 ----
   alts <- panel |> select(ccode1 = ccode, year, M_i = M_tm1, Rpr_i = Rpr_tm1, Reig_i = Reig_tm1, win_start) |>

@@ -25,6 +25,12 @@
 ##                   events of the 3 disputes contributing the most coalition events of the sample (a collapsed key counts for each of its
 ##                   disputes and leaves when any of them is in the top 3; ties at the third place are logged).
 ##   DROP_WW2, FULL_CONTROLS, EVENT_WEIGHTS: the ww2, controls and weights switches (below).
+##   CONTEXT_MODEL = FALSE (every model of MODELS) | TRUE (the M1c model of dual typology stage b, 2026-10-27): the build's state-year
+##                   column multi_mid_jan (a multilateral MID the state had not entered is active at 1 January of t) is appended to W as
+##                   its last column, grand-centred like the other 0/1 controls. Nothing else changes, so the main specification's W is
+##                   untouched. The three stage-2 event groups (bilateral / coalition leader / joiner; stage2_groups() in helpers_data.R,
+##                   from coal_incl and is_joiner_pair; COAL_TIES applies to the context filter only) are computed, asserted and logged for EVERY model and returned as ev$grp;
+##                   only the M1c model passes them to Stan (02_fit_model.R), so the Stan data of the existing models are unchanged.
 ## Control sets (PI decision 2026-10-24, minimal controls). Major-power status and alliance are components of material
 ## and relational power, so they are bad controls and left the main specification; the main sets are as small as the
 ## design allows.
@@ -92,11 +98,13 @@ SY_INDICATORS <- c("cowmaj_tm1", "dem_tm1", "ongoing_tm1")
 assemble_cell <- function(SAMPLE, LAG, VARIANT, CENT = "pr", CONFLICT_HISTORY = TRUE, SAMPLED_M = 0L,
                           DISTANCE = FALSE, CONTIGUITY = TRUE, DY_PEACE_YEARS = FALSE, DROP_WW2 = FALSE, FULL_CONTROLS = FALSE,
                           EVENT_WEIGHTS = "dispute", PAIRS = "all", CHANGES = "raw", CONTEXT = "all", COAL_TIES = "inclusive", COAL_DROP = "none",
-                          data_dir = file.path(v2_root(), "data"), manifest = NULL) {
+                          CONTEXT_MODEL = FALSE, data_dir = file.path(v2_root(), "data"), manifest = NULL) {
   stopifnot(SAMPLE %in% c("mid", "fmid", "fmidcow", "fmidub", "war"), LAG %in% c(1L, 3L, 5L, 10L), VARIANT %in% c("all", "polrel"), CENT %in% c("pr", "eig"),
             EVENT_WEIGHTS %in% c("dispute", "none"), PAIRS %in% c("all", "originators", "joiners"), CHANGES %in% c("raw", "winsor"),
             CONTEXT %in% c("all", "bilateral", "coalition"), COAL_TIES %in% c("inclusive", "strict"), COAL_DROP %in% c("none", "top3"))
   if (COAL_DROP != "none" && CONTEXT != "coalition") stop("COAL_DROP = top3 needs CONTEXT = coalition")
+  stopifnot(is.logical(CONTEXT_MODEL), length(CONTEXT_MODEL) == 1L, !is.na(CONTEXT_MODEL))
+  if (CONTEXT_MODEL && FULL_CONTROLS) stop("CONTEXT_MODEL (M1c) is defined on the minimal control set only (FULL_CONTROLS = TRUE not supported)")
   manifest_path <- file.path(data_dir, "manifest.csv")
   stopifnot(file.exists(manifest_path))
   if (is.null(manifest)) { manifest <- read.csv(manifest_path, stringsAsFactors = FALSE); manifest_source <- "read now" }
@@ -154,6 +162,13 @@ assemble_cell <- function(SAMPLE, LAG, VARIANT, CENT = "pr", CONFLICT_HISTORY = 
   state_codes <- sort(unique(c(sy$ccode, alts$ccode2)))
   sy$state_idx <- match(sy$ccode, state_codes)
   ctrl_w <- w_controls(CONFLICT_HISTORY, FULL_CONTROLS); ctrl_x <- x_controls(CONFLICT_HISTORY, FULL_CONTROLS)
+  if (CONTEXT_MODEL) {
+    ## stage b: the outcome-blind multilateral-opportunity control, LAST in W (0/1 from the build; grand-centred below like the other indicators)
+    if (!"multi_mid_jan" %in% names(sy)) stop("CONTEXT_MODEL (M1c) needs the panel column multi_mid_jan (rebuild the data with 01_build_data.R of 2026-10-27 or later)")
+    stopifnot(!anyNA(sy$multi_mid_jan), all(sy$multi_mid_jan %in% c(0, 1)))
+    logf("multi_mid_jan (stage b, M1c): mean %.4f over %d state-years (%d with a multilateral MID they had not entered active at 1 January of t); among initiators (y1 = 1) %.4f", mean(sy$multi_mid_jan), nrow(sy), sum(sy$multi_mid_jan), mean(sy$multi_mid_jan[sy$y1 == 1L]))
+    ctrl_w <- c(ctrl_w, "multi_mid_jan")
+  }
   ctrl_sy <- union(ctrl_w, ctrl_x)
   ## centre every stage-1 / mu control that enters W or X (the 0/1 indicators as well as the conflict-history counts; PI
   ## decisions 2026-10-23 / 2026-10-24) so that alpha0 in stage 1 is the log-odds at zero power change and average
@@ -172,7 +187,7 @@ assemble_cell <- function(SAMPLE, LAG, VARIANT, CENT = "pr", CONFLICT_HISTORY = 
                                         mean(sy$M_lvl), sd(sy$M_lvl), mean(sy$R_lvl), sd(sy$R_lvl))
   W_cols <- c("dM_i", "dR_i", ctrl_w)      # PI decision 2026-10-22: initiator power changes also enter stage 1 directly
   X_cols <- c("dM_i", "dR_i", ctrl_x)      # main: power changes only; --full_controls: the same controls as W
-  logf("control set: %s; W = %s; X = %s", if (FULL_CONTROLS) "FULL (base specification of commit 8bf0ce1)" else "MINIMAL (main)", paste(W_cols, collapse = ","), paste(X_cols, collapse = ","))
+  logf("control set: %s%s; W = %s; X = %s", if (FULL_CONTROLS) "FULL (base specification of commit 8bf0ce1)" else "MINIMAL (main)", if (CONTEXT_MODEL) " + multi_mid_jan (M1c)" else "", paste(W_cols, collapse = ","), paste(X_cols, collapse = ","))
   
   ## ---- alternatives -----------------------------------------------------------------------------
   sy_key <- sy |> transmute(ccode1 = ccode, year, sy_row = row_number())
@@ -365,9 +380,17 @@ assemble_cell <- function(SAMPLE, LAG, VARIANT, CENT = "pr", CONFLICT_HISTORY = 
     }
   } else logf("context = all: %d events in sample %s (coalition context: %d inclusive, %d strict)", nrow(ev_all), SAMPLE, sum(ev_all$coal_incl), sum(ev_all$coal_strict))
   ## one chosen alternative per (i, j, t): same-year duplicates were collapsed by the build (PI decision 2026-10-24)
+  ## stage-2 event groups (dual typology stage b, 2026-10-27): bilateral / coalition leader / joiner from coal_incl (the spec's column; the
+  ## stage-a tie convention COAL_TIES applies to the context FILTER only) and is_joiner_pair (stage2_groups(): exactly one group per event,
+  ## asserted); counted with their D8 weight sums here and again on the usable events below
+  grp_all <- stage2_groups(ev_all, "coal_incl")
   ev_keys <- ev_all |> transmute(ccode1 = initiator, ccode2 = target, year, dispnum, dispnums, target_has_pos_tm1, fighting_at_ref, dir_flipped,
-                                 w = if (EVENT_WEIGHTS == "dispute") .data[[w_col]] else 1)
+                                 w = if (EVENT_WEIGHTS == "dispute") .data[[w_col]] else 1, grp = grp_all)
   assert_no_dup_keys(ev_keys, c("ccode1", "ccode2", "year"), sprintf("events of sample %s", SAMPLE))
+  stopifnot(all(ev_keys$grp %in% 0:2), sum(ev_keys$grp == 0L) + sum(ev_keys$grp == 1L) + sum(ev_keys$grp == 2L) == nrow(ev_keys))
+  logf("stage-2 event groups (stage b; coalition column %s, joiner flag is_joiner_pair) over the %d sample events: bilateral %d (weights %.1f), coalition leader %d (%.1f), joiner %d (%.1f); joiner pairs whose initiator is an originator (orig1 = 1, target a joiner) %d",
+       "coal_incl", nrow(ev_keys), sum(ev_keys$grp == 0L), sum(ev_keys$w[ev_keys$grp == 0L]), sum(ev_keys$grp == 1L), sum(ev_keys$w[ev_keys$grp == 1L]), sum(ev_keys$grp == 2L), sum(ev_keys$w[ev_keys$grp == 2L]),
+       if ("orig1" %in% names(ev_all)) sum(ev_all$is_joiner_pair & ev_all$orig1 == 1L) else NA_integer_)
   stopifnot(all(is.finite(ev_keys$w)), all(ev_keys$w > 0), all(ev_keys$w <= 1))
   logf("direction (D1): %d of %d events in sample %s have the reversed direction (COW war initiator)", sum(ev_keys$dir_flipped), nrow(ev_keys), SAMPLE)
   ## an event whose pair was already fighting at the state-year's reference date (its earlier dispute ended before the
@@ -379,6 +402,15 @@ assemble_cell <- function(SAMPLE, LAG, VARIANT, CENT = "pr", CONFLICT_HISTORY = 
   ## the chosen alternative must be a STAGE-2 row of the state-year's block (alt_row indexes the full block)
   ev <- ev_keys |> inner_join(sy_key, by = c("ccode1", "year")) |>
     inner_join(alts |> mutate(alt_row = row_number()) |> filter(in_s2 == 1L) |> select(ccode1, ccode2, year, alt_row, dy_mid_tm1), by = c("ccode1", "ccode2", "year"))
+  stopifnot(all(ev$grp %in% 0:2))
+  group_table <- data.frame(group = STAGE2_GROUPS, grp = 0:2,
+                            n_sample = as.integer(tabulate(ev_keys$grp + 1L, nbins = 3L)), w_sample = vapply(0:2, function(g) sum(ev_keys$w[ev_keys$grp == g]), numeric(1)),
+                            n_usable = as.integer(tabulate(ev$grp + 1L, nbins = 3L)), w_usable = vapply(0:2, function(g) sum(ev$w[ev$grp == g]), numeric(1)),   # (rowsum() would drop an empty group)
+                            n_states = vapply(0:2, function(g) n_distinct(ev$ccode1[ev$grp == g]), 1L), stringsAsFactors = FALSE)
+  stopifnot(sum(group_table$n_usable) == nrow(ev), sum(group_table$n_sample) == nrow(ev_keys), abs(sum(group_table$w_usable) - sum(ev$w)) < 1e-9)
+  logf("stage-2 event groups over the %d usable events (sample %s): bilateral %d (weights %.1f, %d initiating states), coalition leader %d (%.1f, %d), joiner %d (%.1f, %d)",
+       nrow(ev), SAMPLE, group_table$n_usable[1], group_table$w_usable[1], group_table$n_states[1], group_table$n_usable[2], group_table$w_usable[2], group_table$n_states[2],
+       group_table$n_usable[3], group_table$w_usable[3], group_table$n_states[3])
   logf("events in sample %s: %d (from %d dispute pairs); usable (initiator in panel AND target in the stage-2 choice set): %d", SAMPLE, nrow(ev_keys),
        sum(lengths(strsplit(ev_keys$dispnums, ";", fixed = TRUE))), nrow(ev))
   stopifnot(nrow(ev) > 0, all(sy$y1[ev$sy_row] == 1L), all(alts$in_s2[ev$alt_row] == 1L), all(alts$sy_row[ev$alt_row] == ev$sy_row))
@@ -405,7 +437,7 @@ assemble_cell <- function(SAMPLE, LAG, VARIANT, CENT = "pr", CONFLICT_HISTORY = 
   ## stage-2 event weights (D8): w_<sample> from the build (or 1 under EVENT_WEIGHTS = "none"); build_stan_data() passes them as ev_w
   logf("event weights (D8, %s): %d usable events, sum of weights %.1f; weight 1 on %d events, min %.4f; weights of the events in the panel's (initiator, dispute, year) groups whose other targets left stage 2 through the choice set no longer sum to 1 (logged, not rescaled; only the pairs filter rescales, see above)",
        EVENT_WEIGHTS, nrow(ev), sum(ev$w), sum(ev$w == 1), min(ev$w))
-  ev <- ev |> select(sy_row, alt_row, w)
+  ev <- ev |> select(sy_row, alt_row, w, grp)        # grp: the stage-b group (0 bilateral, 1 leader, 2 joiner); build_stan_data() ignores it, 02_fit_model.R passes it for M1c only
   
   ## ---- optional sampled alternatives ------------------------------------------------------------------
   n_full <- NULL; sampled <- 0L
@@ -425,12 +457,14 @@ assemble_cell <- function(SAMPLE, LAG, VARIANT, CENT = "pr", CONFLICT_HISTORY = 
        n_ww2 = n_ww2, drop_ww2 = DROP_WW2, dy_peace_years = DY_PEACE_YEARS, full_controls = FULL_CONTROLS, n_fighting_at_ref = nrow(far_keys),
        event_weights = EVENT_WEIGHTS, n_flipped = sum(ev_keys$dir_flipped), iv_null_cor_logn = cor(iv_null, sy$log_n_system_tm1),
        pairs = PAIRS, pairs_weights = pairs_w, changes = CHANGES, winsor = winsor, context = CONTEXT, coal_ties = COAL_TIES, coal_drop = COAL_DROP, context_top3 = context_top3,
-       n_context_dropped = n_context_dropped, n_context_split_groups = n_split_groups)
+       n_context_dropped = n_context_dropped, n_context_split_groups = n_split_groups, context_model = CONTEXT_MODEL, group_table = group_table)
 }
 ## assemble_cell_spec(SAMPLE, LAG, spec, ...): the main-specification constants of spec.R plus the switches of `spec`
-assemble_cell_spec <- function(SAMPLE, LAG, spec, data_dir = spec_data_dir(spec, v2_root()), manifest = NULL) {
+## model = NULL or a model code: the M1c model (CONTEXT_MODELS) switches CONTEXT_MODEL on; every other model leaves it off
+assemble_cell_spec <- function(SAMPLE, LAG, spec, data_dir = spec_data_dir(spec, v2_root()), manifest = NULL, model = NULL) {
+  stopifnot(is.null(model) || model %in% ALL_MODELS)
   assemble_cell(SAMPLE, LAG, VARIANT, CENTRALITY, CONFLICT_HISTORY, SAMPLED_M, DISTANCE = DISTANCE, CONTIGUITY = CONTIGUITY,
                 DY_PEACE_YEARS = DY_PEACE_YEARS, DROP_WW2 = spec$ww2 == "drop", FULL_CONTROLS = spec$controls == "full",
                 EVENT_WEIGHTS = spec$weights, PAIRS = spec$pairs, CHANGES = spec$changes, CONTEXT = spec$context, COAL_TIES = spec$coal_ties,
-                COAL_DROP = spec$coal_drop, data_dir = data_dir, manifest = manifest)
+                COAL_DROP = spec$coal_drop, CONTEXT_MODEL = !is.null(model) && model %in% CONTEXT_MODELS, data_dir = data_dir, manifest = manifest)
 }

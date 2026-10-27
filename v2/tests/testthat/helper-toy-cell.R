@@ -13,13 +13,16 @@ source(file.path(root, "R", "spec.R")); source(file.path(root, "R", "helpers_dat
 ## Events (mid): 10 -> 20 (dispute 1); 10 -> 30 (disputes 4;5, one of them WWII: is_ww2 TRUE, in_mid_noww2 TRUE, in_fmid_noww2 FALSE);
 ##   30 -> 20 (dispute 2); 30 -> 40 (dispute 3, fighting_at_ref: stage 1 only, its row is IV only); 30 -> 10 (dispute 6, pure WWII);
 ##   40 -> 20 (dispute 7, pure WWII: under --drop_ww2 state-year 40 loses y1)
+## Stage-b (2026-10-27): the panel carries multi_mid_jan / n_multi_jan (the M1c stage-1 control); with the default flags (no joiner pairs) the
+##   stage-2 groups are 10 -> 20 and 30 -> 40 bilateral, the four coalition events leaders; test_context_model.R sets joiner pairs via events_edit
 write_toy_cell <- function(dir, alts_edit = identity, events_edit = identity) {
   dir.create(dir, showWarnings = FALSE, recursive = TRUE)
   panel <- tibble(ccode = c(10L, 20L, 30L, 40L), year = 1990L, h = 3L, y1_mid = c(1L, 0L, 1L, 1L), y1_fmid = c(1L, 0L, 1L, 1L),
                   mon_prior_mids_h = c(2L, 0L, 1L, 3L), mon_peace_years_h = c(3L, 10L, 1L, 2L),
                   dM_h = c(0.5, -0.2, 0.1, -0.4), dRpr_h = c(0.3, 0.0, -0.6, 0.2), dReig_h = c(0.1, 0.2, 0.3, 0.4),
                   M_lvl = c(0.8, -0.3, -0.1, -0.4), R_lvl = c(0.2, 0.5, -0.4, -0.3), log_n_system_tm1 = log(4),
-                  cowmaj_tm1 = c(1L, 0L, 0L, 1L), dem_tm1 = c(1L, 1L, 0L, 0L), ongoing_tm1 = c(0L, 0L, 1L, 1L))
+                  cowmaj_tm1 = c(1L, 0L, 0L, 1L), dem_tm1 = c(1L, 1L, 0L, 0L), ongoing_tm1 = c(0L, 0L, 1L, 1L),
+                  multi_mid_jan = c(1L, 0L, 1L, 0L), n_multi_jan = c(2L, 0L, 1L, 0L))     # stage b (2026-10-27): the M1c stage-1 control
   a <- tidyr::expand_grid(ccode1 = c(10L, 20L, 30L, 40L), ccode2 = c(10L, 20L, 30L, 40L)) |> filter(ccode1 != ccode2) |>
     mutate(year = 1990L, h = 3L, in_iv = 1L, in_s2 = 1L)
   a$in_iv[a$ccode1 == 10L & a$ccode2 == 40L] <- 0L

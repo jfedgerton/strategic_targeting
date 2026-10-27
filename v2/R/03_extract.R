@@ -17,6 +17,13 @@
 ##   reach_<cell>.csv      (appendix) posterior mean / 90% interval of r_i = ||mu_i||, |mu_i1|, |mu_i2|
 ##   focus_sigma_<cell>.csv, focus_states_<cell>.csv  (appendix, descriptive) pooled Sigma summary and per-state
 ##                         empirical dispersion of chosen-target positions around mean mu_event (n < 5 flagged)
+##   M1c fits only (dual typology stage b, 2026-10-27; context_model.R):
+##   context_model_<cell>.csv   delta_lead, delta_join, sigma_g per group, the shared rho, the group population ideal points
+##                              mu0 / mu0 + delta_lead / mu0 + delta_join and Sigma_g per group (posterior mean, sd, 90% interval)
+##   typology_<cell>_<group>.csv  the typology per group (bilateral / leader / joiner): the existing classifier on mu_state + delta_g;
+##                              the bilateral table equals typology_<cell>.csv (delta = 0); n_events_in_group flags states without events in the group.
+##                              For an M1c fit, typology_<cell>.csv, mu_state_<cell>.csv, reach and focus_sigma are the BILATERAL
+##                              (reference) quantities; mu_event_<cell>.csv carries each event's own group shift.
 ## r0 (peer radius, in scaled gap units: log ratio divided by the per-axis constant in change_scale.csv,
 ## so 0.5 is about a 5-fold CINC ratio on the material axis) is a documented argument; R0 = 0.5 in spec.R is the v2
 ## default and a PI decision to confirm.
@@ -25,7 +32,7 @@ suppressPackageStartupMessages({ library(rstan); library(dplyr) })
 this_file <- sub("^--file=", "", grep("^--file=", commandArgs(FALSE), value = TRUE))
 R_DIR <- dirname(this_file)
 source(file.path(R_DIR, "spec.R")); source(file.path(R_DIR, "helpers_data.R")); source(file.path(R_DIR, "helpers_model.R"))
-source(file.path(R_DIR, "typology.R"))
+source(file.path(R_DIR, "typology.R")); source(file.path(R_DIR, "context_model.R"))
 Sys.setenv(V2_ROOT = normalizePath(file.path(R_DIR, "..")))
 args <- commandArgs(trailingOnly = TRUE)
 fit_path <- sub("^--fit=", "", grep("^--fit=", args, value = TRUE))
@@ -39,6 +46,8 @@ assert_fit_stan_current(obj)            # the fit's Stan source hash must be the
 out_dir <- dirname(fit_path)
 log_open(paste0("03_extract_", cell))
 logf("fit %s; r0 = %.2f", cell, r0)
+is_context_model <- !is.null(obj$args$model) && obj$args$model %in% CONTEXT_MODELS
+if (is_context_model) logf("M1c fit (dual typology stage b): typology_<cell>, mu_state_<cell>, reach and focus_sigma below are the BILATERAL (reference) quantities; the per-group outputs follow")
 
 ## ---- typology from mu_state (at x_ref) -----------------------------------------------------
 mu <- mu_state_draws(fit)
@@ -112,5 +121,26 @@ if (!is.null(obj$dat$K)) {
     mutate(initiator = labels[i], target = labels[j], uv = UV[cbind(i, j)]) |> arrange(desc(abs(uv))) |> slice_head(n = 200)
   write.csv(pairs |> select(initiator, target, uv), file.path(out_dir, paste0("ame_pairs_", cell, ".csv")), row.names = FALSE)
   logf("AME extraction written (K = %d)", K)
+}
+## ---- M1c (dual typology stage b, 2026-10-27): the stage-b quantities and the typology per group ---------------------------------------
+if (is_context_model) {
+  stopifnot(!is.null(obj$dat$ev_grp), length(obj$dat$ev_grp) == obj$dat$E, all(obj$dat$ev_grp %in% 0:2), dim(mu)[3] == 2L)
+  cms <- context_model_summary(fit)
+  write.csv(cms, file.path(out_dir, paste0("context_model_", cell, ".csv")), row.names = FALSE)
+  show <- function(q, g) { r <- cms[cms$quantity == q & cms$group == g, ]; paste(sprintf("%s %.3f [%.3f, %.3f]", r$axis, r$mean, r$lo, r$hi), collapse = ", ") }
+  logf("M1c shifts (posterior mean [90%%]): delta_lead %s; delta_join %s", show("delta_lead (shift vs bilateral)", "leader"), show("delta_join (shift vs bilateral)", "joiner"))
+  logf("M1c population ideal points: bilateral %s; leader %s; joiner %s", show("mu0 (population ideal point)", "bilateral"), show("mu0 + delta_lead (population ideal point)", "leader"), show("mu0 + delta_join (population ideal point)", "joiner"))
+  logf("M1c tolerance scales sigma_g: bilateral %s; leader %s; joiner %s; shared rho %s", show("sigma_g (tolerance scale)", "bilateral"), show("sigma_g (tolerance scale)", "leader"), show("sigma_g (tolerance scale)", "joiner"), show("rho (shared tolerance correlation)", "shared"))
+  ## events per state and group (usable events of the fit)
+  n_by_g <- sapply(0:2, function(g) tabulate(obj$dat$sy_state[obj$dat$ev_sy[obj$dat$ev_grp == g]], nbins = obj$dat$S))
+  stopifnot(identical(dim(n_by_g), c(obj$dat$S, 3L)), sum(n_by_g) == obj$dat$E, all(rowSums(n_by_g) == n_init))
+  tg <- context_group_typology(fit, labels, r0 = r0, n_events_by_group = n_by_g)
+  for (g in STAGE2_GROUPS) {
+    write.csv(tg[[g]], file.path(out_dir, paste0("typology_", cell, "_", g, ".csv")), row.names = FALSE)
+    logf("typology per group, %s (states with >= 1 event in the group: %d; the classification of the others rests on a_i from other groups and delta_g):", g, sum(tg[[g]]$n_events_in_group > 0))
+    print(typology_summary(tg[[g]] |> filter(n_events_in_group > 0)))
+  }
+  stopifnot(identical(tg$bilateral$map_type, cls$map_type))      # the bilateral group IS the main typology table
+  logf("M1c outputs written: context_model_%s.csv and typology_%s_<bilateral|leader|joiner>.csv", cell, cell)
 }
 logf("03_extract done")

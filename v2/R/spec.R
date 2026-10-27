@@ -8,6 +8,8 @@
 ##
 ## Switches added 2026-10-25 (dual typology stage a): context (all | bilateral | coalition, STAGE-2 events only), coal_ties
 ## (inclusive | strict), coal_drop (none | top3, context = coalition only); suffixes _bi / _co, _strict, _drop3.
+## Model code added 2026-10-27 (dual typology stage b): M1c (CONTEXT_MODELS, stan/m1_context.stan), outside MODELS and the main grid;
+## the context_b preset runs it at lag 3 on mid and fmid (CONTEXT_B_PRESET).
 ## Main specification (PI decisions through 2026-10-25; README "The main specification"):
 ##   sample in {mid, fmid, war} x lag in {1, 3, 5, 10} x model in {M1m, M1r, M1a, M1b, M2m, M2r, M2a, M2b}
 ##   choice set = every other system member at t with positions at t-1 (variant "all"), full sets (no sampled alternatives)
@@ -54,6 +56,15 @@ MAIN_SAMPLES <- c("mid", "fmid", "war")              # the main grid; fmidcow an
 ALL_SAMPLES  <- c("mid", "fmid", "fmidcow", "fmidub", "war")
 LAGS         <- c(1L, 3L, 5L, 10L)
 MODELS       <- c("M1m", "M1r", "M1a", "M1b", "M2m", "M2r", "M2a", "M2b")
+## dual typology stage (b), 2026-10-27: M1c = the M1b joint model with group-specific ideal-point shifts (delta_lead, delta_join) and
+## group-specific tolerance scales (sigma_g, shared correlation rho) over the three stage-2 event groups bilateral / coalition leader /
+## joiner, plus one extra stage-1 control (multi_mid_jan). Its own Stan program (stan/m1_context.stan). NOT part of MODELS (the main
+## grid's 0-95 index mapping and 04_compare.R's eight-model groups stay as they are); 02_fit_model.R and 03_extract.R accept it.
+CONTEXT_MODELS <- c("M1c")
+ALL_MODELS     <- c(MODELS, CONTEXT_MODELS)
+## stan_program(model): the Stan source / build name of a model code (m1_latent_additive | m2_ame | m1_context)
+stan_program <- function(model) { stopifnot(model %in% ALL_MODELS); if (model %in% CONTEXT_MODELS) "m1_context" else if (substr(model, 1, 2) == "M1") "m1_latent_additive" else "m2_ame" }
+STAN_PROGRAMS  <- c("m1_latent_additive", "m2_ame", "m1_context")
 VARIANT      <- "all"                                # choice set: every other system member (polrel is an archived option)
 CENTRALITY   <- "pr"                                 # IGO PageRank (eigenvector centrality is an archived option)
 SAMPLED_M    <- 0L                                   # full choice sets (sampled alternatives are an archived option)
@@ -87,8 +98,12 @@ ROBUSTNESS_PRESETS <- list(
   fullcontrols = list(controls = "full"),
   winsor       = list(changes = "winsor"),
   perm_error   = list(),                             # the permutation and measurement-error tests on the main cell (no switch)
-  context      = list()                              # the context split (CONTEXT_PRESET below): three switch combinations x two cells
+  context      = list(),                             # the context split (CONTEXT_PRESET below): three switch combinations x two cells
+  context_b    = list()                              # dual typology stage (b): the M1c model on the main-spec cells of CONTEXT_B_PRESET (no switch)
 )
+## context_b preset (dual typology stage b, 2026-10-27): the M1c model (one model, group-specific shifts) at lag 3 on mid and fmid with every
+## switch at its default; 05_robustness.R maps --cell_index = 0..1 onto the cell list (0 mid, 1 fmid). M1b family only, no war sample.
+CONTEXT_B_PRESET <- list(cells = c("mid:3:M1c", "fmid:3:M1c"))
 ## context preset (dual typology stage a, 2026-10-25): M1b, lag 3, samples mid and fmid, default tie convention; the three variants are
 ## context = bilateral, context = coalition, and context = coalition without the top-3 coalition disputes (coal_drop = top3). 05_robustness.R
 ## maps --cell_index = 0..5 onto variant (slowest) x cell: 0-1 bilateral, 2-3 coalition, 4-5 coalition_drop3. No war sample.
@@ -161,8 +176,9 @@ spec_string <- function(spec) paste(sprintf("%s=%s", names(spec), unlist(spec)),
 spec_coal_col <- function(spec) c(inclusive = "coal_incl", strict = "coal_strict")[[spec$coal_ties]]
 ## cell_name(sample, lag, model, spec): <sample>_lag<h>_all_pr_<model>[_K<K>]<suffix>, e.g. fmid_lag3_all_pr_M2b_K2_noww2
 ## An M1 cell name carries no K, so ame_K != 2 with an M1 model would be dropped silently: refused (audit fix 16, 2026-10-26).
+## M1c (stage b, 2026-10-27) is named like an M1 model, <sample>_lag<h>_all_pr_M1c<suffix>: no existing cell name contains "M1c".
 cell_name <- function(sample, lag, model, spec) {
-  stopifnot(sample %in% ALL_SAMPLES, lag %in% LAGS, model %in% MODELS)
+  stopifnot(sample %in% ALL_SAMPLES, lag %in% LAGS, model %in% ALL_MODELS)
   if (model_family(model) == "M1" && !identical(as.integer(spec$ame_K), SPEC_DEFAULTS$ame_K))
     stop(sprintf("cell_name: --ame_K=%s with the M1 model %s (K applies to the M2 family only and would not appear in the cell name)", spec$ame_K, model))
   sprintf("%s_lag%d_%s_%s_%s%s%s", sample, as.integer(lag), VARIANT, CENTRALITY, model,
@@ -192,9 +208,10 @@ m1_spec <- function(spec) { spec$ame_K <- SPEC_DEFAULTS$ame_K; spec }
 ## cell_spec(model, spec): the spec whose cell name belongs to `model` under `spec`: m1_spec(spec) for the M1 family, spec for M2
 cell_spec <- function(model, spec) if (model_family(model) == "M1") m1_spec(spec) else spec
 ## model_family(model): "M1" or "M2"; model_D_mode(model): 1 (material), 2 (relational), 3 (both); model_joint(model): 1 for the b models
-model_family <- function(model) { stopifnot(model %in% MODELS); substr(model, 1, 2) }
-model_D_mode <- function(model) { stopifnot(model %in% MODELS); switch(substr(model, 3, 3), m = 1L, r = 2L, a = 3L, b = 3L) }
-model_joint  <- function(model) { stopifnot(model %in% MODELS); as.integer(grepl("b$", model)) }
+## M1c (stage b): family M1 (sampler settings, name without a K), both axes, joint (full Sigma per group, full Omega)
+model_family <- function(model) { stopifnot(model %in% ALL_MODELS); substr(model, 1, 2) }
+model_D_mode <- function(model) { stopifnot(model %in% ALL_MODELS); switch(substr(model, 3, 3), m = 1L, r = 2L, a = 3L, b = 3L, c = 3L) }
+model_joint  <- function(model) { stopifnot(model %in% ALL_MODELS); as.integer(grepl("[bc]$", model)) }
 ## sampler_settings(model, args): the family defaults, each overridable from the command line
 sampler_settings <- function(model, args = character(0)) {
   s <- SAMPLER[[model_family(model)]]

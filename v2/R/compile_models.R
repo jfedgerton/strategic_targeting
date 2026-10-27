@@ -1,7 +1,8 @@
 ## ============================================================================
-## compile_models.R -- compile both Stan programs once and cache them as .rds
+## compile_models.R -- compile the Stan programs once and cache them as .rds
 ## Usage: Rscript v2/R/compile_models.R
-## Output: v2/stan/build/{m1_latent_additive,m2_ame}.rds  (gitignored) plus <model>.sha256, the sha256 of the .stan source
+## Output: v2/stan/build/{m1_latent_additive,m2_ame,m1_context}.rds (gitignored; STAN_PROGRAMS in spec.R; m1_context is the M1c program
+##         of dual typology stage b, 2026-10-27) plus <model>.sha256, the sha256 of the .stan source
 ##         compiled into it (provenance, 2026-10-25 C3); 02_fit_model.R refuses a binary whose model_code is not the checked-out source
 ## ============================================================================
 suppressPackageStartupMessages(library(rstan))
@@ -16,7 +17,7 @@ R_DIR <- dirname(sub("^--file=", "", grep("^--file=", commandArgs(FALSE), value 
 source(file.path(R_DIR, "spec.R")); source(file.path(R_DIR, "helpers_data.R")); source(file.path(R_DIR, "helpers_model.R"))
 root <- v2_root()
 dir.create(file.path(root, "stan", "build"), showWarnings = FALSE, recursive = TRUE)
-for (m in c("m1_latent_additive", "m2_ame")) {
+for (m in STAN_PROGRAMS) {
   src <- file.path(root, "stan", paste0(m, ".stan"))
   out <- file.path(root, "stan", "build", paste0(m, ".rds"))
   side <- file.path(root, "stan", "build", paste0(m, ".sha256"))

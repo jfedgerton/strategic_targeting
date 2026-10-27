@@ -7,8 +7,11 @@
 ##
 ##   sample : mid (all MIDs) | fmid (fatal MIDs, main coding) | war (pair-level war); appendix: fmidcow | fmidub
 ##   lag    : 1 | 3 | 5 | 10   change-window length h
-##   model  : M1m | M1r | M1a | M1b | M2m | M2r | M2a | M2b
+##   model  : M1m | M1r | M1a | M1b | M2m | M2r | M2a | M2b | M1c
 ##            m = material only, r = relational only, a = both independent, b = both joint; M2 = M1 + AME factors (ame_K)
+##            M1c (dual typology stage b, 2026-10-27; stan/m1_context.stan): M1b with group-specific ideal-point shifts delta_lead /
+##            delta_join and tolerance scales sigma_g over the stage-2 groups bilateral / coalition leader / joiner (shared rho), and
+##            multi_mid_jan appended to W. Cell <sample>_lag<h>_all_pr_M1c<suffix>; M1 sampler settings; not in the main grid
 ##   switches (spec.R; every non-default value adds a cell-name suffix, so variants never overwrite main outputs):
 ##     --pairs=all|originators|joiners  --direction=cowwar|sideA  --ww2=include|drop  --weights=dispute|none
 ##     --controls=minimal|full          --changes=raw|winsor      --ame_K=2
@@ -38,6 +41,7 @@
 ##   v2/output/summary_<cell>.csv posterior summaries of the structural parameters, labelled by axis and covariate (written AFTER
 ##                               the fit file)
 ## Cell name: <sample>_lag<h>_all_pr_<model>[_K<K>][_orig|_join][_bi|_co][_strict][_drop3][_noww2][_fullctrl][_w1][_winsor][_sideA][_pilot]
+##            (model M1c: <sample>_lag<h>_all_pr_M1c<suffix>; its fit records args$stan_program = "m1_context" and args$context_model = TRUE)
 ## Seed 123 everywhere (audit F11).
 ## ============================================================================
 suppressPackageStartupMessages({ library(rstan); library(dplyr); library(tidyr) })
@@ -50,7 +54,7 @@ Sys.setenv(V2_ROOT = normalizePath(file.path(R_DIR, "..")))
 ## ---- arguments -------------------------------------------------------------------------
 args <- commandArgs(trailingOnly = TRUE)
 SAMPLE <- get_arg(args, "sample", "mid"); LAG <- as.integer(get_arg(args, "lag", 5)); MODEL <- get_arg(args, "model", "M1b")
-stopifnot(SAMPLE %in% ALL_SAMPLES, LAG %in% LAGS, MODEL %in% MODELS)
+stopifnot(SAMPLE %in% ALL_SAMPLES, LAG %in% LAGS, MODEL %in% ALL_MODELS)
 spec <- parse_spec(args)
 smp <- sampler_settings(MODEL, args)
 CHAINS <- smp$chains; ITER <- smp$iter; WARMUP <- smp$warmup; ADAPT_DELTA <- smp$adapt_delta; MAX_TD <- smp$max_treedepth
@@ -60,7 +64,9 @@ INIT_FROM <- get_arg(args, "init_from", "")
 refuse_archived_options(args, "02_fit_model.R")          # archived options are refused instead of being ignored silently (ARCHIVED_OPTIONS, spec.R)
 stopifnot(CHAINS >= 1, ITER > WARMUP, WARMUP >= 0, THREADS >= 1, is.finite(ADAPT_DELTA), ADAPT_DELTA > 0, ADAPT_DELTA < 1, MAX_TD >= 1)
 
-D_MODE <- model_D_mode(MODEL); joint <- model_joint(MODEL); family <- if (model_family(MODEL) == "M1") "m1_latent_additive" else "m2_ame"
+D_MODE <- model_D_mode(MODEL); joint <- model_joint(MODEL); family <- stan_program(MODEL)   # m1_latent_additive | m2_ame | m1_context (M1c)
+CONTEXT_MODEL <- MODEL %in% CONTEXT_MODELS
+if (CONTEXT_MODEL && (spec$controls != "minimal" || spec$context != "all")) stop("M1c is defined on the minimal control set with every stage-2 event (--controls=minimal, --context=all); it models the contexts itself")
 K <- spec$ame_K
 cell <- cell_name(SAMPLE, LAG, MODEL, spec)
 if (PILOT) cell <- paste0(cell, "_pilot")          # C1: pilots never share a filename with production fits
@@ -99,7 +105,7 @@ manifest_cell <- manifest_at_load[manifest_at_load$file %in% cell_files, ]
 
 ## the manifest SNAPSHOT read above is passed in (review P2-5): every input file's nrow and sha256 are checked against it
 ## at load, so a rebuild between the snapshot and the load stops the run instead of being read silently from disk
-A <- assemble_cell_spec(SAMPLE, LAG, spec, data_dir = data_dir, manifest = manifest_at_load)
+A <- assemble_cell_spec(SAMPLE, LAG, spec, data_dir = data_dir, manifest = manifest_at_load, model = MODEL)   # model = M1c appends multi_mid_jan to W
 sy <- A$sy; alts <- A$alts; ev <- A$ev; W_cols <- A$W_cols; X_cols <- A$X_cols; Z_cols <- A$Z_cols
 state_codes <- A$state_codes; x_ref <- A$x_ref; n_full <- A$n_full; sampled <- A$sampled
 
@@ -107,6 +113,16 @@ state_codes <- A$state_codes; x_ref <- A$x_ref; n_full <- A$n_full; sampled <- A
 dat <- build_stan_data(sy, alts, ev, W_cols, X_cols, Z_cols, joint = joint, sampled = sampled, n_full = n_full,
                        x_ref = x_ref, K = if (family == "m2_ame") K else NULL, allow_orphan_initiations = TRUE,
                        D_mode = D_MODE, grainsize = choose_grainsize(nrow(sy), THREADS))
+if (CONTEXT_MODEL) {
+  ## stage b: the stage-2 group of every usable event goes to Stan as ev_grp (0 bilateral, 1 coalition leader, 2 joiner); the existing
+  ## programs never see it (rstan would ignore it, but it is not added to their data, so their Stan data stay identical to the main grid's)
+  stopifnot("grp" %in% names(ev), length(ev$grp) == dat$E, all(ev$grp %in% 0:2), "multi_mid_jan" %in% W_cols, identical(as.integer(dat$ev_sy), as.integer(ev$sy_row)))
+  dat$ev_grp <- as.integer(ev$grp)
+  gt <- A$group_table
+  if (any(gt$n_usable == 0L)) stop(sprintf("M1c needs events in every stage-2 group; usable events per group: %s", paste(sprintf("%s %d", gt$group, gt$n_usable), collapse = ", ")))
+  logf("M1c stage-2 groups (ev_grp): bilateral %d events (weights %.1f, %d states), coalition leader %d (%.1f, %d), joiner %d (%.1f, %d); sample events before the choice-set join %d / %d / %d",
+       gt$n_usable[1], gt$w_usable[1], gt$n_states[1], gt$n_usable[2], gt$w_usable[2], gt$n_states[2], gt$n_usable[3], gt$w_usable[3], gt$n_states[3], gt$n_sample[1], gt$n_sample[2], gt$n_sample[3])
+}
 logf("reduce_sum grainsize = %d (N1 = %d)", dat$grainsize, dat$N1)
 logf("D_mode = %d (%s)", D_MODE, c("material only", "relational only", "both dimensions")[D_MODE])
 if (family == "m2_ame") logf("AME anchors (most initiations first): ccodes %s", paste(state_codes[dat$anchor], collapse = ", "))
@@ -123,8 +139,8 @@ if (spec$context != "all") logf("context = %s (%s%s): %d stage-2 events removed,
                                 A$n_context_dropped, A$n_context_split_groups, A$n_orphan)
 if (DRY_RUN) {
   saveRDS(list(dat = dat, cell = cell, state_codes = state_codes, W_cols = W_cols, X_cols = X_cols, Z_cols = Z_cols,
-               manifest = manifest_cell, git_commit = git_commit_at_load, spec = spec, winsor = A$winsor,
-               full_controls = spec$controls == "full", event_weights = spec$weights, direction = spec$direction),
+               manifest = manifest_cell, git_commit = git_commit_at_load, spec = spec, winsor = A$winsor, model = MODEL,
+               full_controls = spec$controls == "full", event_weights = spec$weights, direction = spec$direction, group_table = A$group_table),
           file.path(out_dir, paste0("standata_", cell, ".rds")))
   logf("DRY RUN: Stan data assembled and saved; no sampling"); quit(save = "no", status = 0)
 }
@@ -198,8 +214,8 @@ logf("sampling finished in %.1f min; %d chains x %d post-warmup draws, as reques
 sp <- get_sampler_params(fit, inc_warmup = FALSE)
 logf("divergences: %d; max-treedepth hits: %d", sum(sapply(sp, function(m) sum(m[, "divergent__"]))),
      sum(sapply(sp, function(m) sum(m[, "treedepth__"] >= MAX_TD))))
-pars_struct <- c("alpha0", "alpha", "tau", "mu0", "beta", "sigma_x", "sd_re", "sigma_b", "gamma", "Sigma", "Omega", "R_Om",
-                 if (family == "m2_ame") "u_diag")
+pars_struct <- c("alpha0", "alpha", "tau", "mu0", "beta", if (CONTEXT_MODEL) c("delta_lead", "delta_join", "sigma_g", "rho_x", "mu0_lead", "mu0_join") else "sigma_x",
+                 "sd_re", "sigma_b", "gamma", "Sigma", "Omega", "R_Om", if (family == "m2_ame") "u_diag")
 sm_tab <- summary(fit, pars = pars_struct)$summary
 logf("worst Rhat among structural parameters: %.3f; min n_eff: %.0f",
      max(sm_tab[, "Rhat"], na.rm = TRUE), min(sm_tab[, "n_eff"], na.rm = TRUE))
@@ -222,14 +238,14 @@ if (!identical(git_commit_now, git_commit_at_load)) logf("WARNING: git HEAD move
 ## while sampling, the mismatch (C2)
 obj <- list(fit = fit, dat = dat, cell = cell, state_codes = state_codes, W_cols = W_cols, X_cols = X_cols, Z_cols = Z_cols,
             sy_keys = sy |> select(ccode, year, state_idx, y1), ev = ev, x_ref = x_ref, elapsed_min = elapsed,
-            manifest = manifest_cell, data_dir = basename(data_dir), stale = stale, spec = spec, winsor = A$winsor, init = init_info,
+            manifest = manifest_cell, data_dir = basename(data_dir), stale = stale, spec = spec, winsor = A$winsor, init = init_info, group_table = A$group_table,
             param_labels = label_parameters(rownames(sm_tab), W_cols, X_cols, Z_cols, D_MODE),
             args = list(sample = SAMPLE, lag = LAG, variant = VARIANT, model = MODEL, centrality = CENTRALITY, K = K, chains = CHAINS,
                         iter = ITER, warmup = WARMUP, pilot = PILOT, sampled_m = SAMPLED_M, conflict_history = CONFLICT_HISTORY,
                         distance = DISTANCE, contiguity = CONTIGUITY, dy_peace_years = DY_PEACE_YEARS, drop_ww2 = spec$ww2 == "drop",
                         full_controls = spec$controls == "full", event_weights = spec$weights, direction = spec$direction,
                         pairs = spec$pairs, changes = spec$changes, context = spec$context, coal_ties = spec$coal_ties, coal_drop = spec$coal_drop,
-                        context_top3 = A$context_top3, D_mode = D_MODE, threads_per_chain = THREADS,
+                        context_top3 = A$context_top3, D_mode = D_MODE, threads_per_chain = THREADS, context_model = CONTEXT_MODEL, stan_program = family,
                         init_source = init_info$source, init_from = init_info$m1_fit,
                         grainsize = dat$grainsize, seed = V2_SEED, adapt_delta = ADAPT_DELTA, max_treedepth = MAX_TD,
                         stan_source_sha256 = stan_prov$stan_source_sha256, compiled_model_code_sha256 = stan_prov$compiled_model_code_sha256,
