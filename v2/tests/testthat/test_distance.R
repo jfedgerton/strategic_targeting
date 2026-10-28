@@ -19,7 +19,7 @@ test_that("spec: distance defaults to none, adds _dist after _fullctrl and befor
   all_on <- parse_spec(c("--pairs=originators", "--context=coalition", "--coal_ties=strict", "--coal_drop=top3", "--ww2=drop", "--controls=full",
                          "--distance=capital", "--major=joint", "--interact=prefixed", "--weights=none", "--changes=winsor", "--direction=sideA"))
   expect_equal(spec_suffix(all_on), "_orig_co_strict_drop3_noww2_fullctrl_dist_major_ix_w1_winsor_sideA")
-  expect_equal(names(SPEC_SUFFIX), c("pairs", "context", "coal_ties", "coal_drop", "ww2", "controls", "distance", "major", "interact", "weights", "changes", "direction"))
+  expect_equal(names(SPEC_SUFFIX), c("pairs", "context", "coal_ties", "coal_drop", "ww2", "controls", "distance", "contiguity", "major", "interact", "weights", "changes", "direction"))   # contiguity added the same day (test_contiguity.R)
   expect_false(any(duplicated(c(unlist(SPEC_SUFFIX), "_K2", "_pilot", "_STALE", "_samp10", "_noCH", "_polrel"))))
   ## the archived spelling --distance=TRUE is refused as a bad VALUE (parse_spec), not as an archived option; the other archived flags still are
   expect_error(parse_spec("--distance=TRUE"), "--distance must be one of none | capital", fixed = TRUE)
@@ -31,7 +31,7 @@ test_that("spec: distance defaults to none, adds _dist after _fullctrl and befor
   expect_equal(parse_spec("--distance=capital")$distance, "capital")                                   # the valued form is unaffected
   expect_false("distance" %in% ARCHIVED_OPTIONS)
   expect_true(refuse_archived_options("--distance=capital", "02_fit_model.R"))
-  for (old in c("variant", "sampled_m", "centrality", "conflict_history", "contiguity", "dy_peace_years", "drop_ww2", "full_controls", "event_weights", "K")) {
+  for (old in c("variant", "sampled_m", "centrality", "conflict_history", "dy_peace_years", "drop_ww2", "full_controls", "event_weights", "K")) {   # contiguity left the list the same day
     expect_true(old %in% ARCHIVED_OPTIONS); expect_error(refuse_archived_options(paste0("--", old, "=1"), "02_fit_model.R"), "is not an option")
   }
   ## the build still takes --direction only, so --distance is refused there through the switch list
@@ -192,7 +192,7 @@ test_that("robustness driver: the dist preset expands to the four (variant, cell
   ## the sbatch dispatches the preset with the 0-3 range guard
   sb <- readLines(file.path(root, "slurm", "04_robustness.sbatch"))
   expect_true(any(grepl("^  dist)", sb))); expect_true(any(grepl("--preset=dist --cell_index=\\$i", sb))); expect_true(any(grepl('\\[ "\\$i" -le 3 \\] \\|\\| \\{ echo "dist: array index', sb)))
-  expect_true(any(grepl("major_ix\\|dist\\|perm_error", sb)))
+  expect_true(any(grepl("major_ix\\|dist\\|dist_nocontig\\|perm_error", sb)))
   unlink(tmp, recursive = TRUE)
 })
 

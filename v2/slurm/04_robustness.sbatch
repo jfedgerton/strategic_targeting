@@ -32,6 +32,10 @@
 #   dist           PI request 2026-10-28 (distance and distance + major powers; contiguity stays in): M1b, lag 3, fmid and mid, for
 #                  distance=capital (_dist) and distance=capital + major=joint (_dist_major); 4 tasks (array 0-3: 0-1 distance, 2-3
 #                  distance_major; cell order fmid, mid). M1b only: no dependency needed. Submit with --array=0-3 (submit_robustness.sh does).
+#   dist_nocontig  PI request 2026-10-28, same day (the dist cells WITHOUT contiguity; distance replaces it): M1b, lag 3, fmid and mid, for
+#                  distance=capital + contiguity=none (_dist_nocontig) and + major=joint (_dist_nocontig_major); 4 tasks with the SAME index
+#                  mapping as dist (array 0-3: 0-1 distance, 2-3 distance_major; cell order fmid, mid), so the two compare task by task.
+#                  M1b only: no dependency needed. Submit with --array=0-3 (submit_robustness.sh does).
 #   perm_error     the permutation, measurement-error and temporal-holdout tests on the main cell (ROBUSTNESS_MAIN_CELL: mid, lag 5),
 #                  the task layout of the former 06_measurement.sbatch (restored 2026-10-26, audit fix 6):
 #                    0 = m1 permutation + inflation      1 = m2 permutation + inflation
@@ -52,6 +56,7 @@
 #   PRESET=context_b bash v2/slurm/submit_robustness.sh --account=open --export=ALL,DRY_RUN=TRUE --time=00:30:00 --mem=16G --cpus-per-task=1   # assembly check
 #   PRESET=major_ix bash v2/slurm/submit_robustness.sh                                       # 6 M1b tasks (fmid, mid x _major, _ix, _major_ix)
 #   PRESET=dist bash v2/slurm/submit_robustness.sh                                           # 4 M1b tasks (fmid, mid x _dist, _dist_major)
+#   PRESET=dist_nocontig bash v2/slurm/submit_robustness.sh                                  # 4 M1b tasks (fmid, mid x _dist_nocontig, _dist_nocontig_major)
 #   PRESET=noww2 bash v2/slurm/submit_robustness.sh --account=open --export=ALL,DRY_RUN=TRUE --time=00:30:00 --mem=16G --cpus-per-task=1
 #   sbatch --export=ALL,PRESET=perm_error --account=open --cpus-per-task=4 --mem=32G --time=47:00:00 v2/slurm/04_robustness.sbatch
 #   sbatch --export=ALL,PRESET=perm_error,PERM_MODE=refit,N_PERM=20 --cpus-per-task=4 --mem=32G --time=7-00:00:00 v2/slurm/04_robustness.sbatch   # basic
@@ -59,7 +64,7 @@
 source "${SLURM_SUBMIT_DIR:?submit from the repo root}/v2/slurm/00_env.sh" || exit 1
 cd "$V2_ROOT/.." || exit 1
 i=${SLURM_ARRAY_TASK_ID:?run as an array}
-P=${PRESET:?set --export=ALL,PRESET=<noww2|sideA|noweights|fullcontrols|winsor|context|context_b|major_ix|dist|perm_error>}
+P=${PRESET:?set --export=ALL,PRESET=<noww2|sideA|noweights|fullcontrols|winsor|context|context_b|major_ix|dist|dist_nocontig|perm_error>}
 THR=${THREADS_PER_CHAIN:-8}; DRY=${DRY_RUN:-FALSE}
 case $P in
   perm_error)
@@ -92,5 +97,9 @@ case $P in
     [ "$i" -le 3 ] || { echo "dist: array index $i out of range 0-3 (0-1 distance, 2-3 distance_major; fmid, mid)" >&2; exit 1; }
     echo "task $i: preset dist (variant x cell index $i of 4: 0-1 distance, 2-3 distance_major; fmid, mid) threads_per_chain=$THR dry_run=$DRY"
     Rscript v2/R/05_robustness.R --preset=dist --cell_index=$i --dry_run=$DRY --threads_per_chain=$THR ;;
+  dist_nocontig)
+    [ "$i" -le 3 ] || { echo "dist_nocontig: array index $i out of range 0-3 (0-1 distance, 2-3 distance_major; fmid, mid)" >&2; exit 1; }
+    echo "task $i: preset dist_nocontig (variant x cell index $i of 4: 0-1 distance, 2-3 distance_major; fmid, mid; contiguity=none) threads_per_chain=$THR dry_run=$DRY"
+    Rscript v2/R/05_robustness.R --preset=dist_nocontig --cell_index=$i --dry_run=$DRY --threads_per_chain=$THR ;;
   *) echo "unknown PRESET $P" >&2; exit 1 ;;
 esac

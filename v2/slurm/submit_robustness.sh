@@ -7,11 +7,12 @@
 # pending). Each M2 task then starts from the M1 fit of its cell and switches (02_fit_model.R --init_from default).
 #
 # Usage (from the repo root):
-#   PRESET=<noww2|sideA|noweights|fullcontrols|winsor|context|context_b|major_ix|dist> [CELLS=sample:lag:model,...] bash v2/slurm/submit_robustness.sh [extra sbatch options]
+#   PRESET=<noww2|sideA|noweights|fullcontrols|winsor|context|context_b|major_ix|dist|dist_nocontig> [CELLS=sample:lag:model,...] bash v2/slurm/submit_robustness.sh [extra sbatch options]
 # Environment:
 #   PRESET            the preset (required). The refit presets split their cell list by family; `context` and `major_ix` are M1b only
 #                     and are submitted as ONE array each (indices 0-5 of CONTEXT_PRESET / MAJOR_IX_PRESET, no dependency); `dist` (2026-10-28) is ONE array
-#                     of 4 M1b tasks (indices 0-3 of DIST_PRESET: 0-1 distance, 2-3 distance_major; fmid, mid; no dependency); `context_b` (the M1c model of dual typology
+#                     of 4 M1b tasks (indices 0-3 of DIST_PRESET: 0-1 distance, 2-3 distance_major; fmid, mid; no dependency), and so is `dist_nocontig`
+#                     (the same four cells with contiguity = none, DIST_NOCONTIG_PRESET, same indices); `context_b` (the M1c model of dual typology
 #                     stage b, 2026-10-27) is ONE array of 2 M1c tasks (0 mid, 1 fmid; lag 3; no dependency); `perm_error` is refused here (it needs
 #                     the main-grid a / b fits, not a cell list; submit it directly, see 04_robustness.sbatch).
 #   CELLS             the cell list of a refit preset, default = ROBUSTNESS_CELLS of spec.R (the list below must match it; tested).
@@ -26,10 +27,11 @@
 #   PRESET=context_b bash v2/slurm/submit_robustness.sh                               # 2 M1c tasks (mid, fmid), then Rscript v2/R/03_extract.R --fit=...M1c.rds
 #   PRESET=major_ix bash v2/slurm/submit_robustness.sh                                # 6 M1b tasks: fmid, mid x _major, _ix, _major_ix
 #   PRESET=dist bash v2/slurm/submit_robustness.sh                                    # 4 M1b tasks: fmid, mid x _dist, _dist_major
+#   PRESET=dist_nocontig bash v2/slurm/submit_robustness.sh                           # 4 M1b tasks: fmid, mid x _dist_nocontig, _dist_nocontig_major
 #   PRESET=noww2 bash v2/slurm/submit_robustness.sh --account=open --export=ALL,DRY_RUN=TRUE --time=00:30:00 --mem=16G --cpus-per-task=1
 set -eo pipefail
 [ -f v2/slurm/04_robustness.sbatch ] || { echo "run from the repo root" >&2; exit 1; }
-P=${PRESET:?set PRESET=<noww2|sideA|noweights|fullcontrols|winsor|context|context_b|major_ix|dist>}
+P=${PRESET:?set PRESET=<noww2|sideA|noweights|fullcontrols|winsor|context|context_b|major_ix|dist|dist_nocontig>}
 DEFAULT_CELLS="mid:3:M1b,fmid:3:M1b,war:3:M1b,mid:3:M2b,fmid:3:M2b,war:3:M2b"   # = ROBUSTNESS_CELLS in spec.R
 for a in "$@" ${M1_OPTS:-} ${M2_OPTS:-}; do
   case "$a" in --array|--array=*|-a|-a*) echo "ERROR: do not pass --array; the index ranges follow the cell list (got '$a')" >&2; exit 1 ;; esac
@@ -60,6 +62,11 @@ case $P in
     raw=$(PRESET=dist sbatch --parsable --export=ALL --array=0-3 "$@" ${M1_OPTS:-} v2/slurm/04_robustness.sbatch)
     j=$(jobid "$raw")
     echo "dist array submitted: job $j (indices 0-3: 0-1 distance, 2-3 distance_major; fmid, mid; M1b only, no dependency)" ;;
+  dist_nocontig)
+    [ -z "${CELLS:-}" ] || { echo "ERROR: the dist_nocontig preset fixes its cells (DIST_NOCONTIG_PRESET in spec.R); unset CELLS" >&2; exit 1; }
+    raw=$(PRESET=dist_nocontig sbatch --parsable --export=ALL --array=0-3 "$@" ${M1_OPTS:-} v2/slurm/04_robustness.sbatch)
+    j=$(jobid "$raw")
+    echo "dist_nocontig array submitted: job $j (indices 0-3: 0-1 distance, 2-3 distance_major; fmid, mid; contiguity=none; M1b only, no dependency)" ;;
   noww2|sideA|noweights|fullcontrols|winsor)
     CELLS=${CELLS:-$DEFAULT_CELLS}
     m1_cells=""; m2_cells=""

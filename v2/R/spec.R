@@ -14,6 +14,9 @@
 ## interact (none | prefixed: four change products in Z); suffixes _major, _ix; preset major_ix (MAJOR_IX_PRESET).
 ## Switch added 2026-10-28 (PI request): distance (none | capital: log1p capital distance in Z, alternatives without one dropped); suffix
 ## _dist; preset dist (DIST_PRESET: distance alone and distance + major). Contiguity stays in Z under either value.
+## Switch added 2026-10-28 (PI request, same day): contiguity (land | none: contig_land in Z | dropped from Z); none is refused unless
+## distance = capital (distance REPLACES contiguity); suffix _nocontig right after _dist; preset dist_nocontig (DIST_NOCONTIG_PRESET: the
+## four dist cells without contiguity, so the two presets can be compared cell by cell).
 ## Main specification (PI decisions through 2026-10-25; README "The main specification"):
 ##   sample in {mid, fmid, war} x lag in {1, 3, 5, 10} x model in {M1m, M1r, M1a, M1b, M2m, M2r, M2a, M2b}
 ##   choice set = every other system member at t with positions at t-1 (variant "all"), full sets (no sampled alternatives)
@@ -35,6 +38,7 @@ SPEC_CHOICES <- list(
   major     = c("none", "joint"),                   # major-power status (2026-10-27): none (main) | joint = Z gains one_major / both_major (dyad's major count, 0 = reference) and W gains cowmaj_tm1
   interact  = c("none", "prefixed"),                # change interactions in Z (2026-10-27): none (main) | prefixed = the four products dM_j x dRpr_j, dM_i x dM_j, dR_i x dRpr_j, dM_i x dRpr_j
   distance  = c("none", "capital"),                 # capital distance (2026-10-28): none (main) | capital = Z gains log_capdist (log1p km at t-1, centred over the IV rows); alternatives without one are dropped from both sets
+  contiguity = c("land", "none"),                   # land contiguity in Z (2026-10-28): land (main) = contig_land in Z | none = dropped from Z; none needs distance = capital (parse_spec() refuses it otherwise)
   changes   = c("raw", "winsor")                    # initiator and target power changes: as built | winsorised at WINSOR_PROBS of the panel
 )
 SPEC_DEFAULTS <- lapply(SPEC_CHOICES, function(v) v[1])
@@ -47,6 +51,8 @@ SPEC_DEFAULTS$ame_K <- 2L                            # latent dimensions of the 
 ## The distance switch of 2026-10-28 goes FIRST among the control extensions, right after controls and before _major / _ix: it is the only
 ## one that also changes the alternative rows (NA distances are dropped), and the existing _major / _ix / _major_ix names stay as they are.
 ## distance + major therefore gives _dist_major (DIST_PRESET).
+## The contiguity switch (2026-10-28, same day) follows distance immediately: _nocontig can only appear next to _dist (contiguity = none needs
+## distance = capital), so the dist_nocontig cells are _dist_nocontig and _dist_nocontig_major (DIST_NOCONTIG_PRESET); no existing name changes.
 SPEC_SUFFIX <- list(
   pairs     = c(originators = "_orig", joiners = "_join"),
   context   = c(bilateral = "_bi", coalition = "_co"),
@@ -55,6 +61,7 @@ SPEC_SUFFIX <- list(
   ww2       = c(drop = "_noww2"),
   controls  = c(full = "_fullctrl"),
   distance  = c(capital = "_dist"),
+  contiguity = c(none = "_nocontig"),
   major     = c(joint = "_major"),
   interact  = c(prefixed = "_ix"),
   weights   = c(none = "_w1"),
@@ -85,7 +92,8 @@ SAMPLED_M    <- 0L                                   # full choice sets (sampled
 CONFLICT_HISTORY <- TRUE                             # prior-MID counts in W and Z (switching them off is an archived option)
 ## capital distance in Z is the `distance` switch since 2026-10-28 (spec$distance, "none" | "capital"); the former global DISTANCE constant
 ## is gone so that no script can set it apart from the switch (assemble_cell_spec() passes spec$distance; the cell name carries _dist)
-CONTIGUITY   <- TRUE                                 # land contiguity in Z (switching it off is an archived option)
+## land contiguity in Z is the `contiguity` switch since 2026-10-28 (spec$contiguity, "land" | "none"); the former global CONTIGUITY constant
+## is gone for the same reason (assemble_cell_spec() passes spec$contiguity; the cell name carries _nocontig)
 DY_PEACE_YEARS <- FALSE                              # dyadic peace years in Z (archived option)
 R0           <- 0.5                                  # typology peer radius in scaled gap units (03_extract.R default)
 
@@ -116,7 +124,8 @@ ROBUSTNESS_PRESETS <- list(
   context      = list(),                             # the context split (CONTEXT_PRESET below): three switch combinations x two cells
   context_b    = list(),                             # dual typology stage (b): the M1c model on the main-spec cells of CONTEXT_B_PRESET (no switch)
   major_ix     = list(),                             # the major-power and interaction switches (MAJOR_IX_PRESET below): three combinations x two cells
-  dist         = list()                              # the capital-distance switch (DIST_PRESET below): distance alone and distance + major, x two cells
+  dist         = list(),                             # the capital-distance switch (DIST_PRESET below): distance alone and distance + major, x two cells
+  dist_nocontig = list()                             # the same four cells with contiguity = none (DIST_NOCONTIG_PRESET below): distance replaces contiguity
 )
 ## context_b preset (dual typology stage b, 2026-10-27): the M1c model (one model, group-specific shifts) at lag 3 on mid and fmid with every
 ## switch at its default; 05_robustness.R maps --cell_index = 0..1 onto the cell list (0 mid, 1 fmid). M1b family only, no war sample.
@@ -138,6 +147,12 @@ MAJOR_IX_PRESET <- list(cells = c("fmid:3:M1b", "mid:3:M1b"),
 ## --cell_index = 0..3 onto variant (slowest) x cell: 0-1 distance (fmid, mid), 2-3 distance_major. M1b only, so one Slurm array, no dependency.
 DIST_PRESET <- list(cells = c("fmid:3:M1b", "mid:3:M1b"),
                     variants = list(distance = list(distance = "capital"), distance_major = list(distance = "capital", major = "joint")))
+## dist_nocontig preset (PI request 2026-10-28, same day: the dist cells WITHOUT contiguity, so the two can be compared): the four DIST_PRESET
+## cells with contiguity = none on top (distance replaces contiguity); same cells, same variant names, same --cell_index mapping 0-1 distance
+## (fmid, mid), 2-3 distance_major. Cells <sample>_lag3_all_pr_M1b_dist_nocontig and _dist_nocontig_major. M1b only, one Slurm array, no dependency.
+DIST_NOCONTIG_PRESET <- list(cells = c("fmid:3:M1b", "mid:3:M1b"),
+                             variants = list(distance = list(distance = "capital", contiguity = "none"),
+                                             distance_major = list(distance = "capital", contiguity = "none", major = "joint")))
 ## default cell list of the refit presets, "sample:lag:model"; override with --cells=
 ROBUSTNESS_CELLS <- c("mid:3:M1b", "fmid:3:M1b", "war:3:M1b", "mid:3:M2b", "fmid:3:M2b", "war:3:M2b")
 ROBUSTNESS_MAIN_CELL <- list(sample = "mid", lag = 5L)   # the perm_error preset's cell (the a / b fits of both families)
@@ -147,8 +162,9 @@ ROBUSTNESS_MAIN_CELL <- list(sample = "mid", lag = 5L)   # the perm_error preset
 ## --conflict_history / --contiguity / --dy_peace_years options and the pre-spec.R spellings of today's switches
 ## (--drop_ww2 -> --ww2=drop, --full_controls -> --controls=full, --event_weights -> --weights, --K -> --ame_K).
 ## --distance left this list on 2026-10-28: it is a switch again (none | capital), so --distance=TRUE (the archived spelling) is refused by
-## parse_spec() as a value outside SPEC_CHOICES$distance, not here.
-ARCHIVED_OPTIONS <- c("variant", "sampled_m", "centrality", "conflict_history", "contiguity", "dy_peace_years",
+## parse_spec() as a value outside SPEC_CHOICES$distance, not here. --contiguity left it the same day (switch land | none): --contiguity=TRUE
+## and --contiguity=FALSE are refused by parse_spec() as bad values, the bare --contiguity as a flag without a value.
+ARCHIVED_OPTIONS <- c("variant", "sampled_m", "centrality", "conflict_history", "dy_peace_years",
                       "drop_ww2", "full_controls", "event_weights", "K")
 ## refuse_archived_options(args, script, also, also_msg): stop() when args hold --<archived>=... (or the bare flag); `also` adds
 ## script-specific refusals with their own message (the build takes --direction only, so it refuses every other switch of SPEC_CHOICES)
@@ -188,6 +204,8 @@ parse_spec <- function(args = character(0)) {
   ## default there, so context = all is byte-identical to the main specification whatever --coal_ties says
   if (spec$coal_drop != "none" && spec$context != "coalition") stop(sprintf("--coal_drop=%s needs --context=coalition (got context=%s)", spec$coal_drop, spec$context))
   if (spec$context == "all") spec$coal_ties <- SPEC_DEFAULTS$coal_ties
+  ## contiguity = none is only meaningful when the distance replaces it (PI request 2026-10-28): a Z without contiguity AND without distance is refused
+  if (spec$contiguity != "land" && spec$distance != "capital") stop(sprintf("--contiguity=%s needs --distance=capital (distance replaces contiguity; got distance=%s)", spec$contiguity, spec$distance))
   spec
 }
 ## spec_suffix(spec): the cell-name suffix of the non-default switch values, in SPEC_SUFFIX order ("" for the main specification)

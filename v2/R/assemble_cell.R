@@ -56,6 +56,12 @@
 ##                   The current build has no NA distance in alts_lag3_all.rds, so on the real data nothing is dropped. The mean uncentred
 ##                   log_capdist of the chosen targets against every stage-2 alternative and cor(log_capdist, contig_land) over the IV rows
 ##                   are logged and returned (distance_stats). Until 2026-10-28 this was the archived global flag DISTANCE = TRUE / FALSE.
+##   CONTIGUITY    = "land" (main) | "none" (PI request 2026-10-28, cell suffix _nocontig): contig_land is dropped from Z (the distance REPLACES
+##                   contiguity), so a "none" cell needs DISTANCE = "capital" and is refused otherwise (parse_spec() refuses the switch combination
+##                   before any script gets here; the assembly refuses it again). Nothing else changes: the same rows, the same NA-distance drop
+##                   and reconciliation, log_capdist in the same position and centred the same way, so the _dist_nocontig Z is the _dist Z minus
+##                   its first column. cor(log_capdist, contig_land) over the IV rows is still logged (the column stays in the alternatives
+##                   file). Until 2026-10-28 this was the archived global flag CONTIGUITY = TRUE / FALSE; a logical is refused.
 ##   DROP_WW2, FULL_CONTROLS, EVENT_WEIGHTS: the ww2, controls and weights switches (below).
 ##   CONTEXT_MODEL = FALSE (every model of MODELS) | TRUE (the M1c model of dual typology stage b, 2026-10-27): the build's state-year
 ##                   column multi_mid_jan (a multilateral MID the state had not entered is active at 1 January of t) is appended to W as
@@ -68,7 +74,7 @@
 ## design allows.
 ##   W (stage 1), main : dM_i, dR_i, M_lvl, R_lvl (D2), ongoing_tm1, log1p(monadic prior MIDs) [CONFLICT_HISTORY], dem_tm1, log_n_system_tm1 (D3)
 ##   X (mu shifters), main : dM_i, dR_i only (no monadic controls)
-##   Z (dyadic), main : land contiguity [CONTIGUITY], joint democracy, log1p(dyadic prior MIDs) [CONFLICT_HISTORY],
+##   Z (dyadic), main : land contiguity [CONTIGUITY = "land"; "none" drops it, with DISTANCE = "capital" only], joint democracy, log1p(dyadic prior MIDs) [CONFLICT_HISTORY],
 ##                      dy_mid_tm1, [log1p dyadic peace years, DY_PEACE_YEARS], [log1p capital distance, DISTANCE = "capital"],
 ##                      the target's power changes dM_j_h, dRpr_j_h, [dch_j_missing when non-constant, TARGET_MISSING]
 ## FULL_CONTROLS = TRUE (switch controls = full, cell suffix _fullctrl; PI decision 2026-10-27, item 7) is the MAIN specification plus
@@ -102,11 +108,14 @@ Z_INTERACT <- c("ix_dMj_dRj", "ix_dMi_dMj", "ix_dRi_dRj", "ix_dMi_dRj")
 ## the two dyadic controls the full set adds to the main Z (2026-10-27): alliance_def_off (0/1, uncentred), log_dy_peace_years (centred)
 Z_FULL_EXTRA <- c("alliance_def_off", "log_dy_peace_years")
 ## DISTANCE (2026-10-28) is the `distance` switch, "none" | "capital" (a logical is refused: the old global flag is gone); "capital" inserts
-## log_capdist after the dyadic controls and before the target changes, the position the archived flag used
-z_columns <- function(CONFLICT_HISTORY = TRUE, DISTANCE = "none", CONTIGUITY = TRUE, TARGET_MISSING = FALSE, DY_PEACE_YEARS = FALSE,
+## log_capdist after the dyadic controls and before the target changes, the position the archived flag used.
+## CONTIGUITY (2026-10-28) is the `contiguity` switch, "land" | "none" (a logical is refused likewise); "none" drops contig_land, the first column.
+## The column list does not enforce the distance requirement of "none" (assemble_cell() and parse_spec() do).
+z_columns <- function(CONFLICT_HISTORY = TRUE, DISTANCE = "none", CONTIGUITY = "land", TARGET_MISSING = FALSE, DY_PEACE_YEARS = FALSE,
                       FULL_CONTROLS = FALSE, MAJOR = "none", INTERACT = "none") {
-  stopifnot(is.character(DISTANCE), length(DISTANCE) == 1L, DISTANCE %in% c("none", "capital"), MAJOR %in% c("none", "joint"), INTERACT %in% c("none", "prefixed"))
-  base <- c(if (CONTIGUITY) "contig_land", "joint_dem",
+  stopifnot(is.character(DISTANCE), length(DISTANCE) == 1L, DISTANCE %in% c("none", "capital"), MAJOR %in% c("none", "joint"), INTERACT %in% c("none", "prefixed"),
+            is.character(CONTIGUITY), length(CONTIGUITY) == 1L, CONTIGUITY %in% c("land", "none"))
+  base <- c(if (CONTIGUITY == "land") "contig_land", "joint_dem",
             if (CONFLICT_HISTORY) "log_dy_prior_mids",
             "dy_mid_tm1",
             if (FULL_CONTROLS) Z_FULL_EXTRA else if (DY_PEACE_YEARS) "log_dy_peace_years",
@@ -129,7 +138,7 @@ SY_INDICATORS <- c("cowmaj_tm1", "dem_tm1", "ongoing_tm1")
 ## (the robustness comparison, cell suffix _w1). The weights multiply the stage-2 log-lik terms in the Stan programs; log_lik_stage2
 ## stays unweighted per event.
 assemble_cell <- function(SAMPLE, LAG, VARIANT, CENT = "pr", CONFLICT_HISTORY = TRUE, SAMPLED_M = 0L,
-                          DISTANCE = "none", CONTIGUITY = TRUE, DY_PEACE_YEARS = FALSE, DROP_WW2 = FALSE, FULL_CONTROLS = FALSE,
+                          DISTANCE = "none", CONTIGUITY = "land", DY_PEACE_YEARS = FALSE, DROP_WW2 = FALSE, FULL_CONTROLS = FALSE,
                           EVENT_WEIGHTS = "dispute", PAIRS = "all", CHANGES = "raw", CONTEXT = "all", COAL_TIES = "inclusive", COAL_DROP = "none",
                           MAJOR = "none", INTERACT = "none",
                           CONTEXT_MODEL = FALSE, data_dir = file.path(v2_root(), "data"), manifest = NULL) {
@@ -137,8 +146,12 @@ assemble_cell <- function(SAMPLE, LAG, VARIANT, CENT = "pr", CONFLICT_HISTORY = 
             EVENT_WEIGHTS %in% c("dispute", "none"), PAIRS %in% c("all", "originators", "joiners"), CHANGES %in% c("raw", "winsor"),
             CONTEXT %in% c("all", "bilateral", "coalition"), COAL_TIES %in% c("inclusive", "strict"), COAL_DROP %in% c("none", "top3"),
             MAJOR %in% c("none", "joint"), INTERACT %in% c("none", "prefixed"),
-            is.character(DISTANCE), length(DISTANCE) == 1L, DISTANCE %in% c("none", "capital"))   # 2026-10-28: the switch's values, never TRUE / FALSE
+            is.character(DISTANCE), length(DISTANCE) == 1L, DISTANCE %in% c("none", "capital"),      # 2026-10-28: the switch's values, never TRUE / FALSE
+            is.character(CONTIGUITY), length(CONTIGUITY) == 1L, CONTIGUITY %in% c("land", "none"))  # 2026-10-28: likewise
+  ## contiguity = none is defined only as "distance replaces contiguity" (PI request 2026-10-28): a Z without either is refused
+  if (CONTIGUITY == "none" && DISTANCE != "capital") stop(sprintf("CONTIGUITY = none needs DISTANCE = capital (distance replaces contiguity; got DISTANCE = %s)", DISTANCE))
   if (CONTEXT_MODEL && DISTANCE != "none") stop("CONTEXT_MODEL (M1c) with DISTANCE != none is not specified; run M1c with DISTANCE = none")
+  if (CONTEXT_MODEL && CONTIGUITY != "land") stop("CONTEXT_MODEL (M1c) with CONTIGUITY != land is not specified; run M1c with CONTIGUITY = land")
   if (COAL_DROP != "none" && CONTEXT != "coalition") stop("COAL_DROP = top3 needs CONTEXT = coalition")
   stopifnot(is.logical(CONTEXT_MODEL), length(CONTEXT_MODEL) == 1L, !is.na(CONTEXT_MODEL))
   if (CONTEXT_MODEL && FULL_CONTROLS) stop("CONTEXT_MODEL (M1c) is defined on the minimal control set only (FULL_CONTROLS = TRUE not supported)")
@@ -268,6 +281,7 @@ assemble_cell <- function(SAMPLE, LAG, VARIANT, CENT = "pr", CONFLICT_HISTORY = 
     stopifnot(all(n_iv_sy$n_iv > 0L), nrow(n_iv_sy) == nrow(sy))
     logf("distance = capital: log_capdist (log1p km at t-1) enters Z after the dyadic controls, centred over the IV rows; %d of %d alternative rows have NO capital distance and are dropped from both sets (%d were in the IV set, %d in the stage-2 set) across %d state-years; %d rows remain",
          nrow(dist_dropped), n_rows_before, sum(dist_dropped$in_iv), sum(dist_dropped$in_s2), n_distinct(dist_dropped$sy_row), nrow(alts))
+    if (CONTIGUITY == "none") logf("contiguity = none (2026-10-28): contig_land is NOT in Z (distance replaces contiguity); the rows, the NA-distance drop and the centring are those of the distance = capital cell")
   } else stopifnot(is.null(dist_dropped))
   ## target power changes (PI decision 2026-10-23): dM_j_h / dRpr_j_h are always in Z. The missing-target indicator
   ## enters only when it is non-constant in THIS assembled cell (a constant column has no coefficient to estimate).
@@ -327,10 +341,13 @@ assemble_cell <- function(SAMPLE, LAG, VARIANT, CENT = "pr", CONFLICT_HISTORY = 
     ## overlap with land contiguity is logged here, over the IV rows the centring constant comes from
     stopifnot("log_capdist" %in% z_cent, !anyNA(alts$log_capdist), all(is.finite(alts$log_capdist)))
     raw_capdist <- alts$log_capdist
-    ## NA (no warning) when either column is constant over the IV rows (audit of ec9d8ae, P3 3; the toy cell's contiguity can be)
-    cor_contig <- if (CONTIGUITY && sd(raw_capdist[iv_rows]) > 0 && sd(alts$contig_land[iv_rows]) > 0) cor(raw_capdist[iv_rows], alts$contig_land[iv_rows]) else NA_real_
-    logf("distance = capital: log_capdist over the %d IV rows: mean %.4f (the centring constant), SD %.4f, range [%.3f, %.3f]; cor(log_capdist, contig_land) = %.3f (contiguity stays in Z)",
-         sum(iv_rows), mean(raw_capdist[iv_rows]), sd(raw_capdist[iv_rows]), min(raw_capdist[iv_rows]), max(raw_capdist[iv_rows]), cor_contig)
+    ## NA (no warning) when either column is constant over the IV rows (audit of ec9d8ae, P3 3; the toy cell's contiguity can be). Computed under
+    ## either contiguity value (the column stays in the alternatives file; under contiguity = none it describes what the distance replaces)
+    stopifnot("contig_land" %in% names(alts))
+    cor_contig <- if (sd(raw_capdist[iv_rows]) > 0 && sd(alts$contig_land[iv_rows]) > 0) cor(raw_capdist[iv_rows], alts$contig_land[iv_rows]) else NA_real_
+    logf("distance = capital: log_capdist over the %d IV rows: mean %.4f (the centring constant), SD %.4f, range [%.3f, %.3f]; cor(log_capdist, contig_land) = %.3f (%s)",
+         sum(iv_rows), mean(raw_capdist[iv_rows]), sd(raw_capdist[iv_rows]), min(raw_capdist[iv_rows]), max(raw_capdist[iv_rows]), cor_contig,
+         if (CONTIGUITY == "land") "contiguity stays in Z" else "contiguity = none: contig_land is NOT in Z")
     distance_stats <- list(n_rows_dropped = nrow(dist_dropped), n_rows_dropped_iv = sum(dist_dropped$in_iv), n_rows_dropped_s2 = sum(dist_dropped$in_s2),
                            n_sy_affected = n_distinct(dist_dropped$sy_row), n_events_dropped = NA_integer_,
                            mean_iv = mean(raw_capdist[iv_rows]), sd_iv = sd(raw_capdist[iv_rows]), cor_contig_iv = cor_contig,
@@ -616,13 +633,13 @@ assemble_cell <- function(SAMPLE, LAG, VARIANT, CENT = "pr", CONFLICT_HISTORY = 
        event_weights = EVENT_WEIGHTS, n_flipped = sum(ev_keys$dir_flipped), iv_null_cor_logn = cor(iv_null, sy$log_n_system_tm1),
        pairs = PAIRS, pairs_weights = pairs_w, changes = CHANGES, winsor = winsor, context = CONTEXT, coal_ties = COAL_TIES, coal_drop = COAL_DROP, context_top3 = context_top3,
        n_context_dropped = n_context_dropped, n_context_split_groups = n_split_groups, context_model = CONTEXT_MODEL, group_table = group_table,
-       major = MAJOR, major_stats = major_stats, interact = INTERACT, distance = DISTANCE, distance_stats = distance_stats)
+       major = MAJOR, major_stats = major_stats, interact = INTERACT, distance = DISTANCE, distance_stats = distance_stats, contiguity = CONTIGUITY)
 }
 ## assemble_cell_spec(SAMPLE, LAG, spec, ...): the main-specification constants of spec.R plus the switches of `spec`
 ## model = NULL or a model code: the M1c model (CONTEXT_MODELS) switches CONTEXT_MODEL on; every other model leaves it off
 assemble_cell_spec <- function(SAMPLE, LAG, spec, data_dir = spec_data_dir(spec, v2_root()), manifest = NULL, model = NULL) {
   stopifnot(is.null(model) || model %in% ALL_MODELS)
-  assemble_cell(SAMPLE, LAG, VARIANT, CENTRALITY, CONFLICT_HISTORY, SAMPLED_M, DISTANCE = spec$distance, CONTIGUITY = CONTIGUITY,
+  assemble_cell(SAMPLE, LAG, VARIANT, CENTRALITY, CONFLICT_HISTORY, SAMPLED_M, DISTANCE = spec$distance, CONTIGUITY = spec$contiguity,
                 DY_PEACE_YEARS = DY_PEACE_YEARS, DROP_WW2 = spec$ww2 == "drop", FULL_CONTROLS = spec$controls == "full",
                 EVENT_WEIGHTS = spec$weights, PAIRS = spec$pairs, CHANGES = spec$changes, CONTEXT = spec$context, COAL_TIES = spec$coal_ties,
                 COAL_DROP = spec$coal_drop, MAJOR = spec$major, INTERACT = spec$interact,
