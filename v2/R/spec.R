@@ -12,6 +12,8 @@
 ## the context_b preset runs it at lag 3 on mid and fmid (CONTEXT_B_PRESET).
 ## Switches added 2026-10-27 (PI-approved stage-2 extensions): major (none | joint: one_major / both_major in Z, cowmaj_tm1 in W) and
 ## interact (none | prefixed: four change products in Z); suffixes _major, _ix; preset major_ix (MAJOR_IX_PRESET).
+## Switch added 2026-10-28 (PI request): distance (none | capital: log1p capital distance in Z, alternatives without one dropped); suffix
+## _dist; preset dist (DIST_PRESET: distance alone and distance + major). Contiguity stays in Z under either value.
 ## Main specification (PI decisions through 2026-10-25; README "The main specification"):
 ##   sample in {mid, fmid, war} x lag in {1, 3, 5, 10} x model in {M1m, M1r, M1a, M1b, M2m, M2r, M2a, M2b}
 ##   choice set = every other system member at t with positions at t-1 (variant "all"), full sets (no sampled alternatives)
@@ -32,6 +34,7 @@ SPEC_CHOICES <- list(
   controls  = c("minimal", "full"),                 # control sets: minimal (main) | full = main + log_peace_years (W), alliance_def_off + log_dy_peace_years (Z); no major-power status (PI 2026-10-27)
   major     = c("none", "joint"),                   # major-power status (2026-10-27): none (main) | joint = Z gains one_major / both_major (dyad's major count, 0 = reference) and W gains cowmaj_tm1
   interact  = c("none", "prefixed"),                # change interactions in Z (2026-10-27): none (main) | prefixed = the four products dM_j x dRpr_j, dM_i x dM_j, dR_i x dRpr_j, dM_i x dRpr_j
+  distance  = c("none", "capital"),                 # capital distance (2026-10-28): none (main) | capital = Z gains log_capdist (log1p km at t-1, centred over the IV rows); alternatives without one are dropped from both sets
   changes   = c("raw", "winsor")                    # initiator and target power changes: as built | winsorised at WINSOR_PROBS of the panel
 )
 SPEC_DEFAULTS <- lapply(SPEC_CHOICES, function(v) v[1])
@@ -41,6 +44,9 @@ SPEC_DEFAULTS$ame_K <- 2L                            # latent dimensions of the 
 ## The context switches (2026-10-25, dual typology stage a) follow pairs: _bi / _co, then _strict (only with context != all; coal_ties is
 ## normalised to inclusive under context = all, so the main cell name never carries it), then _drop3 (context = coalition only).
 ## The stage-2 switches of 2026-10-27 follow controls (they extend the control sets): _major, then _ix, so both together give _major_ix.
+## The distance switch of 2026-10-28 goes FIRST among the control extensions, right after controls and before _major / _ix: it is the only
+## one that also changes the alternative rows (NA distances are dropped), and the existing _major / _ix / _major_ix names stay as they are.
+## distance + major therefore gives _dist_major (DIST_PRESET).
 SPEC_SUFFIX <- list(
   pairs     = c(originators = "_orig", joiners = "_join"),
   context   = c(bilateral = "_bi", coalition = "_co"),
@@ -48,6 +54,7 @@ SPEC_SUFFIX <- list(
   coal_drop = c(top3 = "_drop3"),
   ww2       = c(drop = "_noww2"),
   controls  = c(full = "_fullctrl"),
+  distance  = c(capital = "_dist"),
   major     = c(joint = "_major"),
   interact  = c(prefixed = "_ix"),
   weights   = c(none = "_w1"),
@@ -76,7 +83,8 @@ VARIANT      <- "all"                                # choice set: every other s
 CENTRALITY   <- "pr"                                 # IGO PageRank (eigenvector centrality is an archived option)
 SAMPLED_M    <- 0L                                   # full choice sets (sampled alternatives are an archived option)
 CONFLICT_HISTORY <- TRUE                             # prior-MID counts in W and Z (switching them off is an archived option)
-DISTANCE     <- FALSE                                # capital distance in Z (archived option)
+## capital distance in Z is the `distance` switch since 2026-10-28 (spec$distance, "none" | "capital"); the former global DISTANCE constant
+## is gone so that no script can set it apart from the switch (assemble_cell_spec() passes spec$distance; the cell name carries _dist)
 CONTIGUITY   <- TRUE                                 # land contiguity in Z (switching it off is an archived option)
 DY_PEACE_YEARS <- FALSE                              # dyadic peace years in Z (archived option)
 R0           <- 0.5                                  # typology peer radius in scaled gap units (03_extract.R default)
@@ -107,7 +115,8 @@ ROBUSTNESS_PRESETS <- list(
   perm_error   = list(),                             # the permutation and measurement-error tests on the main cell (no switch)
   context      = list(),                             # the context split (CONTEXT_PRESET below): three switch combinations x two cells
   context_b    = list(),                             # dual typology stage (b): the M1c model on the main-spec cells of CONTEXT_B_PRESET (no switch)
-  major_ix     = list()                              # the major-power and interaction switches (MAJOR_IX_PRESET below): three combinations x two cells
+  major_ix     = list(),                             # the major-power and interaction switches (MAJOR_IX_PRESET below): three combinations x two cells
+  dist         = list()                              # the capital-distance switch (DIST_PRESET below): distance alone and distance + major, x two cells
 )
 ## context_b preset (dual typology stage b, 2026-10-27): the M1c model (one model, group-specific shifts) at lag 3 on mid and fmid with every
 ## switch at its default; 05_robustness.R maps --cell_index = 0..1 onto the cell list (0 mid, 1 fmid). M1b family only, no war sample.
@@ -124,15 +133,22 @@ CONTEXT_PRESET <- list(cells = c("mid:3:M1b", "fmid:3:M1b"),
 MAJOR_IX_PRESET <- list(cells = c("fmid:3:M1b", "mid:3:M1b"),
                         variants = list(major = list(major = "joint"), interact = list(interact = "prefixed"),
                                         both = list(major = "joint", interact = "prefixed")))
+## dist preset (PI request 2026-10-28: distance and distance + major powers; contiguity stays in): M1b, lag 3, samples fmid and mid; the two
+## variants are distance = capital alone (_dist) and distance = capital with major = joint (_dist_major). No interactions. 05_robustness.R maps
+## --cell_index = 0..3 onto variant (slowest) x cell: 0-1 distance (fmid, mid), 2-3 distance_major. M1b only, so one Slurm array, no dependency.
+DIST_PRESET <- list(cells = c("fmid:3:M1b", "mid:3:M1b"),
+                    variants = list(distance = list(distance = "capital"), distance_major = list(distance = "capital", major = "joint")))
 ## default cell list of the refit presets, "sample:lag:model"; override with --cells=
 ROBUSTNESS_CELLS <- c("mid:3:M1b", "fmid:3:M1b", "war:3:M1b", "mid:3:M2b", "fmid:3:M2b", "war:3:M2b")
 ROBUSTNESS_MAIN_CELL <- list(sample = "mid", lag = 5L)   # the perm_error preset's cell (the a / b fits of both families)
 
 ## ---- archived CLI options (README "Archived options"; audit fix 14, 2026-10-26) ---------------------------------------------------
 ## Every script refuses the SAME list instead of ignoring an archived flag silently: the former --variant / --sampled_m / --centrality /
-## --conflict_history / --distance / --contiguity / --dy_peace_years options and the pre-spec.R spellings of today's switches
+## --conflict_history / --contiguity / --dy_peace_years options and the pre-spec.R spellings of today's switches
 ## (--drop_ww2 -> --ww2=drop, --full_controls -> --controls=full, --event_weights -> --weights, --K -> --ame_K).
-ARCHIVED_OPTIONS <- c("variant", "sampled_m", "centrality", "conflict_history", "distance", "contiguity", "dy_peace_years",
+## --distance left this list on 2026-10-28: it is a switch again (none | capital), so --distance=TRUE (the archived spelling) is refused by
+## parse_spec() as a value outside SPEC_CHOICES$distance, not here.
+ARCHIVED_OPTIONS <- c("variant", "sampled_m", "centrality", "conflict_history", "contiguity", "dy_peace_years",
                       "drop_ww2", "full_controls", "event_weights", "K")
 ## refuse_archived_options(args, script, also, also_msg): stop() when args hold --<archived>=... (or the bare flag); `also` adds
 ## script-specific refusals with their own message (the build takes --direction only, so it refuses every other switch of SPEC_CHOICES)

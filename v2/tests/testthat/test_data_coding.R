@@ -282,11 +282,12 @@ test_that("Z columns: main spec has land contiguity, the target power changes an
   for (ch in c(TRUE, FALSE)) expect_true("dy_mid_tm1" %in% z_columns(CONFLICT_HISTORY = ch))    # the lagged DV is not a --conflict_history control
   expect_false("dy_mid_tm1" %in% Z_CENTRED)                                                  # 0/1, not centred
   expect_equal(SY_INDICATORS, c("cowmaj_tm1", "dem_tm1", "ongoing_tm1"))
-  expect_true("log_capdist" %in% z_columns(DISTANCE = TRUE)); expect_true("contig_land" %in% z_columns(DISTANCE = TRUE))
+  expect_true("log_capdist" %in% z_columns(DISTANCE = "capital")); expect_true("contig_land" %in% z_columns(DISTANCE = "capital"))   # the `distance` switch since 2026-10-28
+  expect_error(z_columns(DISTANCE = TRUE)); expect_error(z_columns(DISTANCE = FALSE))                                                 # the old logical flag is refused
   expect_false("contig_land" %in% z_columns(CONTIGUITY = FALSE))
   expect_false("log_dy_prior_mids" %in% z_columns(CONFLICT_HISTORY = FALSE))
   ## the target changes are in every specification, including the one the 1-D models use (z_columns is model-agnostic)
-  for (ch in c(TRUE, FALSE)) for (di in c(TRUE, FALSE)) for (co in c(TRUE, FALSE))
+  for (ch in c(TRUE, FALSE)) for (di in c("none", "capital")) for (co in c(TRUE, FALSE))
     expect_true(all(c("dM_j_h", "dRpr_j_h") %in% z_columns(ch, di, co)))
   expect_false("dch_j_missing" %in% z_columns())
   expect_equal(tail(z_columns(TARGET_MISSING = TRUE), 1), "dch_j_missing")
@@ -778,15 +779,15 @@ test_that("control sets: minimal main W / X / Z, and --full_controls restores th
   ## (its own switch): W = main W + log_peace_years; X = main X (no controls); Z = main Z + alliance_def_off + log_dy_peace_years after
   ## dy_mid_tm1. Until then `full` reproduced the 8bf0ce1 base (cowmaj_tm1 / major_count, no D2 / D3 columns, no ongoing_tm1, no dy_mid_tm1).
   full_w <- c("M_lvl", "R_lvl", "ongoing_tm1", "log_prior_mids", "dem_tm1", "log_n_system_tm1", "log_peace_years")
-  full_z <- function(CONFLICT_HISTORY = TRUE, DISTANCE = FALSE, CONTIGUITY = TRUE, TARGET_MISSING = FALSE)
+  full_z <- function(CONFLICT_HISTORY = TRUE, DISTANCE = "none", CONTIGUITY = TRUE, TARGET_MISSING = FALSE)
     c(if (CONTIGUITY) "contig_land", "joint_dem", if (CONFLICT_HISTORY) "log_dy_prior_mids", "dy_mid_tm1", "alliance_def_off", "log_dy_peace_years",
-      if (DISTANCE) "log_capdist", "dM_j_h", "dRpr_j_h", if (TARGET_MISSING) "dch_j_missing")
+      if (DISTANCE == "capital") "log_capdist", "dM_j_h", "dRpr_j_h", if (TARGET_MISSING) "dch_j_missing")
   expect_equal(w_controls(FULL_CONTROLS = TRUE), full_w); expect_equal(x_controls(FULL_CONTROLS = TRUE), character(0))
   expect_equal(w_controls(FULL_CONTROLS = TRUE), c(w_controls(), "log_peace_years"))                                   # main + one column, appended
   expect_equal(w_controls(CONFLICT_HISTORY = FALSE, FULL_CONTROLS = TRUE), w_controls(CONFLICT_HISTORY = FALSE))      # the peace years are conflict history
   expect_false(any(c("cowmaj_tm1", "major_count") %in% c(w_controls(FULL_CONTROLS = TRUE), z_columns(FULL_CONTROLS = TRUE))))   # no major-power status in `full`
   expect_true(all(c("ongoing_tm1", "M_lvl", "R_lvl", "log_n_system_tm1") %in% w_controls(FULL_CONTROLS = TRUE))); expect_true("dy_mid_tm1" %in% z_columns(FULL_CONTROLS = TRUE))
-  for (ch in c(TRUE, FALSE)) for (di in c(TRUE, FALSE)) for (co in c(TRUE, FALSE)) for (tm in c(TRUE, FALSE)) {
+  for (ch in c(TRUE, FALSE)) for (di in c("none", "capital")) for (co in c(TRUE, FALSE)) for (tm in c(TRUE, FALSE)) {
     expect_equal(z_columns(ch, di, co, TARGET_MISSING = tm, FULL_CONTROLS = TRUE), full_z(ch, di, co, tm))
     expect_equal(setdiff(z_columns(ch, di, co, TARGET_MISSING = tm, FULL_CONTROLS = TRUE), z_columns(ch, di, co, TARGET_MISSING = tm)), Z_FULL_EXTRA)   # exactly the two extras
   }
@@ -798,7 +799,7 @@ test_that("control sets: minimal main W / X / Z, and --full_controls restores th
   ## the option flags combine with either control set the same way
   for (fc in c(TRUE, FALSE)) {
     expect_false("contig_land" %in% z_columns(CONTIGUITY = FALSE, FULL_CONTROLS = fc))
-    expect_true("log_capdist" %in% z_columns(DISTANCE = TRUE, FULL_CONTROLS = fc))
+    expect_true("log_capdist" %in% z_columns(DISTANCE = "capital", FULL_CONTROLS = fc))
     expect_false("log_dy_prior_mids" %in% z_columns(CONFLICT_HISTORY = FALSE, FULL_CONTROLS = fc))
     expect_equal(tail(z_columns(TARGET_MISSING = TRUE, FULL_CONTROLS = fc), 1), "dch_j_missing")
     expect_true(all(x_controls(FULL_CONTROLS = fc) %in% w_controls(FULL_CONTROLS = fc)))

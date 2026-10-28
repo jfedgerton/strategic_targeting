@@ -18,6 +18,7 @@
 ##     --context=all|bilateral|coalition (STAGE-2 events of one coalition context; stage 1 unchanged)  --coal_ties=inclusive|strict
 ##     --coal_drop=none|top3 (context=coalition only: without the 3 disputes contributing the most coalition events)
 ##     --major=none|joint (one_major / both_major in Z, cowmaj_tm1 in W)  --interact=none|prefixed (four change products in Z)
+##     --distance=none|capital (2026-10-28: log_capdist in Z, alternatives without a capital distance dropped from both sets; suffix _dist)
 ##   sampler: --chains --iter --warmup --adapt_delta --max_treedepth (defaults per family in spec.R, SAMPLER: M2 runs 4000 / 2000
 ##            with adapt_delta 0.95 since the PI decision of 2026-10-25)
 ##   init_from: (M2 only) the M1 fit whose posterior means start every chain (jittered; AME factors near 0; spec.R INIT_*). Default:
@@ -30,8 +31,8 @@
 ##   threads_per_chain: within-chain parallelism via reduce_sum over state-years (1 = serial, exact); Slurm cpus = chains x threads
 ##
 ## The choice set (every other system member, full sets), the PageRank centrality and the control-set constants are fixed in
-## spec.R (the former --variant / --sampled_m / --centrality / --conflict_history / --distance / --contiguity / --dy_peace_years
-## options are archived; see README "Archived options").
+## spec.R (the former --variant / --sampled_m / --centrality / --conflict_history / --contiguity / --dy_peace_years options are
+## archived; see README "Archived options"; --distance returned as the switch none | capital on 2026-10-28).
 ##
 ## Every input file is checked against <data dir>/manifest.csv (nrow + sha256) before use (audit F3/F8/F9). Output:
 ##   v2/output/fit_<cell>.rds    fit, Stan data, cell description, manifest rows, sampling configuration, compiled-model hashes
@@ -41,7 +42,7 @@
 ##                               review 2026-10-26 P1: rstan drops a failed parallel chain and returns the rest with mode 0)
 ##   v2/output/summary_<cell>.csv posterior summaries of the structural parameters, labelled by axis and covariate (written AFTER
 ##                               the fit file)
-## Cell name: <sample>_lag<h>_all_pr_<model>[_K<K>][_orig|_join][_bi|_co][_strict][_drop3][_noww2][_fullctrl][_major][_ix][_w1][_winsor][_sideA][_pilot]
+## Cell name: <sample>_lag<h>_all_pr_<model>[_K<K>][_orig|_join][_bi|_co][_strict][_drop3][_noww2][_fullctrl][_dist][_major][_ix][_w1][_winsor][_sideA][_pilot]
 ##            (model M1c: <sample>_lag<h>_all_pr_M1c<suffix>; its fit records args$stan_program = "m1_context" and args$context_model = TRUE)
 ## Seed 123 everywhere (audit F11).
 ## ============================================================================
@@ -70,6 +71,7 @@ CONTEXT_MODEL <- MODEL %in% CONTEXT_MODELS
 if (CONTEXT_MODEL && (spec$controls != "minimal" || spec$context != "all")) stop("M1c is defined on the minimal control set with every stage-2 event (--controls=minimal, --context=all); it models the contexts itself")
 ## merge 2026-10-27 (stage b x major / interact): the two features were developed independently and M1c under the major or interact switches
 ## has not been specified by the PI; refused here until it is, rather than silently combining the W / Z extensions with the M1c program
+if (CONTEXT_MODEL && spec$distance != "none") stop("M1c with --distance=capital is not specified (the stage-b model is defined on the main Z); run M1c with --distance=none")
 if (CONTEXT_MODEL && (spec$major != "none" || spec$interact != "none")) stop("M1c with --major=joint or --interact=prefixed is not specified (the stage-b model and the 2026-10-27 stage-2 switches were developed independently); run M1c with --major=none --interact=none")
 K <- spec$ame_K
 cell <- cell_name(SAMPLE, LAG, MODEL, spec)
@@ -147,6 +149,9 @@ if (spec$major == "joint") logf("major = joint (2026-10-27): cowmaj_tm1 in W; on
                                 A$major_stats$n_events[["zero"]], A$major_stats$n_events[["one"]], A$major_stats$n_events[["both"]], dat$E,
                                 A$major_stats$var_iv_sets[["one_major"]], A$major_stats$var_iv_sets[["both_major"]], A$major_stats$var_iv_sets[["n_sets"]],
                                 A$major_stats$var_s2_sets[["one_major"]], A$major_stats$var_s2_sets[["both_major"]], A$major_stats$var_s2_sets[["n_sets"]])
+if (spec$distance == "capital") logf("distance = capital (2026-10-28): log_capdist in Z (centred over the IV rows); %d alternative rows without a capital distance dropped from both sets (%d IV, %d stage 2; %d state-years), %d expected events lost with them (counted and reconciled); IV-row mean %.4f, SD %.4f, cor with contig_land %.3f; mean uncentred log_capdist chosen %.4f vs all stage-2 alternatives %.4f",
+                                     A$distance_stats$n_rows_dropped, A$distance_stats$n_rows_dropped_iv, A$distance_stats$n_rows_dropped_s2, A$distance_stats$n_sy_affected, A$distance_stats$n_events_dropped,
+                                     A$distance_stats$mean_iv, A$distance_stats$sd_iv, A$distance_stats$cor_contig_iv, A$distance_stats$mean_chosen, A$distance_stats$mean_s2)
 if (spec$interact == "prefixed") logf("interact = prefixed (2026-10-27): Z carries %s (products of the uncentred %s changes, centred over the IV rows)", paste(Z_INTERACT, collapse = ","), spec$changes)
 if (DRY_RUN) {
   saveRDS(list(dat = dat, cell = cell, state_codes = state_codes, W_cols = W_cols, X_cols = X_cols, Z_cols = Z_cols,
@@ -253,7 +258,7 @@ obj <- list(fit = fit, dat = dat, cell = cell, state_codes = state_codes, W_cols
             param_labels = label_parameters(rownames(sm_tab), W_cols, X_cols, Z_cols, D_MODE),
             args = list(sample = SAMPLE, lag = LAG, variant = VARIANT, model = MODEL, centrality = CENTRALITY, K = K, chains = CHAINS,
                         iter = ITER, warmup = WARMUP, pilot = PILOT, sampled_m = SAMPLED_M, conflict_history = CONFLICT_HISTORY,
-                        distance = DISTANCE, contiguity = CONTIGUITY, dy_peace_years = DY_PEACE_YEARS, drop_ww2 = spec$ww2 == "drop",
+                        distance = spec$distance, distance_stats = A$distance_stats, contiguity = CONTIGUITY, dy_peace_years = DY_PEACE_YEARS, drop_ww2 = spec$ww2 == "drop",
                         full_controls = spec$controls == "full", event_weights = spec$weights, direction = spec$direction,
                         pairs = spec$pairs, changes = spec$changes, context = spec$context, coal_ties = spec$coal_ties, coal_drop = spec$coal_drop,
                         context_top3 = A$context_top3, major = spec$major, major_stats = A$major_stats, interact = spec$interact,

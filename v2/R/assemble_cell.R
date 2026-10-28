@@ -44,6 +44,18 @@
 ##                   centring of dM_j_h / dRpr_j_h) and then centred over the IV rows like every continuous Z column (Z_CENTRED); forming
 ##                   them from the centred target changes instead would be the same model up to a reparameterisation absorbed by the Z
 ##                   main effects, alpha0 and alpha (dM_i, dR_i are in W). Appended after the major indicators when both switches are on.
+##   DISTANCE      = "none" (main) | "capital" (PI request 2026-10-28, cell suffix _dist): Z gains log_capdist = log1p(capital-to-capital
+##                   great-circle distance in km at t-1, built by 01_build_data.R from peacesciencer's add_capital_distance() with every other
+##                   dyadic control at t-1), inserted after the dyadic controls and before the target changes (z_columns()), continuous and
+##                   centred over the IV rows like the other Z_CENTRED columns. Contiguity stays in Z. Alternatives WITHOUT a distance (NA
+##                   kept by the build) are dropped from the assembled block, which removes them from the IV set and the stage-2 set at once
+##                   (one row carries both flags); the counts of rows, state-years and events affected are logged, a state-year whose IV set
+##                   would become empty stops the run, and an event whose chosen target has no distance leaves stage 2 and is COUNTED: in
+##                   the "all" variant the usable events must equal the expected events minus exactly these (reconciled, not bounded). Its
+##                   state-year keeps y1 = 1 (an orphan, like a fighting_at_ref event) and its D8 group's weights are not rescaled (logged).
+##                   The current build has no NA distance in alts_lag3_all.rds, so on the real data nothing is dropped. The mean uncentred
+##                   log_capdist of the chosen targets against every stage-2 alternative and cor(log_capdist, contig_land) over the IV rows
+##                   are logged and returned (distance_stats). Until 2026-10-28 this was the archived global flag DISTANCE = TRUE / FALSE.
 ##   DROP_WW2, FULL_CONTROLS, EVENT_WEIGHTS: the ww2, controls and weights switches (below).
 ##   CONTEXT_MODEL = FALSE (every model of MODELS) | TRUE (the M1c model of dual typology stage b, 2026-10-27): the build's state-year
 ##                   column multi_mid_jan (a multilateral MID the state had not entered is active at 1 January of t) is appended to W as
@@ -57,7 +69,7 @@
 ##   W (stage 1), main : dM_i, dR_i, M_lvl, R_lvl (D2), ongoing_tm1, log1p(monadic prior MIDs) [CONFLICT_HISTORY], dem_tm1, log_n_system_tm1 (D3)
 ##   X (mu shifters), main : dM_i, dR_i only (no monadic controls)
 ##   Z (dyadic), main : land contiguity [CONTIGUITY], joint democracy, log1p(dyadic prior MIDs) [CONFLICT_HISTORY],
-##                      dy_mid_tm1, [log1p dyadic peace years, DY_PEACE_YEARS], [log1p capital distance, DISTANCE],
+##                      dy_mid_tm1, [log1p dyadic peace years, DY_PEACE_YEARS], [log1p capital distance, DISTANCE = "capital"],
 ##                      the target's power changes dM_j_h, dRpr_j_h, [dch_j_missing when non-constant, TARGET_MISSING]
 ## FULL_CONTROLS = TRUE (switch controls = full, cell suffix _fullctrl; PI decision 2026-10-27, item 7) is the MAIN specification plus
 ## the controls the minimal sets dropped, WITHOUT major-power status (which has its own switch, MAJOR):
@@ -89,14 +101,16 @@ Z_MAJOR    <- c("one_major", "both_major")
 Z_INTERACT <- c("ix_dMj_dRj", "ix_dMi_dMj", "ix_dRi_dRj", "ix_dMi_dRj")
 ## the two dyadic controls the full set adds to the main Z (2026-10-27): alliance_def_off (0/1, uncentred), log_dy_peace_years (centred)
 Z_FULL_EXTRA <- c("alliance_def_off", "log_dy_peace_years")
-z_columns <- function(CONFLICT_HISTORY = TRUE, DISTANCE = FALSE, CONTIGUITY = TRUE, TARGET_MISSING = FALSE, DY_PEACE_YEARS = FALSE,
+## DISTANCE (2026-10-28) is the `distance` switch, "none" | "capital" (a logical is refused: the old global flag is gone); "capital" inserts
+## log_capdist after the dyadic controls and before the target changes, the position the archived flag used
+z_columns <- function(CONFLICT_HISTORY = TRUE, DISTANCE = "none", CONTIGUITY = TRUE, TARGET_MISSING = FALSE, DY_PEACE_YEARS = FALSE,
                       FULL_CONTROLS = FALSE, MAJOR = "none", INTERACT = "none") {
-  stopifnot(MAJOR %in% c("none", "joint"), INTERACT %in% c("none", "prefixed"))
+  stopifnot(is.character(DISTANCE), length(DISTANCE) == 1L, DISTANCE %in% c("none", "capital"), MAJOR %in% c("none", "joint"), INTERACT %in% c("none", "prefixed"))
   base <- c(if (CONTIGUITY) "contig_land", "joint_dem",
             if (CONFLICT_HISTORY) "log_dy_prior_mids",
             "dy_mid_tm1",
             if (FULL_CONTROLS) Z_FULL_EXTRA else if (DY_PEACE_YEARS) "log_dy_peace_years",
-            if (DISTANCE) "log_capdist",
+            if (DISTANCE == "capital") "log_capdist",
             "dM_j_h", "dRpr_j_h",
             if (TARGET_MISSING) "dch_j_missing")
   stopifnot(!anyDuplicated(base))
@@ -115,14 +129,16 @@ SY_INDICATORS <- c("cowmaj_tm1", "dem_tm1", "ongoing_tm1")
 ## (the robustness comparison, cell suffix _w1). The weights multiply the stage-2 log-lik terms in the Stan programs; log_lik_stage2
 ## stays unweighted per event.
 assemble_cell <- function(SAMPLE, LAG, VARIANT, CENT = "pr", CONFLICT_HISTORY = TRUE, SAMPLED_M = 0L,
-                          DISTANCE = FALSE, CONTIGUITY = TRUE, DY_PEACE_YEARS = FALSE, DROP_WW2 = FALSE, FULL_CONTROLS = FALSE,
+                          DISTANCE = "none", CONTIGUITY = TRUE, DY_PEACE_YEARS = FALSE, DROP_WW2 = FALSE, FULL_CONTROLS = FALSE,
                           EVENT_WEIGHTS = "dispute", PAIRS = "all", CHANGES = "raw", CONTEXT = "all", COAL_TIES = "inclusive", COAL_DROP = "none",
                           MAJOR = "none", INTERACT = "none",
                           CONTEXT_MODEL = FALSE, data_dir = file.path(v2_root(), "data"), manifest = NULL) {
   stopifnot(SAMPLE %in% c("mid", "fmid", "fmidcow", "fmidub", "war"), LAG %in% c(1L, 3L, 5L, 10L), VARIANT %in% c("all", "polrel"), CENT %in% c("pr", "eig"),
             EVENT_WEIGHTS %in% c("dispute", "none"), PAIRS %in% c("all", "originators", "joiners"), CHANGES %in% c("raw", "winsor"),
             CONTEXT %in% c("all", "bilateral", "coalition"), COAL_TIES %in% c("inclusive", "strict"), COAL_DROP %in% c("none", "top3"),
-            MAJOR %in% c("none", "joint"), INTERACT %in% c("none", "prefixed"))
+            MAJOR %in% c("none", "joint"), INTERACT %in% c("none", "prefixed"),
+            is.character(DISTANCE), length(DISTANCE) == 1L, DISTANCE %in% c("none", "capital"))   # 2026-10-28: the switch's values, never TRUE / FALSE
+  if (CONTEXT_MODEL && DISTANCE != "none") stop("CONTEXT_MODEL (M1c) with DISTANCE != none is not specified; run M1c with DISTANCE = none")
   if (COAL_DROP != "none" && CONTEXT != "coalition") stop("COAL_DROP = top3 needs CONTEXT = coalition")
   stopifnot(is.logical(CONTEXT_MODEL), length(CONTEXT_MODEL) == 1L, !is.na(CONTEXT_MODEL))
   if (CONTEXT_MODEL && FULL_CONTROLS) stop("CONTEXT_MODEL (M1c) is defined on the minimal control set only (FULL_CONTROLS = TRUE not supported)")
@@ -228,10 +244,28 @@ assemble_cell <- function(SAMPLE, LAG, VARIANT, CENT = "pr", CONFLICT_HISTORY = 
     mutate(state_idx = match(ccode1, state_codes), target_idx = match(ccode2, state_codes), dR = .data[[dRalt_col]],
            log_dy_prior_mids = log1p(dy_prior_mids_h), log_dy_peace_years = log1p(dy_peace_years_h))
   stopifnot(!anyNA(alts$target_idx), !anyNA(alts$sy_row))
-  if (DISTANCE) {
-    n_na <- sum(is.na(alts$log_capdist))
-    if (n_na > 0) { logf("--distance: dropping %d alternatives without a capital distance", n_na); alts <- alts |> filter(!is.na(log_capdist)) }
-  }
+  ## distance = capital (2026-10-28): alternatives without a capital distance leave the assembled block, i.e. the IV set AND the stage-2 set at
+  ## once (a row carries both flags, so the two sets cannot be filtered differently). Their keys are kept (dist_dropped) so that the events
+  ## whose chosen target was among them are counted below and the usable-event count is reconciled against them, never bounded.
+  dist_dropped <- NULL; distance_stats <- NULL
+  if (DISTANCE == "capital") {
+    stopifnot("log_capdist" %in% names(alts))
+    n_rows_before <- nrow(alts)
+    dist_dropped <- alts |> filter(is.na(log_capdist)) |> select(ccode1, ccode2, year, sy_row, in_iv, in_s2)
+    stopifnot(all(is.finite(alts$log_capdist[!is.na(alts$log_capdist)])), all(alts$log_capdist[!is.na(alts$log_capdist)] >= 0))
+    if (nrow(dist_dropped) > 0) {
+      alts <- alts |> filter(!is.na(log_capdist))
+      stopifnot(nrow(alts) + nrow(dist_dropped) == n_rows_before, !anyNA(alts$log_capdist))
+      ## a state-year whose IV set empties is an error (the IV of stage 1 is undefined), not a drop; a stage-2 set that empties or shrinks to the
+      ## chosen target alone is caught by the existing check once ev exists
+      n_iv_after <- alts |> group_by(sy_row) |> summarise(n_iv = sum(in_iv), .groups = "drop")
+      lost_sy <- setdiff(seq_len(nrow(sy)), n_iv_after$sy_row[n_iv_after$n_iv > 0L])
+      if (length(lost_sy) > 0) stop(sprintf("distance = capital: %d state-years would lose every IV-set alternative (no capital distance for any of them): %s",
+                                            length(lost_sy), paste(sprintf("%d-%d", sy$ccode[lost_sy], sy$year[lost_sy]), collapse = " ")))
+    }
+    logf("distance = capital: log_capdist (log1p km at t-1) enters Z after the dyadic controls, centred over the IV rows; %d of %d alternative rows have NO capital distance and are dropped from both sets (%d were in the IV set, %d in the stage-2 set) across %d state-years; %d rows remain",
+         nrow(dist_dropped), n_rows_before, sum(dist_dropped$in_iv), sum(dist_dropped$in_s2), n_distinct(dist_dropped$sy_row), nrow(alts))
+  } else stopifnot(is.null(dist_dropped))
   ## target power changes (PI decision 2026-10-23): dM_j_h / dRpr_j_h are always in Z. The missing-target indicator
   ## enters only when it is non-constant in THIS assembled cell (a constant column has no coefficient to estimate).
   stopifnot(all(c("dM_j_h", "dRpr_j_h", "dch_j_missing") %in% names(alts)), all(alts$dch_j_missing %in% c(0L, 1L)),
@@ -285,6 +319,19 @@ assemble_cell <- function(SAMPLE, LAG, VARIANT, CENT = "pr", CONFLICT_HISTORY = 
   z_cent <- intersect(Z_cols, Z_CENTRED)
   iv_rows <- alts$in_iv == 1L
   stopifnot(any(iv_rows))
+  if (DISTANCE == "capital") {
+    ## the uncentred distance is kept for the descriptive statistics below (chosen targets against every stage-2 alternative) and its
+    ## overlap with land contiguity is logged here, over the IV rows the centring constant comes from
+    stopifnot("log_capdist" %in% z_cent, !anyNA(alts$log_capdist), all(is.finite(alts$log_capdist)))
+    raw_capdist <- alts$log_capdist
+    cor_contig <- if (CONTIGUITY) cor(raw_capdist[iv_rows], alts$contig_land[iv_rows]) else NA_real_
+    logf("distance = capital: log_capdist over the %d IV rows: mean %.4f (the centring constant), SD %.4f, range [%.3f, %.3f]; cor(log_capdist, contig_land) = %.3f (contiguity stays in Z)",
+         sum(iv_rows), mean(raw_capdist[iv_rows]), sd(raw_capdist[iv_rows]), min(raw_capdist[iv_rows]), max(raw_capdist[iv_rows]), cor_contig)
+    distance_stats <- list(n_rows_dropped = nrow(dist_dropped), n_rows_dropped_iv = sum(dist_dropped$in_iv), n_rows_dropped_s2 = sum(dist_dropped$in_s2),
+                           n_sy_affected = n_distinct(dist_dropped$sy_row), n_events_dropped = NA_integer_,
+                           mean_iv = mean(raw_capdist[iv_rows]), sd_iv = sd(raw_capdist[iv_rows]), cor_contig_iv = cor_contig,
+                           mean_chosen = NA_real_, mean_s2 = NA_real_)
+  }
   for (cc in z_cent) alts[[cc]] <- alts[[cc]] - mean(alts[[cc]][iv_rows])
   stopifnot(all(abs(colMeans(as.matrix(alts[iv_rows, z_cent, drop = FALSE]))) < 1e-8))
   logf("Z centring: %d continuous Z columns centred over the %d stage-1 IV rows (of %d assembled rows)", length(z_cent), sum(iv_rows), nrow(alts))
@@ -476,12 +523,26 @@ assemble_cell <- function(SAMPLE, LAG, VARIANT, CENT = "pr", CONFLICT_HISTORY = 
   stopifnot(nrow(ev) > 0, all(sy$y1[ev$sy_row] == 1L), all(alts$in_s2[ev$alt_row] == 1L), all(alts$sy_row[ev$alt_row] == ev$sy_row))
   assert_no_dup_keys(ev, c("sy_row", "alt_row"), "events (one chosen alternative per state-year and target)")
   ## every event whose chosen alternative can exist (initiator in sy, target with positions at t-1 and in the system at t,
-  ## pair not fighting at the reference date) has it in its stage-2 set; in the "all" variant without the distance filter
-  ## this is exact, elsewhere a lower bound
+  ## pair not fighting at the reference date) has it in its stage-2 set; in the "all" variant this is exact (with distance = capital,
+  ## exact after subtracting the counted events whose target has no distance), in polrel a lower bound
   expected <- ev_keys |> semi_join(sy_key, by = c("ccode1", "year")) |> filter(target_has_pos_tm1, !fighting_at_ref)
-  if (VARIANT == "all" && !DISTANCE) {
-    if (nrow(ev) != nrow(expected)) stop(sprintf("%d events with initiator in the panel, a target with positions at t-1 and a pair not fighting at the reference date are not in their stage-2 choice set (expected %d usable, got %d)", abs(nrow(expected) - nrow(ev)), nrow(expected), nrow(ev)))
-  } else stopifnot(nrow(ev) <= nrow(expected))
+  ## distance = capital: the expected events whose chosen target left the stage-2 set for lack of a distance are counted (dist_dropped holds the
+  ## dropped rows' keys with their flags), asserted absent from ev, and subtracted from the expectation, so the count is reconciled exactly
+  n_ev_dist <- 0L
+  if (DISTANCE == "capital") {
+    ev_dist <- expected |> semi_join(dist_dropped |> filter(in_s2 == 1L), by = c("ccode1", "ccode2", "year"))
+    n_ev_dist <- nrow(ev_dist)
+    stopifnot(nrow(ev_dist |> semi_join(ev, by = c("ccode1", "ccode2", "year"))) == 0L)        # none of them survived into ev
+    ## an expected event whose key is among the dropped rows but flagged in_s2 = 0 cannot exist (its stage-2 row would be the dropped one)
+    stopifnot(nrow(expected |> semi_join(dist_dropped |> filter(in_s2 == 0L), by = c("ccode1", "ccode2", "year"))) == 0L)
+    distance_stats$n_events_dropped <- n_ev_dist
+    logf("distance = capital: %d of the %d expected stage-2 events of sample %s have a chosen target without a capital distance and leave stage 2 (counted; their state-years keep y1 = 1 as orphans; D8 weights of their groups not rescaled)%s",
+         n_ev_dist, nrow(expected), SAMPLE, if (n_ev_dist > 0) sprintf(": %s", paste(sprintf("%d->%d %d", ev_dist$ccode1, ev_dist$ccode2, ev_dist$year), collapse = ", ")) else "")
+  }
+  if (VARIANT == "all") {
+    if (nrow(ev) != nrow(expected) - n_ev_dist) stop(sprintf("%d events with initiator in the panel, a target with positions at t-1 and a pair not fighting at the reference date are not in their stage-2 choice set (expected %d usable%s, got %d)",
+                                                             abs(nrow(expected) - n_ev_dist - nrow(ev)), nrow(expected) - n_ev_dist, if (DISTANCE == "capital") sprintf(" = %d minus %d without a capital distance", nrow(expected), n_ev_dist) else "", nrow(ev)))
+  } else stopifnot(nrow(ev) <= nrow(expected) - n_ev_dist)
   stopifnot(nrow(ev_keys |> semi_join(sy_key, by = c("ccode1", "year")) |> filter(!target_has_pos_tm1) |> semi_join(alts, by = c("ccode1", "ccode2", "year"))) == 0)
   ## no initiating state-year with a usable event may have an empty or chosen-only stage-2 set (review coverage gap); the
   ## empty-IV-set check is above, so a state-year here always has >= 1 IV row as well
@@ -492,6 +553,13 @@ assemble_cell <- function(SAMPLE, LAG, VARIANT, CENT = "pr", CONFLICT_HISTORY = 
        n_distinct(ev$sy_row), min(n_s2_sy$n_s2[n_s2_sy$sy_row %in% ev$sy_row]), as.integer(median(n_s2_sy$n_s2[n_s2_sy$sy_row %in% ev$sy_row])),
        nrow(sy), min(n_iv_sy$n_iv), as.integer(median(n_iv_sy$n_iv)))
   logf("dy_mid_tm1: %d of %d alternative rows = 1; chosen events with dy_mid_tm1 = 1: %d of %d", sum(alts$dy_mid_tm1), nrow(alts), sum(ev$dy_mid_tm1), nrow(ev))
+  ## distance = capital: the uncentred distance of the chosen targets against every stage-2 alternative (alt_row indexes the assembled block)
+  if (DISTANCE == "capital") {
+    stopifnot(length(raw_capdist) == nrow(alts), all(ev$alt_row %in% seq_len(nrow(alts))))
+    distance_stats$mean_chosen <- mean(raw_capdist[ev$alt_row]); distance_stats$mean_s2 <- mean(raw_capdist[alts$in_s2 == 1L])
+    logf("distance = capital: mean log_capdist (uncentred) of the %d chosen targets %.4f (km ~ %.0f) against %.4f (km ~ %.0f) over the %d stage-2 alternatives",
+         nrow(ev), distance_stats$mean_chosen, expm1(distance_stats$mean_chosen), distance_stats$mean_s2, expm1(distance_stats$mean_s2), sum(alts$in_s2 == 1L))
+  }
   ## major = joint: the event shares per category and the within-choice-set variation of each indicator. one_major / both_major are identified
   ## only by variation INSIDE a choice set (b_j absorbs anything constant per target; a constant per state-year drops from the softmax), so
   ## each must vary within some IV set (it enters the IV of stage 1) and within some stage-2 set of an initiating state-year with a usable
@@ -544,13 +612,13 @@ assemble_cell <- function(SAMPLE, LAG, VARIANT, CENT = "pr", CONFLICT_HISTORY = 
        event_weights = EVENT_WEIGHTS, n_flipped = sum(ev_keys$dir_flipped), iv_null_cor_logn = cor(iv_null, sy$log_n_system_tm1),
        pairs = PAIRS, pairs_weights = pairs_w, changes = CHANGES, winsor = winsor, context = CONTEXT, coal_ties = COAL_TIES, coal_drop = COAL_DROP, context_top3 = context_top3,
        n_context_dropped = n_context_dropped, n_context_split_groups = n_split_groups, context_model = CONTEXT_MODEL, group_table = group_table,
-       major = MAJOR, major_stats = major_stats, interact = INTERACT)
+       major = MAJOR, major_stats = major_stats, interact = INTERACT, distance = DISTANCE, distance_stats = distance_stats)
 }
 ## assemble_cell_spec(SAMPLE, LAG, spec, ...): the main-specification constants of spec.R plus the switches of `spec`
 ## model = NULL or a model code: the M1c model (CONTEXT_MODELS) switches CONTEXT_MODEL on; every other model leaves it off
 assemble_cell_spec <- function(SAMPLE, LAG, spec, data_dir = spec_data_dir(spec, v2_root()), manifest = NULL, model = NULL) {
   stopifnot(is.null(model) || model %in% ALL_MODELS)
-  assemble_cell(SAMPLE, LAG, VARIANT, CENTRALITY, CONFLICT_HISTORY, SAMPLED_M, DISTANCE = DISTANCE, CONTIGUITY = CONTIGUITY,
+  assemble_cell(SAMPLE, LAG, VARIANT, CENTRALITY, CONFLICT_HISTORY, SAMPLED_M, DISTANCE = spec$distance, CONTIGUITY = CONTIGUITY,
                 DY_PEACE_YEARS = DY_PEACE_YEARS, DROP_WW2 = spec$ww2 == "drop", FULL_CONTROLS = spec$controls == "full",
                 EVENT_WEIGHTS = spec$weights, PAIRS = spec$pairs, CHANGES = spec$changes, CONTEXT = spec$context, COAL_TIES = spec$coal_ties,
                 COAL_DROP = spec$coal_drop, MAJOR = spec$major, INTERACT = spec$interact,

@@ -19,6 +19,9 @@
 ## major_ix preset (PI-approved stage-2 switches, 2026-10-27; MAJOR_IX_PRESET in spec.R): M1b, lag 3, samples fmid and mid, three switch
 ##   combinations: major = joint (_major), interact = prefixed (_ix), both (_major_ix). --cell_index = 0..5 maps variant (slowest) x cell:
 ##   0-1 major (fmid, mid), 2-3 interact, 4-5 both; without it all six run in sequence. M1b only: no M1 -> M2 dependency.
+## dist preset (PI request 2026-10-28: distance and distance + major powers; contiguity stays in; DIST_PRESET in spec.R): M1b, lag 3, samples
+##   fmid and mid, two switch combinations: distance = capital (_dist) and distance = capital + major = joint (_dist_major); no interactions.
+##   --cell_index = 0..3 maps variant (slowest) x cell: 0-1 distance (fmid, mid), 2-3 distance_major; without it all four run in sequence. M1b only.
 ## Test preset (no switch; the existing permutation and systematic-measurement-error tests on the main cell's a / b fits):
 ##   perm_error   the temporal holdout (B9, constants frozen on the training years; --cutoff), the permutation test (rescore =
 ##                reliance diagnostic, refit = calibrated p-value) and the relational-level error inflation, per family, on
@@ -28,13 +31,15 @@
 ##                changes and the frozen constants from the raw levels, which does not reproduce a winsorised cell, and the pairs
 ##                cells recompute y1 from a subset of the events; neither case has been checked for the refit-based tests.
 ##                Refused with --major != none or --interact != none as well (audit fix 4, 2026-10-27): the refits would leave the
-##                ix_* products stale and cowmaj_tm1 un-re-centred.
+##                ix_* products stale and cowmaj_tm1 un-re-centred. Refused with --distance != none (2026-10-28): the refits re-centre
+##                z_cent from A$Z_cols, but the NA-distance row drop and the event reconciliation have not been wired into them.
 ##
 ## Usage:
 ##   Rscript v2/R/05_robustness.R --preset=noww2 [--cells=mid:3:M1b,fmid:3:M1b,...] [--cell_index=i] [--dry_run=TRUE]
 ##   Rscript v2/R/05_robustness.R --preset=context [--cell_index=0..5] [--dry_run=TRUE] [--threads_per_chain=k]
 ##   Rscript v2/R/05_robustness.R --preset=context_b [--cell_index=0..1] [--dry_run=TRUE] [--threads_per_chain=k]
 ##   Rscript v2/R/05_robustness.R --preset=major_ix [--cell_index=0..5] [--dry_run=TRUE] [--threads_per_chain=k]
+##   Rscript v2/R/05_robustness.R --preset=dist [--cell_index=0..3] [--dry_run=TRUE] [--threads_per_chain=k]
 ##          [--threads_per_chain=k] [--chains= --iter= --warmup=] [other switches]
 ##       cells      : "sample:lag:model" list; default ROBUSTNESS_CELLS (spec.R). --cell_index=i (0-based) runs ONE cell of the
 ##                    list (the Slurm array of 04_robustness.sbatch); without it every cell runs in sequence.
@@ -75,7 +80,7 @@ if (PRESET != "perm_error") {
   } else if (PRESET == "context_b") {
     ## the M1c model on its fixed cells, every switch at its default: no --cells and no switch may be passed (the cell names would still be
     ## unique through the model code, but the stage-b run is defined on the main specification)
-    if (length(grep("^--(cells|pairs|context|coal_ties|coal_drop|direction|ww2|weights|controls|major|interact|changes|ame_K)=", args)))
+    if (length(grep("^--(cells|pairs|context|coal_ties|coal_drop|direction|ww2|weights|controls|major|interact|distance|changes|ame_K)=", args)))
       stop("the context_b preset fixes its cells (CONTEXT_B_PRESET in spec.R) and runs M1c on the main specification; no --cells and no switch may be passed")
     parts <- strsplit(CONTEXT_B_PRESET$cells, ":", fixed = TRUE)
     cells_tab <- data.frame(sample = vapply(parts, `[`, "", 1), lag = as.integer(vapply(parts, `[`, "", 2)), model = vapply(parts, `[`, "", 3), variant = NA_character_, stringsAsFactors = FALSE)
@@ -87,6 +92,13 @@ if (PRESET != "perm_error") {
     cells_tab <- expand.grid(k = seq_along(MAJOR_IX_PRESET$cells), v = seq_along(MAJOR_IX_PRESET$variants))      # cell fastest, variant slowest
     cells_tab <- data.frame(sample = vapply(parts, `[`, "", 1)[cells_tab$k], lag = as.integer(vapply(parts, `[`, "", 2))[cells_tab$k], model = vapply(parts, `[`, "", 3)[cells_tab$k],
                             variant = names(MAJOR_IX_PRESET$variants)[cells_tab$v], stringsAsFactors = FALSE)
+  } else if (PRESET == "dist") {
+    ## the dist preset (2026-10-28) is a fixed table as well: the two switch combinations of DIST_PRESET x its two cells
+    if (length(grep("^--(cells|distance|major)=", args))) stop("the dist preset fixes --cells, --distance and --major (DIST_PRESET in spec.R); pass other switches only")
+    parts <- strsplit(DIST_PRESET$cells, ":", fixed = TRUE)
+    cells_tab <- expand.grid(k = seq_along(DIST_PRESET$cells), v = seq_along(DIST_PRESET$variants))      # cell fastest, variant slowest
+    cells_tab <- data.frame(sample = vapply(parts, `[`, "", 1)[cells_tab$k], lag = as.integer(vapply(parts, `[`, "", 2))[cells_tab$k], model = vapply(parts, `[`, "", 3)[cells_tab$k],
+                            variant = names(DIST_PRESET$variants)[cells_tab$v], stringsAsFactors = FALSE)
   } else {
     cells <- strsplit(get_arg(args, "cells", paste(ROBUSTNESS_CELLS, collapse = ",")), ",")[[1]]
     parts <- strsplit(cells, ":", fixed = TRUE)
@@ -99,7 +111,7 @@ if (PRESET != "perm_error") {
   log_open(paste0("05_robustness_", PRESET, if (idx >= 0) sprintf("_cell%d", idx) else ""))
   logf("preset %s -> switches %s (suffix %s); %d cell(s): %s", PRESET, spec_string(spec), spec_suffix(spec), nrow(cells_tab),
        paste(sprintf("%s:%d:%s%s", cells_tab$sample, cells_tab$lag, cells_tab$model, ifelse(is.na(cells_tab$variant), "", paste0(" [", cells_tab$variant, "]"))), collapse = " "))
-  if (!PRESET %in% c("context", "context_b", "major_ix") && spec_is_main(spec)) stop("the preset left every switch at its default; refusing to refit main-spec cells from the robustness driver")
+  if (!PRESET %in% c("context", "context_b", "major_ix", "dist") && spec_is_main(spec)) stop("the preset left every switch at its default; refusing to refit main-spec cells from the robustness driver")
   ## pass-through of the fit script's own options
   passthrough <- grep("^--(dry_run|threads_per_chain|chains|iter|warmup|adapt_delta|max_treedepth|pilot)=", args, value = TRUE)
   fit_script <- file.path(R_DIR, "02_fit_model.R")
@@ -108,6 +120,7 @@ if (PRESET != "perm_error") {
     spec_k <- spec
     if (PRESET == "context") for (nm in names(CONTEXT_PRESET$variants[[cl$variant]])) spec_k[[nm]] <- CONTEXT_PRESET$variants[[cl$variant]][[nm]]
     if (PRESET == "major_ix") for (nm in names(MAJOR_IX_PRESET$variants[[cl$variant]])) spec_k[[nm]] <- MAJOR_IX_PRESET$variants[[cl$variant]][[nm]]
+    if (PRESET == "dist") for (nm in names(DIST_PRESET$variants[[cl$variant]])) spec_k[[nm]] <- DIST_PRESET$variants[[cl$variant]][[nm]]
     if (spec_is_main(spec_k) && PRESET != "context_b") stop("refusing to refit a main-spec cell from the robustness driver")   # context_b: the M1c model IS the variant
     switch_args <- c(sprintf("--%s=%s", names(SPEC_CHOICES), unlist(spec_k[names(SPEC_CHOICES)])), sprintf("--ame_K=%d", spec_k$ame_K))
     cell <- cell_name(cl$sample, cl$lag, cl$model, spec_k)
@@ -142,6 +155,7 @@ if (spec$pairs != "all") stop(sprintf("perm_error refuses --pairs=%s: the refit-
 ## audit fix 4 (2026-10-27): the refits (holdout, inflation, permutation refit mode) rebuild the changes and re-centre the controls from the
 ## raw levels (freeze$ctrl_cent / z_cent below), which would leave the ix_* products of --interact stale and cowmaj_tm1 of --major un-re-centred
 if (spec$major != "none") stop(sprintf("perm_error refuses --major=%s: the refits re-centre the W controls from w_controls() without the switch, so cowmaj_tm1 would not be re-centred (the switch has not been wired into the refit-based tests)", spec$major))
+if (spec$distance != "none") stop(sprintf("perm_error refuses --distance=%s: the refit-based tests re-centre Z from the assembled columns but the NA-distance row drop and the event reconciliation have not been wired into them (2026-10-28)", spec$distance))
 if (spec$interact != "none") stop(sprintf("perm_error refuses --interact=%s: the refits rebuild the changes but not the ix_* products in Z, which would stay at their original values (the switch has not been wired into the refit-based tests)", spec$interact))
 cell <- measurement_cell_name(SAMPLE, LAG, FAMILY, spec)     # the M2 name carries its K (review 2026-10-26, P2); spec.R
 log_open(paste0("05_robustness_perm_error_", cell)); set.seed(V2_SEED)

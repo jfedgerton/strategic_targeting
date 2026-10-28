@@ -214,7 +214,7 @@ test_that("spec: the context switches, their suffixes (order, uniqueness, _stric
   expect_error(parse_spec("--coal_drop=top3"), "needs --context=coalition"); expect_error(parse_spec(c("--coal_drop=top3", "--context=bilateral")), "needs --context=coalition")
   expect_error(parse_spec("--context=multilateral"), "--context must be one of"); expect_error(parse_spec("--coal_ties=loose"), "--coal_ties must be one of")
   ## every suffix is distinct, including the fixed ones (_K<K>, _pilot, _STALE) and the archived _samp / _dist / _noCH / _polrel
-  all_suffixes <- c(unlist(SPEC_SUFFIX), "_K2", "_pilot", "_STALE", "_samp10", "_dist", "_noCH", "_polrel")
+  all_suffixes <- c(unlist(SPEC_SUFFIX), "_K2", "_pilot", "_STALE", "_samp10", "_noCH", "_polrel")   # _dist is a switch suffix since 2026-10-28
   expect_false(any(duplicated(all_suffixes)))
   expect_equal(unname(SPEC_SUFFIX$context), c("_bi", "_co")); expect_equal(unname(SPEC_SUFFIX$coal_ties), "_strict"); expect_equal(unname(SPEC_SUFFIX$coal_drop), "_drop3")
   expect_equal(spec_coal_col(parse_spec("--context=bilateral")), "coal_incl"); expect_equal(spec_coal_col(parse_spec(c("--context=bilateral", "--coal_ties=strict"))), "coal_strict")
