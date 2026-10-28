@@ -24,6 +24,11 @@ test_that("spec: distance defaults to none, adds _dist after _fullctrl and befor
   ## the archived spelling --distance=TRUE is refused as a bad VALUE (parse_spec), not as an archived option; the other archived flags still are
   expect_error(parse_spec("--distance=TRUE"), "--distance must be one of none | capital", fixed = TRUE)
   expect_error(parse_spec("--distance=FALSE"), "--distance must be one of"); expect_error(parse_spec("--distance=1"), "--distance must be one of")
+  ## a bare --<switch> (no =value) is refused for every switch, so `02_fit_model.R --distance` can never run the main cell silently (audit of ec9d8ae)
+  for (nm in names(SPEC_CHOICES)) expect_error(parse_spec(paste0("--", nm)), sprintf("--%s needs a value", nm), fixed = TRUE)
+  expect_error(parse_spec("--ame_K"), "--ame_K needs a value", fixed = TRUE)
+  expect_error(parse_spec(c("--major=joint", "--distance")), "--distance needs a value", fixed = TRUE); expect_error(parse_spec("--major"), "--major needs a value", fixed = TRUE)
+  expect_equal(parse_spec("--distance=capital")$distance, "capital")                                   # the valued form is unaffected
   expect_false("distance" %in% ARCHIVED_OPTIONS)
   expect_true(refuse_archived_options("--distance=capital", "02_fit_model.R"))
   for (old in c("variant", "sampled_m", "centrality", "conflict_history", "contiguity", "dy_peace_years", "drop_ww2", "full_controls", "event_weights", "K")) {
@@ -181,8 +186,9 @@ test_that("robustness driver: the dist preset expands to the four (variant, cell
   ## perm_error refuses --distance (the refit-based tests have not been wired for the NA-row drop), before any fit or data file is touched
   rb <- run("--preset=perm_error", "--family=m1", "--distance=capital")
   expect_true(rb$status != 0L); expect_true(any(grepl("perm_error refuses --distance=capital", rb$out, fixed = TRUE)), info = paste(tail(rb$out, 5), collapse = "\n"))
-  ## the archived spelling is refused by the driver as a bad value
+  ## the archived spelling is refused by the driver as a bad value; a bare --distance (no value) is refused too, by parse_spec(), before any call
   ra <- run("--preset=dist", "--distance=TRUE"); expect_true(ra$status != 0L)
+  file.remove(rec); rbare <- run("--preset=noww2", "--distance"); expect_true(rbare$status != 0L); expect_true(any(grepl("--distance needs a value", rbare$out, fixed = TRUE))); expect_false(file.exists(rec))
   ## the sbatch dispatches the preset with the 0-3 range guard
   sb <- readLines(file.path(root, "slurm", "04_robustness.sbatch"))
   expect_true(any(grepl("^  dist)", sb))); expect_true(any(grepl("--preset=dist --cell_index=\\$i", sb))); expect_true(any(grepl('\\[ "\\$i" -le 3 \\] \\|\\| \\{ echo "dist: array index', sb)))

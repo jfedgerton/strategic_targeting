@@ -263,6 +263,9 @@ assemble_cell <- function(SAMPLE, LAG, VARIANT, CENT = "pr", CONFLICT_HISTORY = 
       if (length(lost_sy) > 0) stop(sprintf("distance = capital: %d state-years would lose every IV-set alternative (no capital distance for any of them): %s",
                                             length(lost_sy), paste(sprintf("%d-%d", sy$ccode[lost_sy], sy$year[lost_sy]), collapse = " ")))
     }
+    ## the IV-set sizes logged with the stage-2 sets below describe the block AFTER the drop (audit of ec9d8ae, P3 2)
+    n_iv_sy <- alts |> group_by(ccode1, year) |> summarise(n_iv = sum(in_iv), .groups = "drop")
+    stopifnot(all(n_iv_sy$n_iv > 0L), nrow(n_iv_sy) == nrow(sy))
     logf("distance = capital: log_capdist (log1p km at t-1) enters Z after the dyadic controls, centred over the IV rows; %d of %d alternative rows have NO capital distance and are dropped from both sets (%d were in the IV set, %d in the stage-2 set) across %d state-years; %d rows remain",
          nrow(dist_dropped), n_rows_before, sum(dist_dropped$in_iv), sum(dist_dropped$in_s2), n_distinct(dist_dropped$sy_row), nrow(alts))
   } else stopifnot(is.null(dist_dropped))
@@ -324,7 +327,8 @@ assemble_cell <- function(SAMPLE, LAG, VARIANT, CENT = "pr", CONFLICT_HISTORY = 
     ## overlap with land contiguity is logged here, over the IV rows the centring constant comes from
     stopifnot("log_capdist" %in% z_cent, !anyNA(alts$log_capdist), all(is.finite(alts$log_capdist)))
     raw_capdist <- alts$log_capdist
-    cor_contig <- if (CONTIGUITY) cor(raw_capdist[iv_rows], alts$contig_land[iv_rows]) else NA_real_
+    ## NA (no warning) when either column is constant over the IV rows (audit of ec9d8ae, P3 3; the toy cell's contiguity can be)
+    cor_contig <- if (CONTIGUITY && sd(raw_capdist[iv_rows]) > 0 && sd(alts$contig_land[iv_rows]) > 0) cor(raw_capdist[iv_rows], alts$contig_land[iv_rows]) else NA_real_
     logf("distance = capital: log_capdist over the %d IV rows: mean %.4f (the centring constant), SD %.4f, range [%.3f, %.3f]; cor(log_capdist, contig_land) = %.3f (contiguity stays in Z)",
          sum(iv_rows), mean(raw_capdist[iv_rows]), sd(raw_capdist[iv_rows]), min(raw_capdist[iv_rows]), max(raw_capdist[iv_rows]), cor_contig)
     distance_stats <- list(n_rows_dropped = nrow(dist_dropped), n_rows_dropped_iv = sum(dist_dropped$in_iv), n_rows_dropped_s2 = sum(dist_dropped$in_s2),

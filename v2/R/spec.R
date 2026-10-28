@@ -174,6 +174,9 @@ get_arg <- function(args, name, default) {
 ## parse_spec(args): the switches from the command line, defaults = the main specification; every value is validated
 parse_spec <- function(args = character(0)) {
   spec <- SPEC_DEFAULTS
+  ## a bare --<switch> without =value is refused, never ignored (audit of ec9d8ae, P3 1: `--distance` alone ran the MAIN cell silently)
+  for (nm in c(names(SPEC_CHOICES), "ame_K"))
+    if (length(grep(paste0("^--", nm, "$"), args))) stop(sprintf("--%s needs a value (--%s=%s); a bare flag is refused", nm, nm, if (nm == "ame_K") "<K>" else paste(SPEC_CHOICES[[nm]], collapse = " | ")))
   for (nm in names(SPEC_CHOICES)) {
     spec[[nm]] <- get_arg(args, nm, SPEC_DEFAULTS[[nm]])
     if (!spec[[nm]] %in% SPEC_CHOICES[[nm]])

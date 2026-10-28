@@ -390,3 +390,10 @@ One switch of `spec.R`, defaulting to the main specification, and one preset of 
 * Tests: `test_distance.R` (parsing, suffix order, cell names, archived-list change, column lists, IV-row centring and defaults on the toy cell, NA-drop reconciliation on toy data with a non-chosen alternative, a chosen target, a mixed case, an emptied IV set (error) and a chosen-only stage-2 set (error), the driver, the sbatch, the submit script, the real build); `test_data_coding.R`, `test_spec.R`, `test_context.R`, `test_major_interact.R` updated for the string-valued switch and the new suffix position.
 
 Lag-3 dry runs (`05_robustness.R --preset=dist --dry_run=TRUE`): N1 = 14,597, N2 = 1,720,110 in every cell, 0 alternatives / state-years / events dropped for a missing distance (the build has none); fmid E 1055, sum(y1) 695; mid E 3258, 2086. `_dist`: P1 = 8, Pz = 8; `_dist_major`: P1 = 9, Pz = 10. `log_capdist` over the 1,719,835 IV rows: mean 8.6873 (the centring constant), SD 0.8351, range [2.127, 9.901]; cor(`log_capdist`, `contig_land`) = −0.392. Mean uncentred `log_capdist` of the chosen targets 7.4041 (fmid, ~1642 km) and 7.5050 (mid, ~1816 km) against 8.6872 (~5926 km) over the 1,719,990 stage-2 alternatives.
+
+### Audit of ec9d8ae (2026-10-28; three P3s, no P1 / P2)
+
+* `parse_spec()` refuses a bare `--<switch>` (no `=value`) for every switch and `--ame_K`; `02_fit_model.R --distance` had run the MAIN cell silently (a regression against f7a0cee, where `--distance` was refused as archived). Tested for every switch name and through the robustness driver.
+* `assemble_cell.R`: the IV-set sizes logged with the stage-2 sets are recomputed after the NA-distance row drop (they were computed before it).
+* `assemble_cell.R`: cor(`log_capdist`, `contig_land`) over the IV rows is NA, without a warning, when either column is constant.
+
