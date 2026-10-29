@@ -47,7 +47,9 @@
 #                  block first (M1_IDX=48-59 M2_IDX=60-71 bash v2/slurm/submit_main_grid.sh) or the tasks stop at "a / b fits missing".
 #                  PERM_MODE=refit, N_PERM=20 give the calibrated p-value instead of the rescore diagnostic; refit mode refits 2 x N_PERM
 #                  models per family and will NOT finish within the 48 h, preemptible open allocation: submit it on basic
-#                  (--account=jfe4_cr_default --partition=basic, several days of walltime).
+#                  (--account=jfe4_cr_default --partition=basic, several days of walltime). Since 2026-10-29 the permutation test of ONE
+#                  cell (any sample / lag, --distance=capital allowed) runs through 08_perm_refit.sbatch / submit_perm_refit.sh instead:
+#                  the refit mode as an array of one permutation per task plus a combine job, the rescore mode as one open-account job.
 # Examples (submit from the repo root):
 #   PRESET=noww2 bash v2/slurm/submit_robustness.sh                                          # M1 cells, then M2 cells afterok
 #   PRESET=sideA bash v2/slurm/submit_robustness.sh                                          # needs v2/data_sideA (01_build.sbatch with DIRECTION=sideA)

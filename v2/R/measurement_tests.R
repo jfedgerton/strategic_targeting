@@ -16,6 +16,9 @@
 ##   permutation_test(...)                        shuffle dR within each stage-2 set; refit mode scores observed and
 ##                                                permuted data with the SAME procedure and gives a calibrated p-value;
 ##                                                rescore mode is a reliance diagnostic (B7)
+##   permutation_observed / permutation_refit_one / permutation_summary / permutation_combine (2026-10-29)
+##                                                the pieces of the refit mode, so a Slurm array refits one permutation
+##                                                per task and a combiner rebuilds the sequential output from the parts
 ##   perturb_relational_levels(...)               inflate the relational LEVEL of flagged state-years and rebuild the
 ##                                                gaps, the initiator / target changes and the level column (B8)
 ##   measurement_error_check(...)                 refit on the perturbed data, track how classification changes
@@ -300,39 +303,52 @@ permute_dR <- function(alts, seed) {
             all(out$dR[s2 == 0L] == alts$dR[s2 == 0L]))
   out |> select(-.s2, -.row)
 }
-permutation_test <- function(sy, alts, ev, W_cols, X_cols, Z_cols, fit_a, fit_b, n_perm = 20, mode = c("rescore", "refit"),
-                             family = "m1", K = 2L, stan_models = NULL, chains = 2, iter = 500, warmup = 250, n_draws = 100, x_ref = NULL) {
+## Since 2026-10-29 (PI request: the calibrated test on the fmid lag-3 _dist cell, parallelised) the test is three pieces that
+## permutation_test() chains, so one Slurm task can refit ONE permutation (permutation_refit_one(), seed V2_SEED + p, the same
+## data, sampler settings and statistic) and permutation_combine() rebuilds the sequential output from the per-permutation rows:
+##   permutation_observed(...)        dat_a / dat_b of the observed frames and the observed statistic (obs_a, obs_b, and the draws in rescore mode)
+##   permutation_refit_one(p, ...)    permutation p alone: shuffle with seed V2_SEED + p, refit a and b, their stage-2 LOO elpd (refit mode only)
+##   permutation_summary(...)         the list permutation_test() returns, from obs_a / obs_b and the permuted vectors
+##   permutation_combine(parts, ...)  the same from a per-permutation table (perm, a, b) that must hold every index 1..n_perm exactly once
+## permutation_test() itself runs the loop in sequence as before and is identical in output.
+.perm_wscore <- function(sc) sum(sc$w * sc$log_p_chosen)                  # the weighted stage-2 log score (composite likelihood weights)
+permutation_observed <- function(sy, alts, ev, W_cols, X_cols, Z_cols, fit_a, fit_b, mode = c("rescore", "refit"), family = "m1", K = 2L,
+                                 n_draws = 100, x_ref = NULL) {
   mode <- match.arg(mode)
   if (is.null(x_ref)) x_ref <- rep(0, length(X_cols))
   Kk <- if (family == "m2") K else NULL
   dat_a <- build_stan_data(sy, alts, ev, W_cols, X_cols, Z_cols, joint = 0L, x_ref = x_ref, K = Kk, allow_orphan_initiations = TRUE)
   dat_b <- build_stan_data(sy, alts, ev, W_cols, X_cols, Z_cols, joint = 1L, x_ref = x_ref, K = Kk, anchor = dat_a$anchor, allow_orphan_initiations = TRUE)
-  wscore <- function(sc) sum(sc$w * sc$log_p_chosen)                      # the weighted stage-2 log score (composite likelihood weights)
   if (mode == "refit") {
-    stopifnot(!is.null(stan_models))
     ## the observed statistic by the SAME procedure as the permuted ones: stage-2 LOO elpd of the fits on the observed data
     obs_a <- loo_from_fit(fit_a, "log_lik_stage2")$estimates["elpd_loo", 1]; obs_b <- loo_from_fit(fit_b, "log_lik_stage2")$estimates["elpd_loo", 1]
-    statistic <- "stage2_loo_elpd_of_refits"
+    statistic <- "stage2_loo_elpd_of_refits"; dr_a <- NULL; dr_b <- NULL
   } else {
     dr_a <- extract_draws(fit_a, n_draws); dr_b <- extract_draws(fit_b, n_draws)
-    obs_a <- wscore(stage2_scores(dat_a, dr_a)); obs_b <- wscore(stage2_scores(dat_b, dr_b))
+    obs_a <- .perm_wscore(stage2_scores(dat_a, dr_a)); obs_b <- .perm_wscore(stage2_scores(dat_b, dr_b))
     statistic <- "weighted_stage2_log_score_rescored_with_the_original_fits"
   }
+  stopifnot(is.finite(obs_a), is.finite(obs_b))
+  list(dat_a = dat_a, dat_b = dat_b, obs_a = obs_a, obs_b = obs_b, statistic = statistic, dr_a = dr_a, dr_b = dr_b, x_ref = x_ref, Kk = Kk, mode = mode)
+}
+## permutation p of the refit mode: the dR shuffle with seed V2_SEED + p, the a and b refits with seed V2_SEED and the SAME sampler
+## settings as the sequential loop, and their stage-2 LOO elpd. obs = permutation_observed(..., mode = "refit") (its anchor and x_ref).
+permutation_refit_one <- function(p, sy, alts, ev, W_cols, X_cols, Z_cols, obs, family = "m1", stan_models, chains = 2, iter = 500, warmup = 250) {
+  stopifnot(length(p) == 1, is.finite(p), p >= 1, p == as.integer(p), obs$mode == "refit", !is.null(stan_models), family %in% names(stan_models))
+  alts_p <- permute_dR(alts, seed = V2_SEED + p)
+  da <- build_stan_data(sy, alts_p, ev, W_cols, X_cols, Z_cols, joint = 0L, x_ref = obs$x_ref, K = obs$Kk, anchor = obs$dat_a$anchor, allow_orphan_initiations = TRUE)
+  db <- build_stan_data(sy, alts_p, ev, W_cols, X_cols, Z_cols, joint = 1L, x_ref = obs$x_ref, K = obs$Kk, anchor = obs$dat_a$anchor, allow_orphan_initiations = TRUE)
+  stopifnot(da$E == obs$dat_a$E, da$N1 == obs$dat_a$N1, identical(da$ev_row, obs$dat_a$ev_row))
+  fa <- sampling(stan_models[[family]], data = da, chains = chains, iter = iter, warmup = warmup, seed = V2_SEED, refresh = 0, pars = EXCL_PARS, include = FALSE)
+  fb <- sampling(stan_models[[family]], data = db, chains = chains, iter = iter, warmup = warmup, seed = V2_SEED, refresh = 0, pars = EXCL_PARS, include = FALSE)
+  pa <- loo_from_fit(fa, "log_lik_stage2")$estimates["elpd_loo", 1]; pb <- loo_from_fit(fb, "log_lik_stage2")$estimates["elpd_loo", 1]
+  stopifnot(is.finite(pa), is.finite(pb))
+  list(perm = as.integer(p), seed = V2_SEED + as.integer(p), a = pa, b = pb, adv = pb - pa)
+}
+permutation_summary <- function(obs_a, obs_b, statistic, perm_a, perm_b, mode, n_perm) {
+  stopifnot(length(perm_a) == n_perm, length(perm_b) == n_perm, all(is.finite(perm_a)), all(is.finite(perm_b)), n_perm >= 1)
+  perm_adv <- perm_b - perm_a
   observed_adv <- obs_b - obs_a
-  perm_adv <- numeric(n_perm); perm_a <- numeric(n_perm); perm_b <- numeric(n_perm)
-  for (p in seq_len(n_perm)) {
-    alts_p <- permute_dR(alts, seed = V2_SEED + p)
-    da <- build_stan_data(sy, alts_p, ev, W_cols, X_cols, Z_cols, joint = 0L, x_ref = x_ref, K = Kk, anchor = dat_a$anchor, allow_orphan_initiations = TRUE)
-    db <- build_stan_data(sy, alts_p, ev, W_cols, X_cols, Z_cols, joint = 1L, x_ref = x_ref, K = Kk, anchor = dat_a$anchor, allow_orphan_initiations = TRUE)
-    if (mode == "refit") {
-      fa <- sampling(stan_models[[family]], data = da, chains = chains, iter = iter, warmup = warmup, seed = V2_SEED, refresh = 0, pars = EXCL_PARS, include = FALSE)
-      fb <- sampling(stan_models[[family]], data = db, chains = chains, iter = iter, warmup = warmup, seed = V2_SEED, refresh = 0, pars = EXCL_PARS, include = FALSE)
-      pa <- loo_from_fit(fa, "log_lik_stage2")$estimates["elpd_loo", 1]; pb <- loo_from_fit(fb, "log_lik_stage2")$estimates["elpd_loo", 1]
-    } else {
-      pa <- wscore(stage2_scores(da, dr_a)); pb <- wscore(stage2_scores(db, dr_b))
-    }
-    perm_a[p] <- pa; perm_b[p] <- pb; perm_adv[p] <- pb - pa
-  }
   n_exceed <- sum(perm_adv >= observed_adv)
   p_value <- if (mode == "refit") (1 + n_exceed) / (1 + n_perm) else NA_real_
   list(observed_a = obs_a, observed_b = obs_b, observed_advantage_b_minus_a = observed_adv,
@@ -344,6 +360,79 @@ permutation_test <- function(sy, alts, ev, W_cols, X_cols, Z_cols, fit_a, fit_b,
                             observed_advantage = observed_adv, mean_permuted_advantage = mean(perm_adv),
                             mean_permuted_a = mean(perm_a), mean_permuted_b = mean(perm_b),
                             n_exceedances = n_exceed, exceedance_share = n_exceed / n_perm, p_value = p_value))
+}
+## parts: data.frame with columns perm, a, b (one row per permutation, from the per-permutation files of the Slurm array). Refuses a
+## missing or duplicated index in 1..n_perm and any extra index; rows are put in index order, so the output equals the sequential one.
+permutation_combine <- function(parts, obs_a, obs_b, statistic, n_perm, mode = "refit") {
+  stopifnot(is.data.frame(parts), all(c("perm", "a", "b") %in% names(parts)), n_perm >= 1)
+  idx <- as.integer(parts$perm)
+  if (anyNA(idx)) stop("permutation_combine: a non-integer permutation index")
+  dup <- unique(idx[duplicated(idx)]); if (length(dup)) stop("permutation_combine: duplicated permutation index ", paste(dup, collapse = ", "))
+  extra <- setdiff(idx, seq_len(n_perm)); if (length(extra)) stop("permutation_combine: index outside 1..", n_perm, ": ", paste(extra, collapse = ", "))
+  miss <- setdiff(seq_len(n_perm), idx); if (length(miss)) stop("permutation_combine: missing permutation index ", paste(miss, collapse = ", "), " of 1..", n_perm)
+  o <- order(idx)
+  permutation_summary(obs_a, obs_b, statistic, as.numeric(parts$a[o]), as.numeric(parts$b[o]), mode, n_perm)
+}
+## The per-permutation files of the Slurm array (05_robustness.R --perm_index): <parts_dir>/perm_<pppp>.csv, ONE row: perm, seed, a, b, adv and
+## the settings columns (one-row data.frame `settings`: cell, family, sampler settings, data dimensions, fit files, ...). Written atomically
+## (tmp + rename) and read back. read_permutation_parts() reads every part of the directory and refuses a part whose settings differ from
+## `settings` (column by column, by name), a file whose index differs from its row, a seed other than V2_SEED + perm, or a non-finite statistic;
+## the index completeness check (missing / duplicated / extra) is permutation_combine()'s.
+permutation_part_path <- function(parts_dir, p) file.path(parts_dir, sprintf("perm_%04d.csv", as.integer(p)))
+write_permutation_part <- function(parts_dir, one, settings) {
+  stopifnot(is.list(one), all(c("perm", "seed", "a", "b", "adv") %in% names(one)), is.data.frame(settings), nrow(settings) == 1,
+            one$seed == V2_SEED + one$perm, is.finite(one$a), is.finite(one$b), abs(one$adv - (one$b - one$a)) < 1e-9)
+  dir.create(parts_dir, showWarnings = FALSE, recursive = TRUE)
+  path <- permutation_part_path(parts_dir, one$perm)
+  row <- cbind(data.frame(perm = as.integer(one$perm), seed = as.integer(one$seed), a = one$a, b = one$b, adv = one$adv), settings)
+  tmp <- paste0(path, ".tmp"); write.csv(row, tmp, row.names = FALSE); file.rename(tmp, path)   # never a half-written part
+  chk <- read.csv(path, stringsAsFactors = FALSE)
+  stopifnot(nrow(chk) == 1, chk$perm == one$perm, abs(chk$a - one$a) < 1e-6, abs(chk$b - one$b) < 1e-6)
+  path
+}
+read_permutation_parts <- function(parts_dir, settings) {
+  stopifnot(is.data.frame(settings), nrow(settings) == 1)
+  if (!dir.exists(parts_dir)) stop("no parts directory ", parts_dir, " (run the --perm_index tasks first)")
+  files <- list.files(parts_dir, pattern = "^perm_[0-9]{4}\\.csv$", full.names = TRUE)
+  if (length(files) == 0) stop("no perm_<pppp>.csv part in ", parts_dir)
+  parts <- do.call(rbind, lapply(files, function(f) { d <- read.csv(f, stringsAsFactors = FALSE); if (nrow(d) != 1) stop("part ", basename(f), " has ", nrow(d), " rows, not 1"); d$file <- basename(f); d }))
+  need <- c("perm", "seed", "a", "b", "adv", names(settings))
+  if (!all(need %in% names(parts))) stop("parts lack the column(s) ", paste(setdiff(need, names(parts)), collapse = ", "))
+  ## the index in the file name is the index in the row; the seed is V2_SEED + index; finite statistics
+  bad <- parts$perm != as.integer(sub("^perm_([0-9]{4})\\.csv$", "\\1", parts$file))
+  if (any(bad)) stop("part(s) ", paste(parts$file[bad], collapse = ", "), " hold another permutation index than their file name")
+  if (any(parts$seed != V2_SEED + parts$perm)) stop("part(s) ", paste(parts$file[parts$seed != V2_SEED + parts$perm], collapse = ", "), " were not run with seed V2_SEED + perm")
+  if (!all(is.finite(parts$a)) || !all(is.finite(parts$b))) stop("non-finite statistic in part(s) ", paste(parts$file[!is.finite(parts$a) | !is.finite(parts$b)], collapse = ", "))
+  ## every part was made with THESE settings (cell, spec, family, K, sampler, data dimensions, fit files); a part from another cell or another
+  ## setting is refused by name, never averaged in
+  for (nm in names(settings)) {
+    have <- parts[[nm]]; want <- settings[[nm]]
+    same <- if (is.na(want)) is.na(have) else !is.na(have) & (if (is.numeric(want)) abs(suppressWarnings(as.numeric(have)) - want) < 1e-9 else as.character(have) == as.character(want))
+    same[is.na(same)] <- FALSE
+    if (!all(same)) stop(sprintf("part(s) %s were made with %s = %s, this run has %s; refusing to combine", paste(parts$file[!same], collapse = ", "), nm,
+                                 paste(unique(have[!same]), collapse = " | "), want))
+  }
+  parts[order(parts$perm), , drop = FALSE]
+}
+permutation_test <- function(sy, alts, ev, W_cols, X_cols, Z_cols, fit_a, fit_b, n_perm = 20, mode = c("rescore", "refit"),
+                             family = "m1", K = 2L, stan_models = NULL, chains = 2, iter = 500, warmup = 250, n_draws = 100, x_ref = NULL) {
+  mode <- match.arg(mode)
+  if (mode == "refit") stopifnot(!is.null(stan_models))
+  obs <- permutation_observed(sy, alts, ev, W_cols, X_cols, Z_cols, fit_a, fit_b, mode = mode, family = family, K = K, n_draws = n_draws, x_ref = x_ref)
+  perm_a <- numeric(n_perm); perm_b <- numeric(n_perm)
+  for (p in seq_len(n_perm)) {
+    if (mode == "refit") {
+      one <- permutation_refit_one(p, sy, alts, ev, W_cols, X_cols, Z_cols, obs, family = family, stan_models = stan_models, chains = chains, iter = iter, warmup = warmup)
+      pa <- one$a; pb <- one$b
+    } else {
+      alts_p <- permute_dR(alts, seed = V2_SEED + p)
+      da <- build_stan_data(sy, alts_p, ev, W_cols, X_cols, Z_cols, joint = 0L, x_ref = obs$x_ref, K = obs$Kk, anchor = obs$dat_a$anchor, allow_orphan_initiations = TRUE)
+      db <- build_stan_data(sy, alts_p, ev, W_cols, X_cols, Z_cols, joint = 1L, x_ref = obs$x_ref, K = obs$Kk, anchor = obs$dat_a$anchor, allow_orphan_initiations = TRUE)
+      pa <- .perm_wscore(stage2_scores(da, obs$dr_a)); pb <- .perm_wscore(stage2_scores(db, obs$dr_b))
+    }
+    perm_a[p] <- pa; perm_b[p] <- pb
+  }
+  permutation_summary(obs$obs_a, obs$obs_b, obs$statistic, perm_a, perm_b, mode, n_perm)
 }
 
 ## ---- 5. systematic measurement error ---------------------------------------------------------------------------------

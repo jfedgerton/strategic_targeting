@@ -41,6 +41,7 @@ case $P in
   perm_error)
     echo "ERROR: perm_error is not a cell-list preset; submit it directly (see 04_robustness.sbatch):" >&2
     echo "  sbatch --export=ALL,PRESET=perm_error --account=open --cpus-per-task=4 --mem=32G --time=47:00:00 v2/slurm/04_robustness.sbatch" >&2
+    echo "  the permutation test of one cell (rescore job, or refit array + combine): MODE=<rescore|refit> bash v2/slurm/submit_perm_refit.sh" >&2
     exit 1 ;;
   context)
     [ -z "${CELLS:-}" ] || { echo "ERROR: the context preset fixes its cells (CONTEXT_PRESET in spec.R); unset CELLS" >&2; exit 1; }
