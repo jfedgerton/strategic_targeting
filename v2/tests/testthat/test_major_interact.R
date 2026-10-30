@@ -167,7 +167,9 @@ test_that("robustness driver: the major_ix preset expands to the six (variant, c
   expect_true(run("--preset=major_ix", "--cell_index=6")$status != 0L)
   for (bad in c("--cells=mid:3:M1b", "--major=joint", "--interact=prefixed")) expect_true(run("--preset=major_ix", bad)$status != 0L, info = bad)
   ## audit fix 4 (2026-10-27): perm_error refuses --major / --interact (its refits would leave ix_* stale and cowmaj_tm1 un-re-centred), as it
-  ## refuses --changes=winsor and --pairs != all (audit fix 15); the refusal comes before any fit or data file is touched
+  ## refuses --changes=winsor and --pairs != all (audit fix 15); the refusal comes before any fit or data file is touched. Since 2026-10-30
+  ## --major=joint is taken with --distance=capital for --tests=permutation / permutation_combine only (test_perm_parallel.R); with the default
+  ## test list it is still refused
   for (bad in c("--major=joint", "--interact=prefixed", "--changes=winsor", "--pairs=joiners")) {
     rb <- run("--preset=perm_error", "--family=m1", bad)
     expect_true(rb$status != 0L, info = bad); expect_true(any(grepl(sprintf("perm_error refuses %s", bad), rb$out, fixed = TRUE)), info = paste(bad, paste(tail(rb$out, 5), collapse = "\n")))

@@ -50,6 +50,19 @@
 ##                index and parts whose settings differ), computes the observed statistic from the a / b fits as the sequential loop does,
 ##                and writes the SAME measurement_<cell>_permutation_refit.csv and _draws.csv with p = (1 + exceedances) / (1 + N).
 ##                The sequential loop (no --perm_index / --perm_from) is unchanged and gives the same numbers (tested on a toy cell).
+##                --threads_per_chain=k (2026-10-30, PI request): k reduce_sum threads per refit chain (rstan_options(threads_per_chain = k),
+##                grainsize = choose_grainsize(N1, k), as 02_fit_model.R; Slurm cpus = chains x k). Default 1 = the previous serial chains
+##                (grainsize N1) and the previous output. k > 1 is taken with --perm_mode=refit and --tests=permutation or
+##                permutation_combine only (the other tests and the rescore mode keep grainsize N1 and would ignore it). The part files
+##                carry threads_per_chain and grainsize; the combiner refuses a part made with other values (reduce_sum sums the slices in
+##                another order, so the statistics are not bit-identical across grainsizes), so pass the SAME --threads_per_chain to the
+##                refit tasks and the combiner.
+##                --major=joint (2026-10-30, PI request): accepted with --distance=capital for --tests=permutation / permutation_combine
+##                only, like the distance: the shuffle acts on the assembled frames (cowmaj_tm1 centred, one_major / both_major in Z as
+##                assembled) and the refits take them as they are, nothing is re-centred, and the _dist_major a / b fits
+##                (fit_<s>_lag<h>_all_pr_M1a_dist_major / _M1b_dist_major) are asserted to score exactly those frames. The outputs carry
+##                _dist_major (measurement_<s>_lag<h>_all_pr_M1_dist_major_*). --major without --distance=capital stays refused, as do the
+##                holdout and inflation tests with it (their rebuilds re-centre W from w_controls() without the switch).
 ##
 ## Usage:
 ##   Rscript v2/R/05_robustness.R --preset=noww2 [--cells=mid:3:M1b,fmid:3:M1b,...] [--cell_index=i] [--dry_run=TRUE]
@@ -66,8 +79,9 @@
 ##          [--perm_mode=rescore|refit] [--deltas=0.25,0.5,1.0] [--cutoff=1990] [--r0=0.5] [--chains=4] [--iter=1500] [--warmup=750]
 ##          [--sample=mid --lag=5] [--allow_stale=FALSE] [switches]
 ##   Rscript v2/R/05_robustness.R --preset=perm_error --family=m1 --sample=fmid --lag=3 --distance=capital --tests=permutation --perm_mode=rescore --n_perm=50
-##   Rscript v2/R/05_robustness.R --preset=perm_error --family=m1 --sample=fmid --lag=3 --distance=capital --tests=permutation --perm_mode=refit --perm_index=7
-##   Rscript v2/R/05_robustness.R --preset=perm_error --family=m1 --sample=fmid --lag=3 --distance=capital --tests=permutation_combine --perm_mode=refit --n_perm=20
+##   Rscript v2/R/05_robustness.R --preset=perm_error --family=m1 --sample=fmid --lag=3 --distance=capital --tests=permutation --perm_mode=refit --perm_index=7 --threads_per_chain=8
+##   Rscript v2/R/05_robustness.R --preset=perm_error --family=m1 --sample=fmid --lag=3 --distance=capital --tests=permutation_combine --perm_mode=refit --n_perm=20 --threads_per_chain=8
+##   Rscript v2/R/05_robustness.R --preset=perm_error --family=m1 --sample=fmid --lag=3 --distance=capital --major=joint --tests=permutation --perm_mode=refit --perm_index=7 --threads_per_chain=8
 ##       needs the production a / b fits of the cell (fit_<cell>_M1a / M1b or M2a_K<K> / M2b_K<K> with the switch suffix) from
 ##       02_fit_model.R; refuses pilots, stale fits and fits that do not score the assembled cell (C1 / C4)
 ##       writes v2/output/measurement_<cell>_*.csv with <cell> = <sample>_lag<h>_all_pr_<M1|M2>[_K<K>]<suffix> (measurement_cell_name(),
@@ -196,12 +210,27 @@ if (PERM_SUBSET) {
 if ("permutation_combine" %in% TESTS) {
   if (!identical(TESTS, "permutation_combine") || PERM_MODE != "refit") stop("--tests=permutation_combine goes alone, with --perm_mode=refit (it combines the per-permutation refit parts)")
 }
+## within-chain threads for the permutation refits (2026-10-30): k >= 1; k > 1 only where a refit of the permutation test samples (refit mode,
+## the permutation test or its combiner, which must carry the same setting to accept the parts); the other tests keep grainsize = N1
+if (length(grep("^--threads_per_chain$", args))) stop("--threads_per_chain needs a value; a bare flag is refused")
+THREADS <- get_arg(args, "threads_per_chain", 1)
+if (length(THREADS) != 1 || !is.finite(THREADS) || THREADS < 1 || THREADS != as.integer(THREADS)) stop(sprintf("--threads_per_chain=%s must be a positive integer", paste(THREADS, collapse = ",")))
+THREADS <- as.integer(THREADS)
+if (THREADS > 1 && (PERM_MODE != "refit" || !all(TESTS %in% c("permutation", "permutation_combine"))))
+  stop(sprintf("--threads_per_chain=%d applies to the permutation refits only: --perm_mode=refit with --tests=permutation or permutation_combine (got --tests=%s --perm_mode=%s); the holdout, inflation and rescore paths keep grainsize = N1", THREADS, paste(TESTS, collapse = ","), PERM_MODE))
 ## audit fix 15 (2026-10-26): the refit-based tests are not defined for winsorised changes or a pairs subset (see the header)
 if (spec$changes == "winsor") stop("perm_error refuses --changes=winsor: the inflation and holdout refits rebuild the changes from the raw levels and would not reproduce the winsorised cell")
 if (spec$pairs != "all") stop(sprintf("perm_error refuses --pairs=%s: the refit-based tests are defined on the full event sample (y1 of every initiating state-year)", spec$pairs))
 ## audit fix 4 (2026-10-27): the refits (holdout, inflation, permutation refit mode) rebuild the changes and re-centre the controls from the
 ## raw levels (freeze$ctrl_cent / z_cent below), which would leave the ix_* products of --interact stale and cowmaj_tm1 of --major un-re-centred
-if (spec$major != "none") stop(sprintf("perm_error refuses --major=%s: the refits re-centre the W controls from w_controls() without the switch, so cowmaj_tm1 would not be re-centred (the switch has not been wired into the refit-based tests)", spec$major))
+## --major=joint (2026-10-30, PI request): the permutation test only, and only on the distance cell (the _dist_major cells of the dist preset):
+## like the distance, the shuffle and the refits take the assembled frames as they are (cowmaj_tm1 centred at assembly, one_major / both_major
+## in Z), nothing is re-centred, and the _dist_major fits are asserted below to score exactly these frames. The holdout and inflation refits
+## re-centre the W controls from w_controls() without the switch (cowmaj_tm1 would not be re-centred) and keep refusing it.
+if (spec$major != "none" && !all(TESTS %in% c("permutation", "permutation_combine")))
+  stop(sprintf("perm_error refuses --major=%s with --tests=%s: only the permutation test (--tests=permutation or permutation_combine) takes the major-power switch; the holdout and inflation refits re-centre the W controls from w_controls() without the switch, so cowmaj_tm1 would not be re-centred", spec$major, paste(TESTS, collapse = ",")))
+if (spec$major != "none" && spec$distance != "capital")
+  stop(sprintf("perm_error refuses --major=%s without --distance=capital: the permutation test takes the major-power switch on the distance cell only (the _dist_major a / b fits of the dist preset; 2026-10-30)", spec$major))
 if (spec$contiguity != "land") stop(sprintf("perm_error refuses --contiguity=%s: contiguity stays in Z for every test of this preset (2026-10-29; the permutation test takes --distance=capital with contiguity = land only)", spec$contiguity))   # before the distance check, so the message names the switch
 ## --distance=capital (2026-10-29): the permutation test only. It shuffles dR within the assembled stage-2 sets and never rebuilds a column from
 ## the raw levels, so the NA-distance row drop and the event reconciliation of assembly are the data; the _dist fits are asserted below to score
@@ -211,10 +240,12 @@ if (spec$distance != "none" && !all(TESTS %in% c("permutation", "permutation_com
 if (spec$interact != "none") stop(sprintf("perm_error refuses --interact=%s: the refits rebuild the changes but not the ix_* products in Z, which would stay at their original values (the switch has not been wired into the refit-based tests)", spec$interact))
 cell <- measurement_cell_name(SAMPLE, LAG, FAMILY, spec)     # the M2 name carries its K (review 2026-10-26, P2); spec.R: the _dist cell gives measurement_<..>_M1_dist_*
 log_open(paste0("05_robustness_perm_error_", cell, if (PERM_SUBSET) sprintf("_perm%d_%d", PERM_IDX[1], PERM_IDX[length(PERM_IDX)]) else if ("permutation_combine" %in% TESTS) "_combine" else "")); set.seed(V2_SEED)
-rstan_options(auto_write = FALSE); options(mc.cores = min(CHAINS, n_cores()))
+rstan_options(auto_write = FALSE)
+rstan_options(threads_per_chain = THREADS)                 # as 02_fit_model.R; 1 = the previous serial chains (the other tests keep grainsize = N1 anyway)
+options(mc.cores = min(CHAINS, max(1L, n_cores() %/% THREADS)))
 out_dir <- file.path(v2_root(), "output"); data_dir <- spec_data_dir(spec, v2_root())
 if (!dir.exists(data_dir)) stop("data directory ", data_dir, " does not exist")
-logf("perm_error on cell %s; tests %s; spec %s; data %s", cell, paste(TESTS, collapse = ","), spec_string(spec), basename(data_dir))
+logf("perm_error on cell %s; tests %s; spec %s; data %s; threads_per_chain = %d; mc.cores = %d", cell, paste(TESTS, collapse = ","), spec_string(spec), basename(data_dir), THREADS, getOption("mc.cores"))
 ## compiled models, checked against the checked-out sources (C3)
 models <- list(m1 = readRDS(file.path(v2_root(), "stan", "build", "m1_latent_additive.rds")),
                m2 = readRDS(file.path(v2_root(), "stan", "build", "m2_ame.rds")))
@@ -263,21 +294,24 @@ if ("holdout" %in% TESTS) {
 ## the per-permutation parts of the parallel refit mode (2026-10-29): one row per permutation with its settings, in a per-cell directory
 parts_dir <- file.path(out_dir, sprintf("measurement_%s_permutation_refit_parts", cell))
 ## the settings every part must share, and that the combiner checks against its own run: the cell and its spec, the family / K, the sampler
-## settings of the refits, the data dimensions the fits were verified against, and the fit files
+## settings of the refits (chains / iter / warmup and, since 2026-10-30, the reduce_sum threads per chain and the grainsize they imply), the
+## data dimensions the fits were verified against, and the fit files
+PERM_GRAINSIZE <- choose_grainsize(dat_chk$N1, THREADS)      # = the grainsize of every refit of this run (permutation_refit_one() recomputes and asserts it)
 part_settings <- data.frame(cell = cell, family = toupper(FAMILY), ame_K = if (FAMILY == "m2") K else NA_integer_, sample = SAMPLE, lag = LAG,
                             spec = spec_string(spec), chains = CHAINS, iter = ITER, warmup = WARMUP, v2_seed = V2_SEED,
+                            threads_per_chain = THREADS, grainsize = PERM_GRAINSIZE,
                             E = dat_chk$E, N1 = dat_chk$N1, sum_y1 = sum(dat_chk$y1), fit_a = basename(fa_path), fit_b = basename(fb_path),
                             statistic = "stage2_loo_elpd_of_refits", stringsAsFactors = FALSE)
 if ("permutation" %in% TESTS && PERM_SUBSET) {
   ## ---- parallel refit mode, one task: the permutations PERM_IDX only; no summary, no p-value (the combiner does that) ----------------------
   obs <- permutation_observed(A$sy, A$alts, A$ev, A$W_cols, A$X_cols, A$Z_cols, fit_a, fit_b, mode = "refit", family = FAMILY, K = K, x_ref = A$x_ref)
   stopifnot(obs$dat_a$E == dat_chk$E, obs$dat_a$N1 == dat_chk$N1)
-  logf("permutation refit, permutations %d..%d of n_perm %d (seeds %d..%d); parts in %s; observed a %.3f b %.3f (for the log only, the combiner recomputes them)",
-       PERM_IDX[1], PERM_IDX[length(PERM_IDX)], N_PERM, V2_SEED + PERM_IDX[1], V2_SEED + PERM_IDX[length(PERM_IDX)], basename(parts_dir), obs$obs_a, obs$obs_b)
+  logf("permutation refit, permutations %d..%d of n_perm %d (seeds %d..%d); parts in %s; threads_per_chain %d, grainsize %d (N1 = %d); observed a %.3f b %.3f (for the log only, the combiner recomputes them)",
+       PERM_IDX[1], PERM_IDX[length(PERM_IDX)], N_PERM, V2_SEED + PERM_IDX[1], V2_SEED + PERM_IDX[length(PERM_IDX)], basename(parts_dir), THREADS, PERM_GRAINSIZE, dat_chk$N1, obs$obs_a, obs$obs_b)
   for (p in PERM_IDX) {
     t0 <- Sys.time()
-    one <- permutation_refit_one(p, A$sy, A$alts, A$ev, A$W_cols, A$X_cols, A$Z_cols, obs, family = FAMILY, stan_models = models, chains = CHAINS, iter = ITER, warmup = WARMUP)
-    stopifnot(one$perm == p, one$seed == V2_SEED + p)
+    one <- permutation_refit_one(p, A$sy, A$alts, A$ev, A$W_cols, A$X_cols, A$Z_cols, obs, family = FAMILY, stan_models = models, chains = CHAINS, iter = ITER, warmup = WARMUP, threads = THREADS)
+    stopifnot(one$perm == p, one$seed == V2_SEED + p, one$threads_per_chain == THREADS, one$grainsize == PERM_GRAINSIZE)
     path <- write_permutation_part(parts_dir, one, part_settings)
     logf("permutation %d written: a %.3f b %.3f adv %.3f (%.1f min) -> %s", p, one$a, one$b, one$adv, as.numeric(difftime(Sys.time(), t0, units = "mins")), basename(path))
   }
@@ -285,7 +319,7 @@ if ("permutation" %in% TESTS && PERM_SUBSET) {
 } else if ("permutation" %in% TESTS) {
   ## ---- the sequential test (unchanged): both modes, all n_perm permutations in this process -----------------------------------------------
   pt <- permutation_test(A$sy, A$alts, A$ev, A$W_cols, A$X_cols, A$Z_cols, fit_a, fit_b, n_perm = N_PERM, mode = PERM_MODE,
-                         family = FAMILY, K = K, stan_models = models, chains = CHAINS, iter = ITER, warmup = WARMUP, x_ref = A$x_ref)
+                         family = FAMILY, K = K, stan_models = models, chains = CHAINS, iter = ITER, warmup = WARMUP, x_ref = A$x_ref, threads = THREADS)
   write.csv(with_meta(pt$summary), file.path(out_dir, sprintf("measurement_%s_permutation_%s.csv", cell, PERM_MODE)), row.names = FALSE)
   write.csv(data.frame(perm = seq_along(pt$permuted_advantage), adv = pt$permuted_advantage, a = pt$permuted_a, b = pt$permuted_b),
             file.path(out_dir, sprintf("measurement_%s_permutation_%s_draws.csv", cell, PERM_MODE)), row.names = FALSE)
@@ -294,7 +328,7 @@ if ("permutation" %in% TESTS && PERM_SUBSET) {
 if ("permutation_combine" %in% TESTS) {
   ## ---- the combiner: the parts 1..N_PERM plus the observed statistic from the a / b fits, the sequential output files --------------------
   parts <- read_permutation_parts(parts_dir, part_settings)       # refuses parts with other settings, index / seed mismatches, non-finite statistics
-  logf("%d part(s) read from %s: indices %s", nrow(parts), basename(parts_dir), paste(parts$perm, collapse = " "))
+  logf("%d part(s) read from %s (threads_per_chain %d, grainsize %d, as this run): indices %s", nrow(parts), basename(parts_dir), THREADS, PERM_GRAINSIZE, paste(parts$perm, collapse = " "))
   obs <- permutation_observed(A$sy, A$alts, A$ev, A$W_cols, A$X_cols, A$Z_cols, fit_a, fit_b, mode = "refit", family = FAMILY, K = K, x_ref = A$x_ref)
   pt <- permutation_combine(parts[, c("perm", "a", "b")], obs$obs_a, obs$obs_b, obs$statistic, n_perm = N_PERM, mode = "refit")
   stopifnot(pt$summary$n_perm == N_PERM, pt$summary$p_value == (1 + pt$summary$n_exceedances) / (1 + N_PERM))

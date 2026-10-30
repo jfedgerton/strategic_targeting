@@ -18,7 +18,9 @@
 ##                                                rescore mode is a reliance diagnostic (B7)
 ##   permutation_observed / permutation_refit_one / permutation_summary / permutation_combine (2026-10-29)
 ##                                                the pieces of the refit mode, so a Slurm array refits one permutation
-##                                                per task and a combiner rebuilds the sequential output from the parts
+##                                                per task and a combiner rebuilds the sequential output from the parts;
+##                                                permutation_refit_one(threads = k) (2026-10-30) runs each refit chain with k
+##                                                reduce_sum threads (grainsize = choose_grainsize(N1, k), as 02_fit_model.R)
 ##   perturb_relational_levels(...)               inflate the relational LEVEL of flagged state-years and rebuild the
 ##                                                gaps, the initiator / target changes and the level column (B8)
 ##   measurement_error_check(...)                 refit on the perturbed data, track how classification changes
@@ -311,6 +313,12 @@ permute_dR <- function(alts, seed) {
 ##   permutation_summary(...)         the list permutation_test() returns, from obs_a / obs_b and the permuted vectors
 ##   permutation_combine(parts, ...)  the same from a per-permutation table (perm, a, b) that must hold every index 1..n_perm exactly once
 ## permutation_test() itself runs the loop in sequence as before and is identical in output.
+## Within-chain threads (2026-10-30, PI request): permutation_refit_one(threads = k) and permutation_test(threads = k) sample each refit
+## chain with k reduce_sum threads: rstan_options(threads_per_chain = k) and build_stan_data(grainsize = choose_grainsize(N1, k)), exactly
+## what 02_fit_model.R does for the main fits. threads = 1 (the default) is the previous behaviour (grainsize = N1, one slice per chain,
+## serial) and gives the previous output. reduce_sum sums the slices in another order when the grainsize changes, so the statistics of a
+## refit with k > 1 can differ from the serial ones in floating point: parts of one combined test must share the threads / grainsize
+## setting (the part settings carry both and the combiner refuses a part with another value).
 .perm_wscore <- function(sc) sum(sc$w * sc$log_p_chosen)                  # the weighted stage-2 log score (composite likelihood weights)
 permutation_observed <- function(sy, alts, ev, W_cols, X_cols, Z_cols, fit_a, fit_b, mode = c("rescore", "refit"), family = "m1", K = 2L,
                                  n_draws = 100, x_ref = NULL) {
@@ -333,17 +341,23 @@ permutation_observed <- function(sy, alts, ev, W_cols, X_cols, Z_cols, fit_a, fi
 }
 ## permutation p of the refit mode: the dR shuffle with seed V2_SEED + p, the a and b refits with seed V2_SEED and the SAME sampler
 ## settings as the sequential loop, and their stage-2 LOO elpd. obs = permutation_observed(..., mode = "refit") (its anchor and x_ref).
-permutation_refit_one <- function(p, sy, alts, ev, W_cols, X_cols, Z_cols, obs, family = "m1", stan_models, chains = 2, iter = 500, warmup = 250) {
+## threads = k (2026-10-30): k reduce_sum threads per chain, grainsize = choose_grainsize(N1, k) (1 = serial, grainsize N1, the previous
+## behaviour); the returned list records threads_per_chain and grainsize so the part file can carry them.
+permutation_refit_one <- function(p, sy, alts, ev, W_cols, X_cols, Z_cols, obs, family = "m1", stan_models, chains = 2, iter = 500, warmup = 250, threads = 1L) {
   stopifnot(length(p) == 1, is.finite(p), p >= 1, p == as.integer(p), obs$mode == "refit", !is.null(stan_models), family %in% names(stan_models))
+  stopifnot(length(threads) == 1, is.finite(threads), threads >= 1, threads == as.integer(threads))
+  threads <- as.integer(threads)
+  gs <- choose_grainsize(obs$dat_a$N1, threads)
+  rstan_options(threads_per_chain = threads)                 # as 02_fit_model.R: threads and grainsize are set together, never one without the other
   alts_p <- permute_dR(alts, seed = V2_SEED + p)
-  da <- build_stan_data(sy, alts_p, ev, W_cols, X_cols, Z_cols, joint = 0L, x_ref = obs$x_ref, K = obs$Kk, anchor = obs$dat_a$anchor, allow_orphan_initiations = TRUE)
-  db <- build_stan_data(sy, alts_p, ev, W_cols, X_cols, Z_cols, joint = 1L, x_ref = obs$x_ref, K = obs$Kk, anchor = obs$dat_a$anchor, allow_orphan_initiations = TRUE)
-  stopifnot(da$E == obs$dat_a$E, da$N1 == obs$dat_a$N1, identical(da$ev_row, obs$dat_a$ev_row))
+  da <- build_stan_data(sy, alts_p, ev, W_cols, X_cols, Z_cols, joint = 0L, x_ref = obs$x_ref, K = obs$Kk, anchor = obs$dat_a$anchor, allow_orphan_initiations = TRUE, grainsize = gs)
+  db <- build_stan_data(sy, alts_p, ev, W_cols, X_cols, Z_cols, joint = 1L, x_ref = obs$x_ref, K = obs$Kk, anchor = obs$dat_a$anchor, allow_orphan_initiations = TRUE, grainsize = gs)
+  stopifnot(da$E == obs$dat_a$E, da$N1 == obs$dat_a$N1, identical(da$ev_row, obs$dat_a$ev_row), da$grainsize == gs, db$grainsize == gs)
   fa <- sampling(stan_models[[family]], data = da, chains = chains, iter = iter, warmup = warmup, seed = V2_SEED, refresh = 0, pars = EXCL_PARS, include = FALSE)
   fb <- sampling(stan_models[[family]], data = db, chains = chains, iter = iter, warmup = warmup, seed = V2_SEED, refresh = 0, pars = EXCL_PARS, include = FALSE)
   pa <- loo_from_fit(fa, "log_lik_stage2")$estimates["elpd_loo", 1]; pb <- loo_from_fit(fb, "log_lik_stage2")$estimates["elpd_loo", 1]
   stopifnot(is.finite(pa), is.finite(pb))
-  list(perm = as.integer(p), seed = V2_SEED + as.integer(p), a = pa, b = pb, adv = pb - pa)
+  list(perm = as.integer(p), seed = V2_SEED + as.integer(p), a = pa, b = pb, adv = pb - pa, threads_per_chain = threads, grainsize = as.integer(gs))
 }
 permutation_summary <- function(obs_a, obs_b, statistic, perm_a, perm_b, mode, n_perm) {
   stopifnot(length(perm_a) == n_perm, length(perm_b) == n_perm, all(is.finite(perm_a)), all(is.finite(perm_b)), n_perm >= 1)
@@ -415,14 +429,15 @@ read_permutation_parts <- function(parts_dir, settings) {
   parts[order(parts$perm), , drop = FALSE]
 }
 permutation_test <- function(sy, alts, ev, W_cols, X_cols, Z_cols, fit_a, fit_b, n_perm = 20, mode = c("rescore", "refit"),
-                             family = "m1", K = 2L, stan_models = NULL, chains = 2, iter = 500, warmup = 250, n_draws = 100, x_ref = NULL) {
+                             family = "m1", K = 2L, stan_models = NULL, chains = 2, iter = 500, warmup = 250, n_draws = 100, x_ref = NULL, threads = 1L) {
   mode <- match.arg(mode)
   if (mode == "refit") stopifnot(!is.null(stan_models))
+  if (mode != "refit" && threads != 1L) stop("permutation_test: threads applies to the refit mode only (the rescore mode samples nothing)")
   obs <- permutation_observed(sy, alts, ev, W_cols, X_cols, Z_cols, fit_a, fit_b, mode = mode, family = family, K = K, n_draws = n_draws, x_ref = x_ref)
   perm_a <- numeric(n_perm); perm_b <- numeric(n_perm)
   for (p in seq_len(n_perm)) {
     if (mode == "refit") {
-      one <- permutation_refit_one(p, sy, alts, ev, W_cols, X_cols, Z_cols, obs, family = family, stan_models = stan_models, chains = chains, iter = iter, warmup = warmup)
+      one <- permutation_refit_one(p, sy, alts, ev, W_cols, X_cols, Z_cols, obs, family = family, stan_models = stan_models, chains = chains, iter = iter, warmup = warmup, threads = threads)
       pa <- one$a; pb <- one$b
     } else {
       alts_p <- permute_dR(alts, seed = V2_SEED + p)
