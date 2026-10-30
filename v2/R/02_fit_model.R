@@ -20,6 +20,14 @@
 ##     --major=none|joint (one_major / both_major in Z, cowmaj_tm1 in W)  --interact=none|prefixed (four change products in Z)
 ##     --distance=none|capital (2026-10-28: log_capdist in Z, alternatives without a capital distance dropped from both sets; suffix _dist)
 ##     --contiguity=land|none (2026-10-28: contig_land dropped from Z; needs --distance=capital, distance replaces contiguity; suffix _nocontig)
+##     --rho_prior=beta25|flat  --sigma_prior=ln1|ln05 (2026-10-30, prior sensitivity of the jointness result; M1 m / r / a / b only, the rho
+##            prior with M1b only): a non-default value fits the SAME model with stan/m1_latent_prior.stan, the copy of the main program that
+##            takes the Beta shape on (rho + 1) / 2 (2.5 | 1 = uniform on (-1, 1)) and the lognormal sd of sigma_x (1 | 0.5) as data
+##            (prior_hyper(), spec.R); suffixes _rhoflat / _sigln05 after every data switch; refused with M2 and M1c (cell_name())
+##   tag    : --tag=<alnum> (2026-10-30) appends _t<tag> LAST to the cell name, so the fit, summary, standata and log files of this run never
+##            overwrite an existing fit (e.g. --iter=6000 --warmup=3000 --tag=long for a longer-chain refit while jobs read the untagged fit).
+##            Default "" = every name unchanged. The tag reaches every name built from the spec: an M2 run with a tag looks for the
+##            TAGGED M1 fit (and falls back loudly to random inits when there is none; it never takes the untagged file)
 ##   sampler: --chains --iter --warmup --adapt_delta --max_treedepth (defaults per family in spec.R, SAMPLER: M2 runs 4000 / 2000
 ##            with adapt_delta 0.95 since the PI decision of 2026-10-25)
 ##   init_from: (M2 only) the M1 fit whose posterior means start every chain (jittered; AME factors near 0; spec.R INIT_*). Default:
@@ -43,7 +51,7 @@
 ##                               review 2026-10-26 P1: rstan drops a failed parallel chain and returns the rest with mode 0)
 ##   v2/output/summary_<cell>.csv posterior summaries of the structural parameters, labelled by axis and covariate (written AFTER
 ##                               the fit file)
-## Cell name: <sample>_lag<h>_all_pr_<model>[_K<K>][_orig|_join][_bi|_co][_strict][_drop3][_noww2][_fullctrl][_dist][_nocontig][_major][_ix][_w1][_winsor][_sideA][_pilot]
+## Cell name: <sample>_lag<h>_all_pr_<model>[_K<K>][_orig|_join][_bi|_co][_strict][_drop3][_noww2][_fullctrl][_dist][_nocontig][_major][_ix][_w1][_winsor][_sideA][_rhoflat][_sigln05][_t<tag>][_pilot]
 ##            (model M1c: <sample>_lag<h>_all_pr_M1c<suffix>; its fit records args$stan_program = "m1_context" and args$context_model = TRUE)
 ## Seed 123 everywhere (audit F11).
 ## ============================================================================
@@ -67,7 +75,8 @@ INIT_FROM <- get_arg(args, "init_from", "")
 refuse_archived_options(args, "02_fit_model.R")          # archived options are refused instead of being ignored silently (ARCHIVED_OPTIONS, spec.R)
 stopifnot(CHAINS >= 1, ITER > WARMUP, WARMUP >= 0, THREADS >= 1, is.finite(ADAPT_DELTA), ADAPT_DELTA > 0, ADAPT_DELTA < 1, MAX_TD >= 1)
 
-D_MODE <- model_D_mode(MODEL); joint <- model_joint(MODEL); family <- stan_program(MODEL)   # m1_latent_additive | m2_ame | m1_context (M1c)
+D_MODE <- model_D_mode(MODEL); joint <- model_joint(MODEL); family <- stan_program(MODEL, spec)   # m1_latent_additive | m2_ame | m1_context (M1c) | m1_latent_prior (a prior switch off its default)
+PRIOR_PROGRAM <- family == "m1_latent_prior"; prior <- prior_hyper(spec)   # the hyperparameters the prior program takes as data (2.5 / 1 = the main program's literals)
 CONTEXT_MODEL <- MODEL %in% CONTEXT_MODELS
 if (CONTEXT_MODEL && (spec$controls != "minimal" || spec$context != "all")) stop("M1c is defined on the minimal control set with every stage-2 event (--controls=minimal, --context=all); it models the contexts itself")
 ## merge 2026-10-27 (stage b x major / interact): the two features were developed independently and M1c under the major or interact switches
@@ -79,6 +88,8 @@ cell <- cell_name(SAMPLE, LAG, MODEL, spec)
 if (PILOT) cell <- paste0(cell, "_pilot")          # C1: pilots never share a filename with production fits
 log_open(paste0("02_fit_", cell))
 logf("cell = %s; spec: %s (%s)", cell, spec_string(spec), if (spec_is_main(spec)) "MAIN specification" else paste0("variant, suffix ", spec_suffix(spec)))
+if (nzchar(spec_tag(spec))) logf("run tag %s (2026-10-30): every output of this run carries the suffix %s%s (fit_%s.rds, summary_%s.csv, standata_%s.rds, this log); the untagged files are not touched", spec_tag(spec), TAG_PREFIX, spec_tag(spec), cell, cell, cell)
+logf("Stan program: %s%s", family, if (PRIOR_PROGRAM) sprintf(" (prior sensitivity, 2026-10-30: rho_prior = %s -> Beta(%.2f, %.2f) on (rho + 1) / 2; sigma_prior = %s -> sigma_x ~ lognormal(0, %.2f); the main program has 2.5 and 1)", spec$rho_prior, prior$prior_rho_shape, prior$prior_rho_shape, spec$sigma_prior, prior$prior_sigma_x_sd) else " (the main priors)")
 logf("sampler (%s family): chains %d, iter %d, warmup %d, adapt_delta %.3f, max_treedepth %d", model_family(MODEL), CHAINS, ITER, WARMUP, ADAPT_DELTA, MAX_TD)
 set.seed(V2_SEED)
 rstan_options(auto_write = FALSE)
@@ -130,6 +141,11 @@ if (CONTEXT_MODEL) {
   logf("M1c stage-2 groups (ev_grp): bilateral %d events (weights %.1f, %d states), coalition leader %d (%.1f, %d), joiner %d (%.1f, %d); sample events before the choice-set join %d / %d / %d",
        gt$n_usable[1], gt$w_usable[1], gt$n_states[1], gt$n_usable[2], gt$w_usable[2], gt$n_states[2], gt$n_usable[3], gt$w_usable[3], gt$n_states[3], gt$n_sample[1], gt$n_sample[2], gt$n_sample[3])
 }
+if (PRIOR_PROGRAM) {
+  ## prior sensitivity (2026-10-30): the hyperparameters go to Stan as data; the main program's data stay exactly as before (no field added)
+  stopifnot(is.finite(prior$prior_rho_shape), prior$prior_rho_shape > 0, is.finite(prior$prior_sigma_x_sd), prior$prior_sigma_x_sd > 0)
+  dat$prior_rho_shape <- prior$prior_rho_shape; dat$prior_sigma_x_sd <- prior$prior_sigma_x_sd
+}
 logf("reduce_sum grainsize = %d (N1 = %d)", dat$grainsize, dat$N1)
 logf("D_mode = %d (%s)", D_MODE, c("material only", "relational only", "both dimensions")[D_MODE])
 if (family == "m2_ame") logf("AME anchors (most initiations first): ccodes %s", paste(state_codes[dat$anchor], collapse = ", "))
@@ -158,7 +174,8 @@ if (spec$interact == "prefixed") logf("interact = prefixed (2026-10-27): Z carri
 if (DRY_RUN) {
   saveRDS(list(dat = dat, cell = cell, state_codes = state_codes, W_cols = W_cols, X_cols = X_cols, Z_cols = Z_cols,
                manifest = manifest_cell, git_commit = git_commit_at_load, spec = spec, winsor = A$winsor, model = MODEL,
-               full_controls = spec$controls == "full", event_weights = spec$weights, direction = spec$direction, group_table = A$group_table),
+               full_controls = spec$controls == "full", event_weights = spec$weights, direction = spec$direction, group_table = A$group_table,
+               stan_program = family, prior = c(spec[PRIOR_SWITCHES], prior), tag = spec_tag(spec)),
           file.path(out_dir, paste0("standata_", cell, ".rds")))
   logf("DRY RUN: Stan data assembled and saved; no sampling"); quit(save = "no", status = 0)
 }
@@ -257,6 +274,7 @@ if (!identical(git_commit_now, git_commit_at_load)) logf("WARNING: git HEAD move
 obj <- list(fit = fit, dat = dat, cell = cell, state_codes = state_codes, W_cols = W_cols, X_cols = X_cols, Z_cols = Z_cols,
             sy_keys = sy |> select(ccode, year, state_idx, y1), ev = ev, x_ref = x_ref, elapsed_min = elapsed,
             manifest = manifest_cell, data_dir = basename(data_dir), stale = stale, spec = spec, winsor = A$winsor, init = init_info, group_table = A$group_table,
+            prior = c(spec[PRIOR_SWITCHES], prior, list(stan_program = family)),   # the prior switches and the hyperparameters the program saw (2026-10-30)
             param_labels = label_parameters(rownames(sm_tab), W_cols, X_cols, Z_cols, D_MODE),
             args = list(sample = SAMPLE, lag = LAG, variant = VARIANT, model = MODEL, centrality = CENTRALITY, K = K, chains = CHAINS,
                         iter = ITER, warmup = WARMUP, pilot = PILOT, sampled_m = SAMPLED_M, conflict_history = CONFLICT_HISTORY,
@@ -265,6 +283,7 @@ obj <- list(fit = fit, dat = dat, cell = cell, state_codes = state_codes, W_cols
                         pairs = spec$pairs, changes = spec$changes, context = spec$context, coal_ties = spec$coal_ties, coal_drop = spec$coal_drop,
                         context_top3 = A$context_top3, major = spec$major, major_stats = A$major_stats, interact = spec$interact,
                         D_mode = D_MODE, threads_per_chain = THREADS, context_model = CONTEXT_MODEL, stan_program = family,
+                        rho_prior = spec$rho_prior, sigma_prior = spec$sigma_prior, prior_rho_shape = prior$prior_rho_shape, prior_sigma_x_sd = prior$prior_sigma_x_sd, tag = spec_tag(spec),
                         init_source = init_info$source, init_from = init_info$m1_fit,
                         grainsize = dat$grainsize, seed = V2_SEED, adapt_delta = ADAPT_DELTA, max_treedepth = MAX_TD,
                         stan_source_sha256 = stan_prov$stan_source_sha256, compiled_model_code_sha256 = stan_prov$compiled_model_code_sha256,
@@ -282,6 +301,7 @@ if (!file.rename(tmp_path, fit_path)) stop("rename of ", tmp_path, " to ", fit_p
 rm(chk)
 logf("saved %s%s", fit_path, if (!is.null(stale)) " (STALE: the manifest changed while sampling; downstream tools need --allow_stale)" else "")
 ## the summary CSV AFTER the fit file (C2), labelled by axis and covariate (B2)
-write.csv(data.frame(obj$param_labels, sm_tab, init_source = init_info$source, init_from = init_info$m1_fit, check.names = FALSE),
+write.csv(data.frame(obj$param_labels, sm_tab, init_source = init_info$source, init_from = init_info$m1_fit,
+                     rho_prior = spec$rho_prior, sigma_prior = spec$sigma_prior, stan_program = family, tag = spec_tag(spec), check.names = FALSE),   # the priors and the tag of the run (2026-10-30)
           file.path(out_dir, paste0("summary_", cell, if (!is.null(stale)) "_STALE" else "", ".csv")), row.names = FALSE)
 logf("summary written: %s", paste0("summary_", cell, if (!is.null(stale)) "_STALE" else "", ".csv"))

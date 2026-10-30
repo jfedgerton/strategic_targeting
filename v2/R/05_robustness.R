@@ -63,6 +63,8 @@
 ##                (fit_<s>_lag<h>_all_pr_M1a_dist_major / _M1b_dist_major) are asserted to score exactly those frames. The outputs carry
 ##                _dist_major (measurement_<s>_lag<h>_all_pr_M1_dist_major_*). --major without --distance=capital stays refused, as do the
 ##                holdout and inflation tests with it (their rebuilds re-centre W from w_controls() without the switch).
+##                --tag=<t> and --rho_prior / --sigma_prior (2026-10-30) are refused by every preset: the longer-chain and prior-sensitivity
+##                refits are single 02_fit_model.R cells (README section 4), and the tests here read the untagged main-program fits.
 ##
 ## Usage:
 ##   Rscript v2/R/05_robustness.R --preset=noww2 [--cells=mid:3:M1b,fmid:3:M1b,...] [--cell_index=i] [--dry_run=TRUE]
@@ -100,6 +102,11 @@ PRESET <- get_arg(args, "preset", "")
 if (!PRESET %in% names(ROBUSTNESS_PRESETS)) stop("--preset must be one of ", paste(names(ROBUSTNESS_PRESETS), collapse = " | "), "; got '", PRESET, "'")
 ## the switches: whatever the command line says, with the preset's switch forced on top
 spec <- parse_spec(args)
+## the run tag and the prior switches of 2026-10-30 are 02_fit_model.R options for single cells (the PI's longer-chain and prior-sensitivity
+## refits of M1b): no preset takes them. A tag would be dropped from the preset's 02_fit_model.R calls (they are built from SPEC_CHOICES) and
+## the perm_error fits must be the untagged production fits of the main program, so both are refused here rather than ignored.
+if (nzchar(spec_tag(spec))) stop(sprintf("--tag=%s is not an option of 05_robustness.R (no preset takes a run tag); run the cell through 02_fit_model.R --tag=%s directly", spec$tag, spec$tag))
+if (!spec_prior_is_main(spec)) stop(sprintf("--rho_prior / --sigma_prior are not options of 05_robustness.R (rho_prior=%s, sigma_prior=%s): the prior-sensitivity fits are single M1b cells of 02_fit_model.R, and the perm_error tests refit with the main program's priors", spec$rho_prior, spec$sigma_prior))
 for (nm in names(ROBUSTNESS_PRESETS[[PRESET]])) spec[[nm]] <- ROBUSTNESS_PRESETS[[PRESET]][[nm]]
 switch_args <- c(sprintf("--%s=%s", names(SPEC_CHOICES), unlist(spec[names(SPEC_CHOICES)])), sprintf("--ame_K=%d", spec$ame_K))
 
@@ -115,7 +122,7 @@ if (PRESET != "perm_error") {
   } else if (PRESET == "context_b") {
     ## the M1c model on its fixed cells, every switch at its default: no --cells and no switch may be passed (the cell names would still be
     ## unique through the model code, but the stage-b run is defined on the main specification)
-    if (length(grep("^--(cells|pairs|context|coal_ties|coal_drop|direction|ww2|weights|controls|major|interact|distance|contiguity|changes|ame_K)=", args)))
+    if (length(grep("^--(cells|pairs|context|coal_ties|coal_drop|direction|ww2|weights|controls|major|interact|distance|contiguity|changes|ame_K|rho_prior|sigma_prior|tag)=", args)))
       stop("the context_b preset fixes its cells (CONTEXT_B_PRESET in spec.R) and runs M1c on the main specification; no --cells and no switch may be passed")
     parts <- strsplit(CONTEXT_B_PRESET$cells, ":", fixed = TRUE)
     cells_tab <- data.frame(sample = vapply(parts, `[`, "", 1), lag = as.integer(vapply(parts, `[`, "", 2)), model = vapply(parts, `[`, "", 3), variant = NA_character_, stringsAsFactors = FALSE)

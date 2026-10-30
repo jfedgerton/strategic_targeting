@@ -124,7 +124,13 @@ assert_fit_stan_current <- function(obj, root = v2_root(), what = "fit") {
   if (is.null(sha) || !is.character(sha) || length(sha) != 1 || !grepl("^[0-9a-f]{64}$", sha))
     stop(sprintf("%s %s records no Stan source hash (args$stan_source_sha256; saved before 2026-10-25 C3); refit it with the current program", what, obj$cell))
   if (is.null(obj$args$model)) stop(sprintf("%s %s records no model code (args$model)", what, obj$cell))
-  family <- stan_program(obj$args$model)          # m1_latent_additive | m2_ame | m1_context (M1c, stage b)
+  ## m1_latent_additive | m2_ame | m1_context (M1c, stage b) | m1_latent_prior (an M1 fit with a prior switch off its default, 2026-10-30).
+  ## The program is derived from the model code AND the saved switches (a fit saved before the prior switches existed has no such fields and
+  ## is the main program's); a fit that recorded which program it sampled (args$stan_program, since 2026-10-27) must agree, so a fit of one
+  ## program can never be checked against the other's sidecar
+  family <- stan_program(obj$args$model, obj$spec)
+  if (!is.null(obj$args$stan_program) && !identical(obj$args$stan_program, family))
+    stop(sprintf("%s %s records the program %s but its model code / switches (%s) imply %s; the fit is not what its name says", what, obj$cell, obj$args$stan_program, obj$args$model, family))
   sidecar <- file.path(root, "stan", "build", paste0(family, ".sha256"))
   if (!file.exists(sidecar)) stop("compiled-model sidecar hash missing: ", sidecar, "; rerun v2/R/compile_models.R")
   side <- trimws(readLines(sidecar, warn = FALSE)[1])

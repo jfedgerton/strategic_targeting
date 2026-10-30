@@ -43,9 +43,19 @@ obj <- readRDS(fit_path); fit <- obj$fit; cell <- obj$cell
 assert_production_fit(obj, allow_stale = allow_stale)
 assert_fit_current(obj, file.path(v2_root(), if (is.null(obj$data_dir)) "data" else obj$data_dir, "manifest.csv"))
 assert_fit_stan_current(obj)            # the fit's Stan source hash must be the compiled program's (stan/build/<family>.sha256; audit fix 5)
+## run tags and prior switches (2026-10-30): every output below is named by the fit's recorded cell (typology_<cell>.csv, ...), which carries the
+## tag (_t<tag>) and the prior suffixes (_rhoflat / _sigln05) of the run. The file must be the one 02_fit_model.R wrote for that cell: a fit
+## renamed to another cell's name (a tagged copy of an untagged fit, or the reverse) would write its outputs under the wrong name, so the
+## basename must be fit_<cell>.rds or fit_<cell>_STALE.rds, exactly
+expected_names <- paste0("fit_", cell, c("", "_STALE"), ".rds")
+if (!basename(fit_path) %in% expected_names)
+  stop(sprintf("the fit file %s records the cell %s, so it must be named %s (or %s): a renamed fit is refused (its outputs would carry the recorded cell, not the file's name)",
+               basename(fit_path), cell, expected_names[1], expected_names[2]))
 out_dir <- dirname(fit_path)
 log_open(paste0("03_extract_", cell))
 logf("fit %s; r0 = %.2f", cell, r0)
+if (nzchar(spec_tag(obj$spec))) logf("run tag %s: this is the TAGGED fit (%s); every output below carries %s%s", spec_tag(obj$spec), basename(fit_path), TAG_PREFIX, spec_tag(obj$spec))
+if (!spec_prior_is_main(obj$spec)) logf("prior sensitivity fit (%s): rho_prior = %s (Beta shape %s), sigma_prior = %s (lognormal sd %s)", obj$args$stan_program, obj$prior$rho_prior, obj$prior$prior_rho_shape, obj$prior$sigma_prior, obj$prior$prior_sigma_x_sd)
 is_context_model <- !is.null(obj$args$model) && obj$args$model %in% CONTEXT_MODELS
 if (is_context_model) logf("M1c fit (dual typology stage b): typology_<cell>, mu_state_<cell>, reach and focus_sigma below are the BILATERAL (reference) quantities; the per-group outputs follow")
 

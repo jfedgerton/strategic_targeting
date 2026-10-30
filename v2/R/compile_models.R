@@ -1,8 +1,9 @@
 ## ============================================================================
 ## compile_models.R -- compile the Stan programs once and cache them as .rds
 ## Usage: Rscript v2/R/compile_models.R
-## Output: v2/stan/build/{m1_latent_additive,m2_ame,m1_context}.rds (gitignored; STAN_PROGRAMS in spec.R; m1_context is the M1c program
-##         of dual typology stage b, 2026-10-27) plus <model>.sha256, the sha256 of the .stan source
+## Output: v2/stan/build/{m1_latent_additive,m2_ame,m1_context,m1_latent_prior}.rds (gitignored; STAN_PROGRAMS in spec.R; m1_context is the
+##         M1c program of dual typology stage b, 2026-10-27; m1_latent_prior the prior-sensitivity copy of the M1 program, 2026-10-30, used only
+##         when --rho_prior / --sigma_prior are off their defaults) plus <model>.sha256, the sha256 of the .stan source
 ##         compiled into it (provenance, 2026-10-25 C3); 02_fit_model.R refuses a binary whose model_code is not the checked-out source
 ## ============================================================================
 suppressPackageStartupMessages(library(rstan))

@@ -12,7 +12,7 @@ toy_joiners <- function(e) e |> mutate(orig1 = ifelse(initiator == 30L & target 
 test_that("spec: M1c is a model code outside the main grid with its own Stan program, cell names that collide with nothing, and the context_b preset", {
   expect_false("M1c" %in% MODELS); expect_true("M1c" %in% ALL_MODELS); expect_equal(CONTEXT_MODELS, "M1c")
   expect_equal(stan_program("M1c"), "m1_context"); expect_equal(stan_program("M1b"), "m1_latent_additive"); expect_equal(stan_program("M2a"), "m2_ame")
-  expect_setequal(STAN_PROGRAMS, c("m1_latent_additive", "m2_ame", "m1_context"))
+  expect_setequal(STAN_PROGRAMS, c("m1_latent_additive", "m2_ame", "m1_context", "m1_latent_prior"))   # m1_latent_prior added 2026-10-30 (prior switches)
   expect_equal(model_family("M1c"), "M1"); expect_equal(model_D_mode("M1c"), 3L); expect_equal(model_joint("M1c"), 1L)
   main <- parse_spec(character(0))
   expect_equal(cell_name("fmid", 3L, "M1c", main), "fmid_lag3_all_pr_M1c"); expect_equal(cell_name("mid", 3L, "M1c", parse_spec("--ww2=drop")), "mid_lag3_all_pr_M1c_noww2")

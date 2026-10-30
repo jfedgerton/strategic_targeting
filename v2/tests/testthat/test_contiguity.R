@@ -29,7 +29,7 @@ test_that("spec: contiguity defaults to land, none needs distance = capital, _no
   all_on <- parse_spec(c("--pairs=originators", "--context=coalition", "--coal_ties=strict", "--coal_drop=top3", "--ww2=drop", "--controls=full",
                          "--distance=capital", "--contiguity=none", "--major=joint", "--interact=prefixed", "--weights=none", "--changes=winsor", "--direction=sideA"))
   expect_equal(spec_suffix(all_on), "_orig_co_strict_drop3_noww2_fullctrl_dist_nocontig_major_ix_w1_winsor_sideA")
-  expect_equal(names(SPEC_SUFFIX), c("pairs", "context", "coal_ties", "coal_drop", "ww2", "controls", "distance", "contiguity", "major", "interact", "weights", "changes", "direction"))
+  expect_equal(names(SPEC_SUFFIX), c("pairs", "context", "coal_ties", "coal_drop", "ww2", "controls", "distance", "contiguity", "major", "interact", "weights", "changes", "direction", "rho_prior", "sigma_prior"))   # rho_prior, sigma_prior appended 2026-10-30 (after every data switch)
   expect_equal(which(names(SPEC_SUFFIX) == "contiguity"), which(names(SPEC_SUFFIX) == "distance") + 1L)      # adjacent to _dist
   expect_false(any(duplicated(c(unlist(SPEC_SUFFIX), "_K2", "_pilot", "_STALE", "_samp10", "_noCH", "_polrel"))))
   ## every existing cell name is unchanged: the switch adds nothing at its default
