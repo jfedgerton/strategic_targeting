@@ -299,3 +299,15 @@ test_that("05_robustness.R refuses a run tag and the prior switches for every pr
   expect_true(all(grepl("--rho_prior=beta25", calls, fixed = TRUE))); expect_true(all(grepl("--sigma_prior=ln1", calls, fixed = TRUE))); expect_false(any(grepl("--tag", calls, fixed = TRUE)))
   unlink(tmp, recursive = TRUE)
 })
+
+test_that("permutation part-file spec string matches the 7c4645e form (audit R1 of b1f0988)", {
+  ## the string a 7c4645e driver wrote for the _dist and _dist_major cells (prior switches and tag did not exist)
+  old_dist  <- "pairs=all context=all coal_ties=inclusive coal_drop=none direction=cowwar ww2=include weights=dispute controls=minimal major=none interact=none distance=capital contiguity=land changes=raw ame_K=2"
+  old_major <- sub("major=none", "major=joint", old_dist)
+  for (case in list(list(args = c("--distance=capital"), old = old_dist), list(args = c("--distance=capital", "--major=joint"), old = old_major))) {
+    sp <- parse_spec(case$args)
+    expect_identical(spec_string(sp[setdiff(names(sp), c(PRIOR_SWITCHES, "tag"))]), case$old)
+    expect_false(identical(spec_string(sp), case$old))     # the full string did change, which is why the driver drops the new fields
+  }
+  expect_true(any(grepl('spec_string(spec[setdiff(names(spec), c(PRIOR_SWITCHES, "tag"))])', readLines(file.path(root, "R", "05_robustness.R")), fixed = TRUE)))
+})

@@ -7,7 +7,7 @@
 // the main program's density term for term, 1 gives the flat prior on rho (Beta(1, 1) = uniform on (-1, 1)), 0.5 the tight sigma
 // prior (--rho_prior=flat, --sigma_prior=ln05 of 02_fit_model.R). 02_fit_model.R uses this program ONLY when a prior switch is
 // off its default (stan_program(model, spec)), so m1_latent_additive.stan and the hashes of every existing fit are untouched.
-// tests/testthat/test_prior_switches.R asserts that the two sources differ in exactly these lines.
+// tests/testthat/test_tag_prior.R asserts that the two sources differ in exactly these lines.
 //
 // Two-stage spatial choice model of MID initiation, estimated JOINTLY.
 //

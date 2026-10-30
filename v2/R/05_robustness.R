@@ -304,8 +304,10 @@ parts_dir <- file.path(out_dir, sprintf("measurement_%s_permutation_refit_parts"
 ## settings of the refits (chains / iter / warmup and, since 2026-10-30, the reduce_sum threads per chain and the grainsize they imply), the
 ## data dimensions the fits were verified against, and the fit files
 PERM_GRAINSIZE <- choose_grainsize(dat_chk$N1, THREADS)      # = the grainsize of every refit of this run (permutation_refit_one() recomputes and asserts it)
+## spec string WITHOUT the 2026-10-30 fields (prior switches, tag): the driver refuses non-default values of both, and dropping them keeps
+## the string identical to 7c4645e, so parts written by that commit still combine (audit R1 of b1f0988)
 part_settings <- data.frame(cell = cell, family = toupper(FAMILY), ame_K = if (FAMILY == "m2") K else NA_integer_, sample = SAMPLE, lag = LAG,
-                            spec = spec_string(spec), chains = CHAINS, iter = ITER, warmup = WARMUP, v2_seed = V2_SEED,
+                            spec = spec_string(spec[setdiff(names(spec), c(PRIOR_SWITCHES, "tag"))]), chains = CHAINS, iter = ITER, warmup = WARMUP, v2_seed = V2_SEED,
                             threads_per_chain = THREADS, grainsize = PERM_GRAINSIZE,
                             E = dat_chk$E, N1 = dat_chk$N1, sum_y1 = sum(dat_chk$y1), fit_a = basename(fa_path), fit_b = basename(fb_path),
                             statistic = "stage2_loo_elpd_of_refits", stringsAsFactors = FALSE)
