@@ -55,8 +55,8 @@ SPEC_CHOICES <- list(
 ## (log_capdist in Z, alternatives without one dropped, as distance = capital), the major-power indicators (one_major / both_major in Z and
 ## cowmaj_tm1 in W, as major = joint), land contiguity, the defense-alliance control of the full set, and the peace years as cubics
 ## (p = monadic peace years / 10, q = dyadic peace years / 10) instead of the log1p columns. The power CHANGES leave every matrix: no dM_i /
-## dR_i in W, no X at all (P = 0: mu = mu0 + a_i, or + delta_lead / delta_join for M1c), no dM_j_h / dRpr_j_h / dch_j_missing in Z.
-## multi_mid_jan is in W for EVERY model of the spec (M1a, M1b, M1c), not for M1c alone as in the main specification. The column lists are
+## dR_i in W, no X at all (P = 0: mu = mu0 + a_i, or + delta[g] for M1c / M1cr), no dM_j_h / dRpr_j_h / dch_j_missing in Z.
+## multi_mid_jan is in W for EVERY model of the spec (M1a, M1b, M1c, M1cr), not for M1c alone as in the main specification. The column lists are
 ## W_CONVENTIONAL / Z_CONVENTIONAL in assemble_cell.R (asserted exactly at assembly and in 02_fit_model.R). Models: CONVENTIONAL_MODELS only
 ## (cell_name() refuses the others). The switches the spec fixes (CONVENTIONAL_FIXED) are refused on the command line in ANY value, the
 ## default included (--controls=minimal with --comparison=conventional is a conflict, not a no-op): the W / Z sets are the spec's, not theirs.
@@ -66,7 +66,7 @@ SPEC_CHOICES <- list(
 ## The data switches that do not touch W / Z / X (pairs, context, coal_*, ww2, weights, direction) and the prior switches combine with it as
 ## with any cell; the suffix _conv sits after _ix (the last control extension) and before _w1, so e.g. fmid_lag3_all_pr_M1b_conv,
 ## fmid_lag3_all_pr_M1b_noww2_conv, fmid_lag3_all_pr_M1b_conv_w1. 05_robustness.R refuses the switch for every preset (single cells).
-CONVENTIONAL_MODELS <- c("M1a", "M1b", "M1c")
+CONVENTIONAL_MODELS <- c("M1a", "M1b", "M1c", "M1cr")       # M1cr (role-specific rho, 2026-10-31) added with its program
 CONVENTIONAL_FIXED  <- c("controls", "distance", "contiguity", "major", "interact", "changes")
 SPEC_DEFAULTS <- lapply(SPEC_CHOICES, function(v) v[1])
 SPEC_DEFAULTS$ame_K <- 2L                            # latent dimensions of the M2 (AME) family; "_K<K>" is always in an M2 cell name
@@ -123,18 +123,20 @@ MODELS       <- c("M1m", "M1r", "M1a", "M1b", "M2m", "M2r", "M2a", "M2b")
 ## group-specific tolerance scales (sigma_g, shared correlation rho) over the three stage-2 event groups bilateral / coalition leader /
 ## joiner, plus one extra stage-1 control (multi_mid_jan). Its own Stan program (stan/m1_context.stan). NOT part of MODELS (the main
 ## grid's 0-95 index mapping and 04_compare.R's eight-model groups stay as they are); 02_fit_model.R and 03_extract.R accept it.
-CONTEXT_MODELS <- c("M1c")
+## M1cr (PI request 2026-10-31): M1c with a ROLE-SPECIFIC stage-2 correlation rho_g[G] (stan/m1_context_rho.stan); same data, same groups
+CONTEXT_MODELS <- c("M1c", "M1cr")
 ALL_MODELS     <- c(MODELS, CONTEXT_MODELS)
 ## stan_program(model, spec): the Stan source / build name of a model code (m1_latent_additive | m2_ame | m1_context), and, since 2026-10-30,
 ## m1_latent_prior for an M1 m / r / a / b model whose spec has a prior switch off its default (the copy of m1_latent_additive.stan with the
 ## hyperparameters as data). spec = NULL (or a spec saved before the switches existed, which lacks the fields) means the main priors.
 stan_program <- function(model, spec = NULL) {
   stopifnot(model %in% ALL_MODELS)
+  if (model == "M1cr") return("m1_context_rho")
   if (model %in% CONTEXT_MODELS) return("m1_context")
   if (substr(model, 1, 2) == "M2") return("m2_ame")
   if (spec_prior_is_main(spec)) "m1_latent_additive" else "m1_latent_prior"
 }
-STAN_PROGRAMS  <- c("m1_latent_additive", "m2_ame", "m1_context", "m1_latent_prior")
+STAN_PROGRAMS  <- c("m1_latent_additive", "m2_ame", "m1_context", "m1_latent_prior", "m1_context_rho")
 ## spec_prior_is_main(spec): TRUE when both prior switches are at their default (a NULL spec, or one saved before 2026-10-30 without the
 ## fields, counts as the main priors: every fit before that date sampled the main program)
 spec_prior_is_main <- function(spec) {
@@ -364,8 +366,9 @@ cell_spec <- function(model, spec) if (model_family(model) == "M1") m1_spec(spec
 ## model_family(model): "M1" or "M2"; model_D_mode(model): 1 (material), 2 (relational), 3 (both); model_joint(model): 1 for the b models
 ## M1c (stage b): family M1 (sampler settings, name without a K), both axes, joint (full Sigma per group, full Omega)
 model_family <- function(model) { stopifnot(model %in% ALL_MODELS); substr(model, 1, 2) }
+## M1cr (2026-10-31): the third character decides (M1cr is a "c" model; a regex on the LAST character would read its "r" as relational-only)
 model_D_mode <- function(model) { stopifnot(model %in% ALL_MODELS); switch(substr(model, 3, 3), m = 1L, r = 2L, a = 3L, b = 3L, c = 3L) }
-model_joint  <- function(model) { stopifnot(model %in% ALL_MODELS); as.integer(grepl("[bc]$", model)) }
+model_joint  <- function(model) { stopifnot(model %in% ALL_MODELS); as.integer(substr(model, 3, 3) %in% c("b", "c")) }
 ## sampler_settings(model, args): the family defaults, each overridable from the command line
 sampler_settings <- function(model, args = character(0)) {
   s <- SAMPLER[[model_family(model)]]
