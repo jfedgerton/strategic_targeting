@@ -22,7 +22,7 @@
 ##     --contiguity=land|none (2026-10-28: contig_land dropped from Z; needs --distance=capital, distance replaces contiguity; suffix _nocontig)
 ##     --comparison=none|conventional (PI-approved 2026-10-31, suffix _conv; M1a / M1b / M1c only): W, Z, X fixed to the conventional comparison
 ##            (W_CONVENTIONAL / Z_CONVENTIONAL of assemble_cell.R, no X: P = 0); carries the distance, the major indicators, contiguity, the
-##            defense alliance and the peace-year cubics itself, so --controls, --distance, --contiguity, --major, --interact and --changes
+##            defense alliance itself (no peace years, PI 2026-10-31), so --controls, --distance, --contiguity, --major, --interact and --changes
 ##            are refused with it in any value (parse_spec()); multi_mid_jan is in W for all three models
 ##     --rho_prior=beta25|flat  --sigma_prior=ln1|ln05 (2026-10-30, prior sensitivity of the jointness result; M1 m / r / a / b only, the rho
 ##            prior with M1b only): a non-default value fits the SAME model with stan/m1_latent_prior.stan, the copy of the main program that
@@ -155,7 +155,7 @@ if (CONVENTIONAL) {
   ## P = 0 since this date: beta is 0 x D, X is N1 x 0, x_ref is empty), no change column anywhere, multi_mid_jan in W for every model
   stopifnot(isTRUE(A$conventional), A$distance == "capital", A$major == "joint", identical(W_cols, W_CONVENTIONAL), identical(Z_cols, Z_CONVENTIONAL), length(X_cols) == 0L,
             dat$P == 0L, ncol(dat$X) == 0L, nrow(dat$X) == dat$N1, length(dat$x_ref) == 0L, dat$P1 == length(W_CONVENTIONAL), dat$Pz == length(Z_CONVENTIONAL),
-            !any(CHANGE_COLUMNS %in% c(W_cols, X_cols, Z_cols)), !anyNA(dat$W), !anyNA(dat$Z), "multi_mid_jan" %in% W_cols, MODEL %in% CONVENTIONAL_MODELS)
+            !any(CHANGE_COLUMNS %in% c(W_cols, X_cols, Z_cols)), !any(PEACE_COLUMNS %in% c(W_cols, Z_cols)), !anyNA(dat$W), !anyNA(dat$Z), "multi_mid_jan" %in% W_cols, MODEL %in% CONVENTIONAL_MODELS)
   logf("conventional comparison (2026-10-31, suffix _conv): W = %s (P1 = %d); X = none (P = 0, mu = mu0 + a_i%s); Z = %s (Pz = %d); distance = capital and major = joint are part of the spec (not of the switches)",
        paste(W_cols, collapse = ","), dat$P1, if (CONTEXT_MODEL) " + delta[ev_grp]" else "", paste(Z_cols, collapse = ","), dat$Pz)
 } else stopifnot(!isTRUE(A$conventional), dat$P >= 1L)

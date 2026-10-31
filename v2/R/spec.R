@@ -53,8 +53,8 @@ SPEC_CHOICES <- list(
 ## ---- the conventional comparison specification (PI-approved 2026-10-31; switch `comparison`, suffix _conv) --------------------------
 ## One switch fixes the three design matrices at once; it is NOT a combination of the other switches, although it carries the distance
 ## (log_capdist in Z, alternatives without one dropped, as distance = capital), the major-power indicators (one_major / both_major in Z and
-## cowmaj_tm1 in W, as major = joint), land contiguity, the defense-alliance control of the full set, and the peace years as cubics
-## (p = monadic peace years / 10, q = dyadic peace years / 10) instead of the log1p columns. The power CHANGES leave every matrix: no dM_i /
+## cowmaj_tm1 in W, as major = joint), land contiguity and the defense-alliance control of the full set; no peace years in either stage (PI decision
+## 2026-10-31; lagged conflict and the prior-MID counts stay). The power CHANGES leave every matrix: no dM_i /
 ## dR_i in W, no X at all (P = 0: mu = mu0 + a_i, or + delta[g] for M1c / M1cr), no dM_j_h / dRpr_j_h / dch_j_missing in Z.
 ## multi_mid_jan is in W for EVERY model of the spec (M1a, M1b, M1c, M1cr), not for M1c alone as in the main specification. The column lists are
 ## W_CONVENTIONAL / Z_CONVENTIONAL in assemble_cell.R (asserted exactly at assembly and in 02_fit_model.R). Models: CONVENTIONAL_MODELS only
@@ -272,7 +272,7 @@ parse_spec <- function(args = character(0)) {
   ## ANY value (the default included), since passing one claims a control set the spec does not take; their spec fields stay at the defaults
   if (spec$comparison == "conventional") {
     for (nm in CONVENTIONAL_FIXED) if (length(grep(paste0("^--", nm, "="), args)))
-      stop(sprintf("--%s=%s conflicts with --comparison=conventional, which fixes W, Z and X itself (W_CONVENTIONAL / Z_CONVENTIONAL, no X: distance, majors, contiguity, alliance and the peace-year cubics are part of the spec); leave --%s out", nm, spec[[nm]], nm))
+      stop(sprintf("--%s=%s conflicts with --comparison=conventional, which fixes W, Z and X itself (W_CONVENTIONAL / Z_CONVENTIONAL, no X: distance, majors, contiguity and alliance are part of the spec); leave --%s out", nm, spec[[nm]], nm))
     stopifnot(all(vapply(CONVENTIONAL_FIXED, function(nm) identical(spec[[nm]], SPEC_DEFAULTS[[nm]]), logical(1))))
   }
   ## contiguity = none is only meaningful when the distance replaces it (PI request 2026-10-28): a Z without contiguity AND without distance is refused

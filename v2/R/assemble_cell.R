@@ -65,13 +65,11 @@
 ##   CONVENTIONAL  = FALSE (every cell so far) | TRUE (the conventional comparison specification, PI-approved 2026-10-31, switch comparison =
 ##                   conventional, suffix _conv; assemble_cell_spec() sets it with DISTANCE = "capital" and MAJOR = "joint"): W, Z and X are
 ##                   fixed to W_CONVENTIONAL, Z_CONVENTIONAL and NO X (P = 0), asserted exactly. Stage 1 keeps the levels, the major-power,
-##                   democracy and ongoing indicators, the monadic peace years as a cubic in p = mon_peace_years_h / 10 (peace_p, peace_p2,
-##                   peace_p3; every term grand-centred like the other W controls, so alpha0 stays the log-odds at average controls), the
+##                   democracy and ongoing indicators (grand-centred like the other W controls), the
 ##                   prior-MID count, the log system size and multi_mid_jan for EVERY model (not M1c alone); the power changes dM_i / dR_i
 ##                   leave W and X. Stage 2 keeps land contiguity, the capital distance (the NA-distance drop and reconciliation of DISTANCE =
 ##                   "capital"), joint democracy, the defense alliance, the two major-power indicators (MAJOR = "joint"), dy_mid_tm1, the
-##                   dyadic peace years as a cubic in q = dy_peace_years_h / 10 (dy_peace_q, dy_peace_q2, dy_peace_q3; continuous, centred
-##                   over the IV rows like every Z_CENTRED column) and the dyadic prior-MID count; the target changes dM_j_h / dRpr_j_h and
+##                   dyadic prior-MID count (no peace years in either stage: PI decision 2026-10-31, the cubics of the first draft dropped); the target changes dM_j_h / dRpr_j_h and
 ##                   dch_j_missing leave Z. Requires DISTANCE = "capital", MAJOR = "joint", CONTIGUITY = "land", FULL_CONTROLS = FALSE,
 ##                   INTERACT = "none", CHANGES = "raw" (asserted; parse_spec() refuses those switches on the command line). Nothing else
 ##                   changes (rows, events, weights, groups), so a cell with CONVENTIONAL = FALSE is byte-identical to before.
@@ -139,17 +137,15 @@ z_columns <- function(CONFLICT_HISTORY = TRUE, DISTANCE = "none", CONTIGUITY = "
   c(base, if (MAJOR == "joint") Z_MAJOR, if (INTERACT == "prefixed") Z_INTERACT)
 }
 ## the conventional comparison specification (PI-approved 2026-10-31; CONVENTIONAL = TRUE): the exact column lists, in this order.
-## W_PEACE_CUBIC / Z_PEACE_CUBIC are the cubic terms in p = mon_peace_years_h / 10 and q = dy_peace_years_h / 10, built at assembly
-## (p, p^2, p^3; q, q^2, q^3). No X (P = 0). The change columns must appear in none of the three (asserted at assembly).
-W_PEACE_CUBIC  <- c("peace_p", "peace_p2", "peace_p3")
-Z_PEACE_CUBIC  <- c("dy_peace_q", "dy_peace_q2", "dy_peace_q3")
-W_CONVENTIONAL <- c("M_lvl", "R_lvl", "cowmaj_tm1", "dem_tm1", "ongoing_tm1", W_PEACE_CUBIC, "log_prior_mids", "log_n_system_tm1", "multi_mid_jan")
-Z_CONVENTIONAL <- c("contig_land", "log_capdist", "joint_dem", "alliance_def_off", "one_major", "both_major", "dy_mid_tm1", Z_PEACE_CUBIC, "log_dy_prior_mids")
+## No peace years in either stage (PI decision 2026-10-31: neither the cubics of the first draft nor the log columns); lagged conflict
+## (ongoing_tm1, dy_mid_tm1) and the prior-MID counts stay. No X (P = 0). The change columns must appear in none of the three (asserted).
+W_CONVENTIONAL <- c("M_lvl", "R_lvl", "cowmaj_tm1", "dem_tm1", "ongoing_tm1", "log_prior_mids", "log_n_system_tm1", "multi_mid_jan")
+Z_CONVENTIONAL <- c("contig_land", "log_capdist", "joint_dem", "alliance_def_off", "one_major", "both_major", "dy_mid_tm1", "log_dy_prior_mids")
+PEACE_COLUMNS  <- c("log_peace_years", "log_dy_peace_years")
 CHANGE_COLUMNS <- c("dM_i", "dR_i", "dM_j_h", "dRpr_j_h", "dch_j_missing", Z_INTERACT)
 ## continuous Z columns that assemble_cell() centres over the assembled alternative rows (the 0/1 indicators, dy_mid_tm1
-## included, stay as is); the interaction products (2026-10-27) are continuous and centred like the target changes they are built from;
-## the dyadic peace-year cubic (2026-10-31, conventional comparison only) is continuous and centred the same way
-Z_CENTRED <- c("log_dy_prior_mids", "log_dy_peace_years", "log_capdist", "dM_j_h", "dRpr_j_h", Z_INTERACT, Z_PEACE_CUBIC)
+## included, stay as is); the interaction products (2026-10-27) are continuous and centred like the target changes they are built from
+Z_CENTRED <- c("log_dy_prior_mids", "log_dy_peace_years", "log_capdist", "dM_j_h", "dRpr_j_h", Z_INTERACT)
 ## Monadic 0/1 indicators available in the panel (major power, democracy, ongoing_tm1 = participant in any MID active at
 ## t-1). Those that enter W or X are centred like the conflict-history counts; the main W uses dem_tm1 and ongoing_tm1.
 SY_INDICATORS <- c("cowmaj_tm1", "dem_tm1", "ongoing_tm1")
@@ -252,15 +248,11 @@ assemble_cell <- function(SAMPLE, LAG, VARIANT, CENT = "pr", CONFLICT_HISTORY = 
     stopifnot(!anyDuplicated(ctrl_w))
   }
   if (CONVENTIONAL) {
-    ## the conventional comparison (PI-approved 2026-10-31): the monadic peace years as a cubic in p = peace years / 10 (the column that feeds
-    ## log_peace_years), then the fixed W list; no power changes in W, no X at all
-    stopifnot("mon_peace_years_h" %in% names(sy), !anyNA(sy$mon_peace_years_h), all(is.finite(sy$mon_peace_years_h)), all(sy$mon_peace_years_h >= 0))
-    sy <- sy |> mutate(peace_p = mon_peace_years_h / 10, peace_p2 = (mon_peace_years_h / 10)^2, peace_p3 = (mon_peace_years_h / 10)^3)
-    stopifnot(all(sy$peace_p2 == sy$peace_p^2), all(sy$peace_p3 == sy$peace_p^3), all(is.finite(sy$peace_p3)))
+    ## the conventional comparison (PI-approved 2026-10-31): the fixed W list; no power changes, no peace years in W, no X at all
     ctrl_w <- W_CONVENTIONAL; ctrl_x <- character(0)
-    stopifnot(!anyDuplicated(ctrl_w), all(ctrl_w %in% names(sy)), "cowmaj_tm1" %in% ctrl_w, "multi_mid_jan" %in% ctrl_w, !any(CHANGE_COLUMNS %in% ctrl_w))
-    logf("conventional comparison (2026-10-31): W = %s (P1 = %d, the peace-year cubic p = mon_peace_years_h / 10 with p over %d state-years mean %.3f, SD %.3f, max %.3f); X = none (P = 0); the power changes enter nowhere",
-         paste(ctrl_w, collapse = ","), length(ctrl_w), nrow(sy), mean(sy$peace_p), sd(sy$peace_p), max(sy$peace_p))
+    stopifnot(!anyDuplicated(ctrl_w), all(ctrl_w %in% names(sy)), "cowmaj_tm1" %in% ctrl_w, "multi_mid_jan" %in% ctrl_w, !any(CHANGE_COLUMNS %in% ctrl_w), !any(PEACE_COLUMNS %in% ctrl_w))
+    logf("conventional comparison (2026-10-31): W = %s (P1 = %d); X = none (P = 0); neither the power changes nor the peace years enter",
+         paste(ctrl_w, collapse = ","), length(ctrl_w))
   }
   ctrl_sy <- union(ctrl_w, ctrl_x)
   ## major = joint (2026-10-27): the initiator's own major-power indicator at t-1 enters W (grand-centred below like dem_tm1 and ongoing_tm1);
@@ -368,17 +360,12 @@ assemble_cell <- function(SAMPLE, LAG, VARIANT, CENT = "pr", CONFLICT_HISTORY = 
          if (CHANGES == "winsor") "winsorised changes" else "raw changes", sd(alts$ix_dMj_dRj), sd(alts$ix_dMi_dMj), sd(alts$ix_dRi_dRj), sd(alts$ix_dMi_dRj), nrow(alts))
   }
   if (CONVENTIONAL) {
-    ## the conventional comparison (2026-10-31): the dyadic peace years as a cubic in q = dy_peace_years_h / 10 (the column that feeds
-    ## log_dy_peace_years), centred over the IV rows below with the other continuous columns; then the fixed Z list (no target changes, no
-    ## dch_j_missing whether or not it varies in the cell)
-    stopifnot("dy_peace_years_h" %in% names(alts), !anyNA(alts$dy_peace_years_h), all(is.finite(alts$dy_peace_years_h)), all(alts$dy_peace_years_h >= 0),
-              "alliance_def_off" %in% names(alts), !anyNA(alts$alliance_def_off), all(alts$alliance_def_off %in% c(0L, 1L)))
-    alts <- alts |> mutate(dy_peace_q = dy_peace_years_h / 10, dy_peace_q2 = (dy_peace_years_h / 10)^2, dy_peace_q3 = (dy_peace_years_h / 10)^3)
-    stopifnot(all(alts$dy_peace_q2 == alts$dy_peace_q^2), all(alts$dy_peace_q3 == alts$dy_peace_q^3), all(is.finite(alts$dy_peace_q3)))
+    ## the conventional comparison (2026-10-31): the fixed Z list (no target changes, no peace years, no dch_j_missing whether or not it varies in the cell)
+    stopifnot("alliance_def_off" %in% names(alts), !anyNA(alts$alliance_def_off), all(alts$alliance_def_off %in% c(0L, 1L)))
     Z_cols <- Z_CONVENTIONAL
-    stopifnot(identical(Z_cols, Z_CONVENTIONAL), !any(CHANGE_COLUMNS %in% Z_cols), !"log_dy_peace_years" %in% Z_cols, !anyNA(as.matrix(alts[, Z_cols])))
-    logf("conventional comparison (2026-10-31): Z = %s (Pz = %d; the peace-year cubic q = dy_peace_years_h / 10 with q over %d rows mean %.3f, SD %.3f, max %.3f; dch_j_missing is %s in this cell and NOT in Z)",
-         paste(Z_cols, collapse = ","), length(Z_cols), nrow(alts), mean(alts$dy_peace_q), sd(alts$dy_peace_q), max(alts$dy_peace_q), if (target_missing) "non-constant" else "constant")
+    stopifnot(identical(Z_cols, Z_CONVENTIONAL), !any(CHANGE_COLUMNS %in% Z_cols), !any(PEACE_COLUMNS %in% Z_cols), !anyNA(as.matrix(alts[, Z_cols])))
+    logf("conventional comparison (2026-10-31): Z = %s (Pz = %d; no peace years; dch_j_missing is %s in this cell and NOT in Z)",
+         paste(Z_cols, collapse = ","), length(Z_cols), if (target_missing) "non-constant" else "constant")
   } else {
     Z_cols <- z_columns(CONFLICT_HISTORY, DISTANCE, CONTIGUITY, TARGET_MISSING = target_missing, DY_PEACE_YEARS = DY_PEACE_YEARS, FULL_CONTROLS = FULL_CONTROLS,
                         MAJOR = MAJOR, INTERACT = INTERACT)
@@ -687,7 +674,7 @@ assemble_cell <- function(SAMPLE, LAG, VARIANT, CENT = "pr", CONFLICT_HISTORY = 
   if (CONVENTIONAL) {
     ## no X: x_ref is empty, mu_state = mu0 + a_i; every assembled matrix is asserted against the spec's lists once more, with the change columns absent
     stopifnot(length(x_ref) == 0L, identical(W_cols, W_CONVENTIONAL), identical(Z_cols, Z_CONVENTIONAL), length(X_cols) == 0L,
-              !any(CHANGE_COLUMNS %in% c(W_cols, X_cols, Z_cols)), !anyNA(as.matrix(sy[, W_cols])), !anyNA(as.matrix(alts[, Z_cols])))
+              !any(CHANGE_COLUMNS %in% c(W_cols, X_cols, Z_cols)), !any(PEACE_COLUMNS %in% c(W_cols, Z_cols)), !anyNA(as.matrix(sy[, W_cols])), !anyNA(as.matrix(alts[, Z_cols])))
     logf("x_ref: none (P = 0 under the conventional comparison; mu_state = mu0 + a_i)")
   } else logf("x_ref (mean X over initiating state-years): %s", paste(sprintf("%s=%.3f", X_cols, x_ref), collapse = ", "))
   list(sy = sy, alts = alts, ev = ev, W_cols = W_cols, X_cols = X_cols, Z_cols = Z_cols, state_codes = state_codes,

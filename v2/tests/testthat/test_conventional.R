@@ -1,5 +1,5 @@
 ## The conventional comparison specification (PI-approved 2026-10-31; switch comparison = conventional, suffix _conv): parsing and the refusals
-## of the switches it fixes, the exact W / Z / X column sets under M1a / M1b / M1c on the toy cell (helper-toy-cell.R), the peace-year cubics,
+## of the switches it fixes, the exact W / Z / X column sets under M1a / M1b / M1c / M1cr on the toy cell (helper-toy-cell.R), no peace years,
 ## P = 0 in the three M1 Stan programs (a tiny fit of m1_latent_additive and m1_context), the end-to-end 02_fit_model.R run on the toy cell,
 ## the robustness driver's refusal, and the invariance of every existing cell (spec string form, column sets, Stan data) at the default.
 suppressPackageStartupMessages({ library(testthat); library(dplyr); library(rstan) })
@@ -38,12 +38,12 @@ test_that("spec: comparison defaults to none; conventional adds _conv after _ix 
   expect_identical(perm_part_spec_string(parse_spec(c("--distance=capital", "--rho_prior=flat", "--tag=a"))), perm_part_spec_string(sp))
   expect_true(grepl(" comparison=conventional ", perm_part_spec_string(conv), fixed = TRUE)); expect_false(grepl("comparison", perm_part_spec_string(sp), fixed = TRUE))
   ## the column constants
-  expect_equal(W_CONVENTIONAL, c("M_lvl", "R_lvl", "cowmaj_tm1", "dem_tm1", "ongoing_tm1", "peace_p", "peace_p2", "peace_p3", "log_prior_mids", "log_n_system_tm1", "multi_mid_jan"))
-  expect_equal(Z_CONVENTIONAL, c("contig_land", "log_capdist", "joint_dem", "alliance_def_off", "one_major", "both_major", "dy_mid_tm1", "dy_peace_q", "dy_peace_q2", "dy_peace_q3", "log_dy_prior_mids"))
-  expect_false(any(CHANGE_COLUMNS %in% c(W_CONVENTIONAL, Z_CONVENTIONAL))); expect_true(all(Z_PEACE_CUBIC %in% Z_CENTRED)); expect_false(any(c("log_peace_years", "log_dy_peace_years") %in% c(W_CONVENTIONAL, Z_CONVENTIONAL)))
+  expect_equal(W_CONVENTIONAL, c("M_lvl", "R_lvl", "cowmaj_tm1", "dem_tm1", "ongoing_tm1", "log_prior_mids", "log_n_system_tm1", "multi_mid_jan"))
+  expect_equal(Z_CONVENTIONAL, c("contig_land", "log_capdist", "joint_dem", "alliance_def_off", "one_major", "both_major", "dy_mid_tm1", "log_dy_prior_mids"))
+  expect_false(any(CHANGE_COLUMNS %in% c(W_CONVENTIONAL, Z_CONVENTIONAL))); expect_false(any(grepl("peace", c(W_CONVENTIONAL, Z_CONVENTIONAL)))); expect_equal(PEACE_COLUMNS, c("log_peace_years", "log_dy_peace_years"))
 })
 
-test_that("assembly on the toy cell: exact W / Z / X under M1a, M1b and M1c; the cubics are (py / 10)^k up to the centring constant; the main cells are unchanged", {
+test_that("assembly on the toy cell: exact W / Z / X under M1a, M1b, M1c and M1cr; no peace years; the main cells are unchanged", {
   td <- write_toy_cell(tempfile("toycell"), events_edit = toy_joiners_conv)
   conv <- parse_spec("--comparison=conventional"); main <- parse_spec(character(0))
   panel <- readRDS(file.path(td, "stage1_panel_lag3.rds")); alts0 <- readRDS(file.path(td, "alts_lag3_all.rds"))
@@ -55,19 +55,16 @@ test_that("assembly on the toy cell: exact W / Z / X under M1a, M1b and M1c; the
     expect_false(any(CHANGE_COLUMNS %in% c(A$W_cols, A$X_cols, A$Z_cols)))
     expect_length(A$x_ref, 0L)
     expect_false(anyNA(as.matrix(A$sy[, A$W_cols]))); expect_false(anyNA(as.matrix(A$alts[, A$Z_cols])))
-    ## (d) the cubic columns: p = mon_peace_years_h / 10 grand-centred (every W control is), q = dy_peace_years_h / 10 centred over the IV rows
-    p <- panel$mon_peace_years_h[match(A$sy$ccode, panel$ccode)] / 10
-    for (k in 1:3) expect_equal(A$sy[[W_PEACE_CUBIC[k]]], p^k - mean(p^k), info = paste(m, k))
-    q <- A$alts$dy_peace_years_h / 10; iv <- A$alts$in_iv == 1L
-    for (k in 1:3) expect_equal(A$alts[[Z_PEACE_CUBIC[k]]], q^k - mean((q^k)[iv]), info = paste(m, k))
-    expect_equal(A$alts[[Z_PEACE_CUBIC[2]]] + mean((q^2)[iv]), q^2); expect_equal(A$alts[[Z_PEACE_CUBIC[3]]] + mean((q^3)[iv]), q^3)
+    ## (d) no peace years in either stage (PI decision 2026-10-31); the prior-MID counts and lagged conflict stay
+    expect_false(any(grepl("peace", c(A$W_cols, A$Z_cols)))); expect_true(all(c("ongoing_tm1", "log_prior_mids") %in% A$W_cols)); expect_true(all(c("dy_mid_tm1", "log_dy_prior_mids") %in% A$Z_cols))
+    expect_equal(A$alts$log_dy_prior_mids, log1p(A$alts$dy_prior_mids_h) - mean(log1p(A$alts$dy_prior_mids_h)[A$alts$in_iv == 1L]))   # centred over the IV rows
     ## the 0/1 columns of Z stay 0/1; the W indicators and multi_mid_jan are grand-centred
     for (cc in c("contig_land", "joint_dem", "alliance_def_off", "one_major", "both_major", "dy_mid_tm1")) expect_true(all(A$alts[[cc]] %in% c(0L, 1L)), info = cc)
-    for (cc in c("cowmaj_tm1", "dem_tm1", "ongoing_tm1", "multi_mid_jan", "log_prior_mids", "log_n_system_tm1", W_PEACE_CUBIC)) expect_lt(abs(mean(A$sy[[cc]])), 1e-12)
+    for (cc in c("cowmaj_tm1", "dem_tm1", "ongoing_tm1", "multi_mid_jan", "log_prior_mids", "log_n_system_tm1")) expect_lt(abs(mean(A$sy[[cc]])), 1e-12)
     expect_equal(A$sy$multi_mid_jan, panel$multi_mid_jan[match(A$sy$ccode, panel$ccode)] - mean(panel$multi_mid_jan))
     ## the Stan data: P = 0, X is N1 x 0, x_ref empty, P1 / Pz the list lengths
     dat <- build_stan_data(A$sy, A$alts, A$ev, A$W_cols, A$X_cols, A$Z_cols, joint = 1L, x_ref = A$x_ref, allow_orphan_initiations = TRUE)
-    expect_equal(dat$P, 0L); expect_equal(dim(dat$X), c(dat$N1, 0L)); expect_length(dat$x_ref, 0L); expect_equal(dat$P1, 11L); expect_equal(dat$Pz, 11L)
+    expect_equal(dat$P, 0L); expect_equal(dim(dat$X), c(dat$N1, 0L)); expect_length(dat$x_ref, 0L); expect_equal(dat$P1, 8L); expect_equal(dat$Pz, 8L)
   }
   ## the three models assemble the same frames (the model changes nothing at assembly; M1c passes ev$grp to Stan)
   expect_identical(out$M1a$sy, out$M1b$sy); expect_identical(out$M1a$alts, out$M1c$alts); expect_identical(out$M1a$ev, out$M1c$ev); expect_identical(out$M1c$ev, out$M1cr$ev); expect_identical(out$M1c$sy, out$M1cr$sy); expect_true("grp" %in% names(out$M1c$ev))
@@ -76,17 +73,17 @@ test_that("assembly on the toy cell: exact W / Z / X under M1a, M1b and M1c; the
   expect_error(assemble_cell("mid", 3L, "all", CONVENTIONAL = TRUE, DISTANCE = "capital", MAJOR = "joint", CHANGES = "winsor", data_dir = td), "CONVENTIONAL = TRUE needs")
   expect_error(assemble_cell("mid", 3L, "all", CONVENTIONAL = TRUE, DISTANCE = "capital", MAJOR = "joint", FULL_CONTROLS = TRUE, data_dir = td), "CONVENTIONAL = TRUE needs")
   expect_error(assemble_cell("mid", 3L, "all", CONVENTIONAL = "yes", data_dir = td))
-  ## a missing peace-year column stops the run
-  td2 <- write_toy_cell(tempfile("toycell"), alts_edit = function(a) a |> select(-dy_peace_years_h))
-  expect_error(quiet(assemble_cell_spec("mid", 3L, conv, data_dir = td2, model = "M1b")), "dy_peace_years_h")
-  td3 <- write_toy_cell(tempfile("toycell"), alts_edit = function(a) a |> mutate(dy_peace_years_h = ifelse(ccode1 == 10L & ccode2 == 20L, NA_integer_, dy_peace_years_h)))
-  expect_error(quiet(assemble_cell_spec("mid", 3L, conv, data_dir = td3, model = "M1b")), "dy_peace_years_h")
+  ## a missing or NA alliance column stops the run (the conventional Z needs it; no other cell does)
+  td2 <- write_toy_cell(tempfile("toycell"), alts_edit = function(a) a |> select(-alliance_def_off))
+  expect_error(quiet(assemble_cell_spec("mid", 3L, conv, data_dir = td2, model = "M1b")), "alliance_def_off")
+  td3 <- write_toy_cell(tempfile("toycell"), alts_edit = function(a) a |> mutate(alliance_def_off = ifelse(ccode1 == 10L & ccode2 == 20L, NA_integer_, alliance_def_off)))
+  expect_error(quiet(assemble_cell_spec("mid", 3L, conv, data_dir = td3, model = "M1b")), "alliance_def_off")
   ## (c) the existing cells are unchanged: the main spec, the M1c main spec, and the _dist_major cell assemble exactly as before the switch existed
   M <- quiet(assemble_cell_spec("mid", 3L, main, data_dir = td, model = "M1b")); M0 <- quiet(assemble_cell("mid", 3L, "all", data_dir = td))
   expect_identical(M$W_cols, c("dM_i", "dR_i", "M_lvl", "R_lvl", "ongoing_tm1", "log_prior_mids", "dem_tm1", "log_n_system_tm1")); expect_identical(M$X_cols, c("dM_i", "dR_i"))
   expect_identical(M$Z_cols, c("contig_land", "joint_dem", "log_dy_prior_mids", "dy_mid_tm1", "dM_j_h", "dRpr_j_h", "dch_j_missing"))
   for (nm in c("sy", "alts", "ev", "W_cols", "X_cols", "Z_cols", "x_ref")) expect_identical(M[[nm]], M0[[nm]], info = nm)
-  expect_false(M$conventional); expect_false("peace_p" %in% names(M$sy)); expect_false("dy_peace_q" %in% names(M$alts))
+  expect_false(M$conventional); expect_false(any(grepl("peace", c(M$W_cols, M$Z_cols))))
   C <- quiet(assemble_cell_spec("mid", 3L, main, data_dir = td, model = "M1c")); expect_identical(C$W_cols, c(M$W_cols, "multi_mid_jan")); expect_identical(C$Z_cols, M$Z_cols); expect_false(C$conventional)
   DM <- quiet(assemble_cell_spec("mid", 3L, parse_spec(c("--distance=capital", "--major=joint")), data_dir = td, model = "M1b"))
   expect_identical(DM$W_cols, c(M$W_cols, "cowmaj_tm1")); expect_identical(DM$Z_cols, c("contig_land", "joint_dem", "log_dy_prior_mids", "dy_mid_tm1", "log_capdist", "dM_j_h", "dRpr_j_h", "dch_j_missing", "one_major", "both_major"))
@@ -108,7 +105,7 @@ test_that("the three M1 Stan programs take P = 0: a tiny fit of m1_latent_additi
     dat <- build_stan_data(A$sy, A$alts, A$ev, A$W_cols, A$X_cols, A$Z_cols, joint = jt, x_ref = A$x_ref, allow_orphan_initiations = TRUE)
     expect_equal(dat$P, 0L)
     fit <- sampling(sm_add, data = dat, chains = 1, iter = 40, warmup = 20, seed = 123, refresh = 0, pars = c("z_re", "z_b", "L_Om_joint", "L_Om", "re"), include = FALSE)
-    expect_equal(fit@mode, 0L); expect_equal(fit@par_dims$beta, c(0, 2)); expect_equal(fit@par_dims$alpha, 11); expect_equal(fit@par_dims$gamma, 11)
+    expect_equal(fit@mode, 0L); expect_equal(fit@par_dims$beta, c(0, 2)); expect_equal(fit@par_dims$alpha, 8); expect_equal(fit@par_dims$gamma, 8)
     ## mu_state = mu0 + a_i exactly (no X): check on one draw
     e <- rstan::extract(fit, pars = c("mu0", "mu_state", "Omega"), permuted = TRUE)
     expect_true(all(is.finite(e$mu_state))); expect_equal(dim(e$mu_state)[2:3], c(dat$S, 2L))
@@ -149,7 +146,7 @@ test_that("02_fit_model.R --comparison=conventional end to end on the toy cell: 
     expect_equal(r0$status, 0L, info = paste(m, paste(tail(r0$out, 30), collapse = "\n")))
     sd <- readRDS(file.path(out_dir, sprintf("standata_mid_lag3_all_pr_%s_conv.rds", m)))
     expect_identical(sd$W_cols, W_CONVENTIONAL); expect_identical(sd$Z_cols, Z_CONVENTIONAL); expect_identical(sd$X_cols, character(0))
-    expect_equal(sd$dat$P, 0L); expect_equal(sd$dat$P1, 11L); expect_equal(sd$dat$Pz, 11L); expect_equal(dim(sd$dat$X), c(sd$dat$N1, 0L)); expect_true(sd$conventional); expect_equal(sd$spec$comparison, "conventional")
+    expect_equal(sd$dat$P, 0L); expect_equal(sd$dat$P1, 8L); expect_equal(sd$dat$Pz, 8L); expect_equal(dim(sd$dat$X), c(sd$dat$N1, 0L)); expect_true(sd$conventional); expect_equal(sd$spec$comparison, "conventional")
     expect_equal(sd$cell, sprintf("mid_lag3_all_pr_%s_conv", m)); expect_equal(sd$model, m); expect_equal(prog_of(m), sd$stan_program)
     expect_true(any(grepl("conventional comparison (2026-10-31, suffix _conv): W = ", r0$out, fixed = TRUE)))
     expect_true(any(grepl("X = none (P = 0", r0$out, fixed = TRUE)))
@@ -173,8 +170,8 @@ test_that("02_fit_model.R --comparison=conventional end to end on the toy cell: 
     expect_equal(o$fit@par_dims$beta, c(0, 2)); expect_equal(o$args$model, m); expect_equal(o$args$stan_program, prog_of(m))
     expect_equal(o$args$stan_source_sha256, trimws(readLines(file.path(root, "stan", "build", paste0(o$args$stan_program, ".sha256")))[1]))
     s1 <- read.csv(file.path(out_dir, sprintf("summary_mid_lag3_all_pr_%s_conv.csv", m)))
-    expect_false(any(grepl("^beta\\[", s1$parameter))); expect_equal(s1$covariate[s1$parameter == "alpha[11]"], "multi_mid_jan"); expect_equal(s1$covariate[s1$parameter == "alpha[6]"], "peace_p")
-    expect_equal(s1$covariate[s1$parameter == "gamma[2]"], "log_capdist"); expect_equal(s1$covariate[s1$parameter == "gamma[11]"], "log_dy_prior_mids"); expect_equal(s1$covariate[s1$parameter == "gamma[8]"], "dy_peace_q")
+    expect_false(any(grepl("^beta\\[", s1$parameter))); expect_equal(s1$covariate[s1$parameter == "alpha[8]"], "multi_mid_jan"); expect_equal(s1$covariate[s1$parameter == "alpha[6]"], "log_prior_mids")
+    expect_equal(s1$covariate[s1$parameter == "gamma[2]"], "log_capdist"); expect_equal(s1$covariate[s1$parameter == "gamma[8]"], "log_dy_prior_mids"); expect_equal(s1$covariate[s1$parameter == "gamma[7]"], "dy_mid_tm1")
     expect_true(all(c("mu0[1]", "mu0[2]") %in% s1$parameter)); if (m == "M1c") expect_true(all(c("delta[1,1]", "delta[2,2]", "sigma_g[3,2]", "rho_x", "mu0_g[3,2]") %in% s1$parameter))
     if (m == "M1cr") { expect_true(all(c("delta[1,1]", "delta[2,2]", "sigma_g[3,2]", "rho_g[1]", "rho_g[3]", "mu0_g[3,2]") %in% s1$parameter)); expect_false("rho_x" %in% s1$parameter); expect_equal(s1$covariate[s1$parameter == "rho_g[2]"], "leader") }
     ## 03_extract.R takes the fit (the typology at x_ref = none is mu0 + a_i)
