@@ -17,9 +17,9 @@
 ##   reach_<cell>.csv      (appendix) posterior mean / 90% interval of r_i = ||mu_i||, |mu_i1|, |mu_i2|
 ##   focus_sigma_<cell>.csv, focus_states_<cell>.csv  (appendix, descriptive) pooled Sigma summary and per-state
 ##                         empirical dispersion of chosen-target positions around mean mu_event (n < 5 flagged)
-##   M1c fits only (dual typology stage b, 2026-10-27; context_model.R):
-##   context_model_<cell>.csv   delta_lead, delta_join, sigma_g per group, the shared rho, the group population ideal points
-##                              mu0 / mu0 + delta_lead / mu0 + delta_join and Sigma_g per group (posterior mean, sd, 90% interval)
+##   M1c / M1cr fits only (dual typology stage b, 2026-10-27; M1cr 2026-10-31; context_model.R):
+##   context_model_<cell>.csv   delta[g], sigma_g per group, the shared rho (M1c) or rho_g per group (M1cr), the group population ideal
+##                              points mu0_g and Sigma_g per group (posterior mean, sd, 90% interval); G groups as data since 2026-10-31
 ##   typology_<cell>_<group>.csv  the typology per group (bilateral / leader / joiner): the existing classifier on mu_state + delta_g;
 ##                              the bilateral table equals typology_<cell>.csv (delta = 0); n_events_in_group flags states without events in the group.
 ##                              For an M1c fit, typology_<cell>.csv, mu_state_<cell>.csv, reach and focus_sigma are the BILATERAL
@@ -134,23 +134,29 @@ if (!is.null(obj$dat$K)) {
 }
 ## ---- M1c (dual typology stage b, 2026-10-27): the stage-b quantities and the typology per group ---------------------------------------
 if (is_context_model) {
-  stopifnot(!is.null(obj$dat$ev_grp), length(obj$dat$ev_grp) == obj$dat$E, all(obj$dat$ev_grp %in% 0:2), dim(mu)[3] == 2L)
-  cms <- context_model_summary(fit)
+  ## G groups as data since 2026-10-31: the labels are the fit's recorded group_labels (label of ev_grp g = groups[g + 1])
+  groups <- if (is.null(obj$group_labels)) STAGE2_GROUPS else obj$group_labels
+  G <- length(groups)
+  stopifnot(G >= 2L, identical(as.integer(obj$dat$G), as.integer(G)), !is.null(obj$dat$ev_grp), length(obj$dat$ev_grp) == obj$dat$E, all(obj$dat$ev_grp %in% 0:(G - 1L)), dim(mu)[3] == 2L)
+  cms <- context_model_summary(fit, groups)
   write.csv(cms, file.path(out_dir, paste0("context_model_", cell, ".csv")), row.names = FALSE)
   show <- function(q, g) { r <- cms[cms$quantity == q & cms$group == g, ]; paste(sprintf("%s %.3f [%.3f, %.3f]", r$axis, r$mean, r$lo, r$hi), collapse = ", ") }
-  logf("M1c shifts (posterior mean [90%%]): delta_lead %s; delta_join %s", show("delta_lead (shift vs bilateral)", "leader"), show("delta_join (shift vs bilateral)", "joiner"))
-  logf("M1c population ideal points: bilateral %s; leader %s; joiner %s", show("mu0 (population ideal point)", "bilateral"), show("mu0 + delta_lead (population ideal point)", "leader"), show("mu0 + delta_join (population ideal point)", "joiner"))
-  logf("M1c tolerance scales sigma_g: bilateral %s; leader %s; joiner %s; shared rho %s", show("sigma_g (tolerance scale)", "bilateral"), show("sigma_g (tolerance scale)", "leader"), show("sigma_g (tolerance scale)", "joiner"), show("rho (shared tolerance correlation)", "shared"))
+  q_delta <- sprintf("delta (shift vs %s)", groups[1])
+  logf("%s shifts vs %s (posterior mean [90%%]): %s", obj$args$model, groups[1], paste(sprintf("%s: %s", groups[-1], vapply(groups[-1], function(g) show(q_delta, g), "")), collapse = "; "))
+  logf("%s population ideal points: %s", obj$args$model, paste(sprintf("%s: %s", groups, vapply(groups, function(g) show("mu0_g (group population ideal point)", g), "")), collapse = "; "))
+  logf("%s tolerance scales sigma_g: %s; %s", obj$args$model, paste(sprintf("%s: %s", groups, vapply(groups, function(g) show("sigma_g (tolerance scale)", g), "")), collapse = "; "),
+       if (any(cms$quantity == "rho_g (group tolerance correlation)")) paste("rho_g:", paste(sprintf("%s %s", groups, vapply(groups, function(g) show("rho_g (group tolerance correlation)", g), "")), collapse = "; "))
+       else paste("shared rho", show("rho (shared tolerance correlation)", "shared")))
   ## events per state and group (usable events of the fit)
-  n_by_g <- sapply(0:2, function(g) tabulate(obj$dat$sy_state[obj$dat$ev_sy[obj$dat$ev_grp == g]], nbins = obj$dat$S))
-  stopifnot(identical(dim(n_by_g), c(obj$dat$S, 3L)), sum(n_by_g) == obj$dat$E, all(rowSums(n_by_g) == n_init))
-  tg <- context_group_typology(fit, labels, r0 = r0, n_events_by_group = n_by_g)
-  for (g in STAGE2_GROUPS) {
+  n_by_g <- sapply(0:(G - 1L), function(g) tabulate(obj$dat$sy_state[obj$dat$ev_sy[obj$dat$ev_grp == g]], nbins = obj$dat$S))
+  stopifnot(identical(dim(n_by_g), c(obj$dat$S, as.integer(G))), sum(n_by_g) == obj$dat$E, all(rowSums(n_by_g) == n_init))
+  tg <- context_group_typology(fit, labels, r0 = r0, n_events_by_group = n_by_g, groups = groups)
+  for (g in groups) {
     write.csv(tg[[g]], file.path(out_dir, paste0("typology_", cell, "_", g, ".csv")), row.names = FALSE)
-    logf("typology per group, %s (states with >= 1 event in the group: %d; the classification of the others rests on a_i from other groups and delta_g):", g, sum(tg[[g]]$n_events_in_group > 0))
+    logf("typology per group, %s (states with >= 1 event in the group: %d; the classification of the others rests on a_i from other groups and delta[g]):", g, sum(tg[[g]]$n_events_in_group > 0))
     print(typology_summary(tg[[g]] |> filter(n_events_in_group > 0)))
   }
-  stopifnot(identical(tg$bilateral$map_type, cls$map_type))      # the bilateral group IS the main typology table
-  logf("M1c outputs written: context_model_%s.csv and typology_%s_<bilateral|leader|joiner>.csv", cell, cell)
+  stopifnot(identical(tg[[1]]$map_type, cls$map_type))      # the reference group IS the main typology table
+  logf("%s outputs written: context_model_%s.csv and typology_%s_<%s>.csv", obj$args$model, cell, cell, paste(groups, collapse = "|"))
 }
 logf("03_extract done")

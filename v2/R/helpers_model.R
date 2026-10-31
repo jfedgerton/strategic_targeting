@@ -23,7 +23,7 @@ assert_fit_current <- function(obj, manifest_path) {
 ## Z_cols[k]; mu0[d], sigma_x[d], mu_state[s,d], mu_event[e,d] -> axis d; sd_re[k], Omega / R_Om indices -> the random-effect order
 ## c, a_<axis1>[, a_<axis2>]; Sigma[i,j] -> the axis pair; u_diag[k] -> latent dimension k. Anything else gets NA labels.
 axis_labels <- function(D_mode) { stopifnot(D_mode %in% 1:3); if (D_mode == 3L) c("material", "relational") else c("material", "relational")[D_mode] }
-label_parameters <- function(pars, W_cols, X_cols, Z_cols, D_mode) {
+label_parameters <- function(pars, W_cols, X_cols, Z_cols, D_mode, groups = STAGE2_GROUPS) {
   ax <- axis_labels(D_mode); re <- c("c", paste0("a_", ax))
   base <- sub("\\[.*$", "", pars)
   has <- grepl("^[A-Za-z_0-9]+\\[[0-9]+(,[0-9]+)?\\]$", pars)
@@ -40,9 +40,11 @@ label_parameters <- function(pars, W_cols, X_cols, Z_cols, D_mode) {
   w <- base %in% c("Omega", "R_Om"); cov[w] <- paste(pick(re, i1[w]), pick(re, i2[w]), sep = " x ")
   w <- base == "Sigma"; axis[w] <- paste(pick(ax, i1[w]), pick(ax, i2[w]), sep = " x ")
   w <- base == "u_diag"; cov[w] <- paste0("latent_dim_", i1[w])
-  ## M1c (stage b): delta_lead / delta_join / mu0_lead / mu0_join per axis; sigma_g[g, d] -> group g, axis d; Sigma_g[g, i, j] is not summarised
-  w <- base %in% c("delta_lead", "delta_join", "mu0_lead", "mu0_join"); axis[w] <- pick(ax, i1[w])
-  w <- base == "sigma_g"; axis[w] <- pick(ax, i2[w]); cov[w] <- pick(STAGE2_GROUPS, i1[w])
+  ## M1c / M1cr (stage b; G groups as data since 2026-10-31): delta[g, d] -> group g (0-based, so label groups[g + 1]), axis d;
+  ## mu0_g[k, d] and sigma_g[k, d] -> group label groups[k], axis d; rho_g[k] (M1cr) -> group label groups[k]; Sigma_g[k, i, j] is not summarised
+  w <- base == "delta"; axis[w] <- pick(ax, i2[w]); cov[w] <- pick(groups, i1[w] + 1L)
+  w <- base %in% c("mu0_g", "sigma_g"); axis[w] <- pick(ax, i2[w]); cov[w] <- pick(groups, i1[w])
+  w <- base == "rho_g"; axis[w] <- paste(ax, collapse = " x "); cov[w] <- pick(groups, i1[w])
   w <- base == "rho_x"; axis[w] <- paste(ax, collapse = " x ")
   w <- base == "tau"; cov[w] <- "IV"
   w <- base == "alpha0"; cov[w] <- "intercept"

@@ -7,7 +7,7 @@
 ##
 ##   sample : mid (all MIDs) | fmid (fatal MIDs, main coding) | war (pair-level war); appendix: fmidcow | fmidub
 ##   lag    : 1 | 3 | 5 | 10   change-window length h
-##   model  : M1m | M1r | M1a | M1b | M2m | M2r | M2a | M2b | M1c
+##   model  : M1m | M1r | M1a | M1b | M2m | M2r | M2a | M2b | M1c | M1cr (M1cr, 2026-10-31: M1c with a role-specific stage-2 correlation rho_g, stan/m1_context_rho.stan)
 ##            m = material only, r = relational only, a = both independent, b = both joint; M2 = M1 + AME factors (ame_K)
 ##            M1c (dual typology stage b, 2026-10-27; stan/m1_context.stan): M1b with group-specific ideal-point shifts delta_lead /
 ##            delta_join and tolerance scales sigma_g over the stage-2 groups bilateral / coalition leader / joiner (shared rho), and
@@ -136,14 +136,18 @@ dat <- build_stan_data(sy, alts, ev, W_cols, X_cols, Z_cols, joint = joint, samp
                        x_ref = x_ref, K = if (family == "m2_ame") K else NULL, allow_orphan_initiations = TRUE,
                        D_mode = D_MODE, grainsize = choose_grainsize(nrow(sy), THREADS))
 if (CONTEXT_MODEL) {
-  ## stage b: the stage-2 group of every usable event goes to Stan as ev_grp (0 bilateral, 1 coalition leader, 2 joiner); the existing
-  ## programs never see it (rstan would ignore it, but it is not added to their data, so their Stan data stay identical to the main grid's)
-  stopifnot("grp" %in% names(ev), length(ev$grp) == dat$E, all(ev$grp %in% 0:2), "multi_mid_jan" %in% W_cols, identical(as.integer(dat$ev_sy), as.integer(ev$sy_row)))
-  dat$ev_grp <- as.integer(ev$grp)
+  ## stage b: the stage-2 group of every usable event goes to Stan as ev_grp (0..G-1; 0 = the reference group) with the group count G
+  ## (data since 2026-10-31; G = 3 with the stage-b coding: 0 bilateral, 1 coalition leader, 2 joiner); the existing programs never see either
+  ## (they are not added to their data, so their Stan data stay identical to the main grid's)
   gt <- A$group_table
-  if (any(gt$n_usable == 0L)) stop(sprintf("M1c needs events in every stage-2 group; usable events per group: %s", paste(sprintf("%s %d", gt$group, gt$n_usable), collapse = ", ")))
-  logf("M1c stage-2 groups (ev_grp): bilateral %d events (weights %.1f, %d states), coalition leader %d (%.1f, %d), joiner %d (%.1f, %d); sample events before the choice-set join %d / %d / %d",
-       gt$n_usable[1], gt$w_usable[1], gt$n_states[1], gt$n_usable[2], gt$w_usable[2], gt$n_states[2], gt$n_usable[3], gt$w_usable[3], gt$n_states[3], gt$n_sample[1], gt$n_sample[2], gt$n_sample[3])
+  G_GRP <- nrow(gt)
+  stopifnot(G_GRP >= 2L, identical(gt$grp, 0:(G_GRP - 1L)), identical(gt$group, STAGE2_GROUPS),
+            "grp" %in% names(ev), length(ev$grp) == dat$E, all(ev$grp %in% 0:(G_GRP - 1L)), "multi_mid_jan" %in% W_cols, identical(as.integer(dat$ev_sy), as.integer(ev$sy_row)))
+  dat$G <- G_GRP
+  dat$ev_grp <- as.integer(ev$grp)
+  if (any(gt$n_usable == 0L)) stop(sprintf("%s needs events in every stage-2 group; usable events per group: %s", MODEL, paste(sprintf("%s %d", gt$group, gt$n_usable), collapse = ", ")))
+  logf("%s stage-2 groups (ev_grp, G = %d; usable events, weight sum, distinct initiating states; sample events before the choice-set join): %s", MODEL, G_GRP,
+       paste(sprintf("%d %s %d (%.1f, %d; %d)", gt$grp, gt$group, gt$n_usable, gt$w_usable, gt$n_states, gt$n_sample), collapse = "; "))
 }
 CONVENTIONAL <- spec_is_conventional(spec)
 if (CONVENTIONAL) {
@@ -153,7 +157,7 @@ if (CONVENTIONAL) {
             dat$P == 0L, ncol(dat$X) == 0L, nrow(dat$X) == dat$N1, length(dat$x_ref) == 0L, dat$P1 == length(W_CONVENTIONAL), dat$Pz == length(Z_CONVENTIONAL),
             !any(CHANGE_COLUMNS %in% c(W_cols, X_cols, Z_cols)), !anyNA(dat$W), !anyNA(dat$Z), "multi_mid_jan" %in% W_cols, MODEL %in% CONVENTIONAL_MODELS)
   logf("conventional comparison (2026-10-31, suffix _conv): W = %s (P1 = %d); X = none (P = 0, mu = mu0 + a_i%s); Z = %s (Pz = %d); distance = capital and major = joint are part of the spec (not of the switches)",
-       paste(W_cols, collapse = ","), dat$P1, if (CONTEXT_MODEL) " + delta_lead / delta_join" else "", paste(Z_cols, collapse = ","), dat$Pz)
+       paste(W_cols, collapse = ","), dat$P1, if (CONTEXT_MODEL) " + delta[ev_grp]" else "", paste(Z_cols, collapse = ","), dat$Pz)
 } else stopifnot(!isTRUE(A$conventional), dat$P >= 1L)
 if (PRIOR_PROGRAM) {
   ## prior sensitivity (2026-10-30): the hyperparameters go to Stan as data; the main program's data stay exactly as before (no field added)
@@ -263,7 +267,7 @@ logf("sampling finished in %.1f min; %d chains x %d post-warmup draws, as reques
 sp <- get_sampler_params(fit, inc_warmup = FALSE)
 logf("divergences: %d; max-treedepth hits: %d", sum(sapply(sp, function(m) sum(m[, "divergent__"]))),
      sum(sapply(sp, function(m) sum(m[, "treedepth__"] >= MAX_TD))))
-pars_struct <- c("alpha0", "alpha", "tau", "mu0", if (dat$P > 0L) "beta", if (CONTEXT_MODEL) c("delta_lead", "delta_join", "sigma_g", "rho_x", "mu0_lead", "mu0_join") else "sigma_x",
+pars_struct <- c("alpha0", "alpha", "tau", "mu0", if (dat$P > 0L) "beta", if (CONTEXT_MODEL) c("delta", "sigma_g", if (family == "m1_context_rho") "rho_g" else "rho_x", "mu0_g") else "sigma_x",
                  "sd_re", "sigma_b", "gamma", "Sigma", "Omega", "R_Om", if (family == "m2_ame") "u_diag")
 sm_tab <- summary(fit, pars = pars_struct)$summary
 logf("worst Rhat among structural parameters: %.3f; min n_eff: %.0f",
@@ -290,6 +294,7 @@ obj <- list(fit = fit, dat = dat, cell = cell, state_codes = state_codes, W_cols
             manifest = manifest_cell, data_dir = basename(data_dir), stale = stale, spec = spec, winsor = A$winsor, init = init_info, group_table = A$group_table,
             prior = c(spec[PRIOR_SWITCHES], prior, list(stan_program = family)),   # the prior switches and the hyperparameters the program saw (2026-10-30)
             param_labels = label_parameters(rownames(sm_tab), W_cols, X_cols, Z_cols, D_MODE),
+            group_labels = if (CONTEXT_MODEL) A$group_table$group else NULL,   # M1c / M1cr: the label of ev_grp g is group_labels[g + 1] (2026-10-31)
             args = list(sample = SAMPLE, lag = LAG, variant = VARIANT, model = MODEL, centrality = CENTRALITY, K = K, chains = CHAINS,
                         iter = ITER, warmup = WARMUP, pilot = PILOT, sampled_m = SAMPLED_M, conflict_history = CONFLICT_HISTORY,
                         distance = A$distance, distance_stats = A$distance_stats, contiguity = spec$contiguity, dy_peace_years = DY_PEACE_YEARS, drop_ww2 = spec$ww2 == "drop",   # A$distance / A$major: the assembled values (= the switch, or "capital" / "joint" under the conventional comparison)

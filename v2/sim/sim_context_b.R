@@ -184,7 +184,7 @@ logf("stage 2 simulated: %d events; %d repeat an earlier (state-year, target) pa
 if (M1C) for (g in 0:2) if (sum(ev_sim$grp == g) == 0L) stop("no simulated event in group ", STAGE2_GROUPS[g + 1L], "; raise --n_init")
 if (!M1C) ev_sim$grp <- NULL                                  # M1b: the observed group label of a slot is not part of the simulated data
 dat_sim <- build_stan_data(sy_sim, alts_s, ev_sim, A$W_cols, A$X_cols, A$Z_cols, joint = 1L, x_ref = x_ref, allow_orphan_initiations = FALSE, D_mode = 3L, S = S)
-if (M1C) dat_sim$ev_grp <- as.integer(ev_sim$grp)
+if (M1C) { dat_sim$G <- length(STAGE2_GROUPS); dat_sim$ev_grp <- as.integer(ev_sim$grp) }   # G is data in m1_context.stan since 2026-10-31 (3 groups)
 stopifnot(identical(dat_sim$W, dat0$W), identical(dat_sim$Z, dat0$Z), identical(dat_sim$x, dat0$x), identical(dat_sim$in_iv, dat0$in_iv), identical(dat_sim$in_s2, dat0$in_s2),
           sum(dat_sim$y1) == sum(y1_sim), dat_sim$E == nrow(ev_sim))
 design <- if (M1C) { data.frame(group = STAGE2_GROUPS, n_events = as.integer(tabulate(dat_sim$ev_grp + 1L, nbins = 3L)),
@@ -199,7 +199,7 @@ chosen <- dat_sim$x[dat_sim$ev_row, , drop = FALSE]
 if (M1C) { for (g in 0:2) logf("simulated chosen gaps, group %s: mean (%.2f, %.2f) over %d events; truth population ideal point (%.2f, %.2f)", STAGE2_GROUPS[g + 1L],
                     mean(chosen[dat_sim$ev_grp == g, 1]), mean(chosen[dat_sim$ev_grp == g, 2]), sum(dat_sim$ev_grp == g), TRUTH$mu0[1] + shift[g + 1L, 1], TRUTH$mu0[2] + shift[g + 1L, 2]) } else { logf("simulated chosen gaps: mean (%.2f, %.2f) over %d events; truth population ideal point (%.2f, %.2f)", mean(chosen[, 1]), mean(chosen[, 2]), dat_sim$E, TRUTH$mu0[1], TRUTH$mu0[2]) }
 ## the brute-force likelihood at the truth is finite (sanity)
-R_true <- if (M1C) { stage2_loglik_R_context(dat_sim, list(mu0 = TRUTH$mu0, delta_lead = TRUTH$delta_lead, delta_join = TRUTH$delta_join, beta = TRUTH$beta, a_i = TRUTH$a_i, b_j = TRUTH$b_j, gamma = TRUTH$gamma, sigma_g = unname(TRUTH$sigma_g), rho = TRUTH$rho)) } else { stage2_loglik_R(dat_sim, list(mu0 = TRUTH$mu0, beta = TRUTH$beta, a_i = TRUTH$a_i, b_j = TRUTH$b_j, gamma = TRUTH$gamma, sigma_x = TRUTH$sigma_x, rho = TRUTH$rho)) }
+R_true <- if (M1C) { stage2_loglik_R_context(dat_sim, list(mu0 = TRUTH$mu0, delta = rbind(TRUTH$delta_lead, TRUTH$delta_join), beta = TRUTH$beta, a_i = TRUTH$a_i, b_j = TRUTH$b_j, gamma = TRUTH$gamma, sigma_g = unname(TRUTH$sigma_g), rho = TRUTH$rho)) } else { stage2_loglik_R(dat_sim, list(mu0 = TRUTH$mu0, beta = TRUTH$beta, a_i = TRUTH$a_i, b_j = TRUTH$b_j, gamma = TRUTH$gamma, sigma_x = TRUTH$sigma_x, rho = TRUTH$rho)) }
 stopifnot(is.finite(R_true$lp_stage2))
 logf("stage-2 weighted log-likelihood at the truth: %.1f (mean per event %.3f; uniform choice would give %.3f)", R_true$lp_stage2, mean(R_true$loglik), mean(-log(dat_sim$cs_end - dat_sim$cs_start + 1)))
 
@@ -226,13 +226,14 @@ dir.create(fit_dir, showWarnings = FALSE, recursive = TRUE); dir.create(res_dir,
 ## ---- recovery table ---------------------------------------------------------------------------------------------------------------
 ## M1b (2026-10-27): sigma_x[1], sigma_x[2], rho_x[1] as the program names them, plus the generated Sigma (Sigma[1,2] is the PI's question;
 ## the mirror entry Sigma[2,1] is dropped) in the block stage_2_core
-pars <- if (M1C) { c("mu0", "delta_lead", "delta_join", "mu0_lead", "mu0_join", "sigma_g", "rho_x", "beta", "gamma", "tau", "alpha0", "alpha", "sd_re", "sigma_b") } else { c("mu0", "sigma_x", "rho_x", "Sigma", "beta", "gamma", "tau", "alpha0", "alpha", "sd_re", "sigma_b") }
+## the program names (2026-10-31, G as data): delta[1, ] = the leader shift (TRUTH$delta_lead), delta[2, ] = the joiner shift, mu0_g[k, ] = mu0 + shift of group k - 1
+pars <- if (M1C) { c("mu0", "delta", "mu0_g", "sigma_g", "rho_x", "beta", "gamma", "tau", "alpha0", "alpha", "sd_re", "sigma_b") } else { c("mu0", "sigma_x", "rho_x", "Sigma", "beta", "gamma", "tau", "alpha0", "alpha", "sd_re", "sigma_b") }
 sm_tab <- summary(fit, pars = pars, probs = c(0.05, 0.95))$summary
-if (!M1C) { stopifnot(all(c("sigma_x[1]", "sigma_x[2]", "rho_x[1]", "Sigma[1,2]", "Sigma[2,1]") %in% rownames(sm_tab)), !any(grepl("^(delta_|sigma_g|mu0_lead|mu0_join)", rownames(sm_tab)))); sm_tab <- sm_tab[rownames(sm_tab) != "Sigma[2,1]", , drop = FALSE] }
+if (!M1C) { stopifnot(all(c("sigma_x[1]", "sigma_x[2]", "rho_x[1]", "Sigma[1,2]", "Sigma[2,1]") %in% rownames(sm_tab)), !any(grepl("^(delta|sigma_g|mu0_g)", rownames(sm_tab)))); sm_tab <- sm_tab[rownames(sm_tab) != "Sigma[2,1]", , drop = FALSE] }
 truth_of <- function(nm) {
   base <- sub("\\[.*$", "", nm); i1 <- suppressWarnings(as.integer(sub("^[^\\[]+\\[([0-9]+).*$", "\\1", nm))); i2 <- suppressWarnings(as.integer(sub("^[^\\[]+\\[[0-9]+,([0-9]+)\\]$", "\\1", nm)))
-  switch(base, mu0 = TRUTH$mu0[i1], delta_lead = TRUTH$delta_lead[i1], delta_join = TRUTH$delta_join[i1], mu0_lead = TRUTH$mu0[i1] + TRUTH$delta_lead[i1],
-         mu0_join = TRUTH$mu0[i1] + TRUTH$delta_join[i1], sigma_g = TRUTH$sigma_g[i1, i2], sigma_x = TRUTH$sigma_x[i1], Sigma = TRUTH$Sigma[i1, i2], rho_x = TRUTH$rho, beta = TRUTH$beta[i1, i2], gamma = TRUTH$gamma[i1],
+  switch(base, mu0 = TRUTH$mu0[i1], delta = rbind(TRUTH$delta_lead, TRUTH$delta_join)[i1, i2],
+         mu0_g = TRUTH$mu0[i2] + rbind(c(0, 0), TRUTH$delta_lead, TRUTH$delta_join)[i1, i2], sigma_g = TRUTH$sigma_g[i1, i2], sigma_x = TRUTH$sigma_x[i1], Sigma = TRUTH$Sigma[i1, i2], rho_x = TRUTH$rho, beta = TRUTH$beta[i1, i2], gamma = TRUTH$gamma[i1],
          tau = TRUTH$tau, alpha0 = TRUTH$alpha0, alpha = TRUTH$alpha[i1], sd_re = TRUTH$sd_re[i1], sigma_b = TRUTH$sigma_b, NA_real_)
 }
 rec <- data.frame(parameter = rownames(sm_tab), truth = vapply(rownames(sm_tab), truth_of, numeric(1)), mean = sm_tab[, "mean"], sd = sm_tab[, "sd"],
@@ -241,7 +242,7 @@ stopifnot(!anyNA(rec$truth))
 rec$covered <- rec$truth >= rec$lo & rec$truth <= rec$hi
 rec$bias <- rec$mean - rec$truth
 rec$z <- rec$bias / rec$sd
-rec$block <- if (M1C) { case_when(grepl("^(mu0|delta_lead|delta_join|mu0_lead|mu0_join|sigma_g|rho_x)", rec$parameter) ~ "stage_b", grepl("^(beta|gamma)", rec$parameter) ~ "stage_2",
+rec$block <- if (M1C) { case_when(grepl("^(mu0|delta|mu0_g|sigma_g|rho_x)", rec$parameter) ~ "stage_b", grepl("^(beta|gamma)", rec$parameter) ~ "stage_2",
                        grepl("^(tau|alpha0|alpha)", rec$parameter) ~ "stage_1", grepl("^(sd_re|sigma_b)", rec$parameter) ~ "re_scales", TRUE ~ "other") } else { case_when(grepl("^(mu0|sigma_x|rho_x|Sigma)", rec$parameter) ~ "stage_2_core", grepl("^(beta|gamma)", rec$parameter) ~ "stage_2",
                        grepl("^(tau|alpha0|alpha)", rec$parameter) ~ "stage_1", grepl("^(sd_re|sigma_b)", rec$parameter) ~ "re_scales", TRUE ~ "other") }
 stopifnot(all(rec$block != "other"))

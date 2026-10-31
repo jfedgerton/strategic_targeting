@@ -10,9 +10,9 @@ source(file.path(root, "R", "typology.R")); source(file.path(root, "R", "context
 toy_joiners <- function(e) e |> mutate(orig1 = ifelse(initiator == 30L & target %in% c(20L, 40L), 0L, 1L), is_joiner_pair = orig1 == 0L)
 
 test_that("spec: M1c is a model code outside the main grid with its own Stan program, cell names that collide with nothing, and the context_b preset", {
-  expect_false("M1c" %in% MODELS); expect_true("M1c" %in% ALL_MODELS); expect_equal(CONTEXT_MODELS, "M1c")
+  expect_false("M1c" %in% MODELS); expect_true("M1c" %in% ALL_MODELS); expect_equal(CONTEXT_MODELS, c("M1c", "M1cr"))   # M1cr (role-specific rho) added 2026-10-31
   expect_equal(stan_program("M1c"), "m1_context"); expect_equal(stan_program("M1b"), "m1_latent_additive"); expect_equal(stan_program("M2a"), "m2_ame")
-  expect_setequal(STAN_PROGRAMS, c("m1_latent_additive", "m2_ame", "m1_context", "m1_latent_prior"))   # m1_latent_prior added 2026-10-30 (prior switches)
+  expect_setequal(STAN_PROGRAMS, c("m1_latent_additive", "m2_ame", "m1_context", "m1_latent_prior", "m1_context_rho"))   # m1_latent_prior added 2026-10-30 (prior switches), m1_context_rho 2026-10-31
   expect_equal(model_family("M1c"), "M1"); expect_equal(model_D_mode("M1c"), 3L); expect_equal(model_joint("M1c"), 1L)
   main <- parse_spec(character(0))
   expect_equal(cell_name("fmid", 3L, "M1c", main), "fmid_lag3_all_pr_M1c"); expect_equal(cell_name("mid", 3L, "M1c", parse_spec("--ww2=drop")), "mid_lag3_all_pr_M1c_noww2")
@@ -192,20 +192,21 @@ tiny_context_data <- function(seed = 123L) {
   set.seed(seed)
   sim <- simulate_targeting("M1b", S = 6L, Tt = 6L, K = 2L, seed = seed, target_rate = 0.6)
   dat <- build_stan_data(sim$sy, sim$alts, sim$ev, c("W1", "W2"), paste0("X", 1:4), c("Z1", "Z2"), joint = 1L, x_ref = rep(0, 4), D_mode = 3L)
+  dat$G <- 3L                                            # the group count is data since 2026-10-31
   dat$ev_grp <- as.integer((seq_len(dat$E) - 1L) %% 3L)
   dat
 }
 context_pars <- function(dat) {
   set.seed(7); S <- dat$S
-  list(mu0 = c(0.7, -0.4), delta_lead = c(-0.6, 0.5), delta_join = c(0.3, -0.8), beta = matrix(rnorm(dat$P * 2, 0, 0.3), dat$P, 2),
+  list(mu0 = c(0.7, -0.4), delta = rbind(c(-0.6, 0.5), c(0.3, -0.8)), beta = matrix(rnorm(dat$P * 2, 0, 0.3), dat$P, 2),
        a_i = matrix(rnorm(S * 2), S, 2), c_i = rnorm(S, 0, 0.5), b_j = { z <- rnorm(S); 0.6 * (z - mean(z)) }, gamma = c(0.5, -0.3),
        sigma_g = rbind(c(0.9, 1.2), c(1.6, 0.8), c(1.1, 1.9)), rho = 0.4, alpha0 = -0.5, alpha = c(0.3, -0.2), tau = 0.4)
 }
 context_inits <- function(dat, p) {
   sd_re <- c(0.5, 1, 1); L <- t(chol(matrix(c(1, 0.2, 0.1, 0.2, 1, 0.3, 0.1, 0.3, 1), 3)))
   z_re <- solve(diag(sd_re) %*% L) %*% t(cbind(p$c_i, p$a_i))
-  list(alpha0 = p$alpha0, alpha = p$alpha, tau = p$tau, mu0 = p$mu0, delta_lead = p$delta_lead, delta_join = p$delta_join, beta = p$beta,
-       sigma_g = p$sigma_g, rho_x = p$rho, sd_re = sd_re, L_Om = L, z_re = z_re, sigma_b = 0.6, z_b = p$b_j / 0.6, gamma = p$gamma)   # sigma_g: a 3 x 2 matrix for array[3] vector[2]
+  list(alpha0 = p$alpha0, alpha = p$alpha, tau = p$tau, mu0 = p$mu0, delta = p$delta, beta = p$beta,
+       sigma_g = p$sigma_g, rho_x = p$rho, sd_re = sd_re, L_Om = L, z_re = z_re, sigma_b = 0.6, z_b = p$b_j / 0.6, gamma = p$gamma)   # sigma_g: a 3 x 2 matrix for array[3] vector[2]; delta: a 2 x 2 matrix for array[2] row_vector[2]
 }
 
 test_that("m1_context: the generated log-liks equal the brute-force R likelihood (both stages, per group), and with zero shifts and equal scales the program is M1b", {
@@ -219,23 +220,23 @@ test_that("m1_context: the generated log-liks equal the brute-force R likelihood
   expect_equal(ll2, R$loglik, tolerance = 1e-8)
   eta <- p$alpha0 + as.numeric(dat$W %*% p$alpha) + p$c_i[dat$sy_state] + p$tau * R$lse
   expect_equal(ll1, dbinom(dat$y1, 1, plogis(eta), log = TRUE), tolerance = 1e-8)
-  ## generated quantities: mu_event carries the group shift, mu_state is bilateral, Sigma_g and mu0_lead / mu0_join as defined
+  ## generated quantities: mu_event carries the group shift, mu_state is bilateral, Sigma_g and mu0_g as defined
   me <- rstan::extract(fit, "mu_event")$mu_event[1, , ]; expect_equal(me, R$mu_event, tolerance = 1e-8)
   ms <- rstan::extract(fit, "mu_state")$mu_state[1, , ]; expect_equal(ms, rep(1, dat$S) %o% p$mu0 + p$a_i, tolerance = 1e-8)
   Sg <- rstan::extract(fit, "Sigma_g")$Sigma_g[1, , , ]
   for (g in 1:3) expect_equal(Sg[g, , ], matrix(c(p$sigma_g[g, 1]^2, p$rho * prod(p$sigma_g[g, ]), p$rho * prod(p$sigma_g[g, ]), p$sigma_g[g, 2]^2), 2), tolerance = 1e-8)
-  expect_equal(as.numeric(rstan::extract(fit, "mu0_lead")$mu0_lead[1, ]), p$mu0 + p$delta_lead); expect_equal(as.numeric(rstan::extract(fit, "Sigma")$Sigma[1, , ]), as.numeric(Sg[1, , ]))
+  m0g <- rstan::extract(fit, "mu0_g")$mu0_g[1, , ]; expect_equal(m0g, rbind(p$mu0, p$mu0 + p$delta[1, ], p$mu0 + p$delta[2, ]), check.attributes = FALSE, tolerance = 1e-12); expect_equal(as.numeric(rstan::extract(fit, "Sigma")$Sigma[1, , ]), as.numeric(Sg[1, , ]))
   ## the log density equals the stage-1 + weighted stage-2 sums plus the priors: compare the data-dependent part across two draws
   up <- function(i) unconstrain_pars(fit, i)
-  init2 <- init; init2$delta_lead <- c(0.2, 0.1); p2 <- p; p2$delta_lead <- c(0.2, 0.1); R2 <- stage2_loglik_R_context(dat, p2)
+  init2 <- init; init2$delta[1, ] <- c(0.2, 0.1); p2 <- p; p2$delta[1, ] <- c(0.2, 0.1); R2 <- stage2_loglik_R_context(dat, p2)
   lp1 <- log_prob(fit, up(init), adjust_transform = FALSE); lp2 <- log_prob(fit, up(init2), adjust_transform = FALSE)
-  prior_diff <- sum(dnorm(init2$delta_lead, 0, dat$prior_mu0_sd, log = TRUE)) - sum(dnorm(init$delta_lead, 0, dat$prior_mu0_sd, log = TRUE))
-  expect_equal(as.numeric(lp2 - lp1), (R2$lp_stage2 - R$lp_stage2) + prior_diff, tolerance = 1e-6)      # stage 1 is unchanged by delta_lead (bilateral IV)
+  prior_diff <- sum(dnorm(init2$delta[1, ], 0, dat$prior_mu0_sd, log = TRUE)) - sum(dnorm(init$delta[1, ], 0, dat$prior_mu0_sd, log = TRUE))
+  expect_equal(as.numeric(lp2 - lp1), (R2$lp_stage2 - R$lp_stage2) + prior_diff, tolerance = 1e-6)      # stage 1 is unchanged by delta[1] (bilateral IV)
   ## reduction: zero shifts and three equal scales reproduce the M1b program's log-liks on the same data
-  init0 <- init; init0$delta_lead <- c(0, 0); init0$delta_join <- c(0, 0); init0$sigma_g <- matrix(p$sigma_g[1, ], 3, 2, byrow = TRUE)
+  init0 <- init; init0$delta <- matrix(0, 2, 2); init0$sigma_g <- matrix(p$sigma_g[1, ], 3, 2, byrow = TRUE)
   fit0 <- sampling(smc, data = dat, algorithm = "Fixed_param", chains = 1, iter = 1, warmup = 0, init = list(init0), seed = 123, refresh = 0)
-  initb <- init; initb$sigma_x <- p$sigma_g[1, ]; initb$rho_x <- array(p$rho, 1); initb$L_Om_joint <- array(init$L_Om, c(1, 3, 3)); initb$delta_lead <- NULL; initb$delta_join <- NULL; initb$sigma_g <- NULL; initb$L_Om <- NULL
-  datb <- dat; datb$ev_grp <- NULL
+  initb <- init; initb$sigma_x <- p$sigma_g[1, ]; initb$rho_x <- array(p$rho, 1); initb$L_Om_joint <- array(init$L_Om, c(1, 3, 3)); initb$delta <- NULL; initb$sigma_g <- NULL; initb$L_Om <- NULL
+  datb <- dat; datb$ev_grp <- NULL; datb$G <- NULL
   fitb <- sampling(smb, data = datb, algorithm = "Fixed_param", chains = 1, iter = 1, warmup = 0, init = list(initb), seed = 123, refresh = 0)
   expect_equal(as.numeric(rstan::extract(fit0, "log_lik_stage2")$log_lik_stage2[1, ]), as.numeric(rstan::extract(fitb, "log_lik_stage2")$log_lik_stage2[1, ]), tolerance = 1e-8)
   expect_equal(as.numeric(rstan::extract(fit0, "log_lik_stage1")$log_lik_stage1[1, ]), as.numeric(rstan::extract(fitb, "log_lik_stage1")$log_lik_stage1[1, ]), tolerance = 1e-8)
@@ -243,7 +244,8 @@ test_that("m1_context: the generated log-liks equal the brute-force R likelihood
   ## (a reject() in transformed data makes rstan return a stanfit with mode != 0 after printing the message, or throw)
   rejected <- function(bad) { f <- tryCatch(suppressWarnings(sampling(smc, data = bad, algorithm = "Fixed_param", chains = 1, iter = 1, warmup = 0, init = list(init), seed = 123, refresh = 0)), error = function(e) NULL); is.null(f) || f@mode != 0L }
   bad <- dat; bad$D_mode <- 1L; expect_true(rejected(bad))
-  bad <- dat; bad$ev_grp[1] <- 3L; expect_true(rejected(bad))
+  bad <- dat; bad$ev_grp[1] <- 3L; expect_true(rejected(bad))          # ev_grp must be < G
+  bad <- dat; bad$G <- 1L; expect_true(rejected(bad))
   bad <- dat; bad$sampled <- 1L; expect_true(rejected(bad))
   ## threads: the log density does not depend on the slicing
   dat2 <- dat; dat2$grainsize <- 2L
@@ -261,19 +263,20 @@ test_that("context_model_summary() and context_group_typology() on a short fit o
   cms <- context_model_summary(fit)
   expect_setequal(unique(cms$group), c("bilateral", "leader", "joiner", "shared"))
   expect_equal(sum(cms$quantity == "sigma_g (tolerance scale)"), 6L); expect_equal(sum(cms$quantity == "Sigma_g"), 9L); expect_equal(sum(cms$group == "shared"), 1L)
-  expect_equal(cms$mean[cms$parameter == "mu0_lead[1]"], cms$mean[cms$parameter == "mu0[1]"] + cms$mean[cms$parameter == "delta_lead[1]"], tolerance = 1e-8)
+  expect_equal(cms$mean[cms$parameter == "mu0_g[2,1]"], cms$mean[cms$parameter == "mu0[1]"] + cms$mean[cms$parameter == "delta[1,1]"], tolerance = 1e-8)
+  expect_equal(cms$group[cms$parameter == "delta[2,1]"], "joiner"); expect_equal(cms$group[cms$parameter == "mu0_g[1,2]"], "bilateral")
   expect_true(all(cms$lo <= cms$mean & cms$mean <= cms$hi))
   n_by_g <- sapply(0:2, function(g) tabulate(dat$sy_state[dat$ev_sy[dat$ev_grp == g]], nbins = dat$S))
   tg <- context_group_typology(fit, as.character(100 + seq_len(dat$S)), r0 = 0.5, n_events_by_group = n_by_g)
   expect_named(tg, STAGE2_GROUPS)
-  mu <- mu_state_draws(fit); dl <- rstan::extract(fit, "delta_lead")$delta_lead
+  mu <- mu_state_draws(fit); dl <- rstan::extract(fit, "delta")$delta[, 1, ]
   expect_equal(tg$bilateral$mu1_mean, colMeans(mu[, , 1])); expect_equal(tg$leader$mu1_mean, colMeans(mu[, , 1] + dl[, 1])); expect_equal(tg$leader$mu2_mean, colMeans(mu[, , 2] + dl[, 2]))
   expect_equal(tg$joiner$n_events_in_group, as.integer(n_by_g[, 3])); expect_equal(tg$leader$n_events_as_initiator, as.integer(rowSums(n_by_g)))
   for (g in STAGE2_GROUPS) { expect_equal(tg[[g]]$group, rep(g, dat$S)); expect_true(all(abs(rowSums(tg[[g]][, paste0("p_", TYPE_LEVELS)]) - 1) < 1e-8)) }
   ## the label layer of the summary CSV knows the new parameters
-  lab <- label_parameters(c("delta_lead[1]", "delta_join[2]", "sigma_g[2,1]", "sigma_g[3,2]", "rho_x", "mu0_join[1]", "mu0[2]"), c("W1", "W2"), paste0("X", 1:4), c("Z1", "Z2"), 3L)
-  expect_equal(lab$axis, c("material", "relational", "material", "relational", "material x relational", "material", "relational"))
-  expect_equal(lab$covariate[3:4], c("leader", "joiner"))
+  lab <- label_parameters(c("delta[1,1]", "delta[2,2]", "sigma_g[2,1]", "sigma_g[3,2]", "rho_x", "mu0_g[3,1]", "mu0[2]", "rho_g[2]"), c("W1", "W2"), paste0("X", 1:4), c("Z1", "Z2"), 3L)
+  expect_equal(lab$axis, c("material", "relational", "material", "relational", "material x relational", "material", "relational", "material x relational"))
+  expect_equal(lab$covariate[c(1:4, 6, 8)], c("leader", "joiner", "leader", "joiner", "joiner", "leader"))
 })
 
 test_that("02_fit_model.R --model=M1c end to end on the toy cell: dry run, a short fit, 03_extract.R writes the stage-b outputs; the driver's context_b preset", {
@@ -290,7 +293,8 @@ test_that("02_fit_model.R --model=M1c end to end on the toy cell: dry run, a sho
   expect_equal(r0$status, 0L, info = paste(tail(r0$out, 30), collapse = "\n"))
   sd <- readRDS(file.path(out_dir, "standata_mid_lag3_all_pr_M1c.rds"))
   expect_equal(sd$dat$ev_grp, c(0L, 1L, 2L, 1L, 1L)); expect_equal(tail(sd$W_cols, 1), "multi_mid_jan"); expect_equal(sd$dat$P1, 9L); expect_equal(sd$model, "M1c")
-  expect_true(any(grepl("M1c stage-2 groups (ev_grp): bilateral 1 events", r0$out, fixed = TRUE)))
+  expect_true(any(grepl("M1c stage-2 groups (ev_grp, G = 3; usable events, weight sum, distinct initiating states; sample events before the choice-set join): 0 bilateral 1 (", r0$out, fixed = TRUE)))
+  expect_equal(sd$dat$G, 3L)
   ## the refusals: M1c with the full controls or a context filter
   expect_true(run("02_fit_model.R", "--sample=mid", "--lag=3", "--model=M1c", "--dry_run=TRUE", "--controls=full")$status != 0L)
   expect_true(run("02_fit_model.R", "--sample=mid", "--lag=3", "--model=M1c", "--dry_run=TRUE", "--context=bilateral")$status != 0L)
@@ -302,15 +306,16 @@ test_that("02_fit_model.R --model=M1c end to end on the toy cell: dry run, a sho
   expect_equal(o$args$model, "M1c"); expect_equal(o$args$stan_program, "m1_context"); expect_true(o$args$context_model); expect_equal(o$args$init_source, "stan_random")
   expect_equal(o$args$stan_source_sha256, trimws(readLines(file.path(root, "stan", "build", "m1_context.sha256"))[1]))
   expect_equal(o$dat$ev_grp, c(0L, 1L, 2L, 1L, 1L)); expect_equal(o$group_table$n_usable, c(1L, 3L, 1L)); expect_true("grp" %in% names(o$ev))
-  expect_true(all(c("delta_lead", "delta_join", "sigma_g", "rho_x", "mu0_lead", "mu0_join", "Sigma_g", "mu_state", "mu_event", "log_lik_stage1", "log_lik_stage2") %in% o$fit@model_pars))
+  expect_equal(o$dat$G, 3L); expect_equal(o$group_labels, STAGE2_GROUPS)
+  expect_true(all(c("delta", "sigma_g", "rho_x", "mu0_g", "Sigma_g", "mu_state", "mu_event", "log_lik_stage1", "log_lik_stage2") %in% o$fit@model_pars))
   s1 <- read.csv(file.path(out_dir, "summary_mid_lag3_all_pr_M1c.csv"))
-  expect_true(all(c("delta_lead[1]", "delta_join[2]", "sigma_g[3,2]", "rho_x", "mu0_lead[1]") %in% s1$parameter)); expect_false("sigma_x[1]" %in% s1$parameter)
+  expect_true(all(c("delta[1,1]", "delta[2,2]", "sigma_g[3,2]", "rho_x", "mu0_g[2,1]") %in% s1$parameter)); expect_false("sigma_x[1]" %in% s1$parameter)
   expect_equal(s1$covariate[s1$parameter == "sigma_g[2,1]"], "leader"); expect_equal(s1$covariate[s1$parameter == "alpha[9]"], "multi_mid_jan")
   ## 03_extract.R: the standard outputs (bilateral) plus the stage-b files; assert_fit_stan_current() accepts the M1c program's sidecar
   e1 <- run("03_extract.R", paste0("--fit=", f)); expect_equal(e1$status, 0L, info = paste(tail(e1$out, 30), collapse = "\n"))
   for (nm in c("typology_mid_lag3_all_pr_M1c.csv", "context_model_mid_lag3_all_pr_M1c.csv", "typology_mid_lag3_all_pr_M1c_bilateral.csv", "typology_mid_lag3_all_pr_M1c_leader.csv", "typology_mid_lag3_all_pr_M1c_joiner.csv", "mu_event_mid_lag3_all_pr_M1c.csv"))
     expect_true(file.exists(file.path(out_dir, nm)), info = nm)
-  cm <- read.csv(file.path(out_dir, "context_model_mid_lag3_all_pr_M1c.csv")); expect_true(all(c("delta_lead (shift vs bilateral)", "rho (shared tolerance correlation)", "Sigma_g") %in% cm$quantity))
+  cm <- read.csv(file.path(out_dir, "context_model_mid_lag3_all_pr_M1c.csv")); expect_true(all(c("delta (shift vs bilateral)", "rho (shared tolerance correlation)", "Sigma_g") %in% cm$quantity))
   tb <- read.csv(file.path(out_dir, "typology_mid_lag3_all_pr_M1c_bilateral.csv")); tm <- read.csv(file.path(out_dir, "typology_mid_lag3_all_pr_M1c.csv"))
   expect_equal(tb$map_type, tm$map_type); expect_equal(tb$n_events_in_group, c(1L, 0L, 0L, 0L))
   tl <- read.csv(file.path(out_dir, "typology_mid_lag3_all_pr_M1c_leader.csv")); expect_equal(tl$n_events_in_group, c(1L, 0L, 1L, 1L)); expect_equal(tl$group, rep("leader", 4))

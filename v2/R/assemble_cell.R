@@ -572,7 +572,8 @@ assemble_cell <- function(SAMPLE, LAG, VARIANT, CENT = "pr", CONFLICT_HISTORY = 
   ev_keys <- ev_all |> transmute(ccode1 = initiator, ccode2 = target, year, dispnum, dispnums, target_has_pos_tm1, fighting_at_ref, dir_flipped,
                                  w = if (EVENT_WEIGHTS == "dispute") .data[[w_col]] else 1, grp = grp_all)
   assert_no_dup_keys(ev_keys, c("ccode1", "ccode2", "year"), sprintf("events of sample %s", SAMPLE))
-  stopifnot(all(ev_keys$grp %in% 0:2), sum(ev_keys$grp == 0L) + sum(ev_keys$grp == 1L) + sum(ev_keys$grp == 2L) == nrow(ev_keys))
+  G_GRP <- length(STAGE2_GROUPS)      # the number of stage-2 groups (2026-10-31: G is data in the M1c programs; 3 with the stage-b coding)
+  stopifnot(G_GRP >= 2L, all(ev_keys$grp %in% 0:(G_GRP - 1L)), sum(vapply(0:(G_GRP - 1L), function(g) sum(ev_keys$grp == g), 1L)) == nrow(ev_keys))
   logf("stage-2 event groups (stage b; coalition column %s, joiner = the initiator's orig1 == 0) over the %d sample events: bilateral %d (weights %.1f), coalition leader %d (%.1f), joiner %d (%.1f); pair-level joiner pairs (is_joiner_pair, the `pairs` switch) %d, of which the initiator is an originator (orig1 = 1, target a joiner; bilateral or leader here) %d",
        "coal_incl", nrow(ev_keys), sum(ev_keys$grp == 0L), sum(ev_keys$w[ev_keys$grp == 0L]), sum(ev_keys$grp == 1L), sum(ev_keys$w[ev_keys$grp == 1L]), sum(ev_keys$grp == 2L), sum(ev_keys$w[ev_keys$grp == 2L]),
        sum(ev_all$is_joiner_pair), sum(ev_all$is_joiner_pair & ev_all$orig1 == 1L))
@@ -587,15 +588,15 @@ assemble_cell <- function(SAMPLE, LAG, VARIANT, CENT = "pr", CONFLICT_HISTORY = 
   ## the chosen alternative must be a STAGE-2 row of the state-year's block (alt_row indexes the full block)
   ev <- ev_keys |> inner_join(sy_key, by = c("ccode1", "year")) |>
     inner_join(alts |> mutate(alt_row = row_number()) |> filter(in_s2 == 1L) |> select(ccode1, ccode2, year, alt_row, dy_mid_tm1), by = c("ccode1", "ccode2", "year"))
-  stopifnot(all(ev$grp %in% 0:2))
-  group_table <- data.frame(group = STAGE2_GROUPS, grp = 0:2,
-                            n_sample = as.integer(tabulate(ev_keys$grp + 1L, nbins = 3L)), w_sample = vapply(0:2, function(g) sum(ev_keys$w[ev_keys$grp == g]), numeric(1)),
-                            n_usable = as.integer(tabulate(ev$grp + 1L, nbins = 3L)), w_usable = vapply(0:2, function(g) sum(ev$w[ev$grp == g]), numeric(1)),   # (rowsum() would drop an empty group)
-                            n_states = vapply(0:2, function(g) n_distinct(ev$ccode1[ev$grp == g]), 1L), stringsAsFactors = FALSE)
+  stopifnot(all(ev$grp %in% 0:(G_GRP - 1L)))
+  group_table <- data.frame(group = STAGE2_GROUPS, grp = 0:(G_GRP - 1L),
+                            n_sample = as.integer(tabulate(ev_keys$grp + 1L, nbins = G_GRP)), w_sample = vapply(0:(G_GRP - 1L), function(g) sum(ev_keys$w[ev_keys$grp == g]), numeric(1)),
+                            n_usable = as.integer(tabulate(ev$grp + 1L, nbins = G_GRP)), w_usable = vapply(0:(G_GRP - 1L), function(g) sum(ev$w[ev$grp == g]), numeric(1)),   # (rowsum() would drop an empty group)
+                            n_states = vapply(0:(G_GRP - 1L), function(g) n_distinct(ev$ccode1[ev$grp == g]), 1L), stringsAsFactors = FALSE)
+  stopifnot(nrow(group_table) == G_GRP)
   stopifnot(sum(group_table$n_usable) == nrow(ev), sum(group_table$n_sample) == nrow(ev_keys), abs(sum(group_table$w_usable) - sum(ev$w)) < 1e-9)
-  logf("stage-2 event groups over the %d usable events (sample %s): bilateral %d (weights %.1f, %d initiating states), coalition leader %d (%.1f, %d), joiner %d (%.1f, %d)",
-       nrow(ev), SAMPLE, group_table$n_usable[1], group_table$w_usable[1], group_table$n_states[1], group_table$n_usable[2], group_table$w_usable[2], group_table$n_states[2],
-       group_table$n_usable[3], group_table$w_usable[3], group_table$n_states[3])
+  logf("stage-2 event groups over the %d usable events (sample %s; events, weight sum, distinct initiating states): %s", nrow(ev), SAMPLE,
+       paste(sprintf("%d %s %d (%.1f, %d)", group_table$grp, group_table$group, group_table$n_usable, group_table$w_usable, group_table$n_states), collapse = "; "))
   logf("events in sample %s: %d (from %d dispute pairs); usable (initiator in panel AND target in the stage-2 choice set): %d", SAMPLE, nrow(ev_keys),
        sum(lengths(strsplit(ev_keys$dispnums, ";", fixed = TRUE))), nrow(ev))
   stopifnot(nrow(ev) > 0, all(sy$y1[ev$sy_row] == 1L), all(alts$in_s2[ev$alt_row] == 1L), all(alts$sy_row[ev$alt_row] == ev$sy_row))

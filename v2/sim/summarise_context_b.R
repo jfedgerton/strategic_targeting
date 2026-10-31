@@ -54,7 +54,7 @@ tg <- rec |> filter(!is.na(covered))
 cov <- tg |> group_by(parameter, block) |>
   summarise(n_reps = n(), truth = mean(truth), coverage90 = mean(covered), mean_bias = mean(bias), rmse = sqrt(mean(bias^2)), mean_post_sd = mean(sd), mean_abs_z = mean(abs(z)),
             share_abs_z_gt2 = mean(abs(z) > 2), max_rhat = max(Rhat), min_n_eff = min(n_eff), .groups = "drop") |>
-  mutate(.o = match(sub("\\[.*$", "", parameter), c("mu0", "delta_lead", "delta_join", "mu0_lead", "mu0_join", "sigma_g", "sigma_x", "rho_x", "Sigma", "beta", "gamma", "alpha0", "alpha", "tau", "sd_re", "sigma_b"))) |>
+  mutate(.o = match(sub("\\[.*$", "", parameter), c("mu0", "delta", "mu0_g", "delta_lead", "delta_join", "mu0_lead", "mu0_join", "sigma_g", "sigma_x", "rho_x", "Sigma", "beta", "gamma", "alpha0", "alpha", "tau", "sd_re", "sigma_b"))) |>
   arrange(.o, parameter) |> select(-.o)
 stopifnot(all(cov$n_reps == length(files)), !anyNA(cov$block))
 if (M1C) stopifnot(!any(cov$block == "stage_2_core")) else stopifnot(!any(cov$block == "stage_b"), any(cov$block == "stage_2_core"))
