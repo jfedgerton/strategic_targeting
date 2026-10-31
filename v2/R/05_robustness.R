@@ -63,6 +63,7 @@
 ##                (fit_<s>_lag<h>_all_pr_M1a_dist_major / _M1b_dist_major) are asserted to score exactly those frames. The outputs carry
 ##                _dist_major (measurement_<s>_lag<h>_all_pr_M1_dist_major_*). --major without --distance=capital stays refused, as do the
 ##                holdout and inflation tests with it (their rebuilds re-centre W from w_controls() without the switch).
+##                --comparison=conventional (2026-10-31) is refused by every preset (its six cells are single 02_fit_model.R runs).
 ##                --tag=<t> and --rho_prior / --sigma_prior (2026-10-30) are refused by every preset: the longer-chain and prior-sensitivity
 ##                refits are single 02_fit_model.R cells (README section 4), and the tests here read the untagged main-program fits.
 ##
@@ -107,6 +108,9 @@ spec <- parse_spec(args)
 ## the perm_error fits must be the untagged production fits of the main program, so both are refused here rather than ignored.
 if (nzchar(spec_tag(spec))) stop(sprintf("--tag=%s is not an option of 05_robustness.R (no preset takes a run tag); run the cell through 02_fit_model.R --tag=%s directly", spec$tag, spec$tag))
 if (!spec_prior_is_main(spec)) stop(sprintf("--rho_prior / --sigma_prior are not options of 05_robustness.R (rho_prior=%s, sigma_prior=%s): the prior-sensitivity fits are single M1b cells of 02_fit_model.R, and the perm_error tests refit with the main program's priors", spec$rho_prior, spec$sigma_prior))
+## the conventional comparison (2026-10-31) is a set of single 02_fit_model.R cells (M1a / M1b / M1c x fmid / mid at lag 3): no preset takes it
+## (the refit presets would pass every switch explicitly, which the spec refuses, and perm_error is not wired to its W / Z / X)
+if (spec_is_conventional(spec)) stop("--comparison=conventional is not an option of 05_robustness.R (no preset takes the conventional comparison); run its cells through 02_fit_model.R --comparison=conventional directly")
 for (nm in names(ROBUSTNESS_PRESETS[[PRESET]])) spec[[nm]] <- ROBUSTNESS_PRESETS[[PRESET]][[nm]]
 switch_args <- c(sprintf("--%s=%s", names(SPEC_CHOICES), unlist(spec[names(SPEC_CHOICES)])), sprintf("--ame_K=%d", spec$ame_K))
 
@@ -122,7 +126,7 @@ if (PRESET != "perm_error") {
   } else if (PRESET == "context_b") {
     ## the M1c model on its fixed cells, every switch at its default: no --cells and no switch may be passed (the cell names would still be
     ## unique through the model code, but the stage-b run is defined on the main specification)
-    if (length(grep("^--(cells|pairs|context|coal_ties|coal_drop|direction|ww2|weights|controls|major|interact|distance|contiguity|changes|ame_K|rho_prior|sigma_prior|tag)=", args)))
+    if (length(grep("^--(cells|pairs|context|coal_ties|coal_drop|direction|ww2|weights|controls|major|interact|distance|contiguity|changes|ame_K|rho_prior|sigma_prior|tag|comparison)=", args)))
       stop("the context_b preset fixes its cells (CONTEXT_B_PRESET in spec.R) and runs M1c on the main specification; no --cells and no switch may be passed")
     parts <- strsplit(CONTEXT_B_PRESET$cells, ":", fixed = TRUE)
     cells_tab <- data.frame(sample = vapply(parts, `[`, "", 1), lag = as.integer(vapply(parts, `[`, "", 2)), model = vapply(parts, `[`, "", 3), variant = NA_character_, stringsAsFactors = FALSE)
@@ -304,10 +308,12 @@ parts_dir <- file.path(out_dir, sprintf("measurement_%s_permutation_refit_parts"
 ## settings of the refits (chains / iter / warmup and, since 2026-10-30, the reduce_sum threads per chain and the grainsize they imply), the
 ## data dimensions the fits were verified against, and the fit files
 PERM_GRAINSIZE <- choose_grainsize(dat_chk$N1, THREADS)      # = the grainsize of every refit of this run (permutation_refit_one() recomputes and asserts it)
-## spec string WITHOUT the 2026-10-30 fields (prior switches, tag): the driver refuses non-default values of both, and dropping them keeps
-## the string identical to 7c4645e, so parts written by that commit still combine (audit R1 of b1f0988)
+## spec string WITHOUT the 2026-10-30 fields (prior switches, tag) and without the comparison switch at its default (2026-10-31): the driver
+## refuses non-default values of all three (asserted here once more), and dropping them keeps the string identical to 7c4645e, so parts written
+## by that commit still combine (audit R1 of b1f0988); a non-default comparison would stay in the string (perm_part_spec_string(), spec.R)
+stopifnot(!spec_is_conventional(spec), spec_prior_is_main(spec), !nzchar(spec_tag(spec)))
 part_settings <- data.frame(cell = cell, family = toupper(FAMILY), ame_K = if (FAMILY == "m2") K else NA_integer_, sample = SAMPLE, lag = LAG,
-                            spec = spec_string(spec[setdiff(names(spec), c(PRIOR_SWITCHES, "tag"))]), chains = CHAINS, iter = ITER, warmup = WARMUP, v2_seed = V2_SEED,
+                            spec = perm_part_spec_string(spec), chains = CHAINS, iter = ITER, warmup = WARMUP, v2_seed = V2_SEED,
                             threads_per_chain = THREADS, grainsize = PERM_GRAINSIZE,
                             E = dat_chk$E, N1 = dat_chk$N1, sum_y1 = sum(dat_chk$y1), fit_a = basename(fa_path), fit_b = basename(fb_path),
                             statistic = "stage2_loo_elpd_of_refits", stringsAsFactors = FALSE)

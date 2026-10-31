@@ -47,8 +47,27 @@ SPEC_CHOICES <- list(
   contiguity = c("land", "none"),                   # land contiguity in Z (2026-10-28): land (main) = contig_land in Z | none = dropped from Z; none needs distance = capital (parse_spec() refuses it otherwise)
   changes   = c("raw", "winsor"),                   # initiator and target power changes: as built | winsorised at WINSOR_PROBS of the panel
   rho_prior = c("beta25", "flat"),                  # prior on Sigma's correlation rho (M1 joint models only, 2026-10-30): (rho + 1) / 2 ~ Beta(2.5, 2.5) (main) | Beta(1, 1), uniform on (-1, 1)
-  sigma_prior = c("ln1", "ln05")                    # prior on the tolerance scales sigma_x (M1 family only, 2026-10-30): lognormal(0, 1) (main) | lognormal(0, 0.5)
+  sigma_prior = c("ln1", "ln05"),                   # prior on the tolerance scales sigma_x (M1 family only, 2026-10-30): lognormal(0, 1) (main) | lognormal(0, 0.5)
+  comparison = c("none", "conventional")            # the conventional comparison specification (PI-approved 2026-10-31): none (main) | conventional = W, Z, X fixed to W_CONVENTIONAL / Z_CONVENTIONAL / no X (P = 0); see below
 )
+## ---- the conventional comparison specification (PI-approved 2026-10-31; switch `comparison`, suffix _conv) --------------------------
+## One switch fixes the three design matrices at once; it is NOT a combination of the other switches, although it carries the distance
+## (log_capdist in Z, alternatives without one dropped, as distance = capital), the major-power indicators (one_major / both_major in Z and
+## cowmaj_tm1 in W, as major = joint), land contiguity, the defense-alliance control of the full set, and the peace years as cubics
+## (p = monadic peace years / 10, q = dyadic peace years / 10) instead of the log1p columns. The power CHANGES leave every matrix: no dM_i /
+## dR_i in W, no X at all (P = 0: mu = mu0 + a_i, or + delta_lead / delta_join for M1c), no dM_j_h / dRpr_j_h / dch_j_missing in Z.
+## multi_mid_jan is in W for EVERY model of the spec (M1a, M1b, M1c), not for M1c alone as in the main specification. The column lists are
+## W_CONVENTIONAL / Z_CONVENTIONAL in assemble_cell.R (asserted exactly at assembly and in 02_fit_model.R). Models: CONVENTIONAL_MODELS only
+## (cell_name() refuses the others). The switches the spec fixes (CONVENTIONAL_FIXED) are refused on the command line in ANY value, the
+## default included (--controls=minimal with --comparison=conventional is a conflict, not a no-op): the W / Z sets are the spec's, not theirs.
+## The spec fields of those switches stay at their defaults (spec$distance = "none" etc.); assemble_cell_spec() maps the conventional
+## spec onto DISTANCE = "capital", MAJOR = "joint" and CONVENTIONAL = TRUE, so the existing distance / major machinery (NA-distance drop,
+## event reconciliation, within-set variation checks) runs unchanged and the fit records the assembled values (args$distance = "capital").
+## The data switches that do not touch W / Z / X (pairs, context, coal_*, ww2, weights, direction) and the prior switches combine with it as
+## with any cell; the suffix _conv sits after _ix (the last control extension) and before _w1, so e.g. fmid_lag3_all_pr_M1b_conv,
+## fmid_lag3_all_pr_M1b_noww2_conv, fmid_lag3_all_pr_M1b_conv_w1. 05_robustness.R refuses the switch for every preset (single cells).
+CONVENTIONAL_MODELS <- c("M1a", "M1b", "M1c")
+CONVENTIONAL_FIXED  <- c("controls", "distance", "contiguity", "major", "interact", "changes")
 SPEC_DEFAULTS <- lapply(SPEC_CHOICES, function(v) v[1])
 SPEC_DEFAULTS$ame_K <- 2L                            # latent dimensions of the M2 (AME) family; "_K<K>" is always in an M2 cell name
 SPEC_DEFAULTS$tag   <- ""                            # run tag (2026-10-30): "" = no tag (names unchanged); "<alnum>" appends _t<alnum> last
@@ -78,6 +97,8 @@ SPEC_SUFFIX <- list(
   contiguity = c(none = "_nocontig"),
   major     = c(joint = "_major"),
   interact  = c(prefixed = "_ix"),
+  ## the conventional comparison (2026-10-31) follows the control extensions it replaces (it is refused with any of them) and precedes _w1
+  comparison = c(conventional = "_conv"),
   weights   = c(none = "_w1"),
   changes   = c(winsor = "_winsor"),
   direction = c(sideA = "_sideA"),
@@ -245,6 +266,13 @@ parse_spec <- function(args = character(0)) {
   ## default there, so context = all is byte-identical to the main specification whatever --coal_ties says
   if (spec$coal_drop != "none" && spec$context != "coalition") stop(sprintf("--coal_drop=%s needs --context=coalition (got context=%s)", spec$coal_drop, spec$context))
   if (spec$context == "all") spec$coal_ties <- SPEC_DEFAULTS$coal_ties
+  ## the conventional comparison (2026-10-31) fixes W, Z and X itself (checked FIRST, so a conflicting switch is reported as a conflict): the switches of CONVENTIONAL_FIXED are refused on the command line in
+  ## ANY value (the default included), since passing one claims a control set the spec does not take; their spec fields stay at the defaults
+  if (spec$comparison == "conventional") {
+    for (nm in CONVENTIONAL_FIXED) if (length(grep(paste0("^--", nm, "="), args)))
+      stop(sprintf("--%s=%s conflicts with --comparison=conventional, which fixes W, Z and X itself (W_CONVENTIONAL / Z_CONVENTIONAL, no X: distance, majors, contiguity, alliance and the peace-year cubics are part of the spec); leave --%s out", nm, spec[[nm]], nm))
+    stopifnot(all(vapply(CONVENTIONAL_FIXED, function(nm) identical(spec[[nm]], SPEC_DEFAULTS[[nm]]), logical(1))))
+  }
   ## contiguity = none is only meaningful when the distance replaces it (PI request 2026-10-28): a Z without contiguity AND without distance is refused
   if (spec$contiguity != "land" && spec$distance != "capital") stop(sprintf("--contiguity=%s needs --distance=capital (distance replaces contiguity; got distance=%s)", spec$contiguity, spec$distance))
   ## run tag (2026-10-30): letters and digits only, so the suffix _t<tag> is one unambiguous token of the file name; "" = no tag
@@ -275,6 +303,16 @@ spec_is_main <- function(spec) all(vapply(names(SPEC_CHOICES), function(nm) iden
 spec_data_dir <- function(spec, root) file.path(root, if (spec$direction == "sideA") "data_sideA" else "data")
 ## spec_string(spec): one line for the logs
 spec_string <- function(spec) paste(sprintf("%s=%s", names(spec), unlist(spec)), collapse = " ")
+## spec_is_conventional(spec): TRUE under --comparison=conventional (a spec saved before 2026-10-31 has no field: not conventional)
+spec_is_conventional <- function(spec) !is.null(spec$comparison) && identical(spec$comparison, "conventional")
+## perm_part_spec_string(spec): the spec string written into the permutation refit parts of 05_robustness.R and checked by its combiner
+## (audit R1 of b1f0988: the 7c4645e form, without the prior switches and the tag, so parts written by that commit still combine). The
+## comparison switch (2026-10-31) is dropped at its default for the same reason and KEPT when non-default: it changes W, Z and X, so a
+## conventional cell's parts must never combine with another cell's (the driver refuses the switch anyway, see 05_robustness.R).
+perm_part_spec_string <- function(spec) {
+  drop <- c(PRIOR_SWITCHES, "tag", if (!spec_is_conventional(spec)) "comparison")
+  spec_string(spec[setdiff(names(spec), drop)])
+}
 ## spec_coal_col(spec): the events.rds column the context switch filters on ("coal_incl" / "coal_strict")
 spec_coal_col <- function(spec) c(inclusive = "coal_incl", strict = "coal_strict")[[spec$coal_ties]]
 ## cell_name(sample, lag, model, spec): <sample>_lag<h>_all_pr_<model>[_K<K>]<suffix>, e.g. fmid_lag3_all_pr_M2b_K2_noww2
@@ -287,6 +325,9 @@ cell_name <- function(sample, lag, model, spec) {
   stopifnot(sample %in% ALL_SAMPLES, lag %in% LAGS, model %in% ALL_MODELS)
   if (model_family(model) == "M1" && !identical(as.integer(spec$ame_K), SPEC_DEFAULTS$ame_K))
     stop(sprintf("cell_name: --ame_K=%s with the M1 model %s (K applies to the M2 family only and would not appear in the cell name)", spec$ame_K, model))
+  ## the conventional comparison (2026-10-31) is specified for M1a, M1b and M1c only
+  if (spec_is_conventional(spec) && !model %in% CONVENTIONAL_MODELS)
+    stop(sprintf("cell_name: --comparison=conventional with the model %s (the conventional comparison is specified for %s only)", model, paste(CONVENTIONAL_MODELS, collapse = ", ")))
   if (!spec_prior_is_main(spec)) {
     off <- PRIOR_SWITCHES[vapply(PRIOR_SWITCHES, function(nm) !is.null(spec[[nm]]) && !identical(spec[[nm]], SPEC_DEFAULTS[[nm]]), logical(1))]
     if (stan_program(model) != "m1_latent_additive")

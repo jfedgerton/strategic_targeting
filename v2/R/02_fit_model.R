@@ -20,6 +20,10 @@
 ##     --major=none|joint (one_major / both_major in Z, cowmaj_tm1 in W)  --interact=none|prefixed (four change products in Z)
 ##     --distance=none|capital (2026-10-28: log_capdist in Z, alternatives without a capital distance dropped from both sets; suffix _dist)
 ##     --contiguity=land|none (2026-10-28: contig_land dropped from Z; needs --distance=capital, distance replaces contiguity; suffix _nocontig)
+##     --comparison=none|conventional (PI-approved 2026-10-31, suffix _conv; M1a / M1b / M1c only): W, Z, X fixed to the conventional comparison
+##            (W_CONVENTIONAL / Z_CONVENTIONAL of assemble_cell.R, no X: P = 0); carries the distance, the major indicators, contiguity, the
+##            defense alliance and the peace-year cubics itself, so --controls, --distance, --contiguity, --major, --interact and --changes
+##            are refused with it in any value (parse_spec()); multi_mid_jan is in W for all three models
 ##     --rho_prior=beta25|flat  --sigma_prior=ln1|ln05 (2026-10-30, prior sensitivity of the jointness result; M1 m / r / a / b only, the rho
 ##            prior with M1b only): a non-default value fits the SAME model with stan/m1_latent_prior.stan, the copy of the main program that
 ##            takes the Beta shape on (rho + 1) / 2 (2.5 | 1 = uniform on (-1, 1)) and the lognormal sd of sigma_x (1 | 0.5) as data
@@ -51,7 +55,7 @@
 ##                               review 2026-10-26 P1: rstan drops a failed parallel chain and returns the rest with mode 0)
 ##   v2/output/summary_<cell>.csv posterior summaries of the structural parameters, labelled by axis and covariate (written AFTER
 ##                               the fit file)
-## Cell name: <sample>_lag<h>_all_pr_<model>[_K<K>][_orig|_join][_bi|_co][_strict][_drop3][_noww2][_fullctrl][_dist][_nocontig][_major][_ix][_w1][_winsor][_sideA][_rhoflat][_sigln05][_t<tag>][_pilot]
+## Cell name: <sample>_lag<h>_all_pr_<model>[_K<K>][_orig|_join][_bi|_co][_strict][_drop3][_noww2][_fullctrl][_dist][_nocontig][_major][_ix][_conv][_w1][_winsor][_sideA][_rhoflat][_sigln05][_t<tag>][_pilot]
 ##            (model M1c: <sample>_lag<h>_all_pr_M1c<suffix>; its fit records args$stan_program = "m1_context" and args$context_model = TRUE)
 ## Seed 123 everywhere (audit F11).
 ## ============================================================================
@@ -141,6 +145,16 @@ if (CONTEXT_MODEL) {
   logf("M1c stage-2 groups (ev_grp): bilateral %d events (weights %.1f, %d states), coalition leader %d (%.1f, %d), joiner %d (%.1f, %d); sample events before the choice-set join %d / %d / %d",
        gt$n_usable[1], gt$w_usable[1], gt$n_states[1], gt$n_usable[2], gt$w_usable[2], gt$n_states[2], gt$n_usable[3], gt$w_usable[3], gt$n_states[3], gt$n_sample[1], gt$n_sample[2], gt$n_sample[3])
 }
+CONVENTIONAL <- spec_is_conventional(spec)
+if (CONVENTIONAL) {
+  ## the conventional comparison (PI-approved 2026-10-31): the three matrices are exactly the spec's lists, no X (P = 0; the Stan programs take
+  ## P = 0 since this date: beta is 0 x D, X is N1 x 0, x_ref is empty), no change column anywhere, multi_mid_jan in W for every model
+  stopifnot(isTRUE(A$conventional), A$distance == "capital", A$major == "joint", identical(W_cols, W_CONVENTIONAL), identical(Z_cols, Z_CONVENTIONAL), length(X_cols) == 0L,
+            dat$P == 0L, ncol(dat$X) == 0L, nrow(dat$X) == dat$N1, length(dat$x_ref) == 0L, dat$P1 == length(W_CONVENTIONAL), dat$Pz == length(Z_CONVENTIONAL),
+            !any(CHANGE_COLUMNS %in% c(W_cols, X_cols, Z_cols)), !anyNA(dat$W), !anyNA(dat$Z), "multi_mid_jan" %in% W_cols, MODEL %in% CONVENTIONAL_MODELS)
+  logf("conventional comparison (2026-10-31, suffix _conv): W = %s (P1 = %d); X = none (P = 0, mu = mu0 + a_i%s); Z = %s (Pz = %d); distance = capital and major = joint are part of the spec (not of the switches)",
+       paste(W_cols, collapse = ","), dat$P1, if (CONTEXT_MODEL) " + delta_lead / delta_join" else "", paste(Z_cols, collapse = ","), dat$Pz)
+} else stopifnot(!isTRUE(A$conventional), dat$P >= 1L)
 if (PRIOR_PROGRAM) {
   ## prior sensitivity (2026-10-30): the hyperparameters go to Stan as data; the main program's data stay exactly as before (no field added)
   stopifnot(is.finite(prior$prior_rho_shape), prior$prior_rho_shape > 0, is.finite(prior$prior_sigma_x_sd), prior$prior_sigma_x_sd > 0)
@@ -160,14 +174,14 @@ if (spec$pairs != "all" && spec$weights == "dispute") logf("pairs = %s D8 rescal
 if (spec$context != "all") logf("context = %s (%s%s): %d stage-2 events removed, %d D8 groups split through collapsed keys; stage 1 unchanged, %d state-years with y1 = 1 and no stage-2 event",
                                 spec$context, spec$coal_ties, if (spec$coal_drop == "top3") sprintf(", without disputes %s", paste(A$context_top3$dispnum, collapse = ", ")) else "",
                                 A$n_context_dropped, A$n_context_split_groups, A$n_orphan)
-if (spec$major == "joint") logf("major = joint (2026-10-27): cowmaj_tm1 in W; one_major / both_major in Z; alternatives by major count (0 / 1 / 2) %.4f / %.4f / %.4f, stage-2 events %.4f / %.4f / %.4f (%d / %d / %d of %d); choice sets with within-set variation: IV sets one_major %d, both_major %d of %d; event-bearing stage-2 sets one_major %d, both_major %d of %d",
-                                A$major_stats$share_alts[["zero"]], A$major_stats$share_alts[["one"]], A$major_stats$share_alts[["both"]],
+if (A$major == "joint") logf("major = joint (2026-10-27%s): cowmaj_tm1 in W; one_major / both_major in Z; alternatives by major count (0 / 1 / 2) %.4f / %.4f / %.4f, stage-2 events %.4f / %.4f / %.4f (%d / %d / %d of %d); choice sets with within-set variation: IV sets one_major %d, both_major %d of %d; event-bearing stage-2 sets one_major %d, both_major %d of %d",
+                                if (CONVENTIONAL) ", part of the conventional comparison" else "", A$major_stats$share_alts[["zero"]], A$major_stats$share_alts[["one"]], A$major_stats$share_alts[["both"]],
                                 A$major_stats$share_events[["zero"]], A$major_stats$share_events[["one"]], A$major_stats$share_events[["both"]],
                                 A$major_stats$n_events[["zero"]], A$major_stats$n_events[["one"]], A$major_stats$n_events[["both"]], dat$E,
                                 A$major_stats$var_iv_sets[["one_major"]], A$major_stats$var_iv_sets[["both_major"]], A$major_stats$var_iv_sets[["n_sets"]],
                                 A$major_stats$var_s2_sets[["one_major"]], A$major_stats$var_s2_sets[["both_major"]], A$major_stats$var_s2_sets[["n_sets"]])
-if (spec$distance == "capital") logf("distance = capital (2026-10-28): log_capdist in Z (centred over the IV rows); %d alternative rows without a capital distance dropped from both sets (%d IV, %d stage 2; %d state-years), %d expected events lost with them (counted and reconciled); IV-row mean %.4f, SD %.4f, cor with contig_land %.3f; mean uncentred log_capdist chosen %.4f vs all stage-2 alternatives %.4f",
-                                     A$distance_stats$n_rows_dropped, A$distance_stats$n_rows_dropped_iv, A$distance_stats$n_rows_dropped_s2, A$distance_stats$n_sy_affected, A$distance_stats$n_events_dropped,
+if (A$distance == "capital") logf("distance = capital (2026-10-28%s): log_capdist in Z (centred over the IV rows); %d alternative rows without a capital distance dropped from both sets (%d IV, %d stage 2; %d state-years), %d expected events lost with them (counted and reconciled); IV-row mean %.4f, SD %.4f, cor with contig_land %.3f; mean uncentred log_capdist chosen %.4f vs all stage-2 alternatives %.4f",
+                                     if (CONVENTIONAL) ", part of the conventional comparison" else "", A$distance_stats$n_rows_dropped, A$distance_stats$n_rows_dropped_iv, A$distance_stats$n_rows_dropped_s2, A$distance_stats$n_sy_affected, A$distance_stats$n_events_dropped,
                                      A$distance_stats$mean_iv, A$distance_stats$sd_iv, A$distance_stats$cor_contig_iv, A$distance_stats$mean_chosen, A$distance_stats$mean_s2)
 if (spec$contiguity == "none") logf("contiguity = none (2026-10-28): contig_land is NOT in Z; the distance replaces it (Z = the --distance=capital Z without its contig_land column; same rows, same events)")
 if (spec$interact == "prefixed") logf("interact = prefixed (2026-10-27): Z carries %s (products of the uncentred %s changes, centred over the IV rows)", paste(Z_INTERACT, collapse = ","), spec$changes)
@@ -175,7 +189,7 @@ if (DRY_RUN) {
   saveRDS(list(dat = dat, cell = cell, state_codes = state_codes, W_cols = W_cols, X_cols = X_cols, Z_cols = Z_cols,
                manifest = manifest_cell, git_commit = git_commit_at_load, spec = spec, winsor = A$winsor, model = MODEL,
                full_controls = spec$controls == "full", event_weights = spec$weights, direction = spec$direction, group_table = A$group_table,
-               stan_program = family, prior = c(spec[PRIOR_SWITCHES], prior), tag = spec_tag(spec)),
+               stan_program = family, prior = c(spec[PRIOR_SWITCHES], prior), tag = spec_tag(spec), conventional = CONVENTIONAL),
           file.path(out_dir, paste0("standata_", cell, ".rds")))
   logf("DRY RUN: Stan data assembled and saved; no sampling"); quit(save = "no", status = 0)
 }
@@ -249,7 +263,7 @@ logf("sampling finished in %.1f min; %d chains x %d post-warmup draws, as reques
 sp <- get_sampler_params(fit, inc_warmup = FALSE)
 logf("divergences: %d; max-treedepth hits: %d", sum(sapply(sp, function(m) sum(m[, "divergent__"]))),
      sum(sapply(sp, function(m) sum(m[, "treedepth__"] >= MAX_TD))))
-pars_struct <- c("alpha0", "alpha", "tau", "mu0", "beta", if (CONTEXT_MODEL) c("delta_lead", "delta_join", "sigma_g", "rho_x", "mu0_lead", "mu0_join") else "sigma_x",
+pars_struct <- c("alpha0", "alpha", "tau", "mu0", if (dat$P > 0L) "beta", if (CONTEXT_MODEL) c("delta_lead", "delta_join", "sigma_g", "rho_x", "mu0_lead", "mu0_join") else "sigma_x",
                  "sd_re", "sigma_b", "gamma", "Sigma", "Omega", "R_Om", if (family == "m2_ame") "u_diag")
 sm_tab <- summary(fit, pars = pars_struct)$summary
 logf("worst Rhat among structural parameters: %.3f; min n_eff: %.0f",
@@ -278,10 +292,11 @@ obj <- list(fit = fit, dat = dat, cell = cell, state_codes = state_codes, W_cols
             param_labels = label_parameters(rownames(sm_tab), W_cols, X_cols, Z_cols, D_MODE),
             args = list(sample = SAMPLE, lag = LAG, variant = VARIANT, model = MODEL, centrality = CENTRALITY, K = K, chains = CHAINS,
                         iter = ITER, warmup = WARMUP, pilot = PILOT, sampled_m = SAMPLED_M, conflict_history = CONFLICT_HISTORY,
-                        distance = spec$distance, distance_stats = A$distance_stats, contiguity = spec$contiguity, dy_peace_years = DY_PEACE_YEARS, drop_ww2 = spec$ww2 == "drop",
+                        distance = A$distance, distance_stats = A$distance_stats, contiguity = spec$contiguity, dy_peace_years = DY_PEACE_YEARS, drop_ww2 = spec$ww2 == "drop",   # A$distance / A$major: the assembled values (= the switch, or "capital" / "joint" under the conventional comparison)
                         full_controls = spec$controls == "full", event_weights = spec$weights, direction = spec$direction,
                         pairs = spec$pairs, changes = spec$changes, context = spec$context, coal_ties = spec$coal_ties, coal_drop = spec$coal_drop,
-                        context_top3 = A$context_top3, major = spec$major, major_stats = A$major_stats, interact = spec$interact,
+                        context_top3 = A$context_top3, major = A$major, major_stats = A$major_stats, interact = spec$interact,
+                        comparison = spec$comparison, conventional = CONVENTIONAL,
                         D_mode = D_MODE, threads_per_chain = THREADS, context_model = CONTEXT_MODEL, stan_program = family,
                         rho_prior = spec$rho_prior, sigma_prior = spec$sigma_prior, prior_rho_shape = prior$prior_rho_shape, prior_sigma_x_sd = prior$prior_sigma_x_sd, tag = spec_tag(spec),
                         init_source = init_info$source, init_from = init_info$m1_fit,

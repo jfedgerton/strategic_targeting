@@ -306,8 +306,9 @@ test_that("permutation part-file spec string matches the 7c4645e form (audit R1 
   old_major <- sub("major=none", "major=joint", old_dist)
   for (case in list(list(args = c("--distance=capital"), old = old_dist), list(args = c("--distance=capital", "--major=joint"), old = old_major))) {
     sp <- parse_spec(case$args)
-    expect_identical(spec_string(sp[setdiff(names(sp), c(PRIOR_SWITCHES, "tag"))]), case$old)
+    expect_identical(spec_string(sp[setdiff(names(sp), c(PRIOR_SWITCHES, "tag", "comparison"))]), case$old)
+    expect_identical(perm_part_spec_string(sp), case$old)   # the driver's helper (spec.R; the comparison switch of 2026-10-31 is dropped at its default too)
     expect_false(identical(spec_string(sp), case$old))     # the full string did change, which is why the driver drops the new fields
   }
-  expect_true(any(grepl('spec_string(spec[setdiff(names(spec), c(PRIOR_SWITCHES, "tag"))])', readLines(file.path(root, "R", "05_robustness.R")), fixed = TRUE)))
+  expect_true(any(grepl('spec = perm_part_spec_string(spec)', readLines(file.path(root, "R", "05_robustness.R")), fixed = TRUE)))
 })

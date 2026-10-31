@@ -165,7 +165,7 @@ data {
   int<lower=1> N2;            // flattened alternative rows
   int<lower=0> E;             // initiation events (0 allowed for profiling runs)
   int<lower=0> P1;            // stage-1 controls W (no intercept column)
-  int<lower=1> P;             // predictors of mu (initiator power changes + controls)
+  int<lower=0> P;             // predictors of mu (initiator power changes + controls); 0 = no X (conventional comparison, 2026-10-31: beta is 0 x D)
   int<lower=0> Pz;            // dyadic controls Z
   // ---- stage 1 / state-year level
   array[N1] int<lower=0, upper=1> y1;

@@ -246,6 +246,7 @@ build_stan_data <- function(sy, alts, ev, W_cols, X_cols, Z_cols, joint, sampled
   ev_w <- if ("w" %in% names(ev)) as.numeric(ev$w) else rep(1, nrow(ev))
   stopifnot(length(ev_w) == nrow(ev), all(is.finite(ev_w)), all(ev_w > 0), all(ev_w <= 1))
   W <- as.matrix(sy[, W_cols, drop = FALSE]); X <- as.matrix(sy[, X_cols, drop = FALSE])
+  if (length(X_cols) == 0L) X <- matrix(numeric(0), nrow = nrow(sy), ncol = 0L)   # no X (conventional comparison, 2026-10-31): a numeric N1 x 0 matrix, not the logical one as.matrix() returns for an empty selection
   Z <- as.matrix(alts[, Z_cols, drop = FALSE])
   assert_no_na(sy, c("y1", "state_idx", W_cols, X_cols), "stage-1 panel")
   assert_no_na(alts, c("sy_row", "target_idx", "dM", "dR", Z_cols), "alternatives")
