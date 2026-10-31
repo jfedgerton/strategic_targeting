@@ -19,7 +19,7 @@ test_that("spec: comparison defaults to none; conventional adds _conv after _ix 
   expect_equal(cell_name("fmid", 3L, "M1c", conv), "fmid_lag3_all_pr_M1c_conv"); expect_equal(cell_name("mid", 3L, "M1cr", conv), "mid_lag3_all_pr_M1cr_conv")
   expect_equal(cell_name("fmid", 3L, "M1b", parse_spec(c("--comparison=conventional", "--ww2=drop", "--weights=none"))), "fmid_lag3_all_pr_M1b_noww2_conv_w1")
   expect_equal(cell_name("fmid", 3L, "M1b", parse_spec(c("--comparison=conventional", "--rho_prior=flat", "--tag=x1"))), "fmid_lag3_all_pr_M1b_conv_rhoflat_tx1")
-  expect_equal(which(names(SPEC_SUFFIX) == "comparison"), which(names(SPEC_SUFFIX) == "interact") + 1L); expect_equal(names(SPEC_SUFFIX)[which(names(SPEC_SUFFIX) == "comparison") + 1L], "weights")
+  expect_equal(which(names(SPEC_SUFFIX) == "comparison"), which(names(SPEC_SUFFIX) == "interact") + 1L); expect_equal(names(SPEC_SUFFIX)[which(names(SPEC_SUFFIX) == "comparison") + 2L], "weights")   # roles (2026-10-31) sits between
   expect_false(any(duplicated(c(unlist(SPEC_SUFFIX), "_K2", "_pilot", "_STALE", "_samp10", "_noCH", "_polrel"))))
   ## the switches the spec fixes conflict in ANY value, the default included
   for (bad in c("--controls=minimal", "--controls=full", "--distance=none", "--distance=capital", "--contiguity=land", "--contiguity=none", "--major=none", "--major=joint", "--interact=none", "--interact=prefixed", "--changes=raw", "--changes=winsor"))

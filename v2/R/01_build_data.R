@@ -9,6 +9,7 @@
 ##   sy_positions.rds              state-year positions M = log CINC share, R_pr = log IGO PageRank (both raw log
 ##                                 shares, NOT standardised within year; PI decision 2026-10-23), R_eig (eigenvector
 ##                                 centrality, still std within year; not used in the main grid)
+##   roles_aprime.rds              (2026-10-31) the aprime role group of every non-escalation event (switch roles = aprime; aprime_roles())
 ##   events.rds                    one row per (initiator, target, year) directed event among the kept rows (initiator = COW's
 ##                                 war-initiating side in war-level disputes linked to a COW war, else MID Side A; D1 2026-10-25:
 ##                                 dir_flipped, dir_source, dir_rule, war_link; stage-2 weights w_<sample>, D8) (same-year
@@ -617,6 +618,14 @@ for (s in c("mid", "fmid", "fmidcow", "fmidub", "war")) {
        sum(coal$coal_incl[f]), 100 * mean(coal$coal_incl[f]), sum(coal$coal_strict[f]), 100 * mean(coal$coal_strict[f]), sum(coal$coal_onset_ambiguous[f]))
 }
 rm(w_grp, chk_c, het_g, gp39, gg39)
+## ---- stage-2 role groups "aprime" (PI decision 2026-10-31; switch roles = aprime; aprime_roles() in helpers_data.R) -------------------------
+## Computed on the PRE-collapse non-escalation rows after the direction rule (side-aware: a flipped initiator's own side is COW Side B), per
+## source dispute; mapped to the collapsed events below by the weight-group dispute (the key's smallest dispnum, the events' dispnum column), not
+## ORed. Written to its own file roles_aprime.rds so events.rds (and every existing cell) is byte-identical to before.
+roles_pre <- aprime_roles(events |> filter(!escalation) |> transmute(dispnum, initiator, target, year, orig1 = as.integer(orig1), orig2 = as.integer(orig2), sidea1 = as.integer(sidea1)), dd)
+rd <- attr(roles_pre, "diagnostics")
+blog("roles aprime (pre-collapse, %d non-escalation pairs): alone %d, co-originator %d, joiner %d, target joined late %d; initiators with two sides in the onset year %d events; partners with two sides deciding the group %d events; partner side from its first dispute year (absent in the onset year) %d events; D8 groups mixing group 3 with another group %d",
+     rd$n_events, sum(roles_pre$grp_aprime == 0L), sum(roles_pre$grp_aprime == 1L), sum(roles_pre$grp_aprime == 2L), sum(roles_pre$grp_aprime == 3L), rd$n_init_switch, rd$n_switch_decides, rd$n_fallback_side, rd$n_mixed_groups_with_3)
 ## target has positions at t-1 and is a system member at t: the conditions for its alternative row to exist in the
 ## "all" choice set (besides not already fighting); assemble_cell() asserts every such event is in its choice set
 events <- events |> left_join(pos |> transmute(target = ccode, year = year + 1L, .pos = 1L), by = c("target", "year")) |>
@@ -731,6 +740,17 @@ for (s in c("mid", "fmid", "fmidcow", "fmidub", "war")) {
 }
 blog("duplicate collapse: %d collapsed (initiator, target, year) keys mix a WWII dispute with a non-WWII dispute (in_mid_noww2 keeps %d of them): %s",
      nrow(mixed_ww2), sum(mixed_ww2$in_mid_noww2), paste(sprintf("%d->%d %d disputes %s", mixed_ww2$initiator, mixed_ww2$target, mixed_ww2$year, mixed_ww2$dispnums), collapse = "; "))
+## roles aprime of the collapsed events: the role of the key's weight-group dispute (dispnum = the smallest source dispnum); keys whose source
+## disputes carry different roles are counted (the smallest dispnum decides, by design)
+roles_src <- roles_pre |> left_join(events |> filter(!escalation) |> select(initiator, target, year, key_dispnum = dispnum), by = c("initiator", "target", "year"))
+stopifnot(!anyNA(roles_src$key_dispnum))
+roles_mixed <- roles_src |> group_by(initiator, target, year) |> summarise(n_src = n(), n_roles = n_distinct(grp_aprime), .groups = "drop")
+roles_ap <- roles_src |> filter(dispnum == key_dispnum) |> select(initiator, target, year, dispnum, grp_aprime, n_co_orig, late_target, orig1_src = orig1, orig2_src = orig2)
+stopifnot(nrow(roles_ap) == sum(!events$escalation), !anyDuplicated(paste(roles_ap$initiator, roles_ap$target, roles_ap$year)),
+          nrow(anti_join(events |> filter(!escalation), roles_ap, by = c("initiator", "target", "year", "dispnum"))) == 0L)
+blog("roles aprime after the collapse: %d events (alone %d, co-originator %d, joiner %d, target joined late %d); collapsed keys %d, of which their source disputes carry different roles %d (the weight-group dispute decides)",
+     nrow(roles_ap), sum(roles_ap$grp_aprime == 0L), sum(roles_ap$grp_aprime == 1L), sum(roles_ap$grp_aprime == 2L), sum(roles_ap$grp_aprime == 3L), sum(roles_mixed$n_src > 1L), sum(roles_mixed$n_roles > 1L))
+rm(roles_pre, roles_src, roles_mixed, rd)
 saveRDS(events, file.path(out_dir, "events.rds"))
 
 ## ============================================================================
@@ -900,6 +920,7 @@ add_manifest <- function(obj, fname, note) {
 add_manifest(pos, "sy_positions.rds", "state-year positions: M = log CINC share, R_pr = log PageRank (raw log shares), R_eig std within year")
 add_manifest(events, "events.rds", sprintf("directed events (Side A x Side B pairs; DIRECTION=%s: war-level disputes follow COW's war-initiating side, dir_flipped / dir_source / war_link), joiners %s (is_joiner_pair); month-rule escalation flag with participant-level dates where gml_part matches (excluded from all in_* flags); pair-level war; same-year duplicates collapsed (dispnums); fighting_at_ref; is_ww2; target_has_pos_tm1; stage-2 weights w_<sample>; coalition context coal_incl / coal_strict / coal_onset_ambiguous",
                                            DIRECTION, if (INCLUDE_JOINERS) "included" else "excluded"))
+add_manifest(roles_ap, "roles_aprime.rds", "stage-2 role groups aprime per non-escalation event (PI decision 2026-10-31; switch roles = aprime): grp_aprime 0 alone originator / 1 co-originator / 2 joiner / 3 target joined late, from the weight-group dispute (smallest dispnum) of a collapsed key; aprime_roles()")
 ## number of system states per year, for the system-growth diagnostic on the change variables (item 4 of the
 ## 2026-10-23 decision): g3 at t-1 = log n_system(t-1) - log n_system(t-4), constant within a year
 nsys_year <- states |> distinct(year, n_system) |> arrange(year)

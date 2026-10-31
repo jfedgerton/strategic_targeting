@@ -19,7 +19,7 @@ test_that("spec: major and interact default to none, add _major / _ix after _ful
   expect_equal(spec_suffix(all_on), "_orig_co_strict_drop3_noww2_fullctrl_major_ix_w1_winsor_sideA")
   ## controls = full with major = joint parses (PI 2026-10-27, item 7: the full set carries no major-power status, so nothing is collinear)
   expect_equal(parse_spec(c("--controls=full", "--major=joint"))[c("controls", "major")], list(controls = "full", major = "joint"))
-  expect_equal(names(SPEC_SUFFIX), c("pairs", "context", "coal_ties", "coal_drop", "ww2", "controls", "distance", "contiguity", "major", "interact", "comparison", "weights", "changes", "direction", "rho_prior", "sigma_prior"))   # rho_prior, sigma_prior appended 2026-10-30 (after every data switch)   # distance, contiguity inserted 2026-10-28
+  expect_equal(names(SPEC_SUFFIX), c("pairs", "context", "coal_ties", "coal_drop", "ww2", "controls", "distance", "contiguity", "major", "interact", "comparison", "roles", "weights", "changes", "direction", "rho_prior", "sigma_prior"))   # rho_prior, sigma_prior appended 2026-10-30 (after every data switch)   # distance, contiguity inserted 2026-10-28
   ## uniqueness against every other suffix, the fixed ones and the archived ones; no suffix is a prefix of another followed by a letter run
   all_suffixes <- c(unlist(SPEC_SUFFIX), "_K2", "_pilot", "_STALE", "_samp10", "_noCH", "_polrel")   # _dist is a switch suffix since 2026-10-28
   expect_false(any(duplicated(all_suffixes)))

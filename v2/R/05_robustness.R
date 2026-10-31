@@ -110,6 +110,7 @@ if (nzchar(spec_tag(spec))) stop(sprintf("--tag=%s is not an option of 05_robust
 if (!spec_prior_is_main(spec)) stop(sprintf("--rho_prior / --sigma_prior are not options of 05_robustness.R (rho_prior=%s, sigma_prior=%s): the prior-sensitivity fits are single M1b cells of 02_fit_model.R, and the perm_error tests refit with the main program's priors", spec$rho_prior, spec$sigma_prior))
 ## the conventional comparison (2026-10-31) is a set of single 02_fit_model.R cells (M1a / M1b / M1c x fmid / mid at lag 3): no preset takes it
 ## (the refit presets would pass every switch explicitly, which the spec refuses, and perm_error is not wired to its W / Z / X)
+if (!identical(spec$roles, SPEC_DEFAULTS$roles)) stop(sprintf("--roles=%s is not an option of 05_robustness.R (no preset takes the aprime role coding); run its M1c / M1cr cells through 02_fit_model.R directly", spec$roles))
 if (spec_is_conventional(spec)) stop("--comparison=conventional is not an option of 05_robustness.R (no preset takes the conventional comparison); run its cells through 02_fit_model.R --comparison=conventional directly")
 for (nm in names(ROBUSTNESS_PRESETS[[PRESET]])) spec[[nm]] <- ROBUSTNESS_PRESETS[[PRESET]][[nm]]
 switch_args <- c(sprintf("--%s=%s", names(SPEC_CHOICES), unlist(spec[names(SPEC_CHOICES)])), sprintf("--ame_K=%d", spec$ame_K))
@@ -126,7 +127,7 @@ if (PRESET != "perm_error") {
   } else if (PRESET == "context_b") {
     ## the M1c model on its fixed cells, every switch at its default: no --cells and no switch may be passed (the cell names would still be
     ## unique through the model code, but the stage-b run is defined on the main specification)
-    if (length(grep("^--(cells|pairs|context|coal_ties|coal_drop|direction|ww2|weights|controls|major|interact|distance|contiguity|changes|ame_K|rho_prior|sigma_prior|tag|comparison)=", args)))
+    if (length(grep("^--(cells|pairs|context|coal_ties|coal_drop|direction|ww2|weights|controls|major|interact|distance|contiguity|changes|ame_K|rho_prior|sigma_prior|tag|comparison|roles)=", args)))
       stop("the context_b preset fixes its cells (CONTEXT_B_PRESET in spec.R) and runs M1c on the main specification; no --cells and no switch may be passed")
     parts <- strsplit(CONTEXT_B_PRESET$cells, ":", fixed = TRUE)
     cells_tab <- data.frame(sample = vapply(parts, `[`, "", 1), lag = as.integer(vapply(parts, `[`, "", 2)), model = vapply(parts, `[`, "", 3), variant = NA_character_, stringsAsFactors = FALSE)

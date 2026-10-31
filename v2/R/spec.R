@@ -48,7 +48,8 @@ SPEC_CHOICES <- list(
   changes   = c("raw", "winsor"),                   # initiator and target power changes: as built | winsorised at WINSOR_PROBS of the panel
   rho_prior = c("beta25", "flat"),                  # prior on Sigma's correlation rho (M1 joint models only, 2026-10-30): (rho + 1) / 2 ~ Beta(2.5, 2.5) (main) | Beta(1, 1), uniform on (-1, 1)
   sigma_prior = c("ln1", "ln05"),                   # prior on the tolerance scales sigma_x (M1 family only, 2026-10-30): lognormal(0, 1) (main) | lognormal(0, 0.5)
-  comparison = c("none", "conventional")            # the conventional comparison specification (PI-approved 2026-10-31): none (main) | conventional = W, Z, X fixed to W_CONVENTIONAL / Z_CONVENTIONAL / no X (P = 0); see below
+  comparison = c("none", "conventional"),           # the conventional comparison specification (PI-approved 2026-10-31): none (main) | conventional = W, Z, X fixed to W_CONVENTIONAL / Z_CONVENTIONAL / no X (P = 0); see below
+  roles     = c("stageb", "aprime")                 # stage-2 role groups of the M1c / M1cr models (PI decision 2026-10-31): stageb (main) = the 3 stage-b groups (bilateral / leader / joiner) | aprime = 4 groups (alone originator / co-originator / joiner / target joined late; roles_aprime.rds, aprime_roles())
 )
 ## ---- the conventional comparison specification (PI-approved 2026-10-31; switch `comparison`, suffix _conv) --------------------------
 ## One switch fixes the three design matrices at once; it is NOT a combination of the other switches, although it carries the distance
@@ -99,6 +100,8 @@ SPEC_SUFFIX <- list(
   interact  = c(prefixed = "_ix"),
   ## the conventional comparison (2026-10-31) follows the control extensions it replaces (it is refused with any of them) and precedes _w1
   comparison = c(conventional = "_conv"),
+  ## the role coding (2026-10-31) follows the comparison switch: e.g. fmid_lag3_all_pr_M1c_conv_aprime
+  roles     = c(aprime = "_aprime"),
   weights   = c(none = "_w1"),
   changes   = c(winsor = "_winsor"),
   direction = c(sideA = "_sideA"),
@@ -312,7 +315,7 @@ spec_is_conventional <- function(spec) !is.null(spec$comparison) && identical(sp
 ## comparison switch (2026-10-31) is dropped at its default for the same reason and KEPT when non-default: it changes W, Z and X, so a
 ## conventional cell's parts must never combine with another cell's (the driver refuses the switch anyway, see 05_robustness.R).
 perm_part_spec_string <- function(spec) {
-  drop <- c(PRIOR_SWITCHES, "tag", if (!spec_is_conventional(spec)) "comparison")
+  drop <- c(PRIOR_SWITCHES, "tag", if (!spec_is_conventional(spec)) "comparison", if (is.null(spec$roles) || identical(spec$roles, SPEC_DEFAULTS$roles)) "roles")
   spec_string(spec[setdiff(names(spec), drop)])
 }
 ## spec_coal_col(spec): the events.rds column the context switch filters on ("coal_incl" / "coal_strict")
@@ -330,6 +333,9 @@ cell_name <- function(sample, lag, model, spec) {
   ## the conventional comparison (2026-10-31) is specified for M1a, M1b and M1c only
   if (spec_is_conventional(spec) && !model %in% CONVENTIONAL_MODELS)
     stop(sprintf("cell_name: --comparison=conventional with the model %s (the conventional comparison is specified for %s only)", model, paste(CONVENTIONAL_MODELS, collapse = ", ")))
+  ## the role coding (2026-10-31) applies to the stage-2 groups of the context models only (no other model sees the groups)
+  if (!is.null(spec$roles) && !identical(spec$roles, SPEC_DEFAULTS$roles) && !model %in% CONTEXT_MODELS)
+    stop(sprintf("cell_name: --roles=%s with the model %s (the role coding applies to %s only)", spec$roles, model, paste(CONTEXT_MODELS, collapse = ", ")))
   if (!spec_prior_is_main(spec)) {
     off <- PRIOR_SWITCHES[vapply(PRIOR_SWITCHES, function(nm) !is.null(spec[[nm]]) && !identical(spec[[nm]], SPEC_DEFAULTS[[nm]]), logical(1))]
     if (stan_program(model) != "m1_latent_additive")

@@ -577,6 +577,69 @@ stage2_groups <- function(ev, coal_col = "coal_incl") {
   grp
 }
 
+## ---- stage-2 role groups "aprime" (PI decision 2026-10-31; switch roles = aprime, G = 4) ----------------------------------------------------
+## aprime_roles(pairs, dd): pairs = the PRE-collapse non-escalation event rows AFTER the direction rule (apply_direction()): dispnum, initiator,
+## target, year (pair onset year), orig1 / orig2 (the initiator's / target's COW originator flags after the flip), sidea1 (the INITIATOR's COW
+## Side A flag after the flip: 0 for a flipped initiator, whose own side is COW Side B). dd = COW directed dispute-years (dispnum, ccode1, year,
+## sidea1, orig1). Groups (no date or tie logic):
+##   3 target joined late : orig1 == 1 and orig2 == 0, PER EVENT (target pair); takes precedence over 0 / 1; NOT required constant in a D8 group
+##   2 joiner             : orig1 == 0
+##   1 co-originator      : orig1 == 1 and at least one OTHER participant of the dispute with COW orig == 1 is on the initiator's own side
+##   0 alone originator   : orig1 == 1, no other originator on the initiator's own side, not group 3 (the reference group)
+## Side of a partner c: its COW sidea1 in the pair's onset year when c has a dispute-year row in that year, else in c's FIRST dispute year. A
+## partner with two sides within that year (a within-year side switch, dispute 258) counts as on the initiator's side when either side matches;
+## the events where that decides the group are counted (attr "n_switch_decides"). The initiator's own side is the event's sidea1; it is
+## checked against dd in the onset year (asserted equal wherever the initiator has one side that year; within-year switchers are counted).
+## Groups 0 / 1 / 2 are a property of (initiator, dispute, year) and asserted constant within every D8 group (dispnum, initiator, year) over
+## the events not in group 3. Returns pairs with grp_aprime, n_co_orig (other same-side originators), and flags; attr "diagnostics".
+APRIME_GROUPS <- c("alone", "co_originator", "joiner", "target_late")
+aprime_roles <- function(pairs, dd) {
+  stopifnot(is.data.frame(pairs), all(c("dispnum", "initiator", "target", "year", "orig1", "orig2", "sidea1") %in% names(pairs)),
+            all(c("dispnum", "ccode1", "year", "sidea1", "orig1") %in% names(dd)), !anyNA(pairs[, c("dispnum", "initiator", "target", "year", "orig1", "orig2", "sidea1")]),
+            all(pairs$orig1 %in% c(0L, 1L)), all(pairs$orig2 %in% c(0L, 1L)), all(pairs$sidea1 %in% c(0L, 1L)))
+  assert_no_dup_keys(pairs, c("dispnum", "initiator", "target"), "aprime_roles: pairs")
+  part <- dd |> transmute(dispnum = as.integer(dispnum), ccode = as.integer(ccode1), year = as.integer(year), side = as.integer(sidea1), orig = as.integer(orig1)) |> distinct()
+  ## originator status is constant per participant (as in build_pair_table / participant_spell_dates)
+  po <- part |> group_by(dispnum, ccode) |> summarise(n_o = n_distinct(orig), orig = first(orig), first_year = min(year), .groups = "drop")
+  if (any(po$n_o != 1L)) stop("aprime_roles: originator status differs across a participant's dispute-years")
+  side_y <- part |> group_by(dispnum, ccode, year) |> summarise(side_set = list(sort(unique(side))), n_side = n_distinct(side), .groups = "drop")
+  side_first <- part |> inner_join(po |> select(dispnum, ccode, first_year), by = c("dispnum", "ccode")) |> filter(year == first_year) |>
+    group_by(dispnum, ccode) |> summarise(side_first = list(sort(unique(side))), .groups = "drop")
+  pr <- pairs |> mutate(.e = row_number())
+  ## the initiator's own side: the event's sidea1, checked against dd in the onset year
+  ini <- pr |> select(.e, dispnum, ccode = initiator, year, sidea1) |> left_join(side_y, by = c("dispnum", "ccode", "year"))
+  if (anyNA(ini$n_side)) stop(sprintf("aprime_roles: %d initiators have no dispute-year row in their pair's onset year", sum(is.na(ini$n_side))))
+  ok1 <- ini$n_side == 1L
+  if (any(vapply(ini$side_set[ok1], `[`, 1L, 1L) != ini$sidea1[ok1])) stop("aprime_roles: the event's (post-flip) sidea1 disagrees with the initiator's COW side in the onset year")
+  n_init_switch <- sum(!ok1)
+  ## candidate partners: every other ORIGINATOR of the dispute
+  cand <- pr |> select(.e, dispnum, initiator, year, sidea1) |>
+    inner_join(po |> filter(orig == 1L) |> select(dispnum, ccode), by = "dispnum", relationship = "many-to-many") |> filter(ccode != initiator) |>
+    left_join(side_y |> select(dispnum, ccode, year, side_set, n_side), by = c("dispnum", "ccode", "year")) |>
+    left_join(side_first, by = c("dispnum", "ccode"))
+  cand$fallback <- is.na(cand$n_side)
+  cand$sides <- ifelse(cand$fallback, cand$side_first, cand$side_set)
+  stopifnot(!any(vapply(cand$sides, is.null, TRUE)))
+  cand$match <- mapply(function(s, a) a %in% s, cand$sides, cand$sidea1)
+  cand$match_unique <- mapply(function(s, a) length(s) == 1L && s[1] == a, cand$sides, cand$sidea1)
+  agg <- cand |> group_by(.e) |> summarise(n_co_orig = n_distinct(ccode[match]), n_co_orig_unique = n_distinct(ccode[match_unique]),
+                                          n_fallback = n_distinct(ccode[match & fallback]), .groups = "drop")
+  pr <- pr |> left_join(agg, by = ".e") |> mutate(across(c(n_co_orig, n_co_orig_unique, n_fallback), ~ coalesce(.x, 0L)))
+  pr <- pr |> mutate(late_target = orig1 == 1L & orig2 == 0L,
+                     grp_aprime = case_when(orig1 == 0L ~ 2L, late_target ~ 3L, n_co_orig >= 1L ~ 1L, TRUE ~ 0L),
+                     grp_unique = case_when(orig1 == 0L ~ 2L, late_target ~ 3L, n_co_orig_unique >= 1L ~ 1L, TRUE ~ 0L))
+  stopifnot(!anyNA(pr$grp_aprime), all(pr$grp_aprime %in% 0:3), all((pr$grp_aprime == 2L) == (pr$orig1 == 0L)), all((pr$grp_aprime == 3L) == pr$late_target))
+  ## groups 0 / 1 / 2 are constant within every D8 group (dispnum, initiator, year) over the events outside group 3
+  chk <- pr |> filter(grp_aprime != 3L) |> group_by(dispnum, initiator, year) |> summarise(n = n_distinct(grp_aprime), .groups = "drop")
+  if (any(chk$n != 1L)) stop(sprintf("aprime_roles: groups 0 / 1 / 2 not constant within %d D8 groups (dispnum, initiator, year)", sum(chk$n != 1L)))
+  diag <- list(n_events = nrow(pr), n_init_switch = n_init_switch, n_switch_decides = sum(pr$grp_aprime != pr$grp_unique),
+               n_fallback_side = sum(pr$n_fallback > 0L), n_mixed_groups_with_3 = sum((pr |> group_by(dispnum, initiator, year) |> summarise(m = any(grp_aprime == 3L) & !all(grp_aprime == 3L), .groups = "drop"))$m))
+  attr(pr, "diagnostics") <- diag
+  pr |> select(-.e, -grp_unique)
+}
+## stage2_group_labels(roles): the labels of ev_grp 0..G-1 under the roles switch ("stageb" = the 3-group stage-b coding, "aprime" = the 4 groups above)
+stage2_group_labels <- function(roles = "stageb") { stopifnot(roles %in% c("stageb", "aprime")); if (roles == "aprime") APRIME_GROUPS else STAGE2_GROUPS }
+
 ## ---- initiator direction for war-level disputes (PI decision 2026-10-25; README "Initiator direction") -------------
 ## COW-MID Side A is the side that took the FIRST codable action, not the aggressor. In dispute 258 (the Second World War)
 ## Side A is Poland and the Allies, so the Side A rule gives Poland -> Germany and never Germany -> Poland. For disputes at

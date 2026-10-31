@@ -158,7 +158,7 @@ SY_INDICATORS <- c("cowmaj_tm1", "dem_tm1", "ongoing_tm1")
 assemble_cell <- function(SAMPLE, LAG, VARIANT, CENT = "pr", CONFLICT_HISTORY = TRUE, SAMPLED_M = 0L,
                           DISTANCE = "none", CONTIGUITY = "land", DY_PEACE_YEARS = FALSE, DROP_WW2 = FALSE, FULL_CONTROLS = FALSE,
                           EVENT_WEIGHTS = "dispute", PAIRS = "all", CHANGES = "raw", CONTEXT = "all", COAL_TIES = "inclusive", COAL_DROP = "none",
-                          MAJOR = "none", INTERACT = "none",
+                          MAJOR = "none", INTERACT = "none", ROLES = "stageb",
                           CONTEXT_MODEL = FALSE, CONVENTIONAL = FALSE, data_dir = file.path(v2_root(), "data"), manifest = NULL) {
   stopifnot(SAMPLE %in% c("mid", "fmid", "fmidcow", "fmidub", "war"), LAG %in% c(1L, 3L, 5L, 10L), VARIANT %in% c("all", "polrel"), CENT %in% c("pr", "eig"),
             EVENT_WEIGHTS %in% c("dispute", "none"), PAIRS %in% c("all", "originators", "joiners"), CHANGES %in% c("raw", "winsor"),
@@ -188,6 +188,10 @@ assemble_cell <- function(SAMPLE, LAG, VARIANT, CENT = "pr", CONFLICT_HISTORY = 
   panel  <- assert_matches_manifest(file.path(data_dir, sprintf("stage1_panel_lag%d.rds", LAG)), manifest)
   alts   <- assert_matches_manifest(file.path(data_dir, sprintf("alts_lag%d_%s.rds", LAG, VARIANT)), manifest)
   events <- assert_matches_manifest(file.path(data_dir, "events.rds"), manifest)
+  ## ROLES = aprime (PI decision 2026-10-31): the 4 role groups from the build's roles_aprime.rds (read only under this switch, so every other
+  ## cell reads exactly the three files it read before)
+  stopifnot(is.character(ROLES), length(ROLES) == 1L, ROLES %in% c("stageb", "aprime"))
+  roles_ap <- if (ROLES == "aprime") assert_matches_manifest(file.path(data_dir, "roles_aprime.rds"), manifest) else NULL
   stopifnot(all(panel$h == LAG), all(alts$h == LAG))
   stopifnot(all(c("escalation", "is_joiner_pair", "is_ww2", "target_has_pos_tm1", "fighting_at_ref", "dispnums", "n_disputes", "war_disp",
                   "in_mid_noww2", "in_fmid_noww2", "in_fmidcow_noww2", "in_fmidub_noww2", "in_war_noww2") %in% names(events)),
@@ -559,11 +563,31 @@ assemble_cell <- function(SAMPLE, LAG, VARIANT, CENT = "pr", CONFLICT_HISTORY = 
   ev_keys <- ev_all |> transmute(ccode1 = initiator, ccode2 = target, year, dispnum, dispnums, target_has_pos_tm1, fighting_at_ref, dir_flipped,
                                  w = if (EVENT_WEIGHTS == "dispute") .data[[w_col]] else 1, grp = grp_all)
   assert_no_dup_keys(ev_keys, c("ccode1", "ccode2", "year"), sprintf("events of sample %s", SAMPLE))
-  G_GRP <- length(STAGE2_GROUPS)      # the number of stage-2 groups (2026-10-31: G is data in the M1c programs; 3 with the stage-b coding)
+  GROUP_LABELS <- stage2_group_labels(ROLES)
+  if (ROLES == "aprime") {
+    ## the aprime groups (PI decision 2026-10-31): 0 alone originator, 1 co-originator (another COW originator on the initiator's own side of
+    ## the dispute, side-aware after the direction rule), 2 joiner (orig1 == 0), 3 target joined late (orig1 == 1, orig2 == 0; per event, takes
+    ## precedence). Built per source dispute by aprime_roles() in the build; a collapsed key carries its weight-group dispute's role (smallest
+    ## dispnum = the events' dispnum). Weights unchanged. Groups 0-2 are constant within every D8 group (dispnum, initiator, year), asserted.
+    stopifnot(all(c("initiator", "target", "year", "dispnum", "grp_aprime") %in% names(roles_ap)), !anyNA(roles_ap$grp_aprime), all(roles_ap$grp_aprime %in% 0:3))
+    assert_no_dup_keys(roles_ap, c("initiator", "target", "year"), "roles_aprime.rds")
+    jr <- ev_keys |> select(ccode1, ccode2, year, dispnum) |> left_join(roles_ap |> select(ccode1 = initiator, ccode2 = target, year, r_disp = dispnum, grp_aprime), by = c("ccode1", "ccode2", "year"))
+    if (anyNA(jr$grp_aprime)) stop(sprintf("roles = aprime: %d sample events have no row in roles_aprime.rds (rebuild the data)", sum(is.na(jr$grp_aprime))))
+    stopifnot(nrow(jr) == nrow(ev_keys), all(jr$r_disp == jr$dispnum))
+    xt <- table(stageb = factor(STAGE2_GROUPS[ev_keys$grp + 1L], levels = STAGE2_GROUPS), aprime = factor(APRIME_GROUPS[jr$grp_aprime + 1L], levels = APRIME_GROUPS))
+    logf("roles = aprime: cross-tab of the %d sample events, stage-b 3 groups (rows) x aprime 4 groups (columns): %s", nrow(ev_keys),
+         paste(sprintf("%s: %s", rownames(xt), apply(xt, 1, function(r) paste(sprintf("%s %d", colnames(xt), r), collapse = " / "))), collapse = "; "))
+    ev_keys$grp <- as.integer(jr$grp_aprime)
+    chk <- ev_keys |> filter(grp != 3L) |> group_by(dispnum, ccode1, year) |> summarise(n = n_distinct(grp), .groups = "drop")
+    if (any(chk$n != 1L)) stop(sprintf("roles = aprime: groups 0-2 not constant within %d D8 groups (dispnum, initiator, year)", sum(chk$n != 1L)))
+  }
+  G_GRP <- length(GROUP_LABELS)       # the number of stage-2 groups (2026-10-31: G is data in the M1c programs; 3 stage-b groups, 4 under roles = aprime)
   stopifnot(G_GRP >= 2L, all(ev_keys$grp %in% 0:(G_GRP - 1L)), sum(vapply(0:(G_GRP - 1L), function(g) sum(ev_keys$grp == g), 1L)) == nrow(ev_keys))
-  logf("stage-2 event groups (stage b; coalition column %s, joiner = the initiator's orig1 == 0) over the %d sample events: bilateral %d (weights %.1f), coalition leader %d (%.1f), joiner %d (%.1f); pair-level joiner pairs (is_joiner_pair, the `pairs` switch) %d, of which the initiator is an originator (orig1 = 1, target a joiner; bilateral or leader here) %d",
+  if (ROLES == "stageb") logf("stage-2 event groups (stage b; coalition column %s, joiner = the initiator's orig1 == 0) over the %d sample events: bilateral %d (weights %.1f), coalition leader %d (%.1f), joiner %d (%.1f); pair-level joiner pairs (is_joiner_pair, the `pairs` switch) %d, of which the initiator is an originator (orig1 = 1, target a joiner; bilateral or leader here) %d",
        "coal_incl", nrow(ev_keys), sum(ev_keys$grp == 0L), sum(ev_keys$w[ev_keys$grp == 0L]), sum(ev_keys$grp == 1L), sum(ev_keys$w[ev_keys$grp == 1L]), sum(ev_keys$grp == 2L), sum(ev_keys$w[ev_keys$grp == 2L]),
        sum(ev_all$is_joiner_pair), sum(ev_all$is_joiner_pair & ev_all$orig1 == 1L))
+  else logf("stage-2 event groups (roles = aprime) over the %d sample events: %s", nrow(ev_keys),
+            paste(sprintf("%d %s %d (weights %.1f)", 0:(G_GRP - 1L), GROUP_LABELS, vapply(0:(G_GRP - 1L), function(g) sum(ev_keys$grp == g), 1L), vapply(0:(G_GRP - 1L), function(g) sum(ev_keys$w[ev_keys$grp == g]), 0)), collapse = "; "))
   stopifnot(all(is.finite(ev_keys$w)), all(ev_keys$w > 0), all(ev_keys$w <= 1))
   logf("direction (D1): %d of %d events in sample %s have the reversed direction (COW war initiator)", sum(ev_keys$dir_flipped), nrow(ev_keys), SAMPLE)
   ## an event whose pair was already fighting at the state-year's reference date (its earlier dispute ended before the
@@ -576,11 +600,16 @@ assemble_cell <- function(SAMPLE, LAG, VARIANT, CENT = "pr", CONFLICT_HISTORY = 
   ev <- ev_keys |> inner_join(sy_key, by = c("ccode1", "year")) |>
     inner_join(alts |> mutate(alt_row = row_number()) |> filter(in_s2 == 1L) |> select(ccode1, ccode2, year, alt_row, dy_mid_tm1), by = c("ccode1", "ccode2", "year"))
   stopifnot(all(ev$grp %in% 0:(G_GRP - 1L)))
-  group_table <- data.frame(group = STAGE2_GROUPS, grp = 0:(G_GRP - 1L),
+  group_table <- data.frame(group = GROUP_LABELS, grp = 0:(G_GRP - 1L),
                             n_sample = as.integer(tabulate(ev_keys$grp + 1L, nbins = G_GRP)), w_sample = vapply(0:(G_GRP - 1L), function(g) sum(ev_keys$w[ev_keys$grp == g]), numeric(1)),
                             n_usable = as.integer(tabulate(ev$grp + 1L, nbins = G_GRP)), w_usable = vapply(0:(G_GRP - 1L), function(g) sum(ev$w[ev$grp == g]), numeric(1)),   # (rowsum() would drop an empty group)
                             n_states = vapply(0:(G_GRP - 1L), function(g) n_distinct(ev$ccode1[ev$grp == g]), 1L), stringsAsFactors = FALSE)
   stopifnot(nrow(group_table) == G_GRP)
+  if (ROLES == "aprime") {
+    ## stage 1 is unchanged in this round: count the initiating state-years whose usable stage-2 events are all target-joined-late (group 3)
+    only3 <- ev |> group_by(sy_row) |> summarise(all3 = all(grp == 3L), .groups = "drop")
+    logf("roles = aprime: initiating state-years with usable stage-2 events %d, of which only group-3 (target joined late) events %d (y1 unchanged)", nrow(only3), sum(only3$all3))
+  }
   stopifnot(sum(group_table$n_usable) == nrow(ev), sum(group_table$n_sample) == nrow(ev_keys), abs(sum(group_table$w_usable) - sum(ev$w)) < 1e-9)
   logf("stage-2 event groups over the %d usable events (sample %s; events, weight sum, distinct initiating states): %s", nrow(ev), SAMPLE,
        paste(sprintf("%d %s %d (%.1f, %d)", group_table$grp, group_table$group, group_table$n_usable, group_table$w_usable, group_table$n_states), collapse = "; "))
@@ -684,7 +713,7 @@ assemble_cell <- function(SAMPLE, LAG, VARIANT, CENT = "pr", CONFLICT_HISTORY = 
        pairs = PAIRS, pairs_weights = pairs_w, changes = CHANGES, winsor = winsor, context = CONTEXT, coal_ties = COAL_TIES, coal_drop = COAL_DROP, context_top3 = context_top3,
        n_context_dropped = n_context_dropped, n_context_split_groups = n_split_groups, context_model = CONTEXT_MODEL, group_table = group_table,
        major = MAJOR, major_stats = major_stats, interact = INTERACT, distance = DISTANCE, distance_stats = distance_stats, contiguity = CONTIGUITY,
-       conventional = CONVENTIONAL)
+       conventional = CONVENTIONAL, roles = ROLES)
 }
 ## assemble_cell_spec(SAMPLE, LAG, spec, ...): the main-specification constants of spec.R plus the switches of `spec`
 ## model = NULL or a model code: the M1c model (CONTEXT_MODELS) switches CONTEXT_MODEL on; every other model leaves it off
@@ -698,5 +727,6 @@ assemble_cell_spec <- function(SAMPLE, LAG, spec, data_dir = spec_data_dir(spec,
                 DY_PEACE_YEARS = DY_PEACE_YEARS, DROP_WW2 = spec$ww2 == "drop", FULL_CONTROLS = spec$controls == "full",
                 EVENT_WEIGHTS = spec$weights, PAIRS = spec$pairs, CHANGES = spec$changes, CONTEXT = spec$context, COAL_TIES = spec$coal_ties,
                 COAL_DROP = spec$coal_drop, MAJOR = if (conv) "joint" else spec$major, INTERACT = spec$interact,
-                CONTEXT_MODEL = !is.null(model) && model %in% CONTEXT_MODELS, CONVENTIONAL = conv, data_dir = data_dir, manifest = manifest)
+                CONTEXT_MODEL = !is.null(model) && model %in% CONTEXT_MODELS, CONVENTIONAL = conv,
+                ROLES = if (is.null(spec$roles)) "stageb" else spec$roles, data_dir = data_dir, manifest = manifest)
 }

@@ -24,6 +24,8 @@
 ##            (W_CONVENTIONAL / Z_CONVENTIONAL of assemble_cell.R, no X: P = 0); carries the distance, the major indicators, contiguity, the
 ##            defense alliance itself (no peace years, PI 2026-10-31), so --controls, --distance, --contiguity, --major, --interact and --changes
 ##            are refused with it in any value (parse_spec()); multi_mid_jan is in W for all three models
+##     --roles=stageb|aprime (PI decision 2026-10-31, suffix _aprime; M1c / M1cr only): the stage-2 groups; aprime = 0 alone originator, 1 co-originator,
+##            2 joiner, 3 target joined late (G = 4; roles_aprime.rds of the build); stageb (default) = bilateral / coalition leader / joiner
 ##     --rho_prior=beta25|flat  --sigma_prior=ln1|ln05 (2026-10-30, prior sensitivity of the jointness result; M1 m / r / a / b only, the rho
 ##            prior with M1b only): a non-default value fits the SAME model with stan/m1_latent_prior.stan, the copy of the main program that
 ##            takes the Beta shape on (rho + 1) / 2 (2.5 | 1 = uniform on (-1, 1)) and the lognormal sd of sigma_x (1 | 0.5) as data
@@ -121,7 +123,8 @@ if (!is.na(slurm_job_id) && slurm_job_id == "") slurm_job_id <- NA_character_
 if (!is.na(slurm_task_id) && slurm_task_id == "") slurm_task_id <- NA_character_
 logf("provenance at load: git commit %s (uncommitted changes under v2/R or v2/stan: %s); manifest built %s with %d files; SLURM_JOB_ID %s; SLURM_ARRAY_TASK_ID %s",
      git_commit_at_load, git_dirty_at_load, if ("built" %in% names(manifest_at_load)) manifest_at_load$built[1] else "NA", nrow(manifest_at_load), slurm_job_id, slurm_task_id)
-cell_files <- c(sprintf("stage1_panel_lag%d.rds", LAG), sprintf("alts_lag%d_%s.rds", LAG, VARIANT), "events.rds")
+cell_files <- c(sprintf("stage1_panel_lag%d.rds", LAG), sprintf("alts_lag%d_%s.rds", LAG, VARIANT), "events.rds",
+                if (identical(spec$roles, "aprime")) "roles_aprime.rds")   # roles = aprime (2026-10-31) reads the build's role file as well
 stopifnot(all(cell_files %in% manifest_at_load$file))
 manifest_cell <- manifest_at_load[manifest_at_load$file %in% cell_files, ]
 
@@ -141,7 +144,7 @@ if (CONTEXT_MODEL) {
   ## (they are not added to their data, so their Stan data stay identical to the main grid's)
   gt <- A$group_table
   G_GRP <- nrow(gt)
-  stopifnot(G_GRP >= 2L, identical(gt$grp, 0:(G_GRP - 1L)), identical(gt$group, STAGE2_GROUPS),
+  stopifnot(G_GRP >= 2L, identical(gt$grp, 0:(G_GRP - 1L)), identical(gt$group, stage2_group_labels(spec$roles)), identical(A$roles, spec$roles),
             "grp" %in% names(ev), length(ev$grp) == dat$E, all(ev$grp %in% 0:(G_GRP - 1L)), "multi_mid_jan" %in% W_cols, identical(as.integer(dat$ev_sy), as.integer(ev$sy_row)))
   dat$G <- G_GRP
   dat$ev_grp <- as.integer(ev$grp)
@@ -293,7 +296,7 @@ obj <- list(fit = fit, dat = dat, cell = cell, state_codes = state_codes, W_cols
             sy_keys = sy |> select(ccode, year, state_idx, y1), ev = ev, x_ref = x_ref, elapsed_min = elapsed,
             manifest = manifest_cell, data_dir = basename(data_dir), stale = stale, spec = spec, winsor = A$winsor, init = init_info, group_table = A$group_table,
             prior = c(spec[PRIOR_SWITCHES], prior, list(stan_program = family)),   # the prior switches and the hyperparameters the program saw (2026-10-30)
-            param_labels = label_parameters(rownames(sm_tab), W_cols, X_cols, Z_cols, D_MODE),
+            param_labels = label_parameters(rownames(sm_tab), W_cols, X_cols, Z_cols, D_MODE, groups = A$group_table$group),
             group_labels = if (CONTEXT_MODEL) A$group_table$group else NULL,   # M1c / M1cr: the label of ev_grp g is group_labels[g + 1] (2026-10-31)
             args = list(sample = SAMPLE, lag = LAG, variant = VARIANT, model = MODEL, centrality = CENTRALITY, K = K, chains = CHAINS,
                         iter = ITER, warmup = WARMUP, pilot = PILOT, sampled_m = SAMPLED_M, conflict_history = CONFLICT_HISTORY,
