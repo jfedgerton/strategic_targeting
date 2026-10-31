@@ -41,7 +41,7 @@ M1 (`stan/m1_latent_additive.stan`) has state random effects (c_i, a_i) and targ
 | `R/06_context_compare.R`, `R/context_compare.R` | the bilateral vs coalition comparison of one cell's context fits (section 10); CLI and function file |
 | `R/typology.R`, `R/measurement_tests.R` | sourced function files (classification; LOO, holdout, permutation, error inflation) |
 | `R/context_model.R` | sourced function file of the M1c model (section 11): brute-force likelihood for the tests, the stage-b summary table, the typology per group |
-| `R/compile_models.R` | compiles the four Stan programs (`STAN_PROGRAMS` in `spec.R`) into `stan/build/` with source-hash sidecars |
+| `R/compile_models.R` | compiles the five Stan programs (`STAN_PROGRAMS` in `spec.R`) into `stan/build/` with source-hash sidecars |
 | `slurm/` | `00_env.sh`, `01_build.sbatch`, `02_main_grid.sbatch` (+ `submit_main_grid.sh`, the two dependent arrays), `03_post.sbatch`, `04_robustness.sbatch` (+ `submit_robustness.sh`, a preset's M1 cells then its M2 cells), `05_simulations.sbatch`, `08_perm_refit.sbatch` (+ `submit_perm_refit.sh`: the permutation test of one cell (`_dist` or `_dist_major`), the refit mode as an array of one permutation per task with 8 reduce_sum threads per chain, plus a combine job; section 5) |
 | `sim/` | `simulate.R` (functions), `run_sim.R` (one driver, `--task=`), `write_sim_report.R`, `SIM_REPORT.md` (superseded until the rerun); `sim_context_b.R` (one replicate of the M1c recovery on the observed fmid lag-3 design, `--rep=r`), `summarise_context_b.R` (the coverage table over the replicates), `slurm/06_sim_context_b.sbatch` (20 replicates on Roar; section 11) |
 | `tests/` | `Rscript v2/tests/run_tests.R` runs `tests/testthat/*.R` |
@@ -53,7 +53,7 @@ M1 (`stan/m1_latent_additive.stan`) has state random effects (c_i, a_i) and targ
 Three commands. Locally (from the repo root; needs R 4.3 / rstan 2.32, peacesciencer 1.2.0):
 
 ```
-Rscript v2/R/compile_models.R && Rscript v2/R/01_build_data.R        # 1. compile the four Stan programs (about 2 min each, 3 GB) + build (about 3 min)
+Rscript v2/R/compile_models.R && Rscript v2/R/01_build_data.R        # 1. compile the five Stan programs (about 2 min each, 3 GB) + build (about 3 min)
 Rscript v2/R/02_fit_model.R --sample=fmid --lag=3 --model=M1b          # 2. one main cell (add --dry_run=TRUE to validate only)
 Rscript v2/R/03_extract.R --fit=v2/output/fit_fmid_lag3_all_pr_M1b.rds # 3. post: typology; 04_compare.R needs the eight fits of a group
 ```

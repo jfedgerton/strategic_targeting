@@ -745,7 +745,8 @@ blog("duplicate collapse: %d collapsed (initiator, target, year) keys mix a WWII
 roles_src <- roles_pre |> left_join(events |> filter(!escalation) |> select(initiator, target, year, key_dispnum = dispnum), by = c("initiator", "target", "year"))
 stopifnot(!anyNA(roles_src$key_dispnum))
 roles_mixed <- roles_src |> group_by(initiator, target, year) |> summarise(n_src = n(), n_roles = n_distinct(grp_aprime), .groups = "drop")
-roles_ap <- roles_src |> filter(dispnum == key_dispnum) |> select(initiator, target, year, dispnum, grp_aprime, n_co_orig, late_target, orig1_src = orig1, orig2_src = orig2)
+roles_ap <- as.data.frame(roles_src |> filter(dispnum == key_dispnum) |> select(initiator, target, year, dispnum, grp_aprime, n_co_orig, late_target, orig1_src = orig1, orig2_src = orig2))
+attributes(roles_ap) <- attributes(roles_ap)[c("names", "row.names", "class")]   # audit 2026-10-31 (3): no stray build attributes in the file
 stopifnot(nrow(roles_ap) == sum(!events$escalation), !anyDuplicated(paste(roles_ap$initiator, roles_ap$target, roles_ap$year)),
           nrow(anti_join(events |> filter(!escalation), roles_ap, by = c("initiator", "target", "year", "dispnum"))) == 0L)
 blog("roles aprime after the collapse: %d events (alone %d, co-originator %d, joiner %d, target joined late %d); collapsed keys %d, of which their source disputes carry different roles %d (the weight-group dispute decides)",

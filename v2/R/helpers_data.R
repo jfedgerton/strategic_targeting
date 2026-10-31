@@ -613,8 +613,8 @@ aprime_roles <- function(pairs, dd) {
   if (any(vapply(ini$side_set[ok1], `[`, 1L, 1L) != ini$sidea1[ok1])) stop("aprime_roles: the event's (post-flip) sidea1 disagrees with the initiator's COW side in the onset year")
   n_init_switch <- sum(!ok1)
   ## candidate partners: every other ORIGINATOR of the dispute
-  cand <- pr |> select(.e, dispnum, initiator, year, sidea1) |>
-    inner_join(po |> filter(orig == 1L) |> select(dispnum, ccode), by = "dispnum", relationship = "many-to-many") |> filter(ccode != initiator) |>
+  cand <- pr |> select(.e, dispnum, initiator, target, year, sidea1) |>
+    inner_join(po |> filter(orig == 1L) |> select(dispnum, ccode), by = "dispnum", relationship = "many-to-many") |> filter(ccode != initiator, ccode != target) |>   # audit 2026-10-31 (2): the target is never a partner
     left_join(side_y |> select(dispnum, ccode, year, side_set, n_side), by = c("dispnum", "ccode", "year")) |>
     left_join(side_first, by = c("dispnum", "ccode"))
   cand$fallback <- is.na(cand$n_side)

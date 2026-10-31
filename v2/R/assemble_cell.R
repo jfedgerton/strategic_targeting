@@ -722,6 +722,7 @@ assemble_cell <- function(SAMPLE, LAG, VARIANT, CENT = "pr", CONFLICT_HISTORY = 
 assemble_cell_spec <- function(SAMPLE, LAG, spec, data_dir = spec_data_dir(spec, v2_root()), manifest = NULL, model = NULL) {
   stopifnot(is.null(model) || model %in% ALL_MODELS)
   conv <- spec_is_conventional(spec)
+  if (conv && (LAG != 3L || VARIANT != "all")) stop(sprintf("--comparison=conventional is defined on the lag-3 data with all-states choice sets (got lag %s, variant %s)", LAG, VARIANT))   # audit 2026-10-31 (1)
   if (conv) stopifnot(all(vapply(CONVENTIONAL_FIXED, function(nm) identical(spec[[nm]], SPEC_DEFAULTS[[nm]]), logical(1))), is.null(model) || model %in% CONVENTIONAL_MODELS)
   assemble_cell(SAMPLE, LAG, VARIANT, CENTRALITY, CONFLICT_HISTORY, SAMPLED_M, DISTANCE = if (conv) "capital" else spec$distance, CONTIGUITY = spec$contiguity,
                 DY_PEACE_YEARS = DY_PEACE_YEARS, DROP_WW2 = spec$ww2 == "drop", FULL_CONTROLS = spec$controls == "full",

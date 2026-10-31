@@ -20,10 +20,10 @@
 ##     --major=none|joint (one_major / both_major in Z, cowmaj_tm1 in W)  --interact=none|prefixed (four change products in Z)
 ##     --distance=none|capital (2026-10-28: log_capdist in Z, alternatives without a capital distance dropped from both sets; suffix _dist)
 ##     --contiguity=land|none (2026-10-28: contig_land dropped from Z; needs --distance=capital, distance replaces contiguity; suffix _nocontig)
-##     --comparison=none|conventional (PI-approved 2026-10-31, suffix _conv; M1a / M1b / M1c only): W, Z, X fixed to the conventional comparison
+##     --comparison=none|conventional (PI-approved 2026-10-31, suffix _conv; M1a / M1b / M1c / M1cr only): W, Z, X fixed to the conventional comparison
 ##            (W_CONVENTIONAL / Z_CONVENTIONAL of assemble_cell.R, no X: P = 0); carries the distance, the major indicators, contiguity, the
 ##            defense alliance itself (no peace years, PI 2026-10-31), so --controls, --distance, --contiguity, --major, --interact and --changes
-##            are refused with it in any value (parse_spec()); multi_mid_jan is in W for all three models
+##            are refused with it in any value (parse_spec()); multi_mid_jan is in W for all four models
 ##     --roles=stageb|aprime (PI decision 2026-10-31, suffix _aprime; M1c / M1cr only): the stage-2 groups; aprime = 0 alone originator, 1 co-originator,
 ##            2 joiner, 3 target joined late (G = 4; roles_aprime.rds of the build); stageb (default) = bilateral / coalition leader / joiner
 ##     --rho_prior=beta25|flat  --sigma_prior=ln1|ln05 (2026-10-30, prior sensitivity of the jointness result; M1 m / r / a / b only, the rho
