@@ -48,7 +48,7 @@ SPEC_CHOICES <- list(
   changes   = c("raw", "winsor"),                   # initiator and target power changes: as built | winsorised at WINSOR_PROBS of the panel
   rho_prior = c("beta25", "flat"),                  # prior on Sigma's correlation rho (M1 joint models only, 2026-10-30): (rho + 1) / 2 ~ Beta(2.5, 2.5) (main) | Beta(1, 1), uniform on (-1, 1)
   sigma_prior = c("ln1", "ln05"),                   # prior on the tolerance scales sigma_x (M1 family only, 2026-10-30): lognormal(0, 1) (main) | lognormal(0, 0.5)
-  comparison = c("none", "conventional"),           # the conventional comparison specification (PI-approved 2026-10-31): none (main) | conventional = W, Z, X fixed to W_CONVENTIONAL / Z_CONVENTIONAL / no X (P = 0); see below
+  comparison = c("none", "conventional", "directed"), # the conventional comparison specification (PI-approved 2026-10-31): none (main) | conventional = W, Z, X fixed to W_CONVENTIONAL / Z_CONVENTIONAL / no X (P = 0) | directed (PI-approved 2026-11-01) = conventional with the directed Z_DIRECTED; see below
   roles     = c("stageb", "aprime")                 # stage-2 role groups of the M1c / M1cr models (PI decision 2026-10-31): stageb (main) = the 3 stage-b groups (bilateral / leader / joiner) | aprime = 4 groups (alone originator / co-originator / joiner / target joined late; roles_aprime.rds, aprime_roles())
 )
 ## ---- the conventional comparison specification (PI-approved 2026-10-31; switch `comparison`, suffix _conv) --------------------------
@@ -69,6 +69,17 @@ SPEC_CHOICES <- list(
 ## fmid_lag3_all_pr_M1b_noww2_conv, fmid_lag3_all_pr_M1b_conv_w1. 05_robustness.R refuses the switch for every preset (single cells).
 CONVENTIONAL_MODELS <- c("M1a", "M1b", "M1c", "M1cr")       # M1cr (role-specific rho, 2026-10-31) added with its program
 CONVENTIONAL_FIXED  <- c("controls", "distance", "contiguity", "major", "interact", "changes")
+## ---- the directed comparison specification (PI-approved 2026-11-01; comparison = directed, suffix _cdir) ------------------------------
+## Identical to the conventional comparison (same W = W_CONVENTIONAL, no X / P = 0, distance = capital and major = joint fixed internally, lag 3
+## and variant all enforced, the same switches refused in any value: CONVENTIONAL_FIXED) EXCEPT stage-2 Z = Z_DIRECTED (assemble_cell.R):
+## contig_land, log_capdist, tgt_dem, tgt_dem_x_init_dem, alliance_def_off, tgt_major, tgt_major_x_init_major, dy_mid_tm1, log_dy_prior_mids
+## (Pz = 9). In a conditional logit over one initiator's targets an initiator-only attribute cancels, so the conventional joint_dem and
+## one_major / both_major are replaced by the target's own status and its product with the initiator's: tgt_dem = dem2, tgt_dem_x_init_dem =
+## dem2 * dem1 (= joint_dem, asserted), tgt_major = major2, tgt_major_x_init_major = major2 * major1 (= both_major; one_major = tgt + init -
+## 2 tgt init, asserted). Models: DIRECTED_MODELS, i.e. the four M1 models of the conventional spec plus the AME model M2b (no other M2 model);
+## M2b starts from the M1b fit of the SAME directed cell (m1_spec(); 02_fit_model.R asserts it). The suffix _cdir takes the place of _conv in
+## the suffix order (the two values are exclusive), e.g. fmid_lag3_all_pr_M1b_cdir, fmid_lag3_all_pr_M2b_K1_cdir, mid_lag3_all_pr_M1c_cdir_aprime.
+DIRECTED_MODELS <- c("M1a", "M1b", "M1c", "M1cr", "M2b")
 SPEC_DEFAULTS <- lapply(SPEC_CHOICES, function(v) v[1])
 SPEC_DEFAULTS$ame_K <- 2L                            # latent dimensions of the M2 (AME) family; "_K<K>" is always in an M2 cell name
 SPEC_DEFAULTS$tag   <- ""                            # run tag (2026-10-30): "" = no tag (names unchanged); "<alnum>" appends _t<alnum> last
@@ -99,7 +110,7 @@ SPEC_SUFFIX <- list(
   major     = c(joint = "_major"),
   interact  = c(prefixed = "_ix"),
   ## the conventional comparison (2026-10-31) follows the control extensions it replaces (it is refused with any of them) and precedes _w1
-  comparison = c(conventional = "_conv"),
+  comparison = c(conventional = "_conv", directed = "_cdir"),   # directed (2026-11-01): same position, exclusive with _conv
   ## the role coding (2026-10-31) follows the comparison switch: e.g. fmid_lag3_all_pr_M1c_conv_aprime
   roles     = c(aprime = "_aprime"),
   weights   = c(none = "_w1"),
@@ -278,6 +289,12 @@ parse_spec <- function(args = character(0)) {
       stop(sprintf("--%s=%s conflicts with --comparison=conventional, which fixes W, Z and X itself (W_CONVENTIONAL / Z_CONVENTIONAL, no X: distance, majors, contiguity and alliance are part of the spec); leave --%s out", nm, spec[[nm]], nm))
     stopifnot(all(vapply(CONVENTIONAL_FIXED, function(nm) identical(spec[[nm]], SPEC_DEFAULTS[[nm]]), logical(1))))
   }
+  ## the directed comparison (2026-11-01) fixes the same switches as the conventional one, refused the same way (any value, the default included)
+  if (spec$comparison == "directed") {
+    for (nm in CONVENTIONAL_FIXED) if (length(grep(paste0("^--", nm, "="), args)))
+      stop(sprintf("--%s=%s conflicts with --comparison=directed, which fixes W, Z and X itself (W_CONVENTIONAL / Z_DIRECTED, no X: distance, majors, contiguity and alliance are part of the spec); leave --%s out", nm, spec[[nm]], nm))
+    stopifnot(all(vapply(CONVENTIONAL_FIXED, function(nm) identical(spec[[nm]], SPEC_DEFAULTS[[nm]]), logical(1))))
+  }
   ## contiguity = none is only meaningful when the distance replaces it (PI request 2026-10-28): a Z without contiguity AND without distance is refused
   if (spec$contiguity != "land" && spec$distance != "capital") stop(sprintf("--contiguity=%s needs --distance=capital (distance replaces contiguity; got distance=%s)", spec$contiguity, spec$distance))
   ## run tag (2026-10-30): letters and digits only, so the suffix _t<tag> is one unambiguous token of the file name; "" = no tag
@@ -310,12 +327,14 @@ spec_data_dir <- function(spec, root) file.path(root, if (spec$direction == "sid
 spec_string <- function(spec) paste(sprintf("%s=%s", names(spec), unlist(spec)), collapse = " ")
 ## spec_is_conventional(spec): TRUE under --comparison=conventional (a spec saved before 2026-10-31 has no field: not conventional)
 spec_is_conventional <- function(spec) !is.null(spec$comparison) && identical(spec$comparison, "conventional")
+## spec_is_directed(spec): TRUE under --comparison=directed (2026-11-01; a spec saved before has no such value: not directed)
+spec_is_directed <- function(spec) !is.null(spec$comparison) && identical(spec$comparison, "directed")
 ## perm_part_spec_string(spec): the spec string written into the permutation refit parts of 05_robustness.R and checked by its combiner
 ## (audit R1 of b1f0988: the 7c4645e form, without the prior switches and the tag, so parts written by that commit still combine). The
 ## comparison switch (2026-10-31) is dropped at its default for the same reason and KEPT when non-default: it changes W, Z and X, so a
 ## conventional cell's parts must never combine with another cell's (the driver refuses the switch anyway, see 05_robustness.R).
 perm_part_spec_string <- function(spec) {
-  drop <- c(PRIOR_SWITCHES, "tag", if (!spec_is_conventional(spec)) "comparison", if (is.null(spec$roles) || identical(spec$roles, SPEC_DEFAULTS$roles)) "roles")
+  drop <- c(PRIOR_SWITCHES, "tag", if (!spec_is_conventional(spec) && !spec_is_directed(spec)) "comparison", if (is.null(spec$roles) || identical(spec$roles, SPEC_DEFAULTS$roles)) "roles")
   spec_string(spec[setdiff(names(spec), drop)])
 }
 ## spec_coal_col(spec): the events.rds column the context switch filters on ("coal_incl" / "coal_strict")
@@ -333,6 +352,9 @@ cell_name <- function(sample, lag, model, spec) {
   ## the conventional comparison (2026-10-31) is specified for M1a, M1b and M1c only
   if (spec_is_conventional(spec) && !model %in% CONVENTIONAL_MODELS)
     stop(sprintf("cell_name: --comparison=conventional with the model %s (the conventional comparison is specified for %s only)", model, paste(CONVENTIONAL_MODELS, collapse = ", ")))
+  ## the directed comparison (2026-11-01): the conventional models plus the AME model M2b
+  if (spec_is_directed(spec) && !model %in% DIRECTED_MODELS)
+    stop(sprintf("cell_name: --comparison=directed with the model %s (the directed comparison is specified for %s only)", model, paste(DIRECTED_MODELS, collapse = ", ")))
   ## the role coding (2026-10-31) applies to the stage-2 groups of the context models only (no other model sees the groups)
   if (!is.null(spec$roles) && !identical(spec$roles, SPEC_DEFAULTS$roles) && !model %in% CONTEXT_MODELS)
     stop(sprintf("cell_name: --roles=%s with the model %s (the role coding applies to %s only)", spec$roles, model, paste(CONTEXT_MODELS, collapse = ", ")))

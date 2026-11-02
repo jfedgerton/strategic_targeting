@@ -64,6 +64,7 @@
 ##                _dist_major (measurement_<s>_lag<h>_all_pr_M1_dist_major_*). --major without --distance=capital stays refused, as do the
 ##                holdout and inflation tests with it (their rebuilds re-centre W from w_controls() without the switch).
 ##                --comparison=conventional (2026-10-31) is refused by every preset (its six cells are single 02_fit_model.R runs).
+##                --comparison=directed (2026-11-01) is refused by every preset likewise (single 02_fit_model.R cells).
 ##                --tag=<t> and --rho_prior / --sigma_prior (2026-10-30) are refused by every preset: the longer-chain and prior-sensitivity
 ##                refits are single 02_fit_model.R cells (README section 4), and the tests here read the untagged main-program fits.
 ##
@@ -112,6 +113,7 @@ if (!spec_prior_is_main(spec)) stop(sprintf("--rho_prior / --sigma_prior are not
 ## (the refit presets would pass every switch explicitly, which the spec refuses, and perm_error is not wired to its W / Z / X)
 if (!identical(spec$roles, SPEC_DEFAULTS$roles)) stop(sprintf("--roles=%s is not an option of 05_robustness.R (no preset takes the aprime role coding); run its M1c / M1cr cells through 02_fit_model.R directly", spec$roles))
 if (spec_is_conventional(spec)) stop("--comparison=conventional is not an option of 05_robustness.R (no preset takes the conventional comparison); run its cells through 02_fit_model.R --comparison=conventional directly")
+if (spec_is_directed(spec)) stop("--comparison=directed is not an option of 05_robustness.R (no preset takes the directed comparison); run its cells through 02_fit_model.R --comparison=directed directly")
 for (nm in names(ROBUSTNESS_PRESETS[[PRESET]])) spec[[nm]] <- ROBUSTNESS_PRESETS[[PRESET]][[nm]]
 switch_args <- c(sprintf("--%s=%s", names(SPEC_CHOICES), unlist(spec[names(SPEC_CHOICES)])), sprintf("--ame_K=%d", spec$ame_K))
 
@@ -312,7 +314,7 @@ PERM_GRAINSIZE <- choose_grainsize(dat_chk$N1, THREADS)      # = the grainsize o
 ## spec string WITHOUT the 2026-10-30 fields (prior switches, tag) and without the comparison switch at its default (2026-10-31): the driver
 ## refuses non-default values of all three (asserted here once more), and dropping them keeps the string identical to 7c4645e, so parts written
 ## by that commit still combine (audit R1 of b1f0988); a non-default comparison would stay in the string (perm_part_spec_string(), spec.R)
-stopifnot(!spec_is_conventional(spec), spec_prior_is_main(spec), !nzchar(spec_tag(spec)))
+stopifnot(!spec_is_conventional(spec), !spec_is_directed(spec), spec_prior_is_main(spec), !nzchar(spec_tag(spec)))
 part_settings <- data.frame(cell = cell, family = toupper(FAMILY), ame_K = if (FAMILY == "m2") K else NA_integer_, sample = SAMPLE, lag = LAG,
                             spec = perm_part_spec_string(spec), chains = CHAINS, iter = ITER, warmup = WARMUP, v2_seed = V2_SEED,
                             threads_per_chain = THREADS, grainsize = PERM_GRAINSIZE,

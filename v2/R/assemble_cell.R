@@ -73,6 +73,17 @@
 ##                   dch_j_missing leave Z. Requires DISTANCE = "capital", MAJOR = "joint", CONTIGUITY = "land", FULL_CONTROLS = FALSE,
 ##                   INTERACT = "none", CHANGES = "raw" (asserted; parse_spec() refuses those switches on the command line). Nothing else
 ##                   changes (rows, events, weights, groups), so a cell with CONVENTIONAL = FALSE is byte-identical to before.
+##   DIRECTED      = FALSE (every cell before 2026-11-01) | TRUE (the directed comparison, PI-approved 2026-11-01, switch comparison = directed,
+##                   suffix _cdir; assemble_cell_spec() sets it with DISTANCE = "capital" and MAJOR = "joint", and CONVENTIONAL stays FALSE): the
+##                   conventional comparison in every respect (W = W_CONVENTIONAL, no X, the same rows, events, weights, groups and requirements)
+##                   EXCEPT Z = Z_DIRECTED, where joint_dem / one_major / both_major are replaced by the target's own status and its product with
+##                   the initiator's: tgt_dem = dem2, tgt_dem_x_init_dem = dem2 * dem1, tgt_major = major2, tgt_major_x_init_major = major2 * major1.
+##                   dem1 / dem2 and major1 / major2 are the build's dyad-year columns at t-1 (01_build_data.R section 6: dem = polity2 >=
+##                   POLITY_DEM_CUT with polity2 missing -> 0, the coding of joint_dem = dem1 * dem2; major = COW major-power status, missing -> 0,
+##                   the source and timing of major_count = major1 + major2 and of the panel's cowmaj_tm1). Asserted on every assembled row:
+##                   dem1 = the panel's dem_tm1 and major1 = its cowmaj_tm1 (initiator status, uncentred), tgt_dem_x_init_dem = joint_dem,
+##                   one_major = tgt_major + init_major - 2 tgt_major init_major, both_major = tgt_major init_major. The four columns are 0/1 and
+##                   NOT centred (the 0/1 Z convention); each must vary within some IV set and some event-bearing stage-2 set (else stop).
 ##   DROP_WW2, FULL_CONTROLS, EVENT_WEIGHTS: the ww2, controls and weights switches (below).
 ##   CONTEXT_MODEL = FALSE (every model of MODELS) | TRUE (the M1c model of dual typology stage b, 2026-10-27): the build's state-year
 ##                   column multi_mid_jan (a multilateral MID the state had not entered is active at 1 January of t) is appended to W as
@@ -141,6 +152,9 @@ z_columns <- function(CONFLICT_HISTORY = TRUE, DISTANCE = "none", CONTIGUITY = "
 ## (ongoing_tm1, dy_mid_tm1) and the prior-MID counts stay. No X (P = 0). The change columns must appear in none of the three (asserted).
 W_CONVENTIONAL <- c("M_lvl", "R_lvl", "cowmaj_tm1", "dem_tm1", "ongoing_tm1", "log_prior_mids", "log_n_system_tm1", "multi_mid_jan")
 Z_CONVENTIONAL <- c("contig_land", "log_capdist", "joint_dem", "alliance_def_off", "one_major", "both_major", "dy_mid_tm1", "log_dy_prior_mids")
+## the directed comparison (PI-approved 2026-11-01; DIRECTED = TRUE): W = W_CONVENTIONAL, no X, and this Z, exactly in this order (Pz = 9)
+Z_DIRECTED     <- c("contig_land", "log_capdist", "tgt_dem", "tgt_dem_x_init_dem", "alliance_def_off", "tgt_major", "tgt_major_x_init_major", "dy_mid_tm1", "log_dy_prior_mids")
+Z_DIRECTED_TGT <- c("tgt_dem", "tgt_dem_x_init_dem", "tgt_major", "tgt_major_x_init_major")   # the four 0/1 columns formed at assembly (uncentred)
 PEACE_COLUMNS  <- c("log_peace_years", "log_dy_peace_years")
 CHANGE_COLUMNS <- c("dM_i", "dR_i", "dM_j_h", "dRpr_j_h", "dch_j_missing", Z_INTERACT)
 ## continuous Z columns that assemble_cell() centres over the assembled alternative rows (the 0/1 indicators, dy_mid_tm1
@@ -159,7 +173,7 @@ assemble_cell <- function(SAMPLE, LAG, VARIANT, CENT = "pr", CONFLICT_HISTORY = 
                           DISTANCE = "none", CONTIGUITY = "land", DY_PEACE_YEARS = FALSE, DROP_WW2 = FALSE, FULL_CONTROLS = FALSE,
                           EVENT_WEIGHTS = "dispute", PAIRS = "all", CHANGES = "raw", CONTEXT = "all", COAL_TIES = "inclusive", COAL_DROP = "none",
                           MAJOR = "none", INTERACT = "none", ROLES = "stageb",
-                          CONTEXT_MODEL = FALSE, CONVENTIONAL = FALSE, data_dir = file.path(v2_root(), "data"), manifest = NULL) {
+                          CONTEXT_MODEL = FALSE, CONVENTIONAL = FALSE, DIRECTED = FALSE, data_dir = file.path(v2_root(), "data"), manifest = NULL) {
   stopifnot(SAMPLE %in% c("mid", "fmid", "fmidcow", "fmidub", "war"), LAG %in% c(1L, 3L, 5L, 10L), VARIANT %in% c("all", "polrel"), CENT %in% c("pr", "eig"),
             EVENT_WEIGHTS %in% c("dispute", "none"), PAIRS %in% c("all", "originators", "joiners"), CHANGES %in% c("raw", "winsor"),
             CONTEXT %in% c("all", "bilateral", "coalition"), COAL_TIES %in% c("inclusive", "strict"), COAL_DROP %in% c("none", "top3"),
@@ -172,14 +186,20 @@ assemble_cell <- function(SAMPLE, LAG, VARIANT, CENT = "pr", CONFLICT_HISTORY = 
   ## the conventional comparison (2026-10-31) carries the distance and the major indicators and nothing of the other control extensions
   if (CONVENTIONAL && !(DISTANCE == "capital" && MAJOR == "joint" && CONTIGUITY == "land" && !FULL_CONTROLS && INTERACT == "none" && CHANGES == "raw"))
     stop(sprintf("CONVENTIONAL = TRUE needs DISTANCE = capital, MAJOR = joint, CONTIGUITY = land, FULL_CONTROLS = FALSE, INTERACT = none, CHANGES = raw (got %s, %s, %s, %s, %s, %s); assemble_cell_spec() sets them from the switch", DISTANCE, MAJOR, CONTIGUITY, FULL_CONTROLS, INTERACT, CHANGES))
+  ## the directed comparison (2026-11-01): the same requirements; exclusive with CONVENTIONAL. FIXED_WZX = either spec (W_CONVENTIONAL, no X)
+  stopifnot(is.logical(DIRECTED), length(DIRECTED) == 1L, !is.na(DIRECTED))
+  if (DIRECTED && CONVENTIONAL) stop("DIRECTED = TRUE and CONVENTIONAL = TRUE are exclusive (comparison = directed | conventional)")
+  if (DIRECTED && !(DISTANCE == "capital" && MAJOR == "joint" && CONTIGUITY == "land" && !FULL_CONTROLS && INTERACT == "none" && CHANGES == "raw"))
+    stop(sprintf("DIRECTED = TRUE needs DISTANCE = capital, MAJOR = joint, CONTIGUITY = land, FULL_CONTROLS = FALSE, INTERACT = none, CHANGES = raw (got %s, %s, %s, %s, %s, %s); assemble_cell_spec() sets them from the switch", DISTANCE, MAJOR, CONTIGUITY, FULL_CONTROLS, INTERACT, CHANGES))
+  FIXED_WZX <- CONVENTIONAL || DIRECTED
   ## M1c outside the conventional comparison: the main Z, the minimal W (its refusals of 2026-10-27); under CONVENTIONAL the spec defines W / Z for M1c too
-  if (CONTEXT_MODEL && !CONVENTIONAL && DISTANCE != "none") stop("CONTEXT_MODEL (M1c) with DISTANCE != none is not specified; run M1c with DISTANCE = none")
-  if (CONTEXT_MODEL && !CONVENTIONAL && CONTIGUITY != "land") stop("CONTEXT_MODEL (M1c) with CONTIGUITY != land is not specified; run M1c with CONTIGUITY = land")
+  if (CONTEXT_MODEL && !FIXED_WZX && DISTANCE != "none") stop("CONTEXT_MODEL (M1c) with DISTANCE != none is not specified; run M1c with DISTANCE = none")
+  if (CONTEXT_MODEL && !FIXED_WZX && CONTIGUITY != "land") stop("CONTEXT_MODEL (M1c) with CONTIGUITY != land is not specified; run M1c with CONTIGUITY = land")
   if (COAL_DROP != "none" && CONTEXT != "coalition") stop("COAL_DROP = top3 needs CONTEXT = coalition")
   if (CONTEXT_MODEL && FULL_CONTROLS) stop("CONTEXT_MODEL (M1c) is defined on the minimal control set only (FULL_CONTROLS = TRUE not supported)")
   ## merge 2026-10-27: the M1c model and the major / interact switches were developed independently; their combination is not specified
   ## (W would carry cowmaj_tm1 before multi_mid_jan, Z the extra columns), so it is refused here until the PI decides
-  if (CONTEXT_MODEL && !CONVENTIONAL && (MAJOR != "none" || INTERACT != "none")) stop("CONTEXT_MODEL (M1c) with MAJOR != none or INTERACT != none is not specified; run M1c with MAJOR = none, INTERACT = none")
+  if (CONTEXT_MODEL && !FIXED_WZX && (MAJOR != "none" || INTERACT != "none")) stop("CONTEXT_MODEL (M1c) with MAJOR != none or INTERACT != none is not specified; run M1c with MAJOR = none, INTERACT = none")
   manifest_path <- file.path(data_dir, "manifest.csv")
   stopifnot(file.exists(manifest_path))
   if (is.null(manifest)) { manifest <- read.csv(manifest_path, stringsAsFactors = FALSE); manifest_source <- "read now" }
@@ -242,13 +262,13 @@ assemble_cell <- function(SAMPLE, LAG, VARIANT, CENT = "pr", CONFLICT_HISTORY = 
   sy$state_idx <- match(sy$ccode, state_codes)
   ctrl_w <- w_controls(CONFLICT_HISTORY, FULL_CONTROLS, MAJOR = MAJOR); ctrl_x <- x_controls(CONFLICT_HISTORY, FULL_CONTROLS)
   stopifnot(!anyDuplicated(ctrl_w))
-  if (CONTEXT_MODEL || CONVENTIONAL) {
+  if (CONTEXT_MODEL || FIXED_WZX) {
     ## stage b: the outcome-blind multilateral-opportunity control, LAST in W (0/1 from the build; grand-centred below like the other indicators);
     ## under the conventional comparison (2026-10-31) it is in W for every model, through W_CONVENTIONAL below
     if (!"multi_mid_jan" %in% names(sy)) stop("CONTEXT_MODEL (M1c) / CONVENTIONAL need the panel column multi_mid_jan (rebuild the data with 01_build_data.R of 2026-10-27 or later)")
     stopifnot(!anyNA(sy$multi_mid_jan), all(sy$multi_mid_jan %in% c(0, 1)))
-    logf("multi_mid_jan (stage b, %s): mean %.4f over %d state-years (%d with a multilateral MID they had not entered active at 1 January of t); among initiators (y1 = 1) %.4f", if (CONVENTIONAL) "every model of the conventional comparison" else "M1c", mean(sy$multi_mid_jan), nrow(sy), sum(sy$multi_mid_jan), mean(sy$multi_mid_jan[sy$y1 == 1L]))
-    if (!CONVENTIONAL) ctrl_w <- c(ctrl_w, "multi_mid_jan")
+    logf("multi_mid_jan (stage b, %s): mean %.4f over %d state-years (%d with a multilateral MID they had not entered active at 1 January of t); among initiators (y1 = 1) %.4f", if (CONVENTIONAL) "every model of the conventional comparison" else if (DIRECTED) "every model of the directed comparison" else "M1c", mean(sy$multi_mid_jan), nrow(sy), sum(sy$multi_mid_jan), mean(sy$multi_mid_jan[sy$y1 == 1L]))
+    if (!FIXED_WZX) ctrl_w <- c(ctrl_w, "multi_mid_jan")
     stopifnot(!anyDuplicated(ctrl_w))
   }
   if (CONVENTIONAL) {
@@ -258,6 +278,15 @@ assemble_cell <- function(SAMPLE, LAG, VARIANT, CENT = "pr", CONFLICT_HISTORY = 
     logf("conventional comparison (2026-10-31): W = %s (P1 = %d); X = none (P = 0); neither the power changes nor the peace years enter",
          paste(ctrl_w, collapse = ","), length(ctrl_w))
   }
+  if (DIRECTED) {
+    ## the directed comparison (PI-approved 2026-11-01): the conventional W list and no X, exactly as under CONVENTIONAL
+    ctrl_w <- W_CONVENTIONAL; ctrl_x <- character(0)
+    stopifnot(!anyDuplicated(ctrl_w), all(ctrl_w %in% names(sy)), "cowmaj_tm1" %in% ctrl_w, "multi_mid_jan" %in% ctrl_w, !any(CHANGE_COLUMNS %in% ctrl_w), !any(PEACE_COLUMNS %in% ctrl_w))
+    logf("directed comparison (2026-11-01): W = %s (P1 = %d; the conventional W); X = none (P = 0); neither the power changes nor the peace years enter",
+         paste(ctrl_w, collapse = ","), length(ctrl_w))
+  }
+  ## directed (2026-11-01): the initiator's UNCENTRED status at t-1, kept before the grand-centring below for the identity checks of the Z columns
+  init_raw <- if (DIRECTED) sy |> transmute(sy_row = row_number(), dem_tm1_raw = dem_tm1, cowmaj_tm1_raw = cowmaj_tm1) else NULL
   ctrl_sy <- union(ctrl_w, ctrl_x)
   ## major = joint (2026-10-27): the initiator's own major-power indicator at t-1 enters W (grand-centred below like dem_tm1 and ongoing_tm1);
   ## logged BEFORE the centring with its correlation with the material level M_lvl, which it is bound to track
@@ -265,7 +294,7 @@ assemble_cell <- function(SAMPLE, LAG, VARIANT, CENT = "pr", CONFLICT_HISTORY = 
     stopifnot("cowmaj_tm1" %in% ctrl_w, "cowmaj_tm1" %in% names(sy), all(sy$cowmaj_tm1 %in% c(0L, 1L)))
     if (length(unique(sy$cowmaj_tm1)) < 2) stop("major = joint: cowmaj_tm1 is constant over the stage-1 panel of this cell; it cannot enter W")
     logf("major = joint: cowmaj_tm1 in W (%s): mean %.4f over %d state-years (%d major-power state-years); cor(cowmaj_tm1, M_lvl) = %.3f; grand-centred like the other 0/1 W controls",
-         if (CONVENTIONAL) "in W_CONVENTIONAL" else if (FULL_CONTROLS) "appended to the full controls" else "appended to the minimal controls", mean(sy$cowmaj_tm1), nrow(sy), sum(sy$cowmaj_tm1), cor(sy$cowmaj_tm1, sy$M_lvl))
+         if (FIXED_WZX) "in W_CONVENTIONAL" else if (FULL_CONTROLS) "appended to the full controls" else "appended to the minimal controls", mean(sy$cowmaj_tm1), nrow(sy), sum(sy$cowmaj_tm1), cor(sy$cowmaj_tm1, sy$M_lvl))
   }
   ## centre every stage-1 / mu control that enters W or X (the 0/1 indicators as well as the conflict-history counts; PI
   ## decisions 2026-10-23 / 2026-10-24) so that alpha0 in stage 1 is the log-odds at zero power change and average
@@ -281,14 +310,14 @@ assemble_cell <- function(SAMPLE, LAG, VARIANT, CENT = "pr", CONFLICT_HISTORY = 
   stopifnot(all(abs(colMeans(as.matrix(sy[, ctrl_cent, drop = FALSE]))) < 1e-8), all(is.finite(as.matrix(sy[, ctrl_sy, drop = FALSE]))))
   if (any(W_LEVELS %in% ctrl_sy)) logf("power levels in W (D2, within-year centred over all states with positions, gap-scaled, NOT grand-centred): M_lvl mean %.4f SD %.3f, R_lvl mean %.4f SD %.3f",
                                         mean(sy$M_lvl), sd(sy$M_lvl), mean(sy$R_lvl), sd(sy$R_lvl))
-  if (CONVENTIONAL) {
-    W_cols <- ctrl_w; X_cols <- character(0)           # conventional comparison (2026-10-31): no power changes in W, no X (P = 0)
+  if (FIXED_WZX) {
+    W_cols <- ctrl_w; X_cols <- character(0)           # conventional (2026-10-31) / directed (2026-11-01) comparison: no power changes in W, no X (P = 0)
     stopifnot(identical(W_cols, W_CONVENTIONAL), length(X_cols) == 0L)
   } else {
     W_cols <- c("dM_i", "dR_i", ctrl_w)      # PI decision 2026-10-22: initiator power changes also enter stage 1 directly
     X_cols <- c("dM_i", "dR_i", ctrl_x)      # power changes only (both control sets)
   }
-  logf("control set: %s%s; W = %s; X = %s", if (CONVENTIONAL) "CONVENTIONAL comparison (2026-10-31; W_CONVENTIONAL, Z_CONVENTIONAL, no X)" else if (FULL_CONTROLS) "FULL (main + log_peace_years in W, alliance_def_off + log_dy_peace_years in Z; 2026-10-27)" else "MINIMAL (main)", if (CONTEXT_MODEL && !CONVENTIONAL) " + multi_mid_jan (M1c)" else "", paste(W_cols, collapse = ","), if (length(X_cols)) paste(X_cols, collapse = ",") else "(none)")
+  logf("control set: %s%s; W = %s; X = %s", if (CONVENTIONAL) "CONVENTIONAL comparison (2026-10-31; W_CONVENTIONAL, Z_CONVENTIONAL, no X)" else if (DIRECTED) "DIRECTED comparison (2026-11-01; W_CONVENTIONAL, Z_DIRECTED, no X)" else if (FULL_CONTROLS) "FULL (main + log_peace_years in W, alliance_def_off + log_dy_peace_years in Z; 2026-10-27)" else "MINIMAL (main)", if (CONTEXT_MODEL && !FIXED_WZX) " + multi_mid_jan (M1c)" else "", paste(W_cols, collapse = ","), if (length(X_cols)) paste(X_cols, collapse = ",") else "(none)")
   
   ## ---- alternatives -----------------------------------------------------------------------------
   sy_key <- sy |> transmute(ccode1 = ccode, year, sy_row = row_number())
@@ -370,6 +399,30 @@ assemble_cell <- function(SAMPLE, LAG, VARIANT, CENT = "pr", CONFLICT_HISTORY = 
     stopifnot(identical(Z_cols, Z_CONVENTIONAL), !any(CHANGE_COLUMNS %in% Z_cols), !any(PEACE_COLUMNS %in% Z_cols), !anyNA(as.matrix(alts[, Z_cols])))
     logf("conventional comparison (2026-10-31): Z = %s (Pz = %d; no peace years; dch_j_missing is %s in this cell and NOT in Z)",
          paste(Z_cols, collapse = ","), length(Z_cols), if (target_missing) "non-constant" else "constant")
+  } else if (DIRECTED) {
+    ## the directed comparison (PI-approved 2026-11-01): the target's own democracy / major-power status and its product with the initiator's,
+    ## from the build's dyad-year columns at t-1 (dem1 / dem2, major1 / major2: the coding behind joint_dem and major_count), 0/1, uncentred
+    stopifnot("alliance_def_off" %in% names(alts), !anyNA(alts$alliance_def_off), all(alts$alliance_def_off %in% c(0L, 1L)))
+    miss <- setdiff(c("dem1", "dem2", "major1", "major2", "joint_dem", "major_count", "one_major", "both_major"), names(alts))
+    if (length(miss)) stop(sprintf("directed comparison: the alternatives lack %s (dem1 / dem2 / major1 / major2 are written by 01_build_data.R section 6; one_major / both_major by MAJOR = joint)", paste(miss, collapse = ", ")))
+    for (cc in c("dem1", "dem2", "major1", "major2", "joint_dem")) if (anyNA(alts[[cc]]) || !all(alts[[cc]] %in% c(0L, 1L))) stop(sprintf("directed comparison: %s must be 0/1 without NA", cc))
+    alts <- alts |> mutate(tgt_dem = as.integer(dem2), tgt_dem_x_init_dem = as.integer(dem2 * dem1), tgt_major = as.integer(major2), tgt_major_x_init_major = as.integer(major2 * major1))
+    ## the initiator's status in the alternatives equals the panel's (same coding and timing as the W controls dem_tm1 / cowmaj_tm1), uncentred
+    stopifnot(!is.null(init_raw), nrow(init_raw) == nrow(sy), all(alts$sy_row %in% init_raw$sy_row))
+    if (!all(alts$dem1 == init_raw$dem_tm1_raw[alts$sy_row])) stop(sprintf("directed comparison: dem1 differs from the panel's dem_tm1 on %d alternative rows", sum(alts$dem1 != init_raw$dem_tm1_raw[alts$sy_row])))
+    if (!all(alts$major1 == init_raw$cowmaj_tm1_raw[alts$sy_row])) stop(sprintf("directed comparison: major1 differs from the panel's cowmaj_tm1 on %d alternative rows", sum(alts$major1 != init_raw$cowmaj_tm1_raw[alts$sy_row])))
+    ## the exact identities with the conventional columns, on every row
+    if (!all(alts$tgt_dem_x_init_dem == alts$joint_dem)) stop(sprintf("directed comparison: tgt_dem_x_init_dem != joint_dem on %d rows", sum(alts$tgt_dem_x_init_dem != alts$joint_dem)))
+    if (!all(alts$one_major == alts$tgt_major + alts$major1 - 2L * alts$tgt_major * alts$major1)) stop("directed comparison: one_major != tgt_major + init_major - 2 tgt_major init_major on some rows")
+    if (!all(alts$both_major == alts$tgt_major_x_init_major)) stop("directed comparison: both_major != tgt_major x init_major on some rows")
+    stopifnot(all(alts$major_count == alts$major1 + alts$major2))
+    Z_cols <- Z_DIRECTED
+    stopifnot(identical(Z_cols, Z_DIRECTED), length(Z_cols) == 9L, !any(CHANGE_COLUMNS %in% Z_cols), !any(PEACE_COLUMNS %in% Z_cols), !any(c("joint_dem", Z_MAJOR) %in% Z_cols),
+              !any(Z_DIRECTED_TGT %in% Z_CENTRED), !anyNA(as.matrix(alts[, Z_cols])))
+    for (cc in Z_DIRECTED_TGT) stopifnot(all(alts[[cc]] %in% c(0L, 1L)))
+    logf("directed comparison (2026-11-01): Z = %s (Pz = %d; no peace years; dch_j_missing is %s in this cell and NOT in Z); alternative rows with tgt_dem %.4f, tgt_dem_x_init_dem %.4f, tgt_major %.4f, tgt_major_x_init_major %.4f (uncentred 0/1); identities with joint_dem / one_major / both_major hold on all %d rows",
+         paste(Z_cols, collapse = ","), length(Z_cols), if (target_missing) "non-constant" else "constant",
+         mean(alts$tgt_dem), mean(alts$tgt_dem_x_init_dem), mean(alts$tgt_major), mean(alts$tgt_major_x_init_major), nrow(alts))
   } else {
     Z_cols <- z_columns(CONFLICT_HISTORY, DISTANCE, CONTIGUITY, TARGET_MISSING = target_missing, DY_PEACE_YEARS = DY_PEACE_YEARS, FULL_CONTROLS = FULL_CONTROLS,
                         MAJOR = MAJOR, INTERACT = INTERACT)
@@ -681,6 +734,23 @@ assemble_cell <- function(SAMPLE, LAG, VARIANT, CENT = "pr", CONFLICT_HISTORY = 
     major_stats$n_events <- setNames(c(sum(mc_ev == 0L), sum(mc_ev == 1L), sum(mc_ev == 2L)), c("zero", "one", "both"))
     major_stats$var_iv_sets <- v_iv; major_stats$var_s2_sets <- v_s2
   }
+  ## directed (2026-11-01): each of the four target columns is identified only by variation INSIDE a choice set, so each must vary within some
+  ## IV set and within some stage-2 set of an initiating state-year with a usable event (as for the major indicators); otherwise the run stops
+  directed_stats <- NULL
+  if (DIRECTED) {
+    var_dir <- function(rows) {
+      g <- alts[rows, c("sy_row", Z_DIRECTED_TGT)] |> group_by(sy_row) |> summarise(across(all_of(Z_DIRECTED_TGT), ~ n_distinct(.x) > 1L), .groups = "drop")
+      c(n_sets = nrow(g), vapply(Z_DIRECTED_TGT, function(cc) sum(g[[cc]]), 1L))
+    }
+    d_iv <- var_dir(alts$in_iv == 1L); d_s2 <- var_dir(alts$in_s2 == 1L & alts$sy_row %in% ev$sy_row)
+    logf("directed comparison: within-choice-set variation: IV sets (all %d) with variation in %s; event-bearing stage-2 sets (%d) in %s", d_iv[["n_sets"]],
+         paste(sprintf("%s %d", Z_DIRECTED_TGT, d_iv[Z_DIRECTED_TGT]), collapse = ", "), d_s2[["n_sets"]], paste(sprintf("%s %d", Z_DIRECTED_TGT, d_s2[Z_DIRECTED_TGT]), collapse = ", "))
+    if (any(d_iv[Z_DIRECTED_TGT] == 0L) || any(d_s2[Z_DIRECTED_TGT] == 0L))
+      stop(sprintf("directed comparison: a target column does not vary within any choice set (IV sets: %s; event-bearing stage-2 sets: %s); it is not identified in this cell",
+                   paste(sprintf("%s %d", Z_DIRECTED_TGT, d_iv[Z_DIRECTED_TGT]), collapse = ", "), paste(sprintf("%s %d", Z_DIRECTED_TGT, d_s2[Z_DIRECTED_TGT]), collapse = ", ")))
+    directed_stats <- list(var_iv_sets = d_iv, var_s2_sets = d_s2, share_alts = vapply(Z_DIRECTED_TGT, function(cc) mean(alts[[cc]]), 0),
+                           share_events = vapply(Z_DIRECTED_TGT, function(cc) mean(alts[[cc]][ev$alt_row]), 0))
+  }
   n_orphan <- sum(sy$y1 == 1L & !(seq_len(nrow(sy)) %in% ev$sy_row))
   logf("state-years with y1 = 1 but no usable stage-2 event (kept in stage 1 only): %d", n_orphan)
   ## stage-2 event weights (D8): w_<sample> from the build (or 1 under EVENT_WEIGHTS = "none"); build_stan_data() passes them as ev_w
@@ -705,6 +775,10 @@ assemble_cell <- function(SAMPLE, LAG, VARIANT, CENT = "pr", CONFLICT_HISTORY = 
     stopifnot(length(x_ref) == 0L, identical(W_cols, W_CONVENTIONAL), identical(Z_cols, Z_CONVENTIONAL), length(X_cols) == 0L,
               !any(CHANGE_COLUMNS %in% c(W_cols, X_cols, Z_cols)), !any(PEACE_COLUMNS %in% c(W_cols, Z_cols)), !anyNA(as.matrix(sy[, W_cols])), !anyNA(as.matrix(alts[, Z_cols])))
     logf("x_ref: none (P = 0 under the conventional comparison; mu_state = mu0 + a_i)")
+  } else if (DIRECTED) {
+    stopifnot(length(x_ref) == 0L, identical(W_cols, W_CONVENTIONAL), identical(Z_cols, Z_DIRECTED), length(X_cols) == 0L,
+              !any(CHANGE_COLUMNS %in% c(W_cols, X_cols, Z_cols)), !any(PEACE_COLUMNS %in% c(W_cols, Z_cols)), !anyNA(as.matrix(sy[, W_cols])), !anyNA(as.matrix(alts[, Z_cols])))
+    logf("x_ref: none (P = 0 under the directed comparison; mu_state = mu0 + a_i)")
   } else logf("x_ref (mean X over initiating state-years): %s", paste(sprintf("%s=%.3f", X_cols, x_ref), collapse = ", "))
   list(sy = sy, alts = alts, ev = ev, W_cols = W_cols, X_cols = X_cols, Z_cols = Z_cols, state_codes = state_codes,
        x_ref = x_ref, n_full = n_full, sampled = sampled, n_orphan = n_orphan, manifest_path = manifest_path,
@@ -713,7 +787,7 @@ assemble_cell <- function(SAMPLE, LAG, VARIANT, CENT = "pr", CONFLICT_HISTORY = 
        pairs = PAIRS, pairs_weights = pairs_w, changes = CHANGES, winsor = winsor, context = CONTEXT, coal_ties = COAL_TIES, coal_drop = COAL_DROP, context_top3 = context_top3,
        n_context_dropped = n_context_dropped, n_context_split_groups = n_split_groups, context_model = CONTEXT_MODEL, group_table = group_table,
        major = MAJOR, major_stats = major_stats, interact = INTERACT, distance = DISTANCE, distance_stats = distance_stats, contiguity = CONTIGUITY,
-       conventional = CONVENTIONAL, roles = ROLES)
+       conventional = CONVENTIONAL, roles = ROLES, directed = DIRECTED, directed_stats = directed_stats)
 }
 ## assemble_cell_spec(SAMPLE, LAG, spec, ...): the main-specification constants of spec.R plus the switches of `spec`
 ## model = NULL or a model code: the M1c model (CONTEXT_MODELS) switches CONTEXT_MODEL on; every other model leaves it off
@@ -724,10 +798,14 @@ assemble_cell_spec <- function(SAMPLE, LAG, spec, data_dir = spec_data_dir(spec,
   conv <- spec_is_conventional(spec)
   if (conv && (LAG != 3L || VARIANT != "all")) stop(sprintf("--comparison=conventional is defined on the lag-3 data with all-states choice sets (got lag %s, variant %s)", LAG, VARIANT))   # audit 2026-10-31 (1)
   if (conv) stopifnot(all(vapply(CONVENTIONAL_FIXED, function(nm) identical(spec[[nm]], SPEC_DEFAULTS[[nm]]), logical(1))), is.null(model) || model %in% CONVENTIONAL_MODELS)
-  assemble_cell(SAMPLE, LAG, VARIANT, CENTRALITY, CONFLICT_HISTORY, SAMPLED_M, DISTANCE = if (conv) "capital" else spec$distance, CONTIGUITY = spec$contiguity,
+  ## the directed comparison (2026-11-01): the same lag / variant rule and the same internal DISTANCE / MAJOR mapping; models DIRECTED_MODELS
+  dirc <- spec_is_directed(spec)
+  if (dirc && (LAG != 3L || VARIANT != "all")) stop(sprintf("--comparison=directed is defined on the lag-3 data with all-states choice sets (got lag %s, variant %s)", LAG, VARIANT))
+  if (dirc) stopifnot(!conv, all(vapply(CONVENTIONAL_FIXED, function(nm) identical(spec[[nm]], SPEC_DEFAULTS[[nm]]), logical(1))), is.null(model) || model %in% DIRECTED_MODELS)
+  assemble_cell(SAMPLE, LAG, VARIANT, CENTRALITY, CONFLICT_HISTORY, SAMPLED_M, DISTANCE = if (conv || dirc) "capital" else spec$distance, CONTIGUITY = spec$contiguity,
                 DY_PEACE_YEARS = DY_PEACE_YEARS, DROP_WW2 = spec$ww2 == "drop", FULL_CONTROLS = spec$controls == "full",
                 EVENT_WEIGHTS = spec$weights, PAIRS = spec$pairs, CHANGES = spec$changes, CONTEXT = spec$context, COAL_TIES = spec$coal_ties,
-                COAL_DROP = spec$coal_drop, MAJOR = if (conv) "joint" else spec$major, INTERACT = spec$interact,
-                CONTEXT_MODEL = !is.null(model) && model %in% CONTEXT_MODELS, CONVENTIONAL = conv,
+                COAL_DROP = spec$coal_drop, MAJOR = if (conv || dirc) "joint" else spec$major, INTERACT = spec$interact,
+                CONTEXT_MODEL = !is.null(model) && model %in% CONTEXT_MODELS, CONVENTIONAL = conv, DIRECTED = dirc,
                 ROLES = if (is.null(spec$roles)) "stageb" else spec$roles, data_dir = data_dir, manifest = manifest)
 }

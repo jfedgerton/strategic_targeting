@@ -10,7 +10,7 @@ toy_joiners_conv <- function(e) e |> mutate(orig1 = ifelse(initiator == 30L & ta
 test_that("spec: comparison defaults to none; conventional adds _conv after _ix and before _w1; the switches it fixes are refused in any value; models M1a / M1b / M1c only", {
   main <- parse_spec(character(0))
   expect_equal(main$comparison, "none"); expect_true(spec_is_main(main)); expect_false(spec_is_conventional(main)); expect_false(spec_is_conventional(NULL)); expect_false(spec_is_conventional(list()))
-  expect_equal(SPEC_CHOICES$comparison, c("none", "conventional")); expect_equal(SPEC_SUFFIX$comparison, c(conventional = "_conv"))
+  expect_equal(SPEC_CHOICES$comparison, c("none", "conventional", "directed")); expect_equal(SPEC_SUFFIX$comparison, c(conventional = "_conv", directed = "_cdir"))   # directed added 2026-11-01 (test_directed.R)
   expect_equal(CONVENTIONAL_MODELS, c("M1a", "M1b", "M1c", "M1cr")); expect_equal(CONVENTIONAL_FIXED, c("controls", "distance", "contiguity", "major", "interact", "changes"))
   conv <- parse_spec("--comparison=conventional")
   expect_true(spec_is_conventional(conv)); expect_false(spec_is_main(conv)); expect_equal(spec_suffix(conv), "_conv")
@@ -29,7 +29,7 @@ test_that("spec: comparison defaults to none; conventional adds _conv after _ix 
   ok <- parse_spec(c("--comparison=conventional", "--pairs=originators", "--context=coalition", "--coal_drop=top3", "--ww2=drop", "--weights=none", "--direction=sideA"))
   expect_true(spec_is_conventional(ok)); expect_equal(spec_suffix(ok), "_orig_co_drop3_noww2_conv_w1_sideA")
   ## bad values, the bare flag, and the other models
-  expect_error(parse_spec("--comparison=TRUE"), "--comparison must be one of none | conventional", fixed = TRUE); expect_error(parse_spec("--comparison"), "--comparison needs a value", fixed = TRUE)
+  expect_error(parse_spec("--comparison=TRUE"), "--comparison must be one of none | conventional | directed", fixed = TRUE); expect_error(parse_spec("--comparison"), "--comparison needs a value", fixed = TRUE)
   for (m in c("M1m", "M1r", "M2a", "M2b", "M2m", "M2r")) expect_error(cell_name("fmid", 3L, m, conv), "the conventional comparison is specified for M1a, M1b, M1c, M1cr only", fixed = TRUE, info = m)
   expect_error(cell_name("fmid", 3L, "M1a", parse_spec(c("--comparison=conventional", "--rho_prior=flat"))), "rho prior applies to the joint model M1b only")   # the existing rule still holds
   ## the permutation part string: the 7c4645e form at the default, the switch kept when on
@@ -95,9 +95,9 @@ test_that("assembly on the toy cell: exact W / Z / X under M1a, M1b, M1c and M1c
 
 test_that("the three M1 Stan programs take P = 0: a tiny fit of m1_latent_additive (a and b) and m1_context on the conventional toy cell; the existing programs are unchanged elsewhere", {
   sm_add <- skip_if_no_build("m1_latent_additive"); sm_ctx <- skip_if_no_build("m1_context"); sm_rho <- skip_if_no_build("m1_context_rho")
-  ## the sources: P >= 0 in the three M1 programs, P >= 1 still in m2_ame.stan (not part of this build)
+  ## the sources: P >= 0 in the three M1 programs; m2_ame.stan takes P >= 0 since 2026-11-01 (the directed comparison's M2b, test_directed.R)
   for (m in c("m1_latent_additive", "m1_latent_prior", "m1_context", "m1_context_rho")) expect_true(any(grepl("^  int<lower=0> P;", readLines(file.path(root, "stan", paste0(m, ".stan"))))), info = m)
-  expect_true(any(grepl("^  int<lower=1> P;", readLines(file.path(root, "stan", "m2_ame.stan")))))
+  expect_true(any(grepl("^  int<lower=0> P;", readLines(file.path(root, "stan", "m2_ame.stan")))))
   td <- write_toy_cell(tempfile("toycell"), events_edit = toy_joiners_conv)
   conv <- parse_spec("--comparison=conventional")
   A <- quiet(assemble_cell_spec("mid", 3L, conv, data_dir = td, model = "M1c"))
