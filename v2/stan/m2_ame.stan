@@ -125,7 +125,7 @@ data {
   int<lower=1> N2;
   int<lower=0> E;
   int<lower=0> P1;
-  int<lower=1> P;
+  int<lower=0> P;                       // 0 = no X (directed comparison, 2026-11-01: beta is 0 x D, mu = mu0 + a_i)
   int<lower=0> Pz;
   array[N1] int<lower=0, upper=1> y1;
   array[N1] int<lower=1, upper=S> sy_state;
