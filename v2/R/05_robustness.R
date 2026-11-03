@@ -65,6 +65,7 @@
 ##                holdout and inflation tests with it (their rebuilds re-centre W from w_controls() without the switch).
 ##                --comparison=conventional (2026-10-31) is refused by every preset (its six cells are single 02_fit_model.R runs).
 ##                --comparison=directed (2026-11-01) is refused by every preset likewise (single 02_fit_model.R cells).
+##                --mu_shift=traits and the model M1bz in --cells (2026-11-02) are refused by every preset likewise (single directed cells).
 ##                --tag=<t> and --rho_prior / --sigma_prior (2026-10-30) are refused by every preset: the longer-chain and prior-sensitivity
 ##                refits are single 02_fit_model.R cells (README section 4), and the tests here read the untagged main-program fits.
 ##
@@ -114,6 +115,9 @@ if (!spec_prior_is_main(spec)) stop(sprintf("--rho_prior / --sigma_prior are not
 if (!identical(spec$roles, SPEC_DEFAULTS$roles)) stop(sprintf("--roles=%s is not an option of 05_robustness.R (no preset takes the aprime role coding); run its M1c / M1cr cells through 02_fit_model.R directly", spec$roles))
 if (spec_is_conventional(spec)) stop("--comparison=conventional is not an option of 05_robustness.R (no preset takes the conventional comparison); run its cells through 02_fit_model.R --comparison=conventional directly")
 if (spec_is_directed(spec)) stop("--comparison=directed is not an option of 05_robustness.R (no preset takes the directed comparison); run its cells through 02_fit_model.R --comparison=directed directly")
+## the ideal-point shifters and the rho-regression model M1bz (2026-11-02) are single directed 02_fit_model.R cells: no preset takes them
+if (!identical(spec$mu_shift, SPEC_DEFAULTS$mu_shift)) stop(sprintf("--mu_shift=%s is not an option of 05_robustness.R (no preset takes the ideal-point shifters); run its cells through 02_fit_model.R --comparison=directed --mu_shift=%s directly", spec$mu_shift, spec$mu_shift))
+if (length(grep(sprintf(":(%s)(,|$)", paste(RHOREG_MODELS, collapse = "|")), grep("^--cells=", args, value = TRUE)))) stop(sprintf("the model %s is not an option of 05_robustness.R (no preset takes the rho regression); run its cells through 02_fit_model.R --comparison=directed directly", paste(RHOREG_MODELS, collapse = ", ")))
 for (nm in names(ROBUSTNESS_PRESETS[[PRESET]])) spec[[nm]] <- ROBUSTNESS_PRESETS[[PRESET]][[nm]]
 switch_args <- c(sprintf("--%s=%s", names(SPEC_CHOICES), unlist(spec[names(SPEC_CHOICES)])), sprintf("--ame_K=%d", spec$ame_K))
 
@@ -129,7 +133,7 @@ if (PRESET != "perm_error") {
   } else if (PRESET == "context_b") {
     ## the M1c model on its fixed cells, every switch at its default: no --cells and no switch may be passed (the cell names would still be
     ## unique through the model code, but the stage-b run is defined on the main specification)
-    if (length(grep("^--(cells|pairs|context|coal_ties|coal_drop|direction|ww2|weights|controls|major|interact|distance|contiguity|changes|ame_K|rho_prior|sigma_prior|tag|comparison|roles)=", args)))
+    if (length(grep("^--(cells|pairs|context|coal_ties|coal_drop|direction|ww2|weights|controls|major|interact|distance|contiguity|changes|ame_K|rho_prior|sigma_prior|tag|comparison|roles|mu_shift)=", args)))
       stop("the context_b preset fixes its cells (CONTEXT_B_PRESET in spec.R) and runs M1c on the main specification; no --cells and no switch may be passed")
     parts <- strsplit(CONTEXT_B_PRESET$cells, ":", fixed = TRUE)
     cells_tab <- data.frame(sample = vapply(parts, `[`, "", 1), lag = as.integer(vapply(parts, `[`, "", 2)), model = vapply(parts, `[`, "", 3), variant = NA_character_, stringsAsFactors = FALSE)

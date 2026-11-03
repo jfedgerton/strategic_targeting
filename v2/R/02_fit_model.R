@@ -9,6 +9,9 @@
 ##   lag    : 1 | 3 | 5 | 10   change-window length h
 ##   model  : M1m | M1r | M1a | M1b | M2m | M2r | M2a | M2b | M1c | M1cr (M1cr, 2026-10-31: M1c with a role-specific stage-2 correlation rho_g, stan/m1_context_rho.stan)
 ##            m = material only, r = relational only, a = both independent, b = both joint; M2 = M1 + AME factors (ame_K)
+##            M1bz (PI-approved 2026-11-02; stan/m1_latent_rhoreg.stan; --comparison=directed only, with or without --mu_shift=traits): M1b with
+##            a state-year specific stage-2 correlation rho_n = tanh(g0 + Zr[n] g), Zr = the initiator's M_lvl, R_lvl, cowmaj_tm1, dem_tm1 as in W
+##            (rhoreg_Zr(), assemble_cell.R; Q = 4), used for that state-year's stage-2 softmax and its IV; g0 ~ N(0, 1), g ~ N(0, 0.5)
 ##            M1c (dual typology stage b, 2026-10-27; stan/m1_context.stan): M1b with group-specific ideal-point shifts delta_lead /
 ##            delta_join and tolerance scales sigma_g over the stage-2 groups bilateral / coalition leader / joiner (shared rho), and
 ##            multi_mid_jan appended to W. Cell <sample>_lag<h>_all_pr_M1c<suffix>; M1 sampler settings; not in the main grid
@@ -28,6 +31,9 @@
 ##            directed stage-2 Z (Z_DIRECTED of assemble_cell.R: tgt_dem, tgt_dem_x_init_dem, tgt_major, tgt_major_x_init_major in place of
 ##            joint_dem, one_major, both_major; Pz = 9); same W, no X (P = 0, also in m2_ame.stan since 2026-11-01), same refusals; M2b starts
 ##            from the M1b fit of the same directed cell (asserted: never a _conv or default M1b fit)
+##     --mu_shift=none|traits (PI-approved 2026-11-02, suffix _mst after _cdir; --comparison=directed only; M1a / M1b / M1c / M1cr / M2b / M1bz):
+##            X = M_lvl, R_lvl, cowmaj_tm1, dem_tm1 (X_MU_TRAITS, the W columns centred as in W; P = 4), mu = mu0 (+ delta[g]) + X beta + a_i, x_ref the
+##            mean X over the initiating state-years; a directed M2b with the switch starts from the directed M1b fit WITH the switch (asserted)
 ##     --roles=stageb|aprime (PI decision 2026-10-31, suffix _aprime; M1c / M1cr only): the stage-2 groups; aprime = 0 alone originator, 1 co-originator,
 ##            2 joiner, 3 target joined late (G = 4; roles_aprime.rds of the build); stageb (default) = bilateral / coalition leader / joiner
 ##     --rho_prior=beta25|flat  --sigma_prior=ln1|ln05 (2026-10-30, prior sensitivity of the jointness result; M1 m / r / a / b only, the rho
@@ -61,7 +67,7 @@
 ##                               review 2026-10-26 P1: rstan drops a failed parallel chain and returns the rest with mode 0)
 ##   v2/output/summary_<cell>.csv posterior summaries of the structural parameters, labelled by axis and covariate (written AFTER
 ##                               the fit file)
-## Cell name: <sample>_lag<h>_all_pr_<model>[_K<K>][_orig|_join][_bi|_co][_strict][_drop3][_noww2][_fullctrl][_dist][_nocontig][_major][_ix][_conv|_cdir][_w1][_winsor][_sideA][_rhoflat][_sigln05][_t<tag>][_pilot]
+## Cell name: <sample>_lag<h>_all_pr_<model>[_K<K>][_orig|_join][_bi|_co][_strict][_drop3][_noww2][_fullctrl][_dist][_nocontig][_major][_ix][_conv|_cdir][_mst][_aprime][_w1][_winsor][_sideA][_rhoflat][_sigln05][_t<tag>][_pilot]
 ##            (model M1c: <sample>_lag<h>_all_pr_M1c<suffix>; its fit records args$stan_program = "m1_context" and args$context_model = TRUE)
 ## Seed 123 everywhere (audit F11).
 ## ============================================================================
@@ -88,6 +94,9 @@ stopifnot(CHAINS >= 1, ITER > WARMUP, WARMUP >= 0, THREADS >= 1, is.finite(ADAPT
 D_MODE <- model_D_mode(MODEL); joint <- model_joint(MODEL); family <- stan_program(MODEL, spec)   # m1_latent_additive | m2_ame | m1_context (M1c) | m1_latent_prior (a prior switch off its default)
 PRIOR_PROGRAM <- family == "m1_latent_prior"; prior <- prior_hyper(spec)   # the hyperparameters the prior program takes as data (2.5 / 1 = the main program's literals)
 CONTEXT_MODEL <- MODEL %in% CONTEXT_MODELS
+RHOREG <- MODEL %in% RHOREG_MODELS                       # M1bz (2026-11-02): the rho-regression program m1_latent_rhoreg
+MU_SHIFT <- if (is.null(spec$mu_shift)) "none" else spec$mu_shift   # 2026-11-02
+if (RHOREG) stopifnot(family == "m1_latent_rhoreg", D_MODE == 3L, joint == 1L, spec_is_directed(spec))
 if (CONTEXT_MODEL && (spec$controls != "minimal" || spec$context != "all")) stop("M1c is defined on the minimal control set with every stage-2 event (--controls=minimal, --context=all); it models the contexts itself")
 ## merge 2026-10-27 (stage b x major / interact): the two features were developed independently and M1c under the major or interact switches
 ## has not been specified by the PI; refused here until it is, rather than silently combining the W / Z extensions with the M1c program
@@ -156,6 +165,14 @@ if (CONTEXT_MODEL) {
   logf("%s stage-2 groups (ev_grp, G = %d; usable events, weight sum, distinct initiating states; sample events before the choice-set join): %s", MODEL, G_GRP,
        paste(sprintf("%d %s %d (%.1f, %d; %d)", gt$grp, gt$group, gt$n_usable, gt$w_usable, gt$n_states, gt$n_sample), collapse = "; "))
 }
+if (RHOREG) {
+  ## M1bz (2026-11-02): the traits of the rho regression, N1 x Q, exactly the W columns M_lvl, R_lvl, cowmaj_tm1, dem_tm1 (rhoreg_Zr() asserts them)
+  Zr <- rhoreg_Zr(A)
+  stopifnot(nrow(Zr) == dat$N1, ncol(Zr) == 4L, identical(unname(Zr), unname(dat$W[, match(X_MU_TRAITS, W_cols), drop = FALSE])), all(is.finite(Zr)))
+  dat$Q <- ncol(Zr); dat$Zr <- Zr
+  logf("M1bz rho regression (2026-11-02): rho_n = tanh(g0 + Zr[n] g), Zr = %s (Q = %d, the W columns as they enter W); column means over the %d state-years %s; g0 ~ N(0, 1), g ~ N(0, 0.5)",
+       paste(X_MU_TRAITS, collapse = ","), dat$Q, dat$N1, paste(sprintf("%.4f", colMeans(Zr)), collapse = " / "))
+}
 CONVENTIONAL <- spec_is_conventional(spec)
 DIRECTED <- spec_is_directed(spec)                           # 2026-11-01
 if (CONVENTIONAL) {
@@ -167,15 +184,22 @@ if (CONVENTIONAL) {
   logf("conventional comparison (2026-10-31, suffix _conv): W = %s (P1 = %d); X = none (P = 0, mu = mu0 + a_i%s); Z = %s (Pz = %d); distance = capital and major = joint are part of the spec (not of the switches)",
        paste(W_cols, collapse = ","), dat$P1, if (CONTEXT_MODEL) " + delta[ev_grp]" else "", paste(Z_cols, collapse = ","), dat$Pz)
 } else if (DIRECTED) {
-  ## the directed comparison (PI-approved 2026-11-01): the conventional W, no X (P = 0, in the M1 programs and m2_ame.stan), Z exactly Z_DIRECTED
-  stopifnot(isTRUE(A$directed), !isTRUE(A$conventional), A$distance == "capital", A$major == "joint", identical(W_cols, W_CONVENTIONAL), identical(Z_cols, Z_DIRECTED), length(X_cols) == 0L,
-            dat$P == 0L, ncol(dat$X) == 0L, nrow(dat$X) == dat$N1, length(dat$x_ref) == 0L, dat$P1 == length(W_CONVENTIONAL), dat$Pz == length(Z_DIRECTED), dat$Pz == 9L,
+  ## the directed comparison (PI-approved 2026-11-01): the conventional W, no X (P = 0, in the M1 programs and m2_ame.stan), Z exactly Z_DIRECTED;
+  ## under mu_shift = traits (2026-11-02) X is exactly X_MU_TRAITS (P = 4), the same values as those W columns
+  X_EXPECTED <- if (MU_SHIFT == "traits") X_MU_TRAITS else character(0)
+  stopifnot(MU_SHIFT %in% c("none", "traits"), MU_SHIFT == "none" || MODEL %in% MU_SHIFT_MODELS)
+  if (MU_SHIFT == "traits") stopifnot(identical(X_cols, c("M_lvl", "R_lvl", "cowmaj_tm1", "dem_tm1")), dat$P == 4L, ncol(dat$X) == 4L, length(dat$x_ref) == 4L, all(is.finite(dat$x_ref)),
+                                      identical(unname(dat$X), unname(dat$W[, match(X_MU_TRAITS, W_cols), drop = FALSE])))
+  stopifnot(isTRUE(A$directed), !isTRUE(A$conventional), A$distance == "capital", A$major == "joint", identical(W_cols, W_CONVENTIONAL), identical(Z_cols, Z_DIRECTED), identical(X_cols, X_EXPECTED),
+            dat$P == length(X_EXPECTED), ncol(dat$X) == length(X_EXPECTED), nrow(dat$X) == dat$N1, length(dat$x_ref) == length(X_EXPECTED), dat$P1 == length(W_CONVENTIONAL), dat$Pz == length(Z_DIRECTED), dat$Pz == 9L,
             identical(colnames(dat$Z), Z_DIRECTED) || is.null(colnames(dat$Z)),
             !any(CHANGE_COLUMNS %in% c(W_cols, X_cols, Z_cols)), !any(PEACE_COLUMNS %in% c(W_cols, Z_cols)), !any(c("joint_dem", Z_MAJOR) %in% Z_cols), !anyNA(dat$W), !anyNA(dat$Z),
-            "multi_mid_jan" %in% W_cols, MODEL %in% DIRECTED_MODELS)
-  logf("directed comparison (2026-11-01, suffix _cdir): W = %s (P1 = %d); X = none (P = 0, mu = mu0 + a_i%s); Z = %s (Pz = %d); distance = capital and major = joint are part of the spec (not of the switches)",
-       paste(W_cols, collapse = ","), dat$P1, if (CONTEXT_MODEL) " + delta[ev_grp]" else "", paste(Z_cols, collapse = ","), dat$Pz)
-} else stopifnot(!isTRUE(A$conventional), !isTRUE(A$directed), dat$P >= 1L)
+            "multi_mid_jan" %in% W_cols, MODEL %in% c(DIRECTED_MODELS, RHOREG_MODELS))
+  logf("directed comparison (2026-11-01, suffix _cdir): W = %s (P1 = %d); X = %s (P = %d, mu = mu0 + %sa_i%s); Z = %s (Pz = %d); distance = capital and major = joint are part of the spec (not of the switches)",
+       paste(W_cols, collapse = ","), dat$P1, if (dat$P > 0L) paste(X_cols, collapse = ",") else "none", dat$P, if (dat$P > 0L) "X beta + " else "", if (CONTEXT_MODEL) " + delta[ev_grp]" else "", paste(Z_cols, collapse = ","), dat$Pz)
+  if (MU_SHIFT == "traits") logf("mu_shift = traits (2026-11-02, suffix _mst): X = %s (P = %d; the W columns, centred as in W); x_ref (mean X over the initiating state-years) = %s",
+                                 paste(X_cols, collapse = ","), dat$P, paste(sprintf("%s=%.4f", X_cols, dat$x_ref), collapse = ", "))
+} else stopifnot(!isTRUE(A$conventional), !isTRUE(A$directed), dat$P >= 1L, MU_SHIFT == "none", !RHOREG)
 if (PRIOR_PROGRAM) {
   ## prior sensitivity (2026-10-30): the hyperparameters go to Stan as data; the main program's data stay exactly as before (no field added)
   stopifnot(is.finite(prior$prior_rho_shape), prior$prior_rho_shape > 0, is.finite(prior$prior_sigma_x_sd), prior$prior_sigma_x_sd > 0)
@@ -210,7 +234,8 @@ if (DRY_RUN) {
   saveRDS(list(dat = dat, cell = cell, state_codes = state_codes, W_cols = W_cols, X_cols = X_cols, Z_cols = Z_cols,
                manifest = manifest_cell, git_commit = git_commit_at_load, spec = spec, winsor = A$winsor, model = MODEL,
                full_controls = spec$controls == "full", event_weights = spec$weights, direction = spec$direction, group_table = A$group_table,
-               stan_program = family, prior = c(spec[PRIOR_SWITCHES], prior), tag = spec_tag(spec), conventional = CONVENTIONAL, directed = DIRECTED),
+               stan_program = family, prior = c(spec[PRIOR_SWITCHES], prior), tag = spec_tag(spec), conventional = CONVENTIONAL, directed = DIRECTED,
+               mu_shift = MU_SHIFT, Zr_cols = if (RHOREG) X_MU_TRAITS else NULL),
           file.path(out_dir, paste0("standata_", cell, ".rds")))
   logf("DRY RUN: Stan data assembled and saved; no sampling"); quit(save = "no", status = 0)
 }
@@ -252,8 +277,11 @@ if (family == "m2_ame") {
     ## directed comparison (2026-11-01): the init fit must be the M1 fit of the SAME directed cell (never a _conv or a default-spec M1 fit)
     if (DIRECTED) {
       want <- m1_cell_for_m2(SAMPLE, LAG, MODEL, spec)
-      if (!identical(o1$cell, want) || !spec_is_directed(o1$spec) || !isTRUE(o1$args$directed) || !identical(o1$Z_cols, Z_DIRECTED) || o1$dat$P != 0L)
-        stop(sprintf("--comparison=directed: the init fit %s (cell %s, comparison %s) is not the M1 fit of this directed cell (%s)", basename(m1_path), o1$cell, if (is.null(o1$spec$comparison)) "none" else o1$spec$comparison, want))
+      ## mu_shift (2026-11-02): the init fit must carry the same switch and the same X columns (P = 0 without it, X_MU_TRAITS with it)
+      o1_mu <- if (is.null(o1$spec$mu_shift)) "none" else o1$spec$mu_shift
+      if (!identical(o1$cell, want) || !spec_is_directed(o1$spec) || !isTRUE(o1$args$directed) || !identical(o1$Z_cols, Z_DIRECTED) || !identical(o1_mu, MU_SHIFT) ||
+          !identical(o1$X_cols, X_cols) || o1$dat$P != length(X_cols) || !identical(o1$args$model, "M1b"))
+        stop(sprintf("--comparison=directed: the init fit %s (cell %s, comparison %s, mu_shift %s) is not the M1 fit of this directed cell (%s)", basename(m1_path), o1$cell, if (is.null(o1$spec$comparison)) "none" else o1$spec$comparison, o1_mu, want))
       logf("directed comparison: the init fit is the M1 fit of the same directed cell (%s)", o1$cell)
     }
     res <- m1_inits_for_m2(o1, dat, CHAINS, seed = V2_SEED, jitter_sd = INIT_JITTER_SD, uv_range = INIT_UV_RANGE)
@@ -291,7 +319,7 @@ logf("sampling finished in %.1f min; %d chains x %d post-warmup draws, as reques
 sp <- get_sampler_params(fit, inc_warmup = FALSE)
 logf("divergences: %d; max-treedepth hits: %d", sum(sapply(sp, function(m) sum(m[, "divergent__"]))),
      sum(sapply(sp, function(m) sum(m[, "treedepth__"] >= MAX_TD))))
-pars_struct <- c("alpha0", "alpha", "tau", "mu0", if (dat$P > 0L) "beta", if (CONTEXT_MODEL) c("delta", "sigma_g", if (family == "m1_context_rho") "rho_g" else "rho_x", "mu0_g") else "sigma_x",
+pars_struct <- c("alpha0", "alpha", "tau", "mu0", if (dat$P > 0L) "beta", if (RHOREG) c("g0", "g"), if (CONTEXT_MODEL) c("delta", "sigma_g", if (family == "m1_context_rho") "rho_g" else "rho_x", "mu0_g") else "sigma_x",
                  "sd_re", "sigma_b", "gamma", "Sigma", "Omega", "R_Om", if (family == "m2_ame") "u_diag")
 sm_tab <- summary(fit, pars = pars_struct)$summary
 logf("worst Rhat among structural parameters: %.3f; min n_eff: %.0f",
@@ -317,7 +345,8 @@ obj <- list(fit = fit, dat = dat, cell = cell, state_codes = state_codes, W_cols
             sy_keys = sy |> select(ccode, year, state_idx, y1), ev = ev, x_ref = x_ref, elapsed_min = elapsed,
             manifest = manifest_cell, data_dir = basename(data_dir), stale = stale, spec = spec, winsor = A$winsor, init = init_info, group_table = A$group_table,
             prior = c(spec[PRIOR_SWITCHES], prior, list(stan_program = family)),   # the prior switches and the hyperparameters the program saw (2026-10-30)
-            param_labels = label_parameters(rownames(sm_tab), W_cols, X_cols, Z_cols, D_MODE, groups = A$group_table$group),
+            param_labels = label_parameters(rownames(sm_tab), W_cols, X_cols, Z_cols, D_MODE, groups = A$group_table$group, Zr_cols = if (RHOREG) X_MU_TRAITS else NULL),
+            Zr_cols = if (RHOREG) X_MU_TRAITS else NULL,                     # M1bz (2026-11-02): the traits of rho_n, dat$Zr
             group_labels = if (CONTEXT_MODEL) A$group_table$group else NULL,   # M1c / M1cr: the label of ev_grp g is group_labels[g + 1] (2026-10-31)
             args = list(sample = SAMPLE, lag = LAG, variant = VARIANT, model = MODEL, centrality = CENTRALITY, K = K, chains = CHAINS,
                         iter = ITER, warmup = WARMUP, pilot = PILOT, sampled_m = SAMPLED_M, conflict_history = CONFLICT_HISTORY,
@@ -326,6 +355,7 @@ obj <- list(fit = fit, dat = dat, cell = cell, state_codes = state_codes, W_cols
                         pairs = spec$pairs, changes = spec$changes, context = spec$context, coal_ties = spec$coal_ties, coal_drop = spec$coal_drop,
                         context_top3 = A$context_top3, major = A$major, major_stats = A$major_stats, interact = spec$interact,
                         comparison = spec$comparison, conventional = CONVENTIONAL, directed = DIRECTED, directed_stats = A$directed_stats,
+                        mu_shift = MU_SHIFT, rhoreg = RHOREG,                  # 2026-11-02
                         D_mode = D_MODE, threads_per_chain = THREADS, context_model = CONTEXT_MODEL, stan_program = family,
                         rho_prior = spec$rho_prior, sigma_prior = spec$sigma_prior, prior_rho_shape = prior$prior_rho_shape, prior_sigma_x_sd = prior$prior_sigma_x_sd, tag = spec_tag(spec),
                         init_source = init_info$source, init_from = init_info$m1_fit,
