@@ -100,6 +100,7 @@ if (dim(mu)[3] == 2) {
 rch <- reach_summary(mu, state_labels = labels); rch$n_events_as_initiator <- n_init
 write.csv(rch, file.path(out_dir, paste0("reach_", cell, ".csv")), row.names = FALSE)
 sig <- rstan::extract(fit, pars = "Sigma")$Sigma
+if (identical(obj$args$model, "M1bz")) logf("M1bz: Sigma (focus_sigma, reach) is evaluated at Zr = 0 (rho = tanh(g0)), the all-state within-year average, not the initiator mean; interpret jointness through g")
 if (length(dim(sig)) == 1) sig <- array(sig, c(length(sig), 1, 1))
 write.csv(focus_sigma(sig, D_mode = obj$dat$D_mode), file.path(out_dir, paste0("focus_sigma_", cell, ".csv")), row.names = FALSE)
 D <- dim(mu)[3]; xcols <- if (D == 2) 1:2 else obj$dat$D_mode

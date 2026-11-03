@@ -9,8 +9,9 @@
 // Everything else (sigma_x, the LKJ(2) Omega over (c, a1, a2), mu0, beta, b_j, gamma, alpha, tau, the event weights, the choice-set flags,
 // the sampled path, the reduce_sum slicing, log_lik_stage1 / log_lik_stage2) is the b variant's. Only joint = 1 and D_mode = 3 are accepted
 // (transformed data rejects anything else); the a / 1-D branches below are unreachable and kept for line-by-line comparison with the source.
-// Generated quantities: Sigma is reported at Zr = 0, i.e. with rho = tanh(g0) (Zr is centred, so this is the correlation at the trait
-// reference point); rho_n is not stored per row. g0 and g are parameters and saved as such.
+// Generated quantities: Sigma is reported at Zr = 0, i.e. with rho = tanh(g0). Zr = 0 is NOT the cell or initiator mean: the levels are
+// within-year centred over all states with positions (not grand-centred) and the indicators grand-centred, so Zr = 0 is that year's all-state
+// average with fractional major / democracy shares (initiators' mean Zr is about (0.46, 0.18, 0.18, -0.05)); rho_n is not stored per row. g0 and g are parameters and saved as such.
 // Data are those of m1_latent_additive.stan (build_stan_data()) plus Q and Zr.
 //
 // ---- the source program's header (m1_latent_additive.stan) follows ----
