@@ -49,7 +49,8 @@ SPEC_CHOICES <- list(
   rho_prior = c("beta25", "flat"),                  # prior on Sigma's correlation rho (M1 joint models only, 2026-10-30): (rho + 1) / 2 ~ Beta(2.5, 2.5) (main) | Beta(1, 1), uniform on (-1, 1)
   sigma_prior = c("ln1", "ln05"),                   # prior on the tolerance scales sigma_x (M1 family only, 2026-10-30): lognormal(0, 1) (main) | lognormal(0, 0.5)
   comparison = c("none", "conventional", "directed"), # the conventional comparison specification (PI-approved 2026-10-31): none (main) | conventional = W, Z, X fixed to W_CONVENTIONAL / Z_CONVENTIONAL / no X (P = 0) | directed (PI-approved 2026-11-01) = conventional with the directed Z_DIRECTED; see below
-  roles     = c("stageb", "aprime")                 # stage-2 role groups of the M1c / M1cr models (PI decision 2026-10-31): stageb (main) = the 3 stage-b groups (bilateral / leader / joiner) | aprime = 4 groups (alone originator / co-originator / joiner / target joined late; roles_aprime.rds, aprime_roles())
+  roles     = c("stageb", "aprime"),                # stage-2 role groups of the M1c / M1cr models (PI decision 2026-10-31): stageb (main) = the 3 stage-b groups (bilateral / leader / joiner) | aprime = 4 groups (alone originator / co-originator / joiner / target joined late; roles_aprime.rds, aprime_roles())
+  mu_shift  = c("none", "traits")                   # ideal-point shifters under the directed comparison (PI-approved 2026-11-02): none (main; X = none, P = 0) | traits = X = the initiator's M_lvl, R_lvl, cowmaj_tm1, dem_tm1 at t-1 as they enter W (X_MU_TRAITS, assemble_cell.R; P = 4); needs --comparison=directed
 )
 ## ---- the conventional comparison specification (PI-approved 2026-10-31; switch `comparison`, suffix _conv) --------------------------
 ## One switch fixes the three design matrices at once; it is NOT a combination of the other switches, although it carries the distance
@@ -80,6 +81,16 @@ CONVENTIONAL_FIXED  <- c("controls", "distance", "contiguity", "major", "interac
 ## M2b starts from the M1b fit of the SAME directed cell (m1_spec(); 02_fit_model.R asserts it). The suffix _cdir takes the place of _conv in
 ## the suffix order (the two values are exclusive), e.g. fmid_lag3_all_pr_M1b_cdir, fmid_lag3_all_pr_M2b_K1_cdir, mid_lag3_all_pr_M1c_cdir_aprime.
 DIRECTED_MODELS <- c("M1a", "M1b", "M1c", "M1cr", "M2b")
+## ---- ideal-point shifters and the rho regression under the directed comparison (PI-approved 2026-11-02) ------------------------------
+## mu_shift = traits (suffix _mst, right after _cdir): X = X_MU_TRAITS (assemble_cell.R) = the initiator's M_lvl, R_lvl, cowmaj_tm1, dem_tm1 at t-1,
+## exactly the W columns (same values, same centring: the levels within-year centred, the 0/1 indicators grand-centred), P = 4, through the
+## existing X / beta machinery (beta ~ normal(0, prior_beta_sd)); x_ref stays the mean X over the initiating state-years of the cell. Only with
+## comparison = directed (parse_spec() refuses it otherwise); models MU_SHIFT_MODELS. A directed M2b with the switch starts from the M1b fit of the
+## same directed cell WITH the switch (m1_spec() keeps it; 02_fit_model.R asserts the X columns).
+## M1bz (model code; stan/m1_latent_rhoreg.stan): the joint M1b model with a state-year specific stage-2 correlation rho_n = tanh(g0 + Zr[n] g),
+## Zr = the same four columns (N1 x Q, Q = 4, data). Only with comparison = directed, with or without mu_shift = traits. Not in MODELS (main grid).
+RHOREG_MODELS   <- c("M1bz")
+MU_SHIFT_MODELS <- c(DIRECTED_MODELS, RHOREG_MODELS)
 SPEC_DEFAULTS <- lapply(SPEC_CHOICES, function(v) v[1])
 SPEC_DEFAULTS$ame_K <- 2L                            # latent dimensions of the M2 (AME) family; "_K<K>" is always in an M2 cell name
 SPEC_DEFAULTS$tag   <- ""                            # run tag (2026-10-30): "" = no tag (names unchanged); "<alnum>" appends _t<alnum> last
@@ -111,6 +122,8 @@ SPEC_SUFFIX <- list(
   interact  = c(prefixed = "_ix"),
   ## the conventional comparison (2026-10-31) follows the control extensions it replaces (it is refused with any of them) and precedes _w1
   comparison = c(conventional = "_conv", directed = "_cdir"),   # directed (2026-11-01): same position, exclusive with _conv
+  ## the ideal-point shifters (2026-11-02) follow the comparison switch they need: e.g. fmid_lag3_all_pr_M1b_cdir_mst, mid_lag3_all_pr_M1c_cdir_mst_aprime
+  mu_shift  = c(traits = "_mst"),
   ## the role coding (2026-10-31) follows the comparison switch: e.g. fmid_lag3_all_pr_M1c_conv_aprime
   roles     = c(aprime = "_aprime"),
   weights   = c(none = "_w1"),
@@ -139,18 +152,19 @@ MODELS       <- c("M1m", "M1r", "M1a", "M1b", "M2m", "M2r", "M2a", "M2b")
 ## grid's 0-95 index mapping and 04_compare.R's eight-model groups stay as they are); 02_fit_model.R and 03_extract.R accept it.
 ## M1cr (PI request 2026-10-31): M1c with a ROLE-SPECIFIC stage-2 correlation rho_g[G] (stan/m1_context_rho.stan); same data, same groups
 CONTEXT_MODELS <- c("M1c", "M1cr")
-ALL_MODELS     <- c(MODELS, CONTEXT_MODELS)
+ALL_MODELS     <- c(MODELS, CONTEXT_MODELS, RHOREG_MODELS)   # RHOREG_MODELS (M1bz, 2026-11-02) defined above with the directed comparison
 ## stan_program(model, spec): the Stan source / build name of a model code (m1_latent_additive | m2_ame | m1_context), and, since 2026-10-30,
 ## m1_latent_prior for an M1 m / r / a / b model whose spec has a prior switch off its default (the copy of m1_latent_additive.stan with the
 ## hyperparameters as data). spec = NULL (or a spec saved before the switches existed, which lacks the fields) means the main priors.
 stan_program <- function(model, spec = NULL) {
   stopifnot(model %in% ALL_MODELS)
+  if (model %in% RHOREG_MODELS) return("m1_latent_rhoreg")      # M1bz (2026-11-02): the rho-regression program, no prior-switch copy
   if (model == "M1cr") return("m1_context_rho")
   if (model %in% CONTEXT_MODELS) return("m1_context")
   if (substr(model, 1, 2) == "M2") return("m2_ame")
   if (spec_prior_is_main(spec)) "m1_latent_additive" else "m1_latent_prior"
 }
-STAN_PROGRAMS  <- c("m1_latent_additive", "m2_ame", "m1_context", "m1_latent_prior", "m1_context_rho")
+STAN_PROGRAMS  <- c("m1_latent_additive", "m2_ame", "m1_context", "m1_latent_prior", "m1_context_rho", "m1_latent_rhoreg")
 ## spec_prior_is_main(spec): TRUE when both prior switches are at their default (a NULL spec, or one saved before 2026-10-30 without the
 ## fields, counts as the main priors: every fit before that date sampled the main program)
 spec_prior_is_main <- function(spec) {
@@ -295,6 +309,9 @@ parse_spec <- function(args = character(0)) {
       stop(sprintf("--%s=%s conflicts with --comparison=directed, which fixes W, Z and X itself (W_CONVENTIONAL / Z_DIRECTED, no X: distance, majors, contiguity and alliance are part of the spec); leave --%s out", nm, spec[[nm]], nm))
     stopifnot(all(vapply(CONVENTIONAL_FIXED, function(nm) identical(spec[[nm]], SPEC_DEFAULTS[[nm]]), logical(1))))
   }
+  ## the ideal-point shifters (2026-11-02) are defined under the directed comparison only (X_MU_TRAITS are its W columns)
+  if (spec$mu_shift != SPEC_DEFAULTS$mu_shift && spec$comparison != "directed")
+    stop(sprintf("--mu_shift=%s needs --comparison=directed (the shifters are the directed comparison's W columns M_lvl, R_lvl, cowmaj_tm1, dem_tm1; got comparison=%s)", spec$mu_shift, spec$comparison))
   ## contiguity = none is only meaningful when the distance replaces it (PI request 2026-10-28): a Z without contiguity AND without distance is refused
   if (spec$contiguity != "land" && spec$distance != "capital") stop(sprintf("--contiguity=%s needs --distance=capital (distance replaces contiguity; got distance=%s)", spec$contiguity, spec$distance))
   ## run tag (2026-10-30): letters and digits only, so the suffix _t<tag> is one unambiguous token of the file name; "" = no tag
@@ -324,7 +341,11 @@ spec_is_main <- function(spec) all(vapply(names(SPEC_CHOICES), function(nm) iden
 ## spec_data_dir(spec, root): v2/data for the main direction, v2/data_sideA for direction = sideA
 spec_data_dir <- function(spec, root) file.path(root, if (spec$direction == "sideA") "data_sideA" else "data")
 ## spec_string(spec): one line for the logs
-spec_string <- function(spec) paste(sprintf("%s=%s", names(spec), unlist(spec)), collapse = " ")
+## mu_shift (2026-11-02) is left out at its default, so the spec string of every existing cell is unchanged
+spec_string <- function(spec) {
+  if (!is.null(spec$mu_shift) && identical(spec$mu_shift, SPEC_DEFAULTS$mu_shift)) spec <- spec[setdiff(names(spec), "mu_shift")]
+  paste(sprintf("%s=%s", names(spec), unlist(spec)), collapse = " ")
+}
 ## spec_is_conventional(spec): TRUE under --comparison=conventional (a spec saved before 2026-10-31 has no field: not conventional)
 spec_is_conventional <- function(spec) !is.null(spec$comparison) && identical(spec$comparison, "conventional")
 ## spec_is_directed(spec): TRUE under --comparison=directed (2026-11-01; a spec saved before has no such value: not directed)
@@ -334,7 +355,8 @@ spec_is_directed <- function(spec) !is.null(spec$comparison) && identical(spec$c
 ## comparison switch (2026-10-31) is dropped at its default for the same reason and KEPT when non-default: it changes W, Z and X, so a
 ## conventional cell's parts must never combine with another cell's (the driver refuses the switch anyway, see 05_robustness.R).
 perm_part_spec_string <- function(spec) {
-  drop <- c(PRIOR_SWITCHES, "tag", if (!spec_is_conventional(spec) && !spec_is_directed(spec)) "comparison", if (is.null(spec$roles) || identical(spec$roles, SPEC_DEFAULTS$roles)) "roles")
+  drop <- c(PRIOR_SWITCHES, "tag", if (!spec_is_conventional(spec) && !spec_is_directed(spec)) "comparison", if (is.null(spec$roles) || identical(spec$roles, SPEC_DEFAULTS$roles)) "roles",
+            if (is.null(spec$mu_shift) || identical(spec$mu_shift, SPEC_DEFAULTS$mu_shift)) "mu_shift")   # mu_shift (2026-11-02): dropped at its default, kept when on
   spec_string(spec[setdiff(names(spec), drop)])
 }
 ## spec_coal_col(spec): the events.rds column the context switch filters on ("coal_incl" / "coal_strict")
@@ -352,9 +374,17 @@ cell_name <- function(sample, lag, model, spec) {
   ## the conventional comparison (2026-10-31) is specified for M1a, M1b and M1c only
   if (spec_is_conventional(spec) && !model %in% CONVENTIONAL_MODELS)
     stop(sprintf("cell_name: --comparison=conventional with the model %s (the conventional comparison is specified for %s only)", model, paste(CONVENTIONAL_MODELS, collapse = ", ")))
-  ## the directed comparison (2026-11-01): the conventional models plus the AME model M2b
-  if (spec_is_directed(spec) && !model %in% DIRECTED_MODELS)
-    stop(sprintf("cell_name: --comparison=directed with the model %s (the directed comparison is specified for %s only)", model, paste(DIRECTED_MODELS, collapse = ", ")))
+  ## the directed comparison (2026-11-01): the conventional models plus the AME model M2b; the rho-regression model M1bz (2026-11-02) as well
+  if (spec_is_directed(spec) && !model %in% c(DIRECTED_MODELS, RHOREG_MODELS))
+    stop(sprintf("cell_name: --comparison=directed with the model %s (the directed comparison is specified for %s only; and the rho regression %s)", model, paste(DIRECTED_MODELS, collapse = ", "), paste(RHOREG_MODELS, collapse = ", ")))
+  ## M1bz (2026-11-02) is defined under the directed comparison only
+  if (model %in% RHOREG_MODELS && !spec_is_directed(spec))
+    stop(sprintf("cell_name: the model %s needs --comparison=directed (the rho regression is specified under the directed comparison only; got comparison=%s)", model, if (is.null(spec$comparison)) "none" else spec$comparison))
+  ## mu_shift = traits (2026-11-02): directed only (parse_spec() refuses it otherwise) and the models MU_SHIFT_MODELS
+  if (!is.null(spec$mu_shift) && !identical(spec$mu_shift, SPEC_DEFAULTS$mu_shift)) {
+    if (!spec_is_directed(spec)) stop(sprintf("cell_name: --mu_shift=%s needs --comparison=directed", spec$mu_shift))
+    if (!model %in% MU_SHIFT_MODELS) stop(sprintf("cell_name: --mu_shift=%s with the model %s (specified for %s only)", spec$mu_shift, model, paste(MU_SHIFT_MODELS, collapse = ", ")))
+  }
   ## the role coding (2026-10-31) applies to the stage-2 groups of the context models only (no other model sees the groups)
   if (!is.null(spec$roles) && !identical(spec$roles, SPEC_DEFAULTS$roles) && !model %in% CONTEXT_MODELS)
     stop(sprintf("cell_name: --roles=%s with the model %s (the role coding applies to %s only)", spec$roles, model, paste(CONTEXT_MODELS, collapse = ", ")))
@@ -394,7 +424,8 @@ cell_spec <- function(model, spec) if (model_family(model) == "M1") m1_spec(spec
 ## model_family(model): "M1" or "M2"; model_D_mode(model): 1 (material), 2 (relational), 3 (both); model_joint(model): 1 for the b models
 ## M1c (stage b): family M1 (sampler settings, name without a K), both axes, joint (full Sigma per group, full Omega)
 model_family <- function(model) { stopifnot(model %in% ALL_MODELS); substr(model, 1, 2) }
-## M1cr (2026-10-31): the third character decides (M1cr is a "c" model; a regex on the LAST character would read its "r" as relational-only)
+## M1cr (2026-10-31): the third character decides (M1cr is a "c" model; a regex on the LAST character would read its "r" as relational-only);
+## M1bz (2026-11-02) reads as "b" (both axes, joint): it is the M1b model with rho regressed on the initiator's traits
 model_D_mode <- function(model) { stopifnot(model %in% ALL_MODELS); switch(substr(model, 3, 3), m = 1L, r = 2L, a = 3L, b = 3L, c = 3L) }
 model_joint  <- function(model) { stopifnot(model %in% ALL_MODELS); as.integer(substr(model, 3, 3) %in% c("b", "c")) }
 ## sampler_settings(model, args): the family defaults, each overridable from the command line

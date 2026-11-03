@@ -23,7 +23,8 @@ assert_fit_current <- function(obj, manifest_path) {
 ## Z_cols[k]; mu0[d], sigma_x[d], mu_state[s,d], mu_event[e,d] -> axis d; sd_re[k], Omega / R_Om indices -> the random-effect order
 ## c, a_<axis1>[, a_<axis2>]; Sigma[i,j] -> the axis pair; u_diag[k] -> latent dimension k. Anything else gets NA labels.
 axis_labels <- function(D_mode) { stopifnot(D_mode %in% 1:3); if (D_mode == 3L) c("material", "relational") else c("material", "relational")[D_mode] }
-label_parameters <- function(pars, W_cols, X_cols, Z_cols, D_mode, groups = STAGE2_GROUPS) {
+## M1bz (2026-11-02): Zr_cols (NULL for every other model) labels g[q] -> Zr_cols[q] and g0 -> "intercept (atanh rho at Zr = 0)", both on the axis pair
+label_parameters <- function(pars, W_cols, X_cols, Z_cols, D_mode, groups = STAGE2_GROUPS, Zr_cols = NULL) {
   ax <- axis_labels(D_mode); re <- c("c", paste0("a_", ax))
   base <- sub("\\[.*$", "", pars)
   has <- grepl("^[A-Za-z_0-9]+\\[[0-9]+(,[0-9]+)?\\]$", pars)
@@ -46,10 +47,15 @@ label_parameters <- function(pars, W_cols, X_cols, Z_cols, D_mode, groups = STAG
   w <- base %in% c("mu0_g", "sigma_g"); axis[w] <- pick(ax, i2[w]); cov[w] <- pick(groups, i1[w])
   w <- base == "rho_g"; axis[w] <- paste(ax, collapse = " x "); cov[w] <- pick(groups, i1[w])
   w <- base == "rho_x"; axis[w] <- paste(ax, collapse = " x ")
+  if (!is.null(Zr_cols)) {
+    w <- base == "g"; cov[w] <- pick(Zr_cols, i1[w]); axis[w] <- paste(ax, collapse = " x ")
+    w <- base == "g0"; cov[w] <- "intercept (atanh rho at Zr = 0)"; axis[w] <- paste(ax, collapse = " x ")
+  }
   w <- base == "tau"; cov[w] <- "IV"
   w <- base == "alpha0"; cov[w] <- "intercept"
   out <- data.frame(parameter = pars, axis = axis, covariate = cov, stringsAsFactors = FALSE)
-  stopifnot(nrow(out) == length(pars), !anyNA(out$covariate[base == "alpha"]), !anyNA(out$covariate[base == "beta"]), !anyNA(out$covariate[base == "gamma"]))
+  stopifnot(nrow(out) == length(pars), !anyNA(out$covariate[base == "alpha"]), !anyNA(out$covariate[base == "beta"]), !anyNA(out$covariate[base == "gamma"]),
+            is.null(Zr_cols) || !anyNA(out$covariate[base %in% c("g", "g0")]))
   out
 }
 

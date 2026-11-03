@@ -84,6 +84,13 @@
 ##                   dem1 = the panel's dem_tm1 and major1 = its cowmaj_tm1 (initiator status, uncentred), tgt_dem_x_init_dem = joint_dem,
 ##                   one_major = tgt_major + init_major - 2 tgt_major init_major, both_major = tgt_major init_major. The four columns are 0/1 and
 ##                   NOT centred (the 0/1 Z convention); each must vary within some IV set and some event-bearing stage-2 set (else stop).
+##   MU_SHIFT      = "none" (every cell before 2026-11-02) | "traits" (PI-approved 2026-11-02, switch mu_shift, suffix _mst; DIRECTED = TRUE only):
+##                   X = X_MU_TRAITS = M_lvl, R_lvl, cowmaj_tm1, dem_tm1 (P = 4), the very W columns of the directed comparison after the W
+##                   centring (the levels within-year centred by the build and NOT grand-centred, cowmaj_tm1 / dem_tm1 grand-centred over the
+##                   cell's state-years like every 0/1 W control), so mu = mu0 + X beta + a_i shifts the ideal point with the initiator's traits
+##                   at t-1. x_ref is computed as for every cell with an X: the mean X over the cell's INITIATING state-years (y1 = 1). Rows,
+##                   events, weights, W and Z are those of the directed cell (asserted in the tests); "none" leaves every cell byte-identical.
+##                   rhoreg_Zr() returns the same four columns as the N1 x 4 matrix Zr of the rho-regression model M1bz (02_fit_model.R).
 ##   DROP_WW2, FULL_CONTROLS, EVENT_WEIGHTS: the ww2, controls and weights switches (below).
 ##   CONTEXT_MODEL = FALSE (every model of MODELS) | TRUE (the M1c model of dual typology stage b, 2026-10-27): the build's state-year
 ##                   column multi_mid_jan (a multilateral MID the state had not entered is active at 1 January of t) is appended to W as
@@ -155,6 +162,8 @@ Z_CONVENTIONAL <- c("contig_land", "log_capdist", "joint_dem", "alliance_def_off
 ## the directed comparison (PI-approved 2026-11-01; DIRECTED = TRUE): W = W_CONVENTIONAL, no X, and this Z, exactly in this order (Pz = 9)
 Z_DIRECTED     <- c("contig_land", "log_capdist", "tgt_dem", "tgt_dem_x_init_dem", "alliance_def_off", "tgt_major", "tgt_major_x_init_major", "dy_mid_tm1", "log_dy_prior_mids")
 Z_DIRECTED_TGT <- c("tgt_dem", "tgt_dem_x_init_dem", "tgt_major", "tgt_major_x_init_major")   # the four 0/1 columns formed at assembly (uncentred)
+## the ideal-point shifters of mu_shift = traits and the rho-regression traits Zr of M1bz (PI-approved 2026-11-02): exactly these W_CONVENTIONAL columns, in this order
+X_MU_TRAITS    <- c("M_lvl", "R_lvl", "cowmaj_tm1", "dem_tm1")
 PEACE_COLUMNS  <- c("log_peace_years", "log_dy_peace_years")
 CHANGE_COLUMNS <- c("dM_i", "dR_i", "dM_j_h", "dRpr_j_h", "dch_j_missing", Z_INTERACT)
 ## continuous Z columns that assemble_cell() centres over the assembled alternative rows (the 0/1 indicators, dy_mid_tm1
@@ -172,7 +181,7 @@ SY_INDICATORS <- c("cowmaj_tm1", "dem_tm1", "ongoing_tm1")
 assemble_cell <- function(SAMPLE, LAG, VARIANT, CENT = "pr", CONFLICT_HISTORY = TRUE, SAMPLED_M = 0L,
                           DISTANCE = "none", CONTIGUITY = "land", DY_PEACE_YEARS = FALSE, DROP_WW2 = FALSE, FULL_CONTROLS = FALSE,
                           EVENT_WEIGHTS = "dispute", PAIRS = "all", CHANGES = "raw", CONTEXT = "all", COAL_TIES = "inclusive", COAL_DROP = "none",
-                          MAJOR = "none", INTERACT = "none", ROLES = "stageb",
+                          MAJOR = "none", INTERACT = "none", ROLES = "stageb", MU_SHIFT = "none",
                           CONTEXT_MODEL = FALSE, CONVENTIONAL = FALSE, DIRECTED = FALSE, data_dir = file.path(v2_root(), "data"), manifest = NULL) {
   stopifnot(SAMPLE %in% c("mid", "fmid", "fmidcow", "fmidub", "war"), LAG %in% c(1L, 3L, 5L, 10L), VARIANT %in% c("all", "polrel"), CENT %in% c("pr", "eig"),
             EVENT_WEIGHTS %in% c("dispute", "none"), PAIRS %in% c("all", "originators", "joiners"), CHANGES %in% c("raw", "winsor"),
@@ -192,6 +201,9 @@ assemble_cell <- function(SAMPLE, LAG, VARIANT, CENT = "pr", CONFLICT_HISTORY = 
   if (DIRECTED && !(DISTANCE == "capital" && MAJOR == "joint" && CONTIGUITY == "land" && !FULL_CONTROLS && INTERACT == "none" && CHANGES == "raw"))
     stop(sprintf("DIRECTED = TRUE needs DISTANCE = capital, MAJOR = joint, CONTIGUITY = land, FULL_CONTROLS = FALSE, INTERACT = none, CHANGES = raw (got %s, %s, %s, %s, %s, %s); assemble_cell_spec() sets them from the switch", DISTANCE, MAJOR, CONTIGUITY, FULL_CONTROLS, INTERACT, CHANGES))
   FIXED_WZX <- CONVENTIONAL || DIRECTED
+  ## mu_shift = traits (2026-11-02): the directed comparison only
+  stopifnot(is.character(MU_SHIFT), length(MU_SHIFT) == 1L, MU_SHIFT %in% c("none", "traits"))
+  if (MU_SHIFT == "traits" && !DIRECTED) stop("MU_SHIFT = traits needs DIRECTED = TRUE (the shifters are the directed comparison's W columns; switch mu_shift needs --comparison=directed)")
   ## M1c outside the conventional comparison: the main Z, the minimal W (its refusals of 2026-10-27); under CONVENTIONAL the spec defines W / Z for M1c too
   if (CONTEXT_MODEL && !FIXED_WZX && DISTANCE != "none") stop("CONTEXT_MODEL (M1c) with DISTANCE != none is not specified; run M1c with DISTANCE = none")
   if (CONTEXT_MODEL && !FIXED_WZX && CONTIGUITY != "land") stop("CONTEXT_MODEL (M1c) with CONTIGUITY != land is not specified; run M1c with CONTIGUITY = land")
@@ -280,10 +292,11 @@ assemble_cell <- function(SAMPLE, LAG, VARIANT, CENT = "pr", CONFLICT_HISTORY = 
   }
   if (DIRECTED) {
     ## the directed comparison (PI-approved 2026-11-01): the conventional W list and no X, exactly as under CONVENTIONAL
-    ctrl_w <- W_CONVENTIONAL; ctrl_x <- character(0)
-    stopifnot(!anyDuplicated(ctrl_w), all(ctrl_w %in% names(sy)), "cowmaj_tm1" %in% ctrl_w, "multi_mid_jan" %in% ctrl_w, !any(CHANGE_COLUMNS %in% ctrl_w), !any(PEACE_COLUMNS %in% ctrl_w))
-    logf("directed comparison (2026-11-01): W = %s (P1 = %d; the conventional W); X = none (P = 0); neither the power changes nor the peace years enter",
-         paste(ctrl_w, collapse = ","), length(ctrl_w))
+    ctrl_w <- W_CONVENTIONAL; ctrl_x <- if (MU_SHIFT == "traits") X_MU_TRAITS else character(0)
+    stopifnot(!anyDuplicated(ctrl_w), all(ctrl_w %in% names(sy)), "cowmaj_tm1" %in% ctrl_w, "multi_mid_jan" %in% ctrl_w, !any(CHANGE_COLUMNS %in% ctrl_w), !any(PEACE_COLUMNS %in% ctrl_w),
+              all(X_MU_TRAITS %in% ctrl_w), all(ctrl_x %in% ctrl_w))
+    logf("directed comparison (2026-11-01): W = %s (P1 = %d; the conventional W); X = %s; neither the power changes nor the peace years enter",
+         paste(ctrl_w, collapse = ","), length(ctrl_w), if (MU_SHIFT == "traits") sprintf("%s (P = %d; mu_shift = traits, 2026-11-02: the W columns, centred as in W)", paste(ctrl_x, collapse = ","), length(ctrl_x)) else "none (P = 0)")
   }
   ## directed (2026-11-01): the initiator's UNCENTRED status at t-1, kept before the grand-centring below for the identity checks of the Z columns
   init_raw <- if (DIRECTED) sy |> transmute(sy_row = row_number(), dem_tm1_raw = dem_tm1, cowmaj_tm1_raw = cowmaj_tm1) else NULL
@@ -300,7 +313,7 @@ assemble_cell <- function(SAMPLE, LAG, VARIANT, CENT = "pr", CONFLICT_HISTORY = 
   ## decisions 2026-10-23 / 2026-10-24) so that alpha0 in stage 1 is the log-odds at zero power change and average
   ## controls. X has no controls in either control set (2026-10-27), so mu0 is the ideal gap of a state with zero power
   ## change. dM_i and dR_i are NOT centred (zero power change is the reference).
-  stopifnot(all(ctrl_sy %in% names(sy)), all(ctrl_x %in% ctrl_w), length(ctrl_x) == 0L)
+  stopifnot(all(ctrl_sy %in% names(sy)), all(ctrl_x %in% ctrl_w), length(ctrl_x) == 0L || (DIRECTED && MU_SHIFT == "traits" && identical(ctrl_x, X_MU_TRAITS)))
   for (cc in SY_INDICATORS) stopifnot(!anyNA(sy[[cc]]), all(sy[[cc]] %in% c(0, 1)))
   logf("ongoing_tm1: mean %.4f over %d state-years (%d in a MID active at t-1)", mean(sy$ongoing_tm1), nrow(sy), sum(sy$ongoing_tm1))
   ## the power levels (D2) are already centred within year over every state with positions (0 = the system average that year) and
@@ -313,6 +326,14 @@ assemble_cell <- function(SAMPLE, LAG, VARIANT, CENT = "pr", CONFLICT_HISTORY = 
   if (FIXED_WZX) {
     W_cols <- ctrl_w; X_cols <- character(0)           # conventional (2026-10-31) / directed (2026-11-01) comparison: no power changes in W, no X (P = 0)
     stopifnot(identical(W_cols, W_CONVENTIONAL), length(X_cols) == 0L)
+    if (MU_SHIFT == "traits") {
+      ## mu_shift = traits (2026-11-02): X = the four W columns, already centred above exactly as they enter W (ctrl_x is part of ctrl_sy)
+      X_cols <- X_MU_TRAITS
+      stopifnot(DIRECTED, identical(X_cols, c("M_lvl", "R_lvl", "cowmaj_tm1", "dem_tm1")), all(X_cols %in% W_cols), !any(CHANGE_COLUMNS %in% X_cols),
+                abs(mean(sy$cowmaj_tm1)) < 1e-8, abs(mean(sy$dem_tm1)) < 1e-8, all(is.finite(as.matrix(sy[, X_cols]))))
+      logf("mu_shift = traits (2026-11-02): X = %s (P = %d), the W columns: M_lvl mean %.4f SD %.3f and R_lvl mean %.4f SD %.3f (within-year centred, not grand-centred); cowmaj_tm1 and dem_tm1 grand-centred (mean 0; SD %.3f, %.3f)",
+           paste(X_cols, collapse = ","), length(X_cols), mean(sy$M_lvl), sd(sy$M_lvl), mean(sy$R_lvl), sd(sy$R_lvl), sd(sy$cowmaj_tm1), sd(sy$dem_tm1))
+    }
   } else {
     W_cols <- c("dM_i", "dR_i", ctrl_w)      # PI decision 2026-10-22: initiator power changes also enter stage 1 directly
     X_cols <- c("dM_i", "dR_i", ctrl_x)      # power changes only (both control sets)
@@ -775,6 +796,12 @@ assemble_cell <- function(SAMPLE, LAG, VARIANT, CENT = "pr", CONFLICT_HISTORY = 
     stopifnot(length(x_ref) == 0L, identical(W_cols, W_CONVENTIONAL), identical(Z_cols, Z_CONVENTIONAL), length(X_cols) == 0L,
               !any(CHANGE_COLUMNS %in% c(W_cols, X_cols, Z_cols)), !any(PEACE_COLUMNS %in% c(W_cols, Z_cols)), !anyNA(as.matrix(sy[, W_cols])), !anyNA(as.matrix(alts[, Z_cols])))
     logf("x_ref: none (P = 0 under the conventional comparison; mu_state = mu0 + a_i)")
+  } else if (DIRECTED && MU_SHIFT == "traits") {
+    ## mu_shift = traits (2026-11-02): X = X_MU_TRAITS; x_ref is the mean X over the initiating state-years (the rule of every cell with an X)
+    stopifnot(identical(X_cols, X_MU_TRAITS), length(x_ref) == 4L, identical(names(x_ref), X_MU_TRAITS), all(is.finite(x_ref)), identical(W_cols, W_CONVENTIONAL), identical(Z_cols, Z_DIRECTED),
+              !any(CHANGE_COLUMNS %in% c(W_cols, X_cols, Z_cols)), !any(PEACE_COLUMNS %in% c(W_cols, Z_cols)), !anyNA(as.matrix(sy[, W_cols])), !anyNA(as.matrix(alts[, Z_cols])),
+              identical(as.matrix(sy[, X_cols]), as.matrix(sy[, W_cols])[, X_MU_TRAITS, drop = FALSE]))
+    logf("x_ref (mean X over the %d initiating state-years; mu_shift = traits): %s", sum(sy$y1 == 1L), paste(sprintf("%s=%.4f", X_cols, x_ref), collapse = ", "))
   } else if (DIRECTED) {
     stopifnot(length(x_ref) == 0L, identical(W_cols, W_CONVENTIONAL), identical(Z_cols, Z_DIRECTED), length(X_cols) == 0L,
               !any(CHANGE_COLUMNS %in% c(W_cols, X_cols, Z_cols)), !any(PEACE_COLUMNS %in% c(W_cols, Z_cols)), !anyNA(as.matrix(sy[, W_cols])), !anyNA(as.matrix(alts[, Z_cols])))
@@ -801,11 +828,28 @@ assemble_cell_spec <- function(SAMPLE, LAG, spec, data_dir = spec_data_dir(spec,
   ## the directed comparison (2026-11-01): the same lag / variant rule and the same internal DISTANCE / MAJOR mapping; models DIRECTED_MODELS
   dirc <- spec_is_directed(spec)
   if (dirc && (LAG != 3L || VARIANT != "all")) stop(sprintf("--comparison=directed is defined on the lag-3 data with all-states choice sets (got lag %s, variant %s)", LAG, VARIANT))
-  if (dirc) stopifnot(!conv, all(vapply(CONVENTIONAL_FIXED, function(nm) identical(spec[[nm]], SPEC_DEFAULTS[[nm]]), logical(1))), is.null(model) || model %in% DIRECTED_MODELS)
+  if (dirc) stopifnot(!conv, all(vapply(CONVENTIONAL_FIXED, function(nm) identical(spec[[nm]], SPEC_DEFAULTS[[nm]]), logical(1))), is.null(model) || model %in% c(DIRECTED_MODELS, RHOREG_MODELS))
+  ## mu_shift (2026-11-02): directed only, models MU_SHIFT_MODELS; M1bz (RHOREG_MODELS) directed only. A spec saved before has no field: none
+  mu_shift <- if (is.null(spec$mu_shift)) "none" else spec$mu_shift
+  if (mu_shift != "none") stopifnot(dirc, is.null(model) || model %in% MU_SHIFT_MODELS)
+  if (!is.null(model) && model %in% RHOREG_MODELS && !dirc) stop(sprintf("the model %s is defined under --comparison=directed only", model))
   assemble_cell(SAMPLE, LAG, VARIANT, CENTRALITY, CONFLICT_HISTORY, SAMPLED_M, DISTANCE = if (conv || dirc) "capital" else spec$distance, CONTIGUITY = spec$contiguity,
                 DY_PEACE_YEARS = DY_PEACE_YEARS, DROP_WW2 = spec$ww2 == "drop", FULL_CONTROLS = spec$controls == "full",
                 EVENT_WEIGHTS = spec$weights, PAIRS = spec$pairs, CHANGES = spec$changes, CONTEXT = spec$context, COAL_TIES = spec$coal_ties,
                 COAL_DROP = spec$coal_drop, MAJOR = if (conv || dirc) "joint" else spec$major, INTERACT = spec$interact,
                 CONTEXT_MODEL = !is.null(model) && model %in% CONTEXT_MODELS, CONVENTIONAL = conv, DIRECTED = dirc,
-                ROLES = if (is.null(spec$roles)) "stageb" else spec$roles, data_dir = data_dir, manifest = manifest)
+                ROLES = if (is.null(spec$roles)) "stageb" else spec$roles, MU_SHIFT = mu_shift, data_dir = data_dir, manifest = manifest)
+}
+## rhoreg_Zr(A): the N1 x Q trait matrix Zr of the rho-regression model M1bz (PI-approved 2026-11-02), rho_n = tanh(g0 + Zr[n] g): the columns
+## X_MU_TRAITS (M_lvl, R_lvl, cowmaj_tm1, dem_tm1) of the assembled directed cell's state-years, i.e. exactly the W columns as they enter W (the
+## levels within-year centred, the 0/1 indicators grand-centred). Asserted: a directed cell (W = W_CONVENTIONAL, Z = Z_DIRECTED), Q = 4, finite,
+## the four W columns exactly (with or without mu_shift = traits, whose X is the same matrix). Column names are dropped for Stan.
+rhoreg_Zr <- function(A) {
+  stopifnot(is.list(A), isTRUE(A$directed), identical(A$W_cols, W_CONVENTIONAL), identical(A$Z_cols, Z_DIRECTED), length(A$X_cols) == 0L || identical(A$X_cols, X_MU_TRAITS),
+            all(X_MU_TRAITS %in% names(A$sy)))
+  Zr <- as.matrix(A$sy[, X_MU_TRAITS, drop = FALSE])
+  stopifnot(identical(colnames(Zr), c("M_lvl", "R_lvl", "cowmaj_tm1", "dem_tm1")), ncol(Zr) == 4L, nrow(Zr) == nrow(A$sy), all(is.finite(Zr)),
+            identical(Zr, as.matrix(A$sy[, A$W_cols, drop = FALSE])[, X_MU_TRAITS, drop = FALSE]), abs(mean(Zr[, "cowmaj_tm1"])) < 1e-8, abs(mean(Zr[, "dem_tm1"])) < 1e-8)
+  dimnames(Zr) <- NULL
+  Zr
 }
