@@ -47,6 +47,12 @@
 // reference-group ideal point at x_ref: mu0 + x_ref' beta + a_i; the other groups' ideal points are mu_state + delta[g]),
 // mu_event[E, 2] (at the event's own X, WITH its group shift), Sigma (reference group), Sigma_g[G], mu0_g[G] (mu0_g[1] = mu0,
 // mu0_g[g + 1] = mu0 + delta[g]), Omega, R_Om. P = 0 (no X) is allowed since 2026-10-31.
+// Event-level choice sets (PI-approved 2026-11-04; switch joiner_set): the data carry a ragged index of each event's allowed stage-2 rows
+// (n_ev_alt, ev_alt_first[E], ev_alt_n[E], ev_alt_loc: block-local positions, strictly increasing, all in the state-year's in_s2 set, the chosen
+// row among them; event_alt_sets() in helpers_model.R). An event whose set is its state-year's whole stage-2 set (every event under
+// joiner_set = all) takes the code path of the program before 2026-11-04 term for term; a restricted event (ev_restr = 1, a joiner under
+// joiner_set = opposing) is scored by the log-softmax of its group utility over its allowed rows only (a set of size 1 contributes 0). Stage 1 / IV
+// and the event weights are unchanged.
 // ============================================================================
 functions {
   // Utility of the alternative rows s..e for one state-year and one group: quadratic form in (dM, dR) around mu_n with scales
@@ -72,6 +78,7 @@ functions {
                         matrix x, array[] int alt_target, matrix Z, int Pz,
                         array[] int ev_first, array[] int ev_count, array[] int ev_sorted,
                         array[] int ev_row, array[] int ev_grp, vector ev_w, int G, array[,] int has_g,
+                        array[] int ev_restr, array[] int ev_alt_first, array[] int ev_alt_n, array[] int ev_alt_loc,
                         real alpha0, vector alpha, real tau, row_vector mu0, array[] row_vector delta,
                         matrix beta, matrix a_i, vector c_i, array[] vector sigma_g, vector rho, vector b_j, vector gamma) {
     int L = end - start + 1;
@@ -105,7 +112,11 @@ functions {
         int ev = ev_sorted[ev_first[n] + j - 1];
         int r = ev_row[ev] - s + 1;
         int gg = ev_grp[ev] + 1;
-        lp += ev_w[ev] * (u_g[gg][r] - lse_g[gg]);
+        if (ev_restr[ev] == 0) {
+          lp += ev_w[ev] * (u_g[gg][r] - lse_g[gg]);
+        } else {
+          lp += ev_w[ev] * (u_g[gg][r] - log_sum_exp(u_g[gg][segment(ev_alt_loc, ev_alt_first[ev], ev_alt_n[ev])]));   // restricted set (2026-11-04)
+        }
       }
     }
     lp += bernoulli_logit_lpmf(y1[sy_slice] | eta);
@@ -139,6 +150,10 @@ data {
   vector<lower=0, upper=1>[E] ev_w;
   int<lower=2> G;                              // number of stage-2 groups (data since 2026-10-31; 3 = bilateral / coalition leader / joiner)
   array[E] int<lower=0, upper=G - 1> ev_grp;   // stage-b group of the event, 0..G-1 (0 = the reference group)
+  int<lower=0> n_ev_alt;                       // 2026-11-04: event-level allowed stage-2 rows (ragged): total length
+  array[E] int<lower=1> ev_alt_first;          //   first position of event e's rows in ev_alt_loc
+  array[E] int<lower=1> ev_alt_n;              //   number of allowed rows of event e (its whole stage-2 set unless restricted)
+  array[n_ev_alt] int<lower=1> ev_alt_loc;     //   block-local positions (r - cs_start + 1), strictly increasing within an event
   int<lower=0, upper=1> joint;                 // must be 1
   int<lower=0, upper=1> sampled;               // must be 0
   int<lower=0, upper=1> prior_only;
@@ -207,6 +222,24 @@ transformed data {
     if (ev_start[e] != cs_start[ev_sy[e]] || ev_end[e] != cs_end[ev_sy[e]]) reject("event ", e, ": with full choice sets the event set must be the state-year set");
     if (s2_count[ev_sy[e]] < 2) reject("event ", e, ": its state-year's stage-2 set is empty or holds only the chosen row");
   }
+  // event-level allowed sets (2026-11-04): within the state-year's stage-2 set, strictly increasing, holding the chosen row; restricted when smaller
+  array[E] int ev_restr = rep_array(0, E);
+  for (e in 1:E) {
+    int n = ev_sy[e];
+    int L = cs_end[n] - cs_start[n] + 1;
+    int found = 0;
+    if (ev_alt_first[e] + ev_alt_n[e] - 1 > n_ev_alt) reject("event ", e, ": its allowed-row index runs past ev_alt_loc");
+    if (ev_alt_n[e] > s2_count[n]) reject("event ", e, ": more allowed rows than its state-year's stage-2 set");
+    for (k in 1:ev_alt_n[e]) {
+      int l = ev_alt_loc[ev_alt_first[e] + k - 1];
+      if (l < 1 || l > L) reject("event ", e, ": allowed row outside its state-year's block");
+      if (in_s2[cs_start[n] + l - 1] != 1) reject("event ", e, ": allowed row not in the stage-2 set");
+      if (k > 1 && l <= ev_alt_loc[ev_alt_first[e] + k - 2]) reject("event ", e, ": allowed rows must be strictly increasing");
+      if (cs_start[n] + l - 1 == ev_row[e]) found = 1;
+    }
+    if (found == 0) reject("event ", e, ": the chosen row is not among its allowed rows");
+    if (ev_alt_n[e] < s2_count[n]) ev_restr[e] = 1;
+  }
 }
 parameters {
   real alpha0;
@@ -253,6 +286,7 @@ model {
                                 cs_mixed, iv_first, iv_count, iv_loc, s2_first, s2_count, s2_loc,
                                 x, alt_target, Z, Pz,
                                 ev_first, ev_count, ev_sorted, ev_row, ev_grp, ev_w, G, has_g,
+                                ev_restr, ev_alt_first, ev_alt_n, ev_alt_loc,
                                 alpha0, alpha, tau, mu0, delta, beta, a_i, c_i, sigma_g, rho_g, b_j, gamma);
   }
 }
@@ -291,12 +325,18 @@ generated quantities {
       int s = cs_start[n];
       int e = cs_end[n];
       if (ev_grp[ev] == 0) {
-        log_lik_stage2[ev] = util[ev_row[ev]] - lse_s2[n];
+        if (ev_restr[ev] == 0) {
+          log_lik_stage2[ev] = util[ev_row[ev]] - lse_s2[n];
+        } else {
+          vector[e - s + 1] u0 = util[s:e];
+          log_lik_stage2[ev] = util[ev_row[ev]] - log_sum_exp(u0[segment(ev_alt_loc, ev_alt_first[ev], ev_alt_n[ev])]);
+        }
         mu_event[ev] = Mu[n];
       } else {
         row_vector[2] mu_e = Mu[n] + delta[ev_grp[ev]];
         vector[e - s + 1] u_g = util_block_c(s, e, x, mu_e, sigma_g[ev_grp[ev] + 1], rho_g[ev_grp[ev] + 1], b_j, alt_target, zg_block(Z, gamma, s, e, Pz));
-        real lse_g = (cs_mixed[n] == 0) ? log_sum_exp(u_g) : log_sum_exp(u_g[segment(s2_loc, s2_first[n], s2_count[n])]);
+        real lse_g = (ev_restr[ev] == 1) ? log_sum_exp(u_g[segment(ev_alt_loc, ev_alt_first[ev], ev_alt_n[ev])])
+                     : ((cs_mixed[n] == 0) ? log_sum_exp(u_g) : log_sum_exp(u_g[segment(s2_loc, s2_first[n], s2_count[n])]));
         log_lik_stage2[ev] = u_g[ev_row[ev] - s + 1] - lse_g;
         mu_event[ev] = mu_e;
       }

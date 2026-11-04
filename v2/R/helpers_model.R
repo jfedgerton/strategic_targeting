@@ -501,6 +501,102 @@ m1_inits_for_m2 <- function(obj_m1, dat_m2, chains, seed = V2_SEED, jitter_sd = 
   attr(inits, "n_clamped") <- n_clamped
   inits
 }
+## ---- M2c initial values from the matching M1c fit (PI-approved 2026-11-04) -----------------------------------------------------------------
+## m1c_inits_for_m2c(obj_m1c, dat_m2c, chains, seed, jitter_sd, uv_range): the M2c analogue of m1_inits_for_m2(). m2_context.stan names its
+## shared parameters as m1_context.stan does (alpha0, alpha, tau, mu0, delta[G - 1], beta, sigma_g[G], rho_x (a scalar), sd_re, L_Om, z_re, sigma_b,
+## z_b, gamma), so every one is copied from the M1c posterior means; z_re / z_b / L_Om are reconstructed from the saved c_i, a_i, b_j, sd_re, sigma_b
+## and R_Om as in m1_inits_for_m2(); the AME factors start near 0 (uniform on uv_range, u_diag on its positive upper half), seed + chain; each chain
+## is jittered the same way (N(0, jitter_sd) on the unconstrained parameters, exp(N(0, jitter_sd)) on the scales, N(0, jitter_sd / 5) on the
+## correlations, kept in (-0.95, 0.95) and PD). Dimensions (S, N1, P1, P, Pz, D_mode, joint, G) and the event groups ev_grp must agree.
+m1c_inits_for_m2c <- function(obj_m1c, dat_m2c, chains, seed = V2_SEED, jitter_sd = 0.05, uv_range = c(-0.1, 0.1)) {
+  stopifnot(!is.null(obj_m1c$fit), !is.null(obj_m1c$dat), !is.null(dat_m2c$K), !is.null(dat_m2c$G), chains >= 1, is.finite(jitter_sd), jitter_sd >= 0,
+            length(uv_range) == 2, uv_range[1] < uv_range[2], uv_range[2] > 0, dat_m2c$D_mode == 3L, dat_m2c$joint == 1L)
+  d1 <- obj_m1c$dat
+  for (nm in c("S", "N1", "P1", "P", "Pz", "D_mode", "joint", "G")) if (!identical(as.integer(d1[[nm]]), as.integer(dat_m2c[[nm]])))
+    stop(sprintf("m1c_inits_for_m2c: %s differs between the M1c fit (%s) and the M2c data (%s)", nm, d1[[nm]], dat_m2c[[nm]]))
+  if (!identical(as.integer(d1$ev_grp), as.integer(dat_m2c$ev_grp))) stop("m1c_inits_for_m2c: the event groups ev_grp differ between the M1c fit and the M2c data")
+  S <- as.integer(dat_m2c$S); K <- as.integer(dat_m2c$K); G <- as.integer(dat_m2c$G); P <- as.integer(dat_m2c$P)
+  stopifnot(K >= 1, K <= S - 1, G >= 2)
+  fit <- obj_m1c$fit
+  pars <- c("alpha0", "alpha", "tau", "mu0", "delta", "beta", "sigma_g", "rho_x", "sd_re", "sigma_b", "gamma", "c_i", "a_i", "b_j", "R_Om")
+  pars <- setdiff(pars, if (P == 0L) "beta")
+  stopifnot(all(pars %in% fit@model_pars), !"rho_g" %in% fit@model_pars)       # an M1cr fit (rho_g) is not an M1c fit
+  ex <- rstan::extract(fit, pars = pars, permuted = TRUE)
+  pm <- function(nm) { a <- ex[[nm]]; if (is.null(dim(a)) || length(dim(a)) == 1L) mean(a) else apply(a, seq_along(dim(a))[-1], mean) }
+  m <- list(alpha0 = pm("alpha0"), alpha = as.numeric(pm("alpha")), tau = pm("tau"), mu0 = as.numeric(pm("mu0")), delta = matrix(pm("delta"), G - 1L, 2L),
+            beta = if (P > 0L) matrix(pm("beta"), P, 2L) else matrix(numeric(0), 0L, 2L), sigma_g = matrix(pm("sigma_g"), G, 2L), rho = pm("rho_x"),
+            sd_re = as.numeric(pm("sd_re")), sigma_b = pm("sigma_b"), gamma = as.numeric(pm("gamma")), c_i = as.numeric(pm("c_i")), a_i = matrix(pm("a_i"), S, 2L),
+            b_j = as.numeric(pm("b_j")), R_Om = matrix(pm("R_Om"), 3L, 3L))
+  stopifnot(length(m$alpha) == dat_m2c$P1, length(m$mu0) == 2L, length(m$gamma) == dat_m2c$Pz, length(m$sd_re) == 3L, all(m$sigma_g > 0), all(m$sd_re > 0), m$sigma_b > 0,
+            length(m$c_i) == S, length(m$b_j) == S, abs(m$rho) < 1, all(is.finite(unlist(m))))
+  n_clamped <- 0L; ch <- 0L
+  clamp <- function(x, lim = 0.95, what = "correlation") {
+    out <- pmin(pmax(x, -lim), lim); hit <- which(abs(out - x) > 0)
+    if (length(hit)) { n_clamped <<- n_clamped + length(hit)
+      logf("WARNING: m1c_inits_for_m2c chain %d: the %s init clamp binds (%s -> %s)", ch, what, paste(sprintf("%.4f", x[hit]), collapse = ", "), paste(sprintf("%.4f", out[hit]), collapse = ", ")) }
+    out
+  }
+  lower_chol <- function(R) { R <- (R + t(R)) / 2; diag(R) <- 1; stopifnot(min(eigen(R, symmetric = TRUE, only.values = TRUE)$values) > 1e-8); t(chol(R)) }
+  inits <- vector("list", chains)
+  for (ch in seq_len(chains)) {
+    set.seed(seed + ch)
+    jit <- function(x) x + rnorm(length(x), 0, jitter_sd)
+    pos <- function(x) x * exp(rnorm(length(x), 0, jitter_sd))
+    R <- m$R_Om; R[upper.tri(R)] <- clamp(R[upper.tri(R)] + rnorm(3, 0, jitter_sd / 5), what = "corr(c, a) / corr(a1, a2)"); R[lower.tri(R)] <- t(R)[lower.tri(R)]
+    if (min(eigen((R + t(R)) / 2, symmetric = TRUE, only.values = TRUE)$values) <= 1e-6) R <- m$R_Om
+    L <- lower_chol(R)
+    sd_re <- pos(m$sd_re); sigma_b <- pos(m$sigma_b)
+    z_re <- solve(diag(sd_re, 3L) %*% L, t(cbind(m$c_i, m$a_i)))                 # 3 x S: re' = diag(sd_re) L z_re
+    z_re <- matrix(jit(as.numeric(z_re)), 3L, S)
+    init <- list(alpha0 = jit(m$alpha0), alpha = as.array(jit(m$alpha)), tau = jit(m$tau), mu0 = as.array(jit(m$mu0)),
+                 delta = matrix(jit(as.numeric(m$delta)), G - 1L, 2L), beta = matrix(jit(as.numeric(m$beta)), P, 2L),
+                 sigma_g = matrix(pos(as.numeric(m$sigma_g)), G, 2L), rho_x = clamp(m$rho + rnorm(1, 0, jitter_sd / 5), what = "rho_x"),
+                 sd_re = as.array(sd_re), L_Om = L, z_re = z_re, sigma_b = sigma_b, z_b = as.array(jit(m$b_j / sigma_b)), gamma = as.array(jit(m$gamma)))
+    init$u_diag <- as.array(runif(K, uv_range[2] / 2, uv_range[2]))
+    init$u_lower <- array(runif(K * (K - 1L) / 2L, uv_range[1], uv_range[2]), dim = K * (K - 1L) / 2L)
+    init$U_free <- matrix(runif((S - K - 1L) * K, uv_range[1], uv_range[2]), S - K - 1L, K)
+    init$V_raw <- matrix(runif(S * K, uv_range[1], uv_range[2]), S, K)
+    stopifnot(all(is.finite(unlist(init))), all(init$sigma_g > 0), all(init$sd_re > 0), init$sigma_b > 0, abs(init$rho_x) < 1)
+    inits[[ch]] <- init
+  }
+  if (n_clamped > 0L) logf("WARNING: m1c_inits_for_m2c: %d correlation init(s) clamped to +/-0.95 over %d chains (see the lines above)", n_clamped, chains)
+  attr(inits, "means") <- m
+  attr(inits, "n_copied") <- length(c("alpha0", "alpha", "tau", "mu0", "delta", if (P > 0L) "beta", "sigma_g", "rho_x", "sd_re", "L_Om", "z_re", "sigma_b", "z_b", "gamma"))
+  attr(inits, "n_clamped") <- n_clamped
+  inits
+}
+
+## ---- event-level choice sets of the role programs (PI-approved 2026-11-04; switch joiner_set) -------------------------------------------------
+## event_alt_sets(dat, ev_sets = NULL): adds to a Stan data list (build_stan_data() output, sampled = 0) the ragged event-level index of the allowed
+## stage-2 alternatives that m1_context.stan, m1_context_rho.stan and m2_context.stan take: n_ev_alt, ev_alt_first[E], ev_alt_n[E] and
+## ev_alt_loc[n_ev_alt] (block-local positions r - cs_start + 1, increasing). An event without a row in ev_sets gets the full stage-2 set (in_s2 rows)
+## of its state-year, in the order of the programs' s2_loc, so with ev_sets = NULL (joiner_set = all) the programs compute exactly what they computed
+## before. ev_sets = data.frame(ev_idx, alt_row) (assemble_cell(JOINER_SET = "opposing")$ev_sets): the allowed rows of the restricted (joiner) events,
+## asserted inside the event's state-year block, in its stage-2 set, and containing the chosen row.
+event_alt_sets <- function(dat, ev_sets = NULL) {
+  stopifnot(is.list(dat), dat$sampled == 0L, length(dat$ev_sy) == dat$E, length(dat$ev_row) == dat$E, length(dat$in_s2) == dat$N2)
+  restr <- vector("list", dat$E)
+  if (!is.null(ev_sets)) {
+    stopifnot(is.data.frame(ev_sets), all(c("ev_idx", "alt_row") %in% names(ev_sets)), nrow(ev_sets) >= 1L, !anyNA(ev_sets$ev_idx), !anyNA(ev_sets$alt_row),
+              all(ev_sets$ev_idx %in% seq_len(dat$E)), !anyDuplicated(ev_sets[, c("ev_idx", "alt_row")]))
+    sp <- split(as.integer(ev_sets$alt_row), as.integer(ev_sets$ev_idx))
+    for (k in names(sp)) restr[[as.integer(k)]] <- sort(sp[[k]])
+  }
+  first <- integer(dat$E); len <- integer(dat$E); loc <- vector("list", dat$E); pos <- 1L
+  for (e in seq_len(dat$E)) {
+    n <- dat$ev_sy[e]; s <- dat$cs_start[n]; rows <- s:dat$cs_end[n]
+    full <- rows[dat$in_s2[rows] == 1L]
+    r <- if (is.null(restr[[e]])) full else restr[[e]]
+    if (!all(r %in% full)) stop(sprintf("event_alt_sets: event %d has allowed rows outside its state-year's stage-2 set", e))
+    if (!dat$ev_row[e] %in% r) stop(sprintf("event_alt_sets: event %d: the chosen row %d is not in its allowed set", e, dat$ev_row[e]))
+    first[e] <- pos; len[e] <- length(r); loc[[e]] <- as.integer(r - s + 1L); pos <- pos + length(r)
+  }
+  dat$ev_alt_loc <- array(as.integer(unlist(loc)), dim = pos - 1L)
+  dat$n_ev_alt <- as.integer(pos - 1L); dat$ev_alt_first <- array(first, dim = dat$E); dat$ev_alt_n <- array(len, dim = dat$E)
+  stopifnot(length(dat$ev_alt_loc) == dat$n_ev_alt, all(dat$ev_alt_n >= 1L))
+  dat
+}
+
 ## m1_cell_for_m2(sample, lag, model_m2, spec): the cell name of the matching M1 fit (M2x -> M1x, same switches, K dropped: m1_spec(), so
 ## every AME K of a cell starts from the SAME M1 fit). locate_m1_fit(...): its file in out_dir, or NA when no such file exists.
 m1_cell_for_m2 <- function(sample, lag, model_m2, spec) {
