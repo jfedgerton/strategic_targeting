@@ -113,7 +113,7 @@ test_that("the three M1 Stan programs take P = 0: a tiny fit of m1_latent_additi
     me <- rstan::extract(fit, pars = "mu_event", permuted = TRUE)$mu_event
     for (ev in seq_len(dat$E)) expect_equal(me[, ev, ], e$mu_state[, dat$sy_state[dat$ev_sy[ev]], ], info = paste("event", ev))
   }
-  datc <- build_stan_data(A$sy, A$alts, A$ev, A$W_cols, A$X_cols, A$Z_cols, joint = 1L, x_ref = A$x_ref, allow_orphan_initiations = TRUE); datc$G <- 3L; datc$ev_grp <- as.integer(A$ev$grp)
+  datc <- build_stan_data(A$sy, A$alts, A$ev, A$W_cols, A$X_cols, A$Z_cols, joint = 1L, x_ref = A$x_ref, allow_orphan_initiations = TRUE); datc$G <- 3L; datc$ev_grp <- as.integer(A$ev$grp); datc <- event_alt_sets(datc)   # 2026-11-04: full stage-2 sets
   expect_true(all(0:2 %in% datc$ev_grp))
   for (prog in c("m1_context", "m1_context_rho")) {
     fitc <- sampling(if (prog == "m1_context") sm_ctx else sm_rho, data = datc, chains = 1, iter = 40, warmup = 20, seed = 123, refresh = 0, pars = c("z_re", "z_b", "L_Om", "re"), include = FALSE)

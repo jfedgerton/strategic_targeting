@@ -13,7 +13,7 @@ toy_ctx <- function(seed = 123L) {
   sim <- simulate_targeting("M1b", S = 6L, Tt = 6L, K = 2L, seed = seed, target_rate = 0.6)
   dat <- build_stan_data(sim$sy, sim$alts, sim$ev, c("W1", "W2"), paste0("X", 1:4), c("Z1", "Z2"), joint = 1L, x_ref = rep(0.1, 4), D_mode = 3L)
   dat$G <- 3L; dat$ev_grp <- as.integer((seq_len(dat$E) - 1L) %% 3L)
-  dat
+  event_alt_sets(dat)                                    # 2026-11-04: the event-level allowed rows (full stage-2 sets); the 5153f8e program ignores them
 }
 ## one random parameter point, as named lists for the old (delta_lead / delta_join) and the new (delta) parameterisation
 rand_point <- function(dat, seed) {

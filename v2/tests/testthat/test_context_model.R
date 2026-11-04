@@ -194,7 +194,7 @@ tiny_context_data <- function(seed = 123L) {
   dat <- build_stan_data(sim$sy, sim$alts, sim$ev, c("W1", "W2"), paste0("X", 1:4), c("Z1", "Z2"), joint = 1L, x_ref = rep(0, 4), D_mode = 3L)
   dat$G <- 3L                                            # the group count is data since 2026-10-31
   dat$ev_grp <- as.integer((seq_len(dat$E) - 1L) %% 3L)
-  dat
+  event_alt_sets(dat)                                    # 2026-11-04: the event-level allowed rows (full stage-2 sets)
 }
 context_pars <- function(dat) {
   set.seed(7); S <- dat$S
