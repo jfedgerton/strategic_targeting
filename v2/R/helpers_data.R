@@ -637,6 +637,40 @@ aprime_roles <- function(pairs, dd) {
   attr(pr, "diagnostics") <- diag
   pr |> select(-.e, -grp_unique)
 }
+## ---- joiner choice sets (PI-approved 2026-11-04; switch joiner_set = opposing) -------------------------------------------------------------
+## joiner_opposing_sets(pairs, dd): pairs = the PRE-collapse non-escalation event rows after the direction rule WITH their aprime group (the output
+## of aprime_roles(): dispnum, initiator, target, year, sidea1, grp_aprime); dd = COW directed dispute-years (dispnum, ccode1, year, sidea1). For every
+## JOINER event (grp_aprime == 2) the set of states that (i) take part in the event's dispute in its onset year (a dispute-year row in that year) and
+## (ii) are on the side OPPOSITE to the joiner's own side. The joiner's own side is the event's (post-flip) sidea1, as in aprime_roles(). A state with
+## two sides within the onset year (a within-year switcher, dispute 258) is opposite when EITHER of its sides differs from the joiner's (so a switching
+## target stays in its own pair's set); such members are flagged (opp_two_sides) and counted. The initiator is never in its own set. The chosen target
+## must be in its set: the function stops and lists the offending events otherwise.
+## Returns one row per (event, opposing state): dispnum, initiator, target, year, opp_ccode, opp_two_sides; attr "diagnostics" (counts, sizes).
+joiner_opposing_sets <- function(pairs, dd) {
+  stopifnot(is.data.frame(pairs), all(c("dispnum", "initiator", "target", "year", "sidea1", "grp_aprime") %in% names(pairs)),
+            all(c("dispnum", "ccode1", "year", "sidea1") %in% names(dd)), !anyNA(pairs[, c("dispnum", "initiator", "target", "year", "sidea1", "grp_aprime")]),
+            all(pairs$sidea1 %in% c(0L, 1L)), all(pairs$grp_aprime %in% 0:3))
+  assert_no_dup_keys(pairs, c("dispnum", "initiator", "target"), "joiner_opposing_sets: pairs")
+  jn <- pairs |> filter(grp_aprime == 2L) |> transmute(dispnum = as.integer(dispnum), initiator = as.integer(initiator), target = as.integer(target),
+                                                        year = as.integer(year), own = as.integer(sidea1))
+  if (nrow(jn) == 0L) stop("joiner_opposing_sets: no joiner event (grp_aprime == 2)")
+  part <- dd |> transmute(dispnum = as.integer(dispnum), ccode = as.integer(ccode1), year = as.integer(year), side = as.integer(sidea1)) |> distinct()
+  sides <- part |> group_by(dispnum, ccode, year) |> summarise(n_side = n_distinct(side), has1 = any(side == 1L), has0 = any(side == 0L), .groups = "drop")
+  cand <- jn |> inner_join(sides, by = c("dispnum", "year"), relationship = "many-to-many") |> filter(ccode != initiator) |>
+    mutate(opposite = (own == 1L & has0) | (own == 0L & has1))
+  out <- cand |> filter(opposite) |> transmute(dispnum, initiator, target, year, opp_ccode = ccode, opp_two_sides = n_side > 1L) |>
+    arrange(dispnum, initiator, target, year, opp_ccode)
+  ## the chosen target is in its own set, for every joiner event (loud failure with the list)
+  miss <- jn |> anti_join(out |> filter(opp_ccode == target), by = c("dispnum", "initiator", "target", "year"))
+  if (nrow(miss) > 0L) stop(sprintf("joiner_opposing_sets: %d joiner events have a chosen target that is not on the opposite side of the dispute in the onset year: %s", nrow(miss),
+                                    paste(sprintf("%d->%d %d (dispute %d)", miss$initiator, miss$target, miss$year, miss$dispnum), collapse = "; ")))
+  sz <- out |> count(dispnum, initiator, target, year, name = "n_opp")
+  stopifnot(nrow(sz) == nrow(jn), all(sz$n_opp >= 1L), !anyDuplicated(out[, c("dispnum", "initiator", "target", "year", "opp_ccode")]))
+  attr(out, "diagnostics") <- list(n_events = nrow(jn), size_min = min(sz$n_opp), size_median = stats::median(sz$n_opp), size_max = max(sz$n_opp),
+                                   n_singleton = sum(sz$n_opp == 1L), n_rows = nrow(out), n_two_sided_members = sum(out$opp_two_sides),
+                                   n_events_with_two_sided = n_distinct(paste(out$dispnum, out$initiator, out$target)[out$opp_two_sides]))
+  out
+}
 ## stage2_group_labels(roles): the labels of ev_grp 0..G-1 under the roles switch ("stageb" = the 3-group stage-b coding, "aprime" = the 4 groups above)
 stage2_group_labels <- function(roles = "stageb") { stopifnot(roles %in% c("stageb", "aprime")); if (roles == "aprime") APRIME_GROUPS else STAGE2_GROUPS }
 

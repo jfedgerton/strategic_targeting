@@ -10,6 +10,8 @@
 ##                                 shares, NOT standardised within year; PI decision 2026-10-23), R_eig (eigenvector
 ##                                 centrality, still std within year; not used in the main grid)
 ##   roles_aprime.rds              (2026-10-31) the aprime role group of every non-escalation event (switch roles = aprime; aprime_roles())
+##   joiner_sets_aprime.rds        (2026-11-04) per aprime JOINER event (group 2), the states on the opposite side of its (weight-group) dispute in the
+##                                 onset year, one row per (event, state) (switch joiner_set = opposing; joiner_opposing_sets())
 ##   events.rds                    one row per (initiator, target, year) directed event among the kept rows (initiator = COW's
 ##                                 war-initiating side in war-level disputes linked to a COW war, else MID Side A; D1 2026-10-25:
 ##                                 dir_flipped, dir_source, dir_rule, war_link; stage-2 weights w_<sample>, D8) (same-year
@@ -626,6 +628,14 @@ roles_pre <- aprime_roles(events |> filter(!escalation) |> transmute(dispnum, in
 rd <- attr(roles_pre, "diagnostics")
 blog("roles aprime (pre-collapse, %d non-escalation pairs): alone %d, co-originator %d, joiner %d, target joined late %d; initiators with two sides in the onset year %d events; partners with two sides deciding the group %d events; partner side from its first dispute year (absent in the onset year) %d events; D8 groups mixing group 3 with another group %d",
      rd$n_events, sum(roles_pre$grp_aprime == 0L), sum(roles_pre$grp_aprime == 1L), sum(roles_pre$grp_aprime == 2L), sum(roles_pre$grp_aprime == 3L), rd$n_init_switch, rd$n_switch_decides, rd$n_fallback_side, rd$n_mixed_groups_with_3)
+## ---- joiner choice sets (PI-approved 2026-11-04; switch joiner_set = opposing; joiner_opposing_sets() in helpers_data.R) -----------------------
+## For every pre-collapse joiner event (aprime group 2): the states on the side opposite to the joiner's own (post-flip) side that take part in the
+## dispute in the onset year. Mapped to the collapsed events below by the weight-group dispute, as the roles; written to its own file, so every other
+## file (roles_aprime.rds included) is byte-identical to the previous build.
+jset_pre <- joiner_opposing_sets(roles_pre, dd)
+jd <- attr(jset_pre, "diagnostics")
+blog("joiner sets (pre-collapse): %d joiner events; opposing-side set size min %d / median %.1f / max %d; %d events with a single opposing state; %d (event, state) rows; members with two sides in the onset year %d (in %d events; counted as opposite when either side differs)",
+     jd$n_events, jd$size_min, jd$size_median, jd$size_max, jd$n_singleton, jd$n_rows, jd$n_two_sided_members, jd$n_events_with_two_sided)
 ## target has positions at t-1 and is a system member at t: the conditions for its alternative row to exist in the
 ## "all" choice set (besides not already fighting); assemble_cell() asserts every such event is in its choice set
 events <- events |> left_join(pos |> transmute(target = ccode, year = year + 1L, .pos = 1L), by = c("target", "year")) |>
@@ -751,7 +761,17 @@ stopifnot(nrow(roles_ap) == sum(!events$escalation), !anyDuplicated(paste(roles_
           nrow(anti_join(events |> filter(!escalation), roles_ap, by = c("initiator", "target", "year", "dispnum"))) == 0L)
 blog("roles aprime after the collapse: %d events (alone %d, co-originator %d, joiner %d, target joined late %d); collapsed keys %d, of which their source disputes carry different roles %d (the weight-group dispute decides)",
      nrow(roles_ap), sum(roles_ap$grp_aprime == 0L), sum(roles_ap$grp_aprime == 1L), sum(roles_ap$grp_aprime == 2L), sum(roles_ap$grp_aprime == 3L), sum(roles_mixed$n_src > 1L), sum(roles_mixed$n_roles > 1L))
-rm(roles_pre, roles_src, roles_mixed, rd)
+## joiner sets of the collapsed events: the set of the key's weight-group dispute (the dispute its role came from), for every collapsed joiner event
+jn_keys <- roles_ap |> filter(grp_aprime == 2L) |> select(initiator, target, year, dispnum)
+jset_ap <- as.data.frame(jset_pre |> semi_join(jn_keys, by = c("initiator", "target", "year", "dispnum")) |> arrange(year, initiator, target, opp_ccode))
+attributes(jset_ap) <- attributes(jset_ap)[c("names", "row.names", "class")]
+jsz <- jset_ap |> count(initiator, target, year, name = "n_opp")
+stopifnot(nrow(jsz) == nrow(jn_keys), nrow(anti_join(jn_keys, jsz, by = c("initiator", "target", "year"))) == 0L,
+          nrow(jsz |> anti_join(jset_ap |> filter(opp_ccode == target), by = c("initiator", "target", "year"))) == 0L,   # the chosen target is in every set
+          !anyDuplicated(jset_ap[, c("initiator", "target", "year", "opp_ccode")]), all(jset_ap$opp_ccode != jset_ap$initiator))
+blog("joiner sets after the collapse: %d joiner events (of %d non-escalation events); opposing-side set size min %d / median %.1f / max %d; %d events with a single opposing state (before the intersection with a state-year's stage-2 set, done at assembly)",
+     nrow(jsz), nrow(roles_ap), min(jsz$n_opp), median(jsz$n_opp), max(jsz$n_opp), sum(jsz$n_opp == 1L))
+rm(roles_pre, roles_src, roles_mixed, rd, jset_pre, jd, jn_keys, jsz)
 saveRDS(events, file.path(out_dir, "events.rds"))
 
 ## ============================================================================
@@ -922,6 +942,7 @@ add_manifest(pos, "sy_positions.rds", "state-year positions: M = log CINC share,
 add_manifest(events, "events.rds", sprintf("directed events (Side A x Side B pairs; DIRECTION=%s: war-level disputes follow COW's war-initiating side, dir_flipped / dir_source / war_link), joiners %s (is_joiner_pair); month-rule escalation flag with participant-level dates where gml_part matches (excluded from all in_* flags); pair-level war; same-year duplicates collapsed (dispnums); fighting_at_ref; is_ww2; target_has_pos_tm1; stage-2 weights w_<sample>; coalition context coal_incl / coal_strict / coal_onset_ambiguous",
                                            DIRECTION, if (INCLUDE_JOINERS) "included" else "excluded"))
 add_manifest(roles_ap, "roles_aprime.rds", "stage-2 role groups aprime per non-escalation event (PI decision 2026-10-31; switch roles = aprime): grp_aprime 0 alone originator / 1 co-originator / 2 joiner / 3 target joined late, from the weight-group dispute (smallest dispnum) of a collapsed key; aprime_roles()")
+add_manifest(jset_ap, "joiner_sets_aprime.rds", "joiner choice sets (PI-approved 2026-11-04; switch joiner_set = opposing): per aprime joiner event (initiator, target, year, dispnum = its weight-group dispute) the states opp_ccode on the opposite side of that dispute in the onset year (opp_two_sides: a within-year switcher); joiner_opposing_sets()")
 ## number of system states per year, for the system-growth diagnostic on the change variables (item 4 of the
 ## 2026-10-23 decision): g3 at t-1 = log n_system(t-1) - log n_system(t-4), constant within a year
 nsys_year <- states |> distinct(year, n_system) |> arrange(year)
@@ -1182,6 +1203,19 @@ for (h in LAGS) {
     lost_pr <- ev_flag |> semi_join(panel, by = c("ccode1" = "ccode", "year")) |> semi_join(alts |> filter(in_s2 == 1L), by = c("ccode1", "ccode2", "year")) |>
       anti_join(a_v |> filter(in_s2 == 1L), by = c("ccode1", "ccode2", "year")) |> nrow()
     if (variant == "polrel") blog("  variant polrel: %d events have a target outside the politically relevant set (dropped from stage 2)", lost_pr)
+    if (variant == "all") {
+      ## joiner sets (2026-11-04): the restriction intersected with this lag's all-states stage-2 sets, for the joiner events with a stage-2 row (a log
+      ## line only; assemble_cell() redoes it per cell and sample)
+      jr <- jset_ap |> semi_join(a_v |> filter(in_s2 == 1L), by = c("initiator" = "ccode1", "target" = "ccode2", "year"))
+      j_ev <- jr |> distinct(initiator, target, year)
+      j_s2 <- j_ev |> inner_join(n_sets, by = c("initiator" = "ccode1", "year"))
+      j_kept <- jr |> semi_join(a_v |> filter(in_s2 == 1L), by = c("initiator" = "ccode1", "opp_ccode" = "ccode2", "year")) |> count(initiator, target, year, name = "n_kept")
+      j_s2 <- j_s2 |> left_join(j_kept, by = c("initiator", "target", "year"))
+      stopifnot(!anyNA(j_s2$n_kept), all(j_s2$n_kept >= 1L), all(j_s2$n_kept <= j_s2$n_s2))
+      blog("  variant all, joiner sets: %d joiner events with a stage-2 row (all samples); restricted set size (opposing states in the stage-2 set) min %d / median %.1f / max %d; size 1: %d; alternatives removed in total %d (of %d stage-2 rows of these events)",
+           nrow(j_s2), min(j_s2$n_kept), median(j_s2$n_kept), max(j_s2$n_kept), sum(j_s2$n_kept == 1L), sum(j_s2$n_s2 - j_s2$n_kept), sum(j_s2$n_s2))
+      rm(jr, j_ev, j_s2, j_kept)
+    }
     add_manifest(a_v, sprintf("alts_lag%d_%s.rds", h, variant), sprintf("choice sets h=%d variant=%s; union of the stage-1 IV set (in_iv, January rule) and the stage-2 set (in_s2, reference-date rule), already-fighting alternatives removed (month rule); dy_mid_tm1", h, variant))
   }
   rm(alts, chk); invisible(gc())
