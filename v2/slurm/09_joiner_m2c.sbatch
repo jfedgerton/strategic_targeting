@@ -10,7 +10,8 @@
 #SBATCH --output=%x_%A_%a.out
 #SBATCH --open-mode=append
 # ENTRY DIRECTION, ROLE CODINGS bc / bcj, JOINER CHOICE SETS AND THE AME ROLE MODEL M2c (PI decisions 2026-11-04). Every cell: --entry=later
-# (v2/data_entry), --comparison=directed, lag 3; the role cells take --roles=$ROLES, ROLES=bcj by default (the MAIN coding, PI decision 2026-11-04) or ROLES=bc (optional appendix coding; one submission per coding).
+# (v2/data_entry; EVENTS=pairs, the default) or --events=dymid (v2/data_dymid, the interacting-dyads foundation with the entry rule built in, README
+# section 6.9; EVENTS=dymid, PI-approved 2026-11-04: the same 22 cells with suffix _dy in place of _ent), --comparison=directed, lag 3; the role cells take --roles=$ROLES, ROLES=bcj by default (the MAIN coding, PI decision 2026-11-04) or ROLES=bc (optional appendix coding; one submission per coding).
 #   idx  sample  model  K  joiner_set  needs (init fit in v2/output; M2c only)
 #    0   fmid    M1c    -  all         -   (baseline and M2c init)
 #    1   mid     M1c    -  all         -
@@ -20,21 +21,22 @@
 #    5   mid     M1c    -  opposing    -
 #    6   fmid    M1b    -  -           -   (the pooled baseline on the entry events; no roles, so its cell is the same for both codings: run it ONCE)
 #    7   mid     M1b    -  -           -
-#    8   fmid    M2c    1  all         fit_fmid_lag3_all_pr_M1c_cdir_<ROLES>_ent_t<TAG>.rds        (task 0)
-#    9   mid     M2c    1  all         fit_mid_lag3_all_pr_M1c_cdir_<ROLES>_ent_t<TAG>.rds         (task 1)
-#   10   fmid    M2c    2  all         fit_fmid_lag3_all_pr_M1c_cdir_<ROLES>_ent_t<TAG>.rds        (task 0)
-#   11   mid     M2c    2  all         fit_mid_lag3_all_pr_M1c_cdir_<ROLES>_ent_t<TAG>.rds         (task 1)
-#   12   fmid    M2c    1  opposing    fit_fmid_lag3_all_pr_M1c_cdir_<ROLES>_jset_ent_t<TAG>.rds   (task 4)
-#   13   mid     M2c    1  opposing    fit_mid_lag3_all_pr_M1c_cdir_<ROLES>_jset_ent_t<TAG>.rds    (task 5)
-#   14   fmid    M2c    2  opposing    fit_fmid_lag3_all_pr_M1c_cdir_<ROLES>_jset_ent_t<TAG>.rds   (task 4)
-#   15   mid     M2c    2  opposing    fit_mid_lag3_all_pr_M1c_cdir_<ROLES>_jset_ent_t<TAG>.rds    (task 5)
+#  (<DS> below = _ent under EVENTS=pairs, _dy under EVENTS=dymid)
+#    8   fmid    M2c    1  all         fit_fmid_lag3_all_pr_M1c_cdir_<ROLES><DS>_t<TAG>.rds        (task 0)
+#    9   mid     M2c    1  all         fit_mid_lag3_all_pr_M1c_cdir_<ROLES><DS>_t<TAG>.rds         (task 1)
+#   10   fmid    M2c    2  all         fit_fmid_lag3_all_pr_M1c_cdir_<ROLES><DS>_t<TAG>.rds        (task 0)
+#   11   mid     M2c    2  all         fit_mid_lag3_all_pr_M1c_cdir_<ROLES><DS>_t<TAG>.rds         (task 1)
+#   12   fmid    M2c    1  opposing    fit_fmid_lag3_all_pr_M1c_cdir_<ROLES>_jset<DS>_t<TAG>.rds   (task 4)
+#   13   mid     M2c    1  opposing    fit_mid_lag3_all_pr_M1c_cdir_<ROLES>_jset<DS>_t<TAG>.rds    (task 5)
+#   14   fmid    M2c    2  opposing    fit_fmid_lag3_all_pr_M1c_cdir_<ROLES>_jset<DS>_t<TAG>.rds   (task 4)
+#   15   mid     M2c    2  opposing    fit_mid_lag3_all_pr_M1c_cdir_<ROLES>_jset<DS>_t<TAG>.rds    (task 5)
 #  politically relevant choice set (--variant=polrel; cell names <sample>_lag3_polrel_pr_...; joiner_set all):
 #   16   fmid    M1c    -  all         -   (polrel baseline and M2c init)
 #   17   mid     M1c    -  all         -
-#   18   fmid    M2c    1  all         fit_fmid_lag3_polrel_pr_M1c_cdir_<ROLES>_ent_t<TAG>.rds     (task 16)
-#   19   mid     M2c    1  all         fit_mid_lag3_polrel_pr_M1c_cdir_<ROLES>_ent_t<TAG>.rds      (task 17)
-#   20   fmid    M2c    2  all         fit_fmid_lag3_polrel_pr_M1c_cdir_<ROLES>_ent_t<TAG>.rds     (task 16)
-#   21   mid     M2c    2  all         fit_mid_lag3_polrel_pr_M1c_cdir_<ROLES>_ent_t<TAG>.rds      (task 17)
+#   18   fmid    M2c    1  all         fit_fmid_lag3_polrel_pr_M1c_cdir_<ROLES><DS>_t<TAG>.rds     (task 16)
+#   19   mid     M2c    1  all         fit_mid_lag3_polrel_pr_M1c_cdir_<ROLES><DS>_t<TAG>.rds      (task 17)
+#   20   fmid    M2c    2  all         fit_fmid_lag3_polrel_pr_M1c_cdir_<ROLES><DS>_t<TAG>.rds     (task 16)
+#   21   mid     M2c    2  all         fit_mid_lag3_polrel_pr_M1c_cdir_<ROLES><DS>_t<TAG>.rds      (task 17)
 # Dependencies: tasks 8-15 need the M1c fits of tasks 0, 1, 4, 5 and tasks 18-21 those of tasks 16-17, of the SAME ROLES -> submit_joiner_m2c.sh
 # submits the M1 tasks (0-7,16-17, or 0-5,16-17 with SKIP_M1B=TRUE for the second coding) as one array and the M2c tasks 8-15,18-21 with --dependency=afterok:<that array> --kill-on-invalid-dep=yes (one
 # dependency on the whole M1 array, as in submit_main_grid.sh: a failed M1cr / M1b task also cancels the M2c array; resubmit with A_JOB=<id>).
@@ -51,7 +53,7 @@
 # DRY RUN (open account, no sampling, no init fit needed):
 #   sbatch --account=open --export=ALL,ROLES=bcj,DRY_RUN=TRUE --time=00:30:00 --mem=16G --cpus-per-task=1 v2/slurm/09_joiner_m2c.sbatch
 # Post: Rscript v2/R/03_extract.R --fit=v2/output/fit_<cell>.rds for each fit.
-# Needs the entry build (Rscript v2/R/01_build_data.R --entry=later -> v2/data_entry with its manifest) and the recompiled m1_context / m1_context_rho
+# Needs the entry build (Rscript v2/R/01_build_data.R --entry=later -> v2/data_entry with its manifest; EVENTS=dymid: --events=dymid -> v2/data_dymid) and the recompiled m1_context / m1_context_rho
 # / m2_context programs (compile_models.R). NOTE: the edited m1_context / m1_context_rho sources change their hashes, so 03_extract.R refuses M1c /
 # M1cr fits sampled with the earlier sources (assert_fit_stan_current).
 source "${SLURM_SUBMIT_DIR:?submit from the repo root}/v2/slurm/00_env.sh" || exit 1
@@ -85,12 +87,14 @@ case $i in
 esac
 ROLES=${ROLES:-bcj}      # PI decision 2026-11-04: bcj is the main coding (especially for M2c); ROLES=bc is the optional appendix coding
 case $ROLES in bc|bcj) ;; *) echo "ROLES must be bc or bcj (got '$ROLES')" >&2; exit 1 ;; esac
+EVENTS=${EVENTS:-pairs}  # PI-approved 2026-11-04: pairs (default; --entry=later, v2/data_entry, suffix _ent, unchanged) | dymid (--events=dymid, v2/data_dymid, suffix _dy)
+case $EVENTS in pairs) DATA_ARG="--entry=later"; DS=_ent ;; dymid) DATA_ARG="--events=dymid"; DS=_dy ;; *) echo "EVENTS must be pairs or dymid (got '$EVENTS')" >&2; exit 1 ;; esac
 DRY=${DRY_RUN:-FALSE}
 THR=${THREADS_PER_CHAIN:-8}
 TAG=${TAG:-long}
 [[ "$TAG" =~ ^[A-Za-z0-9]+$ ]] || { echo "TAG must be letters and digits (got '$TAG')" >&2; exit 1; }
 if [ "$m" = "M1b" ]; then ROLE_ARGS=""; else ROLE_ARGS="--roles=$ROLES --joiner_set=$js"; fi
-BASE="--sample=$s --lag=3 --model=$m --comparison=directed --entry=later --variant=$vr $ROLE_ARGS --tag=$TAG --dry_run=$DRY --threads_per_chain=$THR"
+BASE="--sample=$s --lag=3 --model=$m --comparison=directed $DATA_ARG --variant=$vr $ROLE_ARGS --tag=$TAG --dry_run=$DRY --threads_per_chain=$THR"
 if [ "$m" != "M2c" ]; then
   IT=${LONG_ITER:-6000}; WU=${LONG_WARMUP:-3000}; AD=${LONG_ADAPT_DELTA:-0.9}
   SAMP="--iter=$IT --warmup=$WU --adapt_delta=$AD"
@@ -103,9 +107,9 @@ if [ "$m" != "M2c" ]; then
 else
   SAMP="--ame_K=$K${M2_ITER:+ --iter=$M2_ITER}${M2_WARMUP:+ --warmup=$M2_WARMUP}${M2_ADAPT_DELTA:+ --adapt_delta=$M2_ADAPT_DELTA}"
   if [ "$DRY" != "TRUE" ]; then
-    want="v2/output/fit_${s}_lag3_${vr}_pr_M1c_cdir_${ROLES}$([ "$js" = opposing ] && echo _jset)_ent_t${TAG}.rds"
+    want="v2/output/fit_${s}_lag3_${vr}_pr_M1c_cdir_${ROLES}$([ "$js" = opposing ] && echo _jset)${DS}_t${TAG}.rds"
     [ -f "$want" ] || { echo "ERROR: task $i ($s M2c K$K joiner_set=$js) needs $want (see the table above)" >&2; exit 1; }
   fi
 fi
-echo "task $i -> sample=$s model=$m roles=$ROLES (M1b: none) entry=later variant=$vr K=${K:--} joiner_set=$js tag=$TAG; $SAMP; threads_per_chain=$THR cpus=${SLURM_CPUS_PER_TASK:-?} dry_run=$DRY"
+echo "task $i -> sample=$s model=$m roles=$ROLES (M1b: none) events=$EVENTS ($DATA_ARG) variant=$vr K=${K:--} joiner_set=$js tag=$TAG; $SAMP; threads_per_chain=$THR cpus=${SLURM_CPUS_PER_TASK:-?} dry_run=$DRY"
 Rscript v2/R/02_fit_model.R $BASE $SAMP
