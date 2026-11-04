@@ -148,7 +148,8 @@ if (!is.na(slurm_job_id) && slurm_job_id == "") slurm_job_id <- NA_character_
 if (!is.na(slurm_task_id) && slurm_task_id == "") slurm_task_id <- NA_character_
 logf("provenance at load: git commit %s (uncommitted changes under v2/R or v2/stan: %s); manifest built %s with %d files; SLURM_JOB_ID %s; SLURM_ARRAY_TASK_ID %s",
      git_commit_at_load, git_dirty_at_load, if ("built" %in% names(manifest_at_load)) manifest_at_load$built[1] else "NA", nrow(manifest_at_load), slurm_job_id, slurm_task_id)
-cell_files <- c(sprintf("stage1_panel_lag%d.rds", LAG), sprintf("alts_lag%d_%s.rds", LAG, VARIANT), "events.rds",
+VARIANT_SPEC <- spec_variant(spec)                       # 2026-11-04: all | polrel (the variant switch, role / AME models only)
+cell_files <- c(sprintf("stage1_panel_lag%d.rds", LAG), sprintf("alts_lag%d_%s.rds", LAG, VARIANT_SPEC), "events.rds",
                 if (spec$roles %in% JOINER_ROLES) "roles_aprime.rds",   # bc / bcj (2026-11-04) are derived from the same file   # roles = aprime (2026-10-31) reads the build's role file as well
                 if (JOINER_SET == "opposing") "joiner_sets_aprime.rds")   # joiner_set = opposing (2026-11-04) reads the joiner sets as well
 stopifnot(all(cell_files %in% manifest_at_load$file))
@@ -411,7 +412,7 @@ obj <- list(fit = fit, dat = dat, cell = cell, state_codes = state_codes, W_cols
             Zr_cols = if (RHOREG) X_MU_TRAITS else NULL,                     # M1bz (2026-11-02): the traits of rho_n, dat$Zr
             jset_stats = A$jset_stats,                                        # joiner_set = opposing (2026-11-04): joiner events, set sizes, singletons, removed rows
             group_labels = if (CONTEXT_MODEL) A$group_table$group else NULL,   # M1c / M1cr: the label of ev_grp g is group_labels[g + 1] (2026-10-31)
-            args = list(sample = SAMPLE, lag = LAG, variant = VARIANT, model = MODEL, centrality = CENTRALITY, K = K, chains = CHAINS,
+            args = list(sample = SAMPLE, lag = LAG, variant = VARIANT_SPEC, model = MODEL, centrality = CENTRALITY, K = K, chains = CHAINS,
                         iter = ITER, warmup = WARMUP, pilot = PILOT, sampled_m = SAMPLED_M, conflict_history = CONFLICT_HISTORY,
                         distance = A$distance, distance_stats = A$distance_stats, contiguity = spec$contiguity, dy_peace_years = DY_PEACE_YEARS, drop_ww2 = spec$ww2 == "drop",   # A$distance / A$major: the assembled values (= the switch, or "capital" / "joint" under the conventional comparison)
                         full_controls = spec$controls == "full", event_weights = spec$weights, direction = spec$direction,

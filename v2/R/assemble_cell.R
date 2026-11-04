@@ -730,7 +730,18 @@ assemble_cell <- function(SAMPLE, LAG, VARIANT, CENT = "pr", CONFLICT_HISTORY = 
   if (VARIANT == "all") {
     if (nrow(ev) != nrow(expected) - n_ev_dist) stop(sprintf("%d events with initiator in the panel, a target with positions at t-1 and a pair not fighting at the reference date are not in their stage-2 choice set (expected %d usable%s, got %d)",
                                                              abs(nrow(expected) - n_ev_dist - nrow(ev)), nrow(expected) - n_ev_dist, if (DISTANCE == "capital") sprintf(" = %d minus %d without a capital distance", nrow(expected), n_ev_dist) else "", nrow(ev)))
-  } else stopifnot(nrow(ev) <= nrow(expected) - n_ev_dist)
+  } else {
+    stopifnot(nrow(ev) <= nrow(expected) - n_ev_dist)
+    ## polrel (2026-11-04 logging): an expected event whose chosen target is not politically relevant has no stage-2 row in this variant and leaves
+    ## stage 2 (the archived variant's rule, kept); its state-year keeps y1 = 1. Counted per stage-2 group (events and D8 weights).
+    pr_drop <- expected |> anti_join(ev, by = c("ccode1", "ccode2", "year"))
+    if (DISTANCE == "capital") pr_drop <- pr_drop |> anti_join(dist_dropped |> filter(in_s2 == 1L), by = c("ccode1", "ccode2", "year"))
+    stopifnot(nrow(pr_drop) == nrow(expected) - n_ev_dist - nrow(ev))
+    logf("variant %s: %d of %d expected stage-2 events of sample %s have a chosen target outside the choice set and leave stage 2 (weights %.1f of %.1f); by group: %s",
+         VARIANT, nrow(pr_drop), nrow(expected) - n_ev_dist, SAMPLE, sum(pr_drop$w), sum(expected$w),
+         paste(sprintf("%s %d of %d (weights %.1f of %.1f)", GROUP_LABELS, vapply(0:(G_GRP - 1L), function(g) sum(pr_drop$grp == g), 1L), vapply(0:(G_GRP - 1L), function(g) sum(expected$grp == g), 1L),
+                       vapply(0:(G_GRP - 1L), function(g) sum(pr_drop$w[pr_drop$grp == g]), 0), vapply(0:(G_GRP - 1L), function(g) sum(expected$w[expected$grp == g]), 0)), collapse = "; "))
+  }
   stopifnot(nrow(ev_keys |> semi_join(sy_key, by = c("ccode1", "year")) |> filter(!target_has_pos_tm1) |> semi_join(alts, by = c("ccode1", "ccode2", "year"))) == 0)
   ## no initiating state-year with a usable event may have an empty or chosen-only stage-2 set (review coverage gap); the
   ## empty-IV-set check is above, so a state-year here always has >= 1 IV row as well
@@ -880,11 +891,13 @@ assemble_cell <- function(SAMPLE, LAG, VARIANT, CENT = "pr", CONFLICT_HISTORY = 
 assemble_cell_spec <- function(SAMPLE, LAG, spec, data_dir = spec_data_dir(spec, v2_root()), manifest = NULL, model = NULL) {
   stopifnot(is.null(model) || model %in% ALL_MODELS)
   conv <- spec_is_conventional(spec)
+  VARIANT <- spec_variant(spec)                            # 2026-11-04: the variant switch (polrel for the role / AME models); "all" otherwise
+  if (VARIANT != "all") stopifnot(is.null(model) || model %in% POLREL_MODELS)
   if (conv && (LAG != 3L || VARIANT != "all")) stop(sprintf("--comparison=conventional is defined on the lag-3 data with all-states choice sets (got lag %s, variant %s)", LAG, VARIANT))   # audit 2026-10-31 (1)
   if (conv) stopifnot(all(vapply(CONVENTIONAL_FIXED, function(nm) identical(spec[[nm]], SPEC_DEFAULTS[[nm]]), logical(1))), is.null(model) || model %in% CONVENTIONAL_MODELS)
   ## the directed comparison (2026-11-01): the same lag / variant rule and the same internal DISTANCE / MAJOR mapping; models DIRECTED_MODELS
   dirc <- spec_is_directed(spec)
-  if (dirc && (LAG != 3L || VARIANT != "all")) stop(sprintf("--comparison=directed is defined on the lag-3 data with all-states choice sets (got lag %s, variant %s)", LAG, VARIANT))
+  if (dirc && LAG != 3L) stop(sprintf("--comparison=directed is defined on the lag-3 data (got lag %s)", LAG))   # polrel allowed since 2026-11-04 (role / AME models)
   if (dirc) stopifnot(!conv, all(vapply(CONVENTIONAL_FIXED, function(nm) identical(spec[[nm]], SPEC_DEFAULTS[[nm]]), logical(1))), is.null(model) || model %in% c(DIRECTED_MODELS, RHOREG_MODELS, AME_CONTEXT_MODELS))
   ## mu_shift (2026-11-02): directed only, models MU_SHIFT_MODELS; M1bz (RHOREG_MODELS) directed only. A spec saved before has no field: none
   mu_shift <- if (is.null(spec$mu_shift)) "none" else spec$mu_shift

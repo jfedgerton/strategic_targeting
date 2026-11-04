@@ -52,7 +52,8 @@ SPEC_CHOICES <- list(
   roles     = c("stageb", "aprime", "bc", "bcj"),                # stage-2 role groups of the M1c / M1cr models (PI decision 2026-10-31): stageb (main) = the 3 stage-b groups (bilateral / leader / joiner) | aprime = 4 groups (alone originator / co-originator / joiner / target joined late; roles_aprime.rds, aprime_roles())
   mu_shift  = c("none", "traits"),                  # ideal-point shifters under the directed comparison (PI-approved 2026-11-02): none (main; X = none, P = 0) | traits = X = the initiator's M_lvl, R_lvl, cowmaj_tm1, dem_tm1 at t-1 as they enter W (X_MU_TRAITS, assemble_cell.R; P = 4); needs --comparison=directed
   joiner_set = c("all", "opposing"),                 # joiner choice set (PI-approved 2026-11-04): all (main; every stage-2 alternative) | opposing = a joiner event (aprime group 2) is scored only against the states on the OTHER side of the dispute it joins in the onset year, intersected with the state-year's stage-2 set (joiner_sets_aprime.rds); needs --roles=aprime
-  entry     = c("keep", "later")                    # joiner entry direction (PI decision 2026-11-04): keep (main; v2/data) | later = a joiner initiates against the side it joins, two joiners: the later entrant (v2/data_entry, built by 01_build_data.R --entry=later); suffix _ent
+  entry     = c("keep", "later"),                    # joiner entry direction (PI decision 2026-11-04): keep (main; v2/data) | later = a joiner initiates against the side it joins, two joiners: the later entrant (v2/data_entry, built by 01_build_data.R --entry=later); suffix _ent
+  variant   = c("all", "polrel")                    # choice set (un-archived 2026-11-04 for the role / AME models only): all (main) | polrel = the politically relevant alternatives (contiguous, conttype 1..5, or either state a major power; alts_lag<h>_polrel.rds of the build, data or data_entry); no suffix: it takes the "all" slot of the cell name
 )
 ## ---- the conventional comparison specification (PI-approved 2026-10-31; switch `comparison`, suffix _conv) --------------------------
 ## One switch fixes the three design matrices at once; it is NOT a combination of the other switches, although it carries the distance
@@ -199,7 +200,10 @@ prior_hyper <- function(spec) {
   stopifnot(rp %in% names(PRIOR_RHO_SHAPE), sp %in% names(PRIOR_SIGMA_X_SD))
   list(prior_rho_shape = unname(PRIOR_RHO_SHAPE[[rp]]), prior_sigma_x_sd = unname(PRIOR_SIGMA_X_SD[[sp]]))
 }
-VARIANT      <- "all"                                # choice set: every other system member (polrel is an archived option)
+VARIANT      <- "all"                                # choice set of the main specification: every other system member (polrel: the `variant` switch, 2026-11-04)
+## spec_variant(spec): the choice-set variant of a spec ("all" for a spec saved before 2026-11-04, which has no variant field)
+spec_variant <- function(spec) if (is.null(spec$variant)) VARIANT else spec$variant
+POLREL_MODELS <- c("M1c", "M1cr", "M2c")             # the models the polrel variant is specified for (PI request 2026-11-04)
 CENTRALITY   <- "pr"                                 # IGO PageRank (eigenvector centrality is an archived option)
 SAMPLED_M    <- 0L                                   # full choice sets (sampled alternatives are an archived option)
 CONFLICT_HISTORY <- TRUE                             # prior-MID counts in W and Z (switching them off is an archived option)
@@ -277,7 +281,7 @@ ROBUSTNESS_MAIN_CELL <- list(sample = "mid", lag = 5L)   # the perm_error preset
 ## --distance left this list on 2026-10-28: it is a switch again (none | capital), so --distance=TRUE (the archived spelling) is refused by
 ## parse_spec() as a value outside SPEC_CHOICES$distance, not here. --contiguity left it the same day (switch land | none): --contiguity=TRUE
 ## and --contiguity=FALSE are refused by parse_spec() as bad values, the bare --contiguity as a flag without a value.
-ARCHIVED_OPTIONS <- c("variant", "sampled_m", "centrality", "conflict_history", "dy_peace_years",
+ARCHIVED_OPTIONS <- c("sampled_m", "centrality", "conflict_history", "dy_peace_years",
                       "drop_ww2", "full_controls", "event_weights", "K")
 ## refuse_archived_options(args, script, also, also_msg): stop() when args hold --<archived>=... (or the bare flag); `also` adds
 ## script-specific refusals with their own message (the build takes --direction only, so it refuses every other switch of SPEC_CHOICES)
@@ -374,6 +378,7 @@ spec_string <- function(spec) {
   if (!is.null(spec$mu_shift) && identical(spec$mu_shift, SPEC_DEFAULTS$mu_shift)) spec <- spec[setdiff(names(spec), "mu_shift")]
   if (!is.null(spec$joiner_set) && identical(spec$joiner_set, SPEC_DEFAULTS$joiner_set)) spec <- spec[setdiff(names(spec), "joiner_set")]
   if (!is.null(spec$entry) && identical(spec$entry, SPEC_DEFAULTS$entry)) spec <- spec[setdiff(names(spec), "entry")]
+  if (!is.null(spec$variant) && identical(spec$variant, SPEC_DEFAULTS$variant)) spec <- spec[setdiff(names(spec), "variant")]
   paste(sprintf("%s=%s", names(spec), unlist(spec)), collapse = " ")
 }
 ## spec_is_conventional(spec): TRUE under --comparison=conventional (a spec saved before 2026-10-31 has no field: not conventional)
@@ -388,7 +393,8 @@ perm_part_spec_string <- function(spec) {
   drop <- c(PRIOR_SWITCHES, "tag", if (!spec_is_conventional(spec) && !spec_is_directed(spec)) "comparison", if (is.null(spec$roles) || identical(spec$roles, SPEC_DEFAULTS$roles)) "roles",
             if (is.null(spec$mu_shift) || identical(spec$mu_shift, SPEC_DEFAULTS$mu_shift)) "mu_shift",
             if (is.null(spec$joiner_set) || identical(spec$joiner_set, SPEC_DEFAULTS$joiner_set)) "joiner_set",
-            if (is.null(spec$entry) || identical(spec$entry, SPEC_DEFAULTS$entry)) "entry")   # joiner_set (2026-11-04): likewise   # mu_shift (2026-11-02): dropped at its default, kept when on
+            if (is.null(spec$entry) || identical(spec$entry, SPEC_DEFAULTS$entry)) "entry",
+            if (is.null(spec$variant) || identical(spec$variant, SPEC_DEFAULTS$variant)) "variant")   # joiner_set (2026-11-04): likewise   # mu_shift (2026-11-02): dropped at its default, kept when on
   spec_string(spec[setdiff(names(spec), drop)])
 }
 ## spec_coal_col(spec): the events.rds column the context switch filters on ("coal_incl" / "coal_strict")
@@ -435,7 +441,10 @@ cell_name <- function(sample, lag, model, spec) {
     if ("rho_prior" %in% off && model_joint(model) != 1L)
       stop(sprintf("cell_name: --rho_prior=%s with the model %s, which has no Sigma correlation rho (the rho prior applies to the joint model M1b only)", spec$rho_prior, model))
   }
-  sprintf("%s_lag%d_%s_%s_%s%s%s", sample, as.integer(lag), VARIANT, CENTRALITY, model,
+  ## the politically relevant choice set (2026-11-04): the role / AME models only; its name takes the variant slot (<sample>_lag<h>_polrel_pr_...)
+  if (!identical(spec_variant(spec), "all") && !model %in% POLREL_MODELS)
+    stop(sprintf("cell_name: --variant=%s with the model %s (the politically relevant choice set is specified for %s only)", spec_variant(spec), model, paste(POLREL_MODELS, collapse = ", ")))
+  sprintf("%s_lag%d_%s_%s_%s%s%s", sample, as.integer(lag), spec_variant(spec), CENTRALITY, model,
           if (grepl("^M2", model)) sprintf("_K%d", spec$ame_K) else "", spec_suffix(spec))
 }
 ## compare_group_name(sample, lag, spec): the <group> of 04_compare.R, <sample>_lag<h>_all_pr[_K<K>]<suffix>; "_K<K>" only for a non-default
@@ -443,7 +452,7 @@ cell_name <- function(sample, lag, model, spec) {
 ## overwrites the K=2 one (review 2026-10-26, P2)
 compare_group_name <- function(sample, lag, spec) {
   stopifnot(sample %in% ALL_SAMPLES, lag %in% LAGS)
-  sprintf("%s_lag%d_%s_%s%s%s", sample, as.integer(lag), VARIANT, CENTRALITY,
+  sprintf("%s_lag%d_%s_%s%s%s", sample, as.integer(lag), spec_variant(spec), CENTRALITY,
           if (!identical(as.integer(spec$ame_K), SPEC_DEFAULTS$ame_K)) sprintf("_K%d", spec$ame_K) else "", spec_suffix(spec))
 }
 ## measurement_cell_name(sample, lag, family, spec): the <cell> of the 05_robustness.R perm_error outputs (measurement_<cell>_*.csv),
@@ -451,7 +460,7 @@ compare_group_name <- function(sample, lag, spec) {
 ## P2: K=2 and K=3 wrote the same mid_lag5_all_pr_M2 files); the M1 name never does.
 measurement_cell_name <- function(sample, lag, family, spec) {
   stopifnot(sample %in% ALL_SAMPLES, lag %in% LAGS, family %in% c("m1", "m2"))
-  sprintf("%s_lag%d_%s_%s_%s%s%s", sample, as.integer(lag), VARIANT, CENTRALITY, toupper(family),
+  sprintf("%s_lag%d_%s_%s_%s%s%s", sample, as.integer(lag), spec_variant(spec), CENTRALITY, toupper(family),
           if (family == "m2") sprintf("_K%d", spec$ame_K) else "", spec_suffix(spec))
 }
 ## m1_spec(spec): the spec of the M1 cell that goes with an M2 cell, i.e. the same switches with ame_K reset to the default (K belongs to
