@@ -8,4 +8,5 @@ v2/sim/fits/
 v2/output/
 v2/data_sideA/
 v2/data_entry/
+v2/data_dymid/
 *.out
