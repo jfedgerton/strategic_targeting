@@ -447,6 +447,15 @@ collapse_duplicate_events <- function(events) {
   ## entry = later (2026-11-04): entry_reversed is ORed and entry_rule pasted; both columns exist only in that build variant
   if ("entry_reversed" %in% names(events)) or_cols <- c(or_cols, "entry_reversed")
   if ("entry_rule" %in% names(events)) paste_cols <- c(paste_cols, "entry_rule")
+  ## events = dymid (2026-11-04; recognised by its fatal_any column): the dymid samples (fmidany in place of fmidcow), no MIC / GML columns, and the
+  ## event-dyad columns: war_ddiw / war_dymid / recip ORed, warnum_ddiw / n_spells max, ev_source pasted
+  if ("fatal_any" %in% names(events)) {
+    wsum_cols <- c("w_mid", "w_fmid", "w_fmidany", "w_fmidub", "w_war")
+    or_cols <- c(setdiff(or_cols, c("fatal_cow", "in_fmidcow", "in_fmidcow_noww2")), "fatal_any", "in_fmidany", "in_fmidany_noww2", "war_ddiw", "war_dymid", "recip")
+    tri_cols <- setdiff(tri_cols, c("fatal_mic", "fatal_gml"))
+    max_cols <- c(setdiff(max_cols, "mic_fatalmin"), "warnum_ddiw", "n_spells")
+    paste_cols <- c(paste_cols, "ev_source")
+  }
   known <- c(key_cols, same_cols, all_cols, any_cols, wsum_cols, or_cols, tri_cols, max_cols, min_cols, paste_cols, "is_joiner_pair", "escalation")
   extra <- setdiff(names(events), known); missing <- setdiff(known, names(events))
   if (length(extra)) stop("collapse_duplicate_events: unclassified columns: ", paste(extra, collapse = ", "))
