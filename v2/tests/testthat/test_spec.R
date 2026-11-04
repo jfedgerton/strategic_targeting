@@ -7,7 +7,7 @@ test_that("the defaults are the main specification and every switch value is val
   main <- parse_spec(character(0))
   expect_equal(main[names(SPEC_CHOICES)], list(pairs = "all", context = "all", coal_ties = "inclusive", coal_drop = "none", direction = "cowwar", ww2 = "include", weights = "dispute", controls = "minimal",
                                                major = "none", interact = "none", distance = "none", contiguity = "land", changes = "raw",
-                                               rho_prior = "beta25", sigma_prior = "ln1", comparison = "none", roles = "stageb", mu_shift = "none", joiner_set = "all", entry = "keep", variant = "all"))   # comparison and roles added 2026-10-31, mu_shift 2026-11-02, joiner_set and entry 2026-11-04
+                                               rho_prior = "beta25", sigma_prior = "ln1", comparison = "none", roles = "stageb", mu_shift = "none", joiner_set = "all", entry = "keep", events = "pairs", variant = "all"))   # comparison and roles added 2026-10-31, mu_shift 2026-11-02, joiner_set, entry and events 2026-11-04
   expect_equal(main$tag, "")
   expect_equal(main$ame_K, 2L); expect_true(spec_is_main(main)); expect_equal(spec_suffix(main), "")
   expect_equal(parse_spec("--pairs=joiners")$pairs, "joiners"); expect_false(spec_is_main(parse_spec("--pairs=joiners")))
