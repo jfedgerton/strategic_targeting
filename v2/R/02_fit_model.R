@@ -39,6 +39,10 @@
 ##            mean X over the initiating state-years; a directed M2b with the switch starts from the directed M1b fit WITH the switch (asserted)
 ##     --roles=stageb|aprime (PI decision 2026-10-31, suffix _aprime; M1c / M1cr only): the stage-2 groups; aprime = 0 alone originator, 1 co-originator,
 ##            2 joiner, 3 target joined late (G = 4; roles_aprime.rds of the build); stageb (default) = bilateral / coalition leader / joiner
+##            bc (2026-11-04, suffix _bc; needs --entry=later): G = 2, 0 bilateral (aprime alone, reference), 1 coalition (co-originator or joiner);
+##            bcj (suffix _bcj; needs --entry=later): G = 3, 0 bilateral, 1 coalition originator, 2 joiner. M1c / M1cr / M2c
+##     --entry=keep|later (PI decision 2026-11-04, suffix _ent): later reads v2/data_entry (01_build_data.R --entry=later): a joiner initiates against the
+##            side it joins (two joiners: the later entrant); every downstream quantity rebuilt from those events
 ##     --joiner_set=all|opposing (PI-approved 2026-11-04, suffix _jset after _aprime; --roles=aprime only, M1c / M1cr / M2c): opposing scores every joiner
 ##            event (aprime group 2) only against the states on the opposite side of its dispute in the onset year (joiner_sets_aprime.rds of the build),
 ##            intersected with the state-year's stage-2 set; other events, stage 1 / IV and the weights unchanged; all = byte-identical to before
@@ -73,7 +77,7 @@
 ##                               review 2026-10-26 P1: rstan drops a failed parallel chain and returns the rest with mode 0)
 ##   v2/output/summary_<cell>.csv posterior summaries of the structural parameters, labelled by axis and covariate (written AFTER
 ##                               the fit file)
-## Cell name: <sample>_lag<h>_all_pr_<model>[_K<K>][_orig|_join][_bi|_co][_strict][_drop3][_noww2][_fullctrl][_dist][_nocontig][_major][_ix][_conv|_cdir][_mst][_aprime][_jset][_w1][_winsor][_sideA][_rhoflat][_sigln05][_t<tag>][_pilot]
+## Cell name: <sample>_lag<h>_all_pr_<model>[_K<K>][_orig|_join][_bi|_co][_strict][_drop3][_noww2][_fullctrl][_dist][_nocontig][_major][_ix][_conv|_cdir][_mst][_aprime|_bc|_bcj][_jset][_w1][_winsor][_sideA][_ent][_rhoflat][_sigln05][_t<tag>][_pilot]
 ##            (model M1c: <sample>_lag<h>_all_pr_M1c<suffix>; its fit records args$stan_program = "m1_context" and args$context_model = TRUE)
 ## Seed 123 everywhere (audit F11).
 ## ============================================================================
@@ -145,7 +149,7 @@ if (!is.na(slurm_task_id) && slurm_task_id == "") slurm_task_id <- NA_character_
 logf("provenance at load: git commit %s (uncommitted changes under v2/R or v2/stan: %s); manifest built %s with %d files; SLURM_JOB_ID %s; SLURM_ARRAY_TASK_ID %s",
      git_commit_at_load, git_dirty_at_load, if ("built" %in% names(manifest_at_load)) manifest_at_load$built[1] else "NA", nrow(manifest_at_load), slurm_job_id, slurm_task_id)
 cell_files <- c(sprintf("stage1_panel_lag%d.rds", LAG), sprintf("alts_lag%d_%s.rds", LAG, VARIANT), "events.rds",
-                if (identical(spec$roles, "aprime")) "roles_aprime.rds",   # roles = aprime (2026-10-31) reads the build's role file as well
+                if (spec$roles %in% JOINER_ROLES) "roles_aprime.rds",   # bc / bcj (2026-11-04) are derived from the same file   # roles = aprime (2026-10-31) reads the build's role file as well
                 if (JOINER_SET == "opposing") "joiner_sets_aprime.rds")   # joiner_set = opposing (2026-11-04) reads the joiner sets as well
 stopifnot(all(cell_files %in% manifest_at_load$file))
 manifest_cell <- manifest_at_load[manifest_at_load$file %in% cell_files, ]
@@ -182,9 +186,9 @@ if (CONTEXT_MODEL) {
   is_restr <- dat$ev_alt_n < s2_n[dat$ev_sy]; n_restr <- sum(is_restr)
   if (JOINER_SET == "opposing") {
     js <- A$jset_stats
-    stopifnot(!is.null(js), all(dat$ev_grp[is_restr] == 2L), n_restr == js$n_joiner_events - js$n_unrestricted)
-    logf("joiner_set = opposing (2026-11-04): %d joiner events (aprime group 2); restricted set size min %d / median %.1f / max %d; size 1: %d (log-prob 0 in stage 2, kept; weights %.1f); %d events actually restricted in Stan (ev_restr = 1); alternatives removed %d; n_ev_alt = %d",
-         js$n_joiner_events, js$size_min, js$size_median, js$size_max, js$n_singleton, js$w_singleton, n_restr, js$n_removed, dat$n_ev_alt)
+    stopifnot(!is.null(js), length(A$ev_joiner) == dat$E, all(A$ev_joiner[is_restr]), n_restr == js$n_joiner_events - js$n_unrestricted)
+    logf("joiner_set = opposing (2026-11-04): %d joiner events (initiator a joiner; roles %s); restricted set size min %d / median %.1f / max %d; size 1: %d (log-prob 0 in stage 2, kept; weights %.1f); %d events actually restricted in Stan (ev_restr = 1); alternatives removed %d; n_ev_alt = %d",
+         js$n_joiner_events, spec$roles, js$size_min, js$size_median, js$size_max, js$n_singleton, js$w_singleton, n_restr, js$n_removed, dat$n_ev_alt)
   } else {
     stopifnot(n_restr == 0L)
     logf("joiner_set = all: every event is scored against its state-year's whole stage-2 set (n_ev_alt = %d)", dat$n_ev_alt)
@@ -334,7 +338,7 @@ if (family == "m2_context") {
   assert_fit_current(o1, manifest_path)
   assert_fit_matches_cell(o1, dat, W_cols, X_cols, Z_cols, what = "init_from M1c fit")
   o1_js <- if (is.null(o1$spec$joiner_set)) "all" else o1$spec$joiner_set
-  if (!identical(o1$args$model, "M1c") || !identical(o1$cell, want) || !spec_is_directed(o1$spec) || !identical(o1$spec$roles, "aprime") || !identical(o1_js, JOINER_SET) ||
+  if (!identical(o1$args$model, "M1c") || !identical(o1$cell, want) || !spec_is_directed(o1$spec) || !identical(o1$spec$roles, spec$roles) || !identical(if (is.null(o1$spec$entry)) "keep" else o1$spec$entry, if (is.null(spec$entry)) "keep" else spec$entry) || !identical(o1_js, JOINER_SET) ||
       !identical(spec_tag(o1$spec), spec_tag(spec)) || o1$dat$D_mode != 3L || o1$dat$joint != 1L || !identical(as.integer(o1$dat$G), as.integer(dat$G)) ||
       !identical(as.integer(o1$dat$ev_grp), as.integer(dat$ev_grp)) || !identical(o1$group_labels, A$group_table$group))
     stop(sprintf("the init fit %s (cell %s, model %s, roles %s, joiner_set %s) is not the M1c fit of this M2c cell (%s)", basename(m1_path), o1$cell, o1$args$model,

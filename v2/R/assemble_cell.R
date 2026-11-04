@@ -222,12 +222,13 @@ assemble_cell <- function(SAMPLE, LAG, VARIANT, CENT = "pr", CONFLICT_HISTORY = 
   events <- assert_matches_manifest(file.path(data_dir, "events.rds"), manifest)
   ## ROLES = aprime (PI decision 2026-10-31): the 4 role groups from the build's roles_aprime.rds (read only under this switch, so every other
   ## cell reads exactly the three files it read before)
-  stopifnot(is.character(ROLES), length(ROLES) == 1L, ROLES %in% c("stageb", "aprime"))
-  roles_ap <- if (ROLES == "aprime") assert_matches_manifest(file.path(data_dir, "roles_aprime.rds"), manifest) else NULL
+  stopifnot(is.character(ROLES), length(ROLES) == 1L, ROLES %in% c("stageb", "aprime", "bc", "bcj"))
+  APRIME_BASED <- ROLES %in% c("aprime", "bc", "bcj")       # bc / bcj (2026-11-04) are derived from the same file
+  roles_ap <- if (APRIME_BASED) assert_matches_manifest(file.path(data_dir, "roles_aprime.rds"), manifest) else NULL
   ## JOINER_SET = opposing (PI-approved 2026-11-04): the joiner choice sets of the build's joiner_sets_aprime.rds (read only under this switch, so
   ## every other cell reads exactly the files it read before); needs the aprime groups (role 2 = joiner) and full choice sets
   stopifnot(is.character(JOINER_SET), length(JOINER_SET) == 1L, JOINER_SET %in% c("all", "opposing"))
-  if (JOINER_SET == "opposing" && ROLES != "aprime") stop("JOINER_SET = opposing needs ROLES = aprime (the restriction applies to the aprime joiner group, role 2; switch joiner_set needs --roles=aprime)")
+  if (JOINER_SET == "opposing" && !APRIME_BASED) stop("JOINER_SET = opposing needs ROLES = aprime, bc or bcj (the restriction applies to the joiner events; switch joiner_set needs one of those roles)")
   if (JOINER_SET == "opposing" && SAMPLED_M > 0) stop("JOINER_SET = opposing is not defined with sampled alternatives (SAMPLED_M > 0)")
   jsets <- if (JOINER_SET == "opposing") assert_matches_manifest(file.path(data_dir, "joiner_sets_aprime.rds"), manifest) else NULL
   stopifnot(all(panel$h == LAG), all(alts$h == LAG))
@@ -644,7 +645,8 @@ assemble_cell <- function(SAMPLE, LAG, VARIANT, CENT = "pr", CONFLICT_HISTORY = 
                                  w = if (EVENT_WEIGHTS == "dispute") .data[[w_col]] else 1, grp = grp_all)
   assert_no_dup_keys(ev_keys, c("ccode1", "ccode2", "year"), sprintf("events of sample %s", SAMPLE))
   GROUP_LABELS <- stage2_group_labels(ROLES)
-  if (ROLES == "aprime") {
+  ev_keys$ap_grp <- NA_integer_                                  # the aprime group of every event (2026-11-04: the joiner flag of joiner_set)
+  if (APRIME_BASED) {
     ## the aprime groups (PI decision 2026-10-31): 0 alone originator, 1 co-originator (another COW originator on the initiator's own side of
     ## the dispute, side-aware after the direction rule), 2 joiner (orig1 == 0), 3 target joined late (orig1 == 1, orig2 == 0; per event, takes
     ## precedence). Built per source dispute by aprime_roles() in the build; a collapsed key carries its weight-group dispute's role (smallest
@@ -652,21 +654,32 @@ assemble_cell <- function(SAMPLE, LAG, VARIANT, CENT = "pr", CONFLICT_HISTORY = 
     stopifnot(all(c("initiator", "target", "year", "dispnum", "grp_aprime") %in% names(roles_ap)), !anyNA(roles_ap$grp_aprime), all(roles_ap$grp_aprime %in% 0:3))
     assert_no_dup_keys(roles_ap, c("initiator", "target", "year"), "roles_aprime.rds")
     jr <- ev_keys |> select(ccode1, ccode2, year, dispnum) |> left_join(roles_ap |> select(ccode1 = initiator, ccode2 = target, year, r_disp = dispnum, grp_aprime), by = c("ccode1", "ccode2", "year"))
-    if (anyNA(jr$grp_aprime)) stop(sprintf("roles = aprime: %d sample events have no row in roles_aprime.rds (rebuild the data)", sum(is.na(jr$grp_aprime))))
+    if (anyNA(jr$grp_aprime)) stop(sprintf("roles = %s: %d sample events have no row in roles_aprime.rds (rebuild the data)", ROLES, sum(is.na(jr$grp_aprime))))
     stopifnot(nrow(jr) == nrow(ev_keys), all(jr$r_disp == jr$dispnum))
     xt <- table(stageb = factor(STAGE2_GROUPS[ev_keys$grp + 1L], levels = STAGE2_GROUPS), aprime = factor(APRIME_GROUPS[jr$grp_aprime + 1L], levels = APRIME_GROUPS))
-    logf("roles = aprime: cross-tab of the %d sample events, stage-b 3 groups (rows) x aprime 4 groups (columns): %s", nrow(ev_keys),
+    logf("roles = %s: cross-tab of the %d sample events, stage-b 3 groups (rows) x aprime 4 groups (columns): %s", ROLES, nrow(ev_keys),
          paste(sprintf("%s: %s", rownames(xt), apply(xt, 1, function(r) paste(sprintf("%s %d", colnames(xt), r), collapse = " / "))), collapse = "; "))
     ev_keys$grp <- as.integer(jr$grp_aprime)
     chk <- ev_keys |> filter(grp != 3L) |> group_by(dispnum, ccode1, year) |> summarise(n = n_distinct(grp), .groups = "drop")
-    if (any(chk$n != 1L)) stop(sprintf("roles = aprime: groups 0-2 not constant within %d D8 groups (dispnum, initiator, year)", sum(chk$n != 1L)))
+    if (any(chk$n != 1L)) stop(sprintf("roles = %s: groups 0-2 not constant within %d D8 groups (dispnum, initiator, year)", ROLES, sum(chk$n != 1L)))
+    ev_keys$ap_grp <- as.integer(jr$grp_aprime)
+    if (ROLES %in% c("bc", "bcj")) {
+      ## bc / bcj (PI decision 2026-11-04): from the aprime groups; no late-target event may exist (entry = later)
+      if (any(ev_keys$ap_grp == 3L)) stop(sprintf("roles = %s: %d sample events are aprime group 3 (target joined late); bc / bcj are defined on the entry = later events only", ROLES, sum(ev_keys$ap_grp == 3L)))
+      ev_keys$grp <- ROLE_FROM_APRIME[[ROLES]][ev_keys$ap_grp + 1L]
+      stopifnot(!anyNA(ev_keys$grp), all((ev_keys$grp == 0L) == (ev_keys$ap_grp == 0L)),
+                if (ROLES == "bc") all((ev_keys$grp == 1L) == (ev_keys$ap_grp %in% 1:2)) else all(ev_keys$grp == ev_keys$ap_grp))
+      xr <- table(aprime = factor(APRIME_GROUPS[ev_keys$ap_grp + 1L], levels = APRIME_GROUPS), roles = factor(GROUP_LABELS[ev_keys$grp + 1L], levels = GROUP_LABELS))
+      logf("roles = %s: cross-tab of the %d sample events, aprime 4 groups (rows) x %s %d groups (columns): %s", ROLES, nrow(ev_keys), ROLES, length(GROUP_LABELS),
+           paste(sprintf("%s: %s", rownames(xr), apply(xr, 1, function(r) paste(sprintf("%s %d", colnames(xr), r), collapse = " / "))), collapse = "; "))
+    }
   }
   G_GRP <- length(GROUP_LABELS)       # the number of stage-2 groups (2026-10-31: G is data in the M1c programs; 3 stage-b groups, 4 under roles = aprime)
   stopifnot(G_GRP >= 2L, all(ev_keys$grp %in% 0:(G_GRP - 1L)), sum(vapply(0:(G_GRP - 1L), function(g) sum(ev_keys$grp == g), 1L)) == nrow(ev_keys))
   if (ROLES == "stageb") logf("stage-2 event groups (stage b; coalition column %s, joiner = the initiator's orig1 == 0) over the %d sample events: bilateral %d (weights %.1f), coalition leader %d (%.1f), joiner %d (%.1f); pair-level joiner pairs (is_joiner_pair, the `pairs` switch) %d, of which the initiator is an originator (orig1 = 1, target a joiner; bilateral or leader here) %d",
        "coal_incl", nrow(ev_keys), sum(ev_keys$grp == 0L), sum(ev_keys$w[ev_keys$grp == 0L]), sum(ev_keys$grp == 1L), sum(ev_keys$w[ev_keys$grp == 1L]), sum(ev_keys$grp == 2L), sum(ev_keys$w[ev_keys$grp == 2L]),
        sum(ev_all$is_joiner_pair), sum(ev_all$is_joiner_pair & ev_all$orig1 == 1L))
-  else logf("stage-2 event groups (roles = aprime) over the %d sample events: %s", nrow(ev_keys),
+  else logf("stage-2 event groups (roles = %s) over the %d sample events: %s", ROLES, nrow(ev_keys),
             paste(sprintf("%d %s %d (weights %.1f)", 0:(G_GRP - 1L), GROUP_LABELS, vapply(0:(G_GRP - 1L), function(g) sum(ev_keys$grp == g), 1L), vapply(0:(G_GRP - 1L), function(g) sum(ev_keys$w[ev_keys$grp == g]), 0)), collapse = "; "))
   stopifnot(all(is.finite(ev_keys$w)), all(ev_keys$w > 0), all(ev_keys$w <= 1))
   logf("direction (D1): %d of %d events in sample %s have the reversed direction (COW war initiator)", sum(ev_keys$dir_flipped), nrow(ev_keys), SAMPLE)
@@ -685,10 +698,10 @@ assemble_cell <- function(SAMPLE, LAG, VARIANT, CENT = "pr", CONFLICT_HISTORY = 
                             n_usable = as.integer(tabulate(ev$grp + 1L, nbins = G_GRP)), w_usable = vapply(0:(G_GRP - 1L), function(g) sum(ev$w[ev$grp == g]), numeric(1)),   # (rowsum() would drop an empty group)
                             n_states = vapply(0:(G_GRP - 1L), function(g) n_distinct(ev$ccode1[ev$grp == g]), 1L), stringsAsFactors = FALSE)
   stopifnot(nrow(group_table) == G_GRP)
-  if (ROLES == "aprime") {
+  if (APRIME_BASED) {
     ## stage 1 is unchanged in this round: count the initiating state-years whose usable stage-2 events are all target-joined-late (group 3)
-    only3 <- ev |> group_by(sy_row) |> summarise(all3 = all(grp == 3L), .groups = "drop")
-    logf("roles = aprime: initiating state-years with usable stage-2 events %d, of which only group-3 (target joined late) events %d (y1 unchanged)", nrow(only3), sum(only3$all3))
+    only3 <- ev |> group_by(sy_row) |> summarise(all3 = all(ap_grp == 3L), .groups = "drop")
+    logf("roles = %s: initiating state-years with usable stage-2 events %d, of which only group-3 (target joined late) events %d (y1 unchanged)", ROLES, nrow(only3), sum(only3$all3))
   }
   stopifnot(sum(group_table$n_usable) == nrow(ev), sum(group_table$n_sample) == nrow(ev_keys), abs(sum(group_table$w_usable) - sum(ev$w)) < 1e-9)
   logf("stage-2 event groups over the %d usable events (sample %s; events, weight sum, distinct initiating states): %s", nrow(ev), SAMPLE,
@@ -792,8 +805,8 @@ assemble_cell <- function(SAMPLE, LAG, VARIANT, CENT = "pr", CONFLICT_HISTORY = 
     stopifnot(all(c("initiator", "target", "year", "dispnum", "opp_ccode") %in% names(jsets)), !anyNA(jsets[, c("initiator", "target", "year", "dispnum", "opp_ccode")]))
     assert_no_dup_keys(jsets, c("initiator", "target", "year", "opp_ccode"), "joiner_sets_aprime.rds")
     ev$.ev_idx <- seq_len(nrow(ev))
-    jev <- ev |> filter(grp == 2L)
-    if (nrow(jev) == 0L) stop(sprintf("joiner_set = opposing: no usable joiner event (aprime group 2) in sample %s", SAMPLE))
+    jev <- ev |> filter(ap_grp == 2L)                    # 2026-11-04: the initiator is a joiner (aprime 2), whatever group the role coding gives it (bc: part of group 1)
+    if (nrow(jev) == 0L) stop(sprintf("joiner_set = opposing: no usable joiner event (initiator a joiner, aprime group 2) in sample %s", SAMPLE))
     js <- jev |> select(.ev_idx, ccode1, ccode2, year, dispnum, sy_row, alt_row) |>
       inner_join(jsets |> select(ccode1 = initiator, ccode2 = target, year, dispnum, opp_ccode), by = c("ccode1", "ccode2", "year", "dispnum"), relationship = "one-to-many")
     no_set <- jev |> filter(!.ev_idx %in% js$.ev_idx)
@@ -807,18 +820,19 @@ assemble_cell <- function(SAMPLE, LAG, VARIANT, CENT = "pr", CONFLICT_HISTORY = 
                                      paste(sprintf("%d->%d %d (dispute %d)", bad$ccode1, bad$ccode2, bad$year, bad$dispnum), collapse = "; ")))
     ## every allowed row is a stage-2 row of the event's own state-year and an opposing state of the event's dispute (by construction; asserted)
     stopifnot(all(alts$in_s2[ev_sets$alt_row] == 1L), all(alts$sy_row[ev_sets$alt_row] == ev$sy_row[ev_sets$ev_idx]), all(alts$ccode2[ev_sets$alt_row] == ev_sets$opp_ccode),
-              !anyDuplicated(ev_sets[, c("ev_idx", "alt_row")]), setequal(unique(ev_sets$ev_idx), jev$.ev_idx), all(ev$grp[ev_sets$ev_idx] == 2L))
+              !anyDuplicated(ev_sets[, c("ev_idx", "alt_row")]), setequal(unique(ev_sets$ev_idx), jev$.ev_idx), all(ev$ap_grp[ev_sets$ev_idx] == 2L))
     n_set <- tabulate(ev_sets$ev_idx, nbins = nrow(ev))[jev$.ev_idx]
     n_full_s2 <- vapply(jev$sy_row, function(n) sum(alts$in_s2[alts$sy_row == n]), 1L)
     stopifnot(all(n_set >= 1L), all(n_set <= n_full_s2))
     jset_stats <- list(n_joiner_events = nrow(jev), size_min = min(n_set), size_median = stats::median(n_set), size_max = max(n_set), n_singleton = sum(n_set == 1L),
                        n_unrestricted = sum(n_set == n_full_s2), n_removed = sum(n_full_s2 - n_set), n_full_rows = sum(n_full_s2), w_joiner = sum(jev$w), w_singleton = sum(jev$w[n_set == 1L]))
-    logf("joiner_set = opposing (2026-11-04): %d usable joiner events (aprime group 2, weights %.1f) scored against the opposing side of their dispute only; restricted set size min %d / median %.1f / max %d; %d events with set size 1 (log-prob 0 in stage 2, kept so the D8 weights are unchanged; weights %.1f); %d events whose restricted set equals their full stage-2 set; alternatives removed in total %d of %d stage-2 rows of the joiner events; every other event (%d) keeps its full stage-2 set; stage 1 / IV unchanged",
-         jset_stats$n_joiner_events, jset_stats$w_joiner, jset_stats$size_min, jset_stats$size_median, jset_stats$size_max, jset_stats$n_singleton, jset_stats$w_singleton,
+    logf("joiner_set = opposing (2026-11-04): %d usable joiner events (initiator a joiner; roles %s; weights %.1f) scored against the opposing side of their dispute only; restricted set size min %d / median %.1f / max %d; %d events with set size 1 (log-prob 0 in stage 2, kept so the D8 weights are unchanged; weights %.1f); %d events whose restricted set equals their full stage-2 set; alternatives removed in total %d of %d stage-2 rows of the joiner events; every other event (%d) keeps its full stage-2 set; stage 1 / IV unchanged",
+         jset_stats$n_joiner_events, ROLES, jset_stats$w_joiner, jset_stats$size_min, jset_stats$size_median, jset_stats$size_max, jset_stats$n_singleton, jset_stats$w_singleton,
          jset_stats$n_unrestricted, jset_stats$n_removed, jset_stats$n_full_rows, nrow(ev) - nrow(jev))
     ev_sets <- ev_sets |> select(ev_idx, alt_row)
     ev$.ev_idx <- NULL
   }
+  ev_joiner <- if (APRIME_BASED) ev$ap_grp == 2L else rep(FALSE, nrow(ev))      # 2026-11-04: the initiator is a joiner (for 02_fit_model.R's checks)
   ev <- ev |> select(sy_row, alt_row, w, grp)        # grp: the stage-b group (0 bilateral, 1 leader, 2 joiner); build_stan_data() ignores it, 02_fit_model.R passes it for M1c only
   
   ## ---- optional sampled alternatives ------------------------------------------------------------------
@@ -857,7 +871,7 @@ assemble_cell <- function(SAMPLE, LAG, VARIANT, CENT = "pr", CONFLICT_HISTORY = 
        n_context_dropped = n_context_dropped, n_context_split_groups = n_split_groups, context_model = CONTEXT_MODEL, group_table = group_table,
        major = MAJOR, major_stats = major_stats, interact = INTERACT, distance = DISTANCE, distance_stats = distance_stats, contiguity = CONTIGUITY,
        conventional = CONVENTIONAL, roles = ROLES, directed = DIRECTED, directed_stats = directed_stats,
-       joiner_set = JOINER_SET, ev_sets = ev_sets, jset_stats = jset_stats)        # 2026-11-04: ev_sets = NULL unless JOINER_SET = opposing
+       joiner_set = JOINER_SET, ev_sets = ev_sets, jset_stats = jset_stats, ev_joiner = ev_joiner)        # 2026-11-04: ev_sets = NULL unless JOINER_SET = opposing
 }
 ## assemble_cell_spec(SAMPLE, LAG, spec, ...): the main-specification constants of spec.R plus the switches of `spec`
 ## model = NULL or a model code: the M1c model (CONTEXT_MODELS) switches CONTEXT_MODEL on; every other model leaves it off
@@ -878,9 +892,12 @@ assemble_cell_spec <- function(SAMPLE, LAG, spec, data_dir = spec_data_dir(spec,
   if (!is.null(model) && model %in% RHOREG_MODELS && !dirc) stop(sprintf("the model %s is defined under --comparison=directed only", model))
   ## M2c (2026-11-04): directed with roles = aprime only; joiner_set (2026-11-04): roles = aprime and a role model only (a spec saved before: all)
   roles_v <- if (is.null(spec$roles)) "stageb" else spec$roles
-  if (!is.null(model) && model %in% AME_CONTEXT_MODELS && !(dirc && roles_v == "aprime")) stop(sprintf("the model %s is defined under --comparison=directed with --roles=aprime only", model))
+  if (!is.null(model) && model %in% AME_CONTEXT_MODELS && !(dirc && roles_v %in% JOINER_ROLES)) stop(sprintf("the model %s is defined under --comparison=directed with --roles=aprime, bc or bcj only", model))
+  entry_v <- if (is.null(spec$entry)) "keep" else spec$entry
+  if (roles_v %in% ENTRY_ROLES && entry_v != "later") stop(sprintf("--roles=%s needs --entry=later", roles_v))
+  if (entry_v == "later") stopifnot(basename(data_dir) == "data_entry")
   jset <- if (is.null(spec$joiner_set)) "all" else spec$joiner_set
-  if (jset != "all" && roles_v != "aprime") stop(sprintf("--joiner_set=%s needs --roles=aprime", jset))
+  if (jset != "all" && !roles_v %in% JOINER_ROLES) stop(sprintf("--joiner_set=%s needs --roles=aprime, bc or bcj", jset))
   if (jset != "all" && !is.null(model) && !model %in% ROLE_MODELS) stop(sprintf("--joiner_set=%s with the model %s (the restriction applies to %s only)", jset, model, paste(ROLE_MODELS, collapse = ", ")))
   assemble_cell(SAMPLE, LAG, VARIANT, CENTRALITY, CONFLICT_HISTORY, SAMPLED_M, DISTANCE = if (conv || dirc) "capital" else spec$distance, CONTIGUITY = spec$contiguity,
                 DY_PEACE_YEARS = DY_PEACE_YEARS, DROP_WW2 = spec$ww2 == "drop", FULL_CONTROLS = spec$controls == "full",
