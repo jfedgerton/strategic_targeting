@@ -101,12 +101,17 @@ set.seed(V2_SEED)
 ## manifest and build_log, so they never overwrite each other; 02_fit_model.R --direction=sideA reads the second one and
 ## suffixes its cells with _sideA. The direction is the only switch the build takes; every other switch acts at assembly.
 ## the build takes --direction only: the archived flags and every other switch of spec.R are refused, not ignored (audit fix 14, 2026-10-26)
-refuse_archived_options(commandArgs(trailingOnly = TRUE), "01_build_data.R", also = setdiff(names(SPEC_CHOICES), "direction"),
-                        also_msg = "the build takes --direction only; every other switch acts at assembly, in 02_fit_model.R")
-DIRECTION <- parse_spec(c(commandArgs(trailingOnly = TRUE), paste0("--direction=", Sys.getenv("V2_DIRECTION", unset = "cowwar"))))$direction
+## JOINER ENTRY DIRECTION (PI decision 2026-11-04): ENTRY = "keep" (main; the events above) | "later" (a joiner initiates against the side it
+## joins, entry_later_direction() in helpers_data.R; README "Joiner entry direction"). Selected by `--entry=later` or V2_ENTRY=later; written to
+## its own directory v2/data_entry with its own manifest and build log (fits read it with --entry=later, suffix _ent). Not combined with sideA.
+refuse_archived_options(commandArgs(trailingOnly = TRUE), "01_build_data.R", also = setdiff(names(SPEC_CHOICES), c("direction", "entry")),
+                        also_msg = "the build takes --direction and --entry only; every other switch acts at assembly, in 02_fit_model.R")
+build_spec <- parse_spec(c(commandArgs(trailingOnly = TRUE), paste0("--direction=", Sys.getenv("V2_DIRECTION", unset = "cowwar")), paste0("--entry=", Sys.getenv("V2_ENTRY", unset = "keep"))))
+DIRECTION <- build_spec$direction; ENTRY <- build_spec$entry
 if (!DIRECTION %in% SPEC_CHOICES$direction) stop("--direction / V2_DIRECTION must be 'cowwar' (main) or 'sideA' (appendix); got ", DIRECTION)
-log_open(paste0("01_build_data", if (DIRECTION == "sideA") "_sideA" else ""))
-out_dir <- file.path(v2_root(), if (DIRECTION == "sideA") "data_sideA" else "data"); dir.create(out_dir, showWarnings = FALSE)
+stopifnot(ENTRY %in% SPEC_CHOICES$entry, !(ENTRY == "later" && DIRECTION == "sideA"))
+log_open(paste0("01_build_data", if (DIRECTION == "sideA") "_sideA" else "", if (ENTRY == "later") "_entry" else ""))
+out_dir <- spec_data_dir(build_spec, v2_root()); dir.create(out_dir, showWarnings = FALSE)
 build_log <- file.path(out_dir, "build_log.txt"); cat("", file = build_log)
 blog <- function(fmt, ...) { m <- logf(fmt, ...); cat(m, "\n", file = build_log, append = TRUE) }
 
@@ -122,8 +127,8 @@ PR_CONT_MAX     <- 5L             # politically relevant: conttype in 1..PR_CONT
 PREWINDOW_YEARS <- 10L            # conflict-history look-back before the change window starts
 POLITY_DEM_CUT  <- 6L             # democracy = polity2 >= 6 (NA -> 0, flagged in *_dem_missing)
 FIRST_YEAR      <- 1816L
-blog("flags: DIRECTION=%s (output dir %s) LAGS=%s INCLUDE_JOINERS=%s IGO_FILL=%s PR_CONT_MAX=%d PREWINDOW_YEARS=%d WAR_DIR_WINDOW=%d WAR_DIR_MIN_LINK=%d PART_DATES=%s",
-     DIRECTION, basename(out_dir), paste(LAGS, collapse = ","), INCLUDE_JOINERS, IGO_FILL, PR_CONT_MAX, PREWINDOW_YEARS, WAR_DIR_WINDOW, WAR_DIR_MIN_LINK, PART_DATES)
+blog("flags: DIRECTION=%s ENTRY=%s (output dir %s) LAGS=%s INCLUDE_JOINERS=%s IGO_FILL=%s PR_CONT_MAX=%d PREWINDOW_YEARS=%d WAR_DIR_WINDOW=%d WAR_DIR_MIN_LINK=%d PART_DATES=%s",
+     DIRECTION, ENTRY, basename(out_dir), paste(LAGS, collapse = ","), INCLUDE_JOINERS, IGO_FILL, PR_CONT_MAX, PREWINDOW_YEARS, WAR_DIR_WINDOW, WAR_DIR_MIN_LINK, PART_DATES)
 
 ## ============================================================================
 ## 1. State-years, CINC share, majors, democracy
@@ -312,6 +317,25 @@ if (DIRECTION == "cowwar") {
   stopifnot(any(events$initiator == 255L & events$target == 290L & events$year == 1939L), !any(events$initiator == 290L & events$target == 255L & events$year == 1939L))
 } else stopifnot(!any(events$dir_flipped))
 rm(wl, match_in, one_link, flipped, amb)
+## ---- joiner entry direction (PI decision 2026-11-04; ENTRY = later only; entry_later_direction() in helpers_data.R) ---------------------------
+## A state that joins a dispute makes an initiation choice against the side it joins against (the UK entering for Poland in 1939 initiates
+## against Germany). Both originators: the direction above (Side A after the D1 flips); one joiner: the joiner initiates; two joiners: the later
+## entrant (participant entry dates of D5, coarser resolution) initiates, an exact tie keeps the direction above. Everything below (escalation and
+## choice-set rules, sample flags, weights, collapse, roles, panels and y1) is recomputed from these events; the conflict-history controls are built
+## from the raw COW directed dispute-years (dd), not from the events, so their definition does not change.
+if (ENTRY == "later") {
+  psd_entry <- participant_spell_dates(dd, dispute_date_bounds(cow_mid_disps |> mutate(dispnum = as.integer(dispnum)), dd), part = if (PART_DATES) gml_part else NULL)
+  n_late_target_before <- sum(events$orig1 == 1L & events$orig2 == 0L)
+  events <- entry_later_direction(events, psd_entry)
+  ed_ <- attr(events, "diagnostics")
+  blog("entry = later: %d directed events; rule orig_orig %d (unchanged), joiner_orig %d, joiner_joiner_later %d, joiner_joiner_tie %d (unchanged); events reversed %d (originator -> late entrant, the former late-target events: %d of %d; joiner -> later joiner %d); participant spells located by fallback %d",
+       ed_$n, ed_$n_rule[["orig_orig"]], ed_$n_rule[["joiner_orig"]], ed_$n_rule[["joiner_joiner_later"]], ed_$n_rule[["joiner_joiner_tie"]], ed_$n_reversed,
+       ed_$n_reversed_joiner_orig, n_late_target_before, ed_$n_reversed_jj, ed_$n_spell_fallback)
+  ## the PI's case (verified on the keep data before hard-coding: Germany -> UK 1939, dispute 258, Germany originator, UK joiner)
+  stopifnot(any(events$initiator == 200L & events$target == 255L & events$year == 1939L), !any(events$initiator == 255L & events$target == 200L & events$year == 1939L),
+            any(events$initiator == 255L & events$target == 290L & events$year == 1939L))
+  rm(psd_entry, ed_)
+}
 events <- events |>
   mutate(is_joiner_pair = orig1 == 0L | orig2 == 0L,          # tabulation only; NOT a model covariate (originator status moved with the state)
          fatal1 = ifelse(fatality1 < 0, NA, fatality1 >= 1),
@@ -1227,5 +1251,23 @@ stopifnot(nrow(scale_tbl) == 2L * length(LAGS), all(is.finite(scale_tbl$pooled_s
 scale_tbl <- bind_rows(scale_tbl, data.frame(h = NA_integer_, variable = c("gap_M", "gap_R_pr"), pooled_sd = c(GAP_SCALE_M, GAP_SCALE_R)))
 write.csv(scale_tbl, file.path(out_dir, "change_scale.csv"), row.names = FALSE)
 blog("change_scale.csv written: %s", paste(sprintf("h=%d %s=%.6f", scale_tbl$h, scale_tbl$variable, scale_tbl$pooled_sd), collapse = "; "))
+## entry = later (2026-11-04): the change against the keep build in v2/data (when built): events reversed / added / removed and new initiating
+## state-years, per sample, on the collapsed non-escalation events and the lag-3 panel
+if (ENTRY == "later" && file.exists(file.path(v2_root(), "data", "events.rds")) && file.exists(file.path(v2_root(), "data", "stage1_panel_lag3.rds"))) {
+  ek <- readRDS(file.path(v2_root(), "data", "events.rds")); pk <- readRDS(file.path(v2_root(), "data", "stage1_panel_lag3.rds"))
+  pl <- readRDS(file.path(out_dir, "stage1_panel_lag3.rds"))
+  for (s in c("mid", "fmid", "war")) {
+    a <- ek |> filter(!escalation, .data[[paste0("in_", s)]]) |> distinct(initiator, target, year); b <- events |> filter(!escalation, .data[[paste0("in_", s)]]) |> distinct(initiator, target, year)
+    rv <- b |> semi_join(a |> transmute(.i = target, .t = initiator, year) |> rename(initiator = .i, target = .t), by = c("initiator", "target", "year")) |> anti_join(a, by = c("initiator", "target", "year"))
+    yk <- pk |> select(ccode, year, y_k = all_of(paste0("y1_", s))); yl <- pl |> select(ccode, year, y_l = all_of(paste0("y1_", s)))
+    yy <- inner_join(yk, yl, by = c("ccode", "year"))
+    blog("entry = later vs keep, sample %-4s: events keep %d, later %d; in both directions identical %d; reversed (j -> i under later, i -> j under keep) %d; new keys not reversals %d; keep keys gone and not reversed %d; lag-3 initiating state-years keep %d, later %d (new %d, lost %d of %d common state-years)",
+         s, nrow(a), nrow(b), nrow(semi_join(b, a, by = c("initiator", "target", "year"))), nrow(rv),
+         nrow(b) - nrow(semi_join(b, a, by = c("initiator", "target", "year"))) - nrow(rv),
+         nrow(a |> anti_join(b, by = c("initiator", "target", "year")) |> anti_join(b |> transmute(.i = target, .t = initiator, year) |> rename(initiator = .i, target = .t), by = c("initiator", "target", "year"))),
+         sum(yy$y_k), sum(yy$y_l), sum(yy$y_l == 1L & yy$y_k == 0L), sum(yy$y_l == 0L & yy$y_k == 1L), nrow(yy))
+  }
+  rm(ek, pk, pl)
+}
 write_manifest(manifest, file.path(out_dir, "manifest.csv"))
 blog("manifest written with %d files; build complete", length(manifest))

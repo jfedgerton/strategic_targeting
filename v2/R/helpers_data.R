@@ -444,6 +444,9 @@ collapse_duplicate_events <- function(events) {
                   "war_link", "n_war_match")
   min_cols   <- c("dispnum", "ev_start_lo", "ev_start_hi")
   paste_cols <- c("fatal_source", "dir_source", "dir_rule")
+  ## entry = later (2026-11-04): entry_reversed is ORed and entry_rule pasted; both columns exist only in that build variant
+  if ("entry_reversed" %in% names(events)) or_cols <- c(or_cols, "entry_reversed")
+  if ("entry_rule" %in% names(events)) paste_cols <- c(paste_cols, "entry_rule")
   known <- c(key_cols, same_cols, all_cols, any_cols, wsum_cols, or_cols, tri_cols, max_cols, min_cols, paste_cols, "is_joiner_pair", "escalation")
   extra <- setdiff(names(events), known); missing <- setdiff(known, names(events))
   if (length(extra)) stop("collapse_duplicate_events: unclassified columns: ", paste(extra, collapse = ", "))
@@ -671,8 +674,19 @@ joiner_opposing_sets <- function(pairs, dd) {
                                    n_events_with_two_sided = n_distinct(paste(out$dispnum, out$initiator, out$target)[out$opp_two_sides]))
   out
 }
-## stage2_group_labels(roles): the labels of ev_grp 0..G-1 under the roles switch ("stageb" = the 3-group stage-b coding, "aprime" = the 4 groups above)
-stage2_group_labels <- function(roles = "stageb") { stopifnot(roles %in% c("stageb", "aprime")); if (roles == "aprime") APRIME_GROUPS else STAGE2_GROUPS }
+## ---- role codings bc / bcj (PI decision 2026-11-04; need entry = later, where no late-target event exists): derived from the aprime groups ------
+## bc  (G = 2): 0 bilateral = aprime 0 (alone originator; the reference group), 1 coalition = aprime 1 (co-originator) or 2 (joiner)
+## bcj (G = 3): 0 bilateral = aprime 0 (reference), 1 coalition originator = aprime 1, 2 joiner = aprime 2
+## ROLE_FROM_APRIME[[roles]][a + 1] is the group of aprime group a (NA for aprime 3, which must not occur under entry = later).
+BC_GROUPS  <- c("bilateral", "coalition")
+BCJ_GROUPS <- c("bilateral", "coalition_originator", "joiner")
+ROLE_FROM_APRIME <- list(bc = c(0L, 1L, 1L, NA_integer_), bcj = c(0L, 1L, 2L, NA_integer_))
+## stage2_group_labels(roles): the labels of ev_grp 0..G-1 under the roles switch ("stageb" = the 3-group stage-b coding, "aprime" = the 4 groups above,
+## "bc" / "bcj" = the codings of 2026-11-04)
+stage2_group_labels <- function(roles = "stageb") {
+  stopifnot(roles %in% c("stageb", "aprime", "bc", "bcj"))
+  switch(roles, stageb = STAGE2_GROUPS, aprime = APRIME_GROUPS, bc = BC_GROUPS, bcj = BCJ_GROUPS)
+}
 
 ## ---- initiator direction for war-level disputes (PI decision 2026-10-25; README "Initiator direction") -------------
 ## COW-MID Side A is the side that took the FIRST codable action, not the aggressor. In dispute 258 (the Second World War)
@@ -807,6 +821,51 @@ apply_direction <- function(pair_ev) {
             all(out$orig1[f] == pair_ev$orig2[f]), all(out$initiator[!f] == pair_ev$initiator[!f]), all(out$initiator != out$target),
             all((out$sidea1 == 0L) == out$dir_flipped))
   assert_no_dup_keys(out, c("dispnum", "initiator", "target"), "events after the direction rule")
+  out
+}
+## ---- joiner entry direction (PI decision 2026-11-04; build variant V2_ENTRY=later / --entry=later -> v2/data_entry) -------------------------
+## entry_later_direction(ev, psd): ev = the directed events AFTER apply_direction() (initiator, target, dispnum, year = pair onset year, sidea1 /
+## sidea2, orig1 / orig2, fatality1 / 2, hostlev1 / 2); psd = participant_spell_dates(). For every pair of opposing participants:
+##   both COW originators       -> the current direction (Side A after the D1 war flips), unchanged;
+##   exactly one joiner (orig 0) -> the JOINER initiates and the originator is the target (an originator -> late-entrant pair is reversed);
+##   both joiners                -> the LATER entrant initiates, entry = the participant's entry date of its spell covering the pair onset year
+##                                  (participant_spell_dates(): GML day / month where known, else the dispute bounds; compared at the coarser of
+##                                  the two resolutions, date_cmp(), the D5 convention); an exact tie keeps the current direction.
+## A reversed event swaps every *1 / *2 column (as apply_direction() does) and carries entry_reversed = TRUE and entry_rule (orig_orig, joiner_orig,
+## joiner_joiner_later, joiner_joiner_tie). After the rule no event has orig1 == 1 and orig2 == 0 (no "late target" event), asserted.
+## attr "diagnostics": counts per rule, reversals, ties, spells found by fallback.
+entry_later_direction <- function(ev, psd) {
+  stopifnot(all(c("dispnum", "initiator", "target", "year", "sidea1", "sidea2", "orig1", "orig2", "fatality1", "fatality2", "hostlev1", "hostlev2") %in% names(ev)),
+            all(c("dispnum", "ccode", "spell_first", "spell_last", "entry_res", "entry_y", "entry_mkey", "entry_dkey") %in% names(psd)),
+            all(ev$orig1 %in% 0:1), all(ev$orig2 %in% 0:1), all(ev$sidea1 + ev$sidea2 == 1L))
+  assert_no_dup_keys(ev, c("dispnum", "initiator", "target"), "entry_later_direction: events")
+  ## the entry date of each participant's spell covering the pair onset year (else its latest spell starting before; counted)
+  ent <- function(cc) {
+    q <- data.frame(.e = seq_len(nrow(ev)), dispnum = as.integer(ev$dispnum), ccode = as.integer(ev[[cc]]), year = as.integer(ev$year))
+    m <- q |> inner_join(psd |> select(dispnum, ccode, spell_first, spell_last, entry_res, entry_y, entry_mkey, entry_dkey), by = c("dispnum", "ccode"), relationship = "many-to-many") |>
+      mutate(cover = spell_first <= year & spell_last >= year, before = spell_first <= year) |> group_by(.e) |>
+      arrange(desc(cover), desc(before & !cover), desc(spell_first), .by_group = TRUE) |> slice(1) |> ungroup()
+    if (nrow(m) != nrow(q)) stop(sprintf("entry_later_direction: %d events have a participant without a spell in its dispute", nrow(q) - nrow(m)))
+    m <- m[order(m$.e), ]
+    list(res = m$entry_res, y = m$entry_y, mkey = m$entry_mkey, dkey = m$entry_dkey, fallback = !m$cover)
+  }
+  a <- ent("initiator"); b <- ent("target")
+  both_j <- ev$orig1 == 0L & ev$orig2 == 0L
+  cc <- rep(0L, nrow(ev))
+  if (any(both_j)) cc[both_j] <- date_cmp(lapply(a[c("res", "y", "mkey", "dkey")], `[`, both_j), lapply(b[c("res", "y", "mkey", "dkey")], `[`, both_j))$cmp
+  rule <- ifelse(ev$orig1 == 1L & ev$orig2 == 1L, "orig_orig", ifelse(!both_j, "joiner_orig", ifelse(cc == 0L, "joiner_joiner_tie", "joiner_joiner_later")))
+  ## reverse: an originator initiator facing a joiner target; or two joiners where the TARGET entered later (cc < 0: the initiator entered earlier)
+  rev <- (ev$orig1 == 1L & ev$orig2 == 0L) | (both_j & cc < 0L)
+  out <- ev
+  swap <- function(x, y) { tmp <- out[[x]][rev]; out[[x]][rev] <<- out[[y]][rev]; out[[y]][rev] <<- tmp }
+  swap("initiator", "target"); swap("sidea1", "sidea2"); swap("orig1", "orig2"); swap("fatality1", "fatality2"); swap("hostlev1", "hostlev2")
+  out$entry_reversed <- rev; out$entry_rule <- rule
+  stopifnot(!any(out$orig1 == 1L & out$orig2 == 0L), all(out$initiator != out$target), all(out$sidea1 + out$sidea2 == 1L),
+            all(out$initiator[rev] == ev$target[rev]), all(out$initiator[!rev] == ev$initiator[!rev]), all(out$orig1[rule == "joiner_orig"] == 0L))
+  assert_no_dup_keys(out, c("dispnum", "initiator", "target"), "events after the entry rule")
+  attr(out, "diagnostics") <- list(n = nrow(ev), n_rule = table(factor(rule, levels = c("orig_orig", "joiner_orig", "joiner_joiner_later", "joiner_joiner_tie"))),
+                                   n_reversed = sum(rev), n_reversed_joiner_orig = sum(rev & rule == "joiner_orig"), n_reversed_jj = sum(rev & rule == "joiner_joiner_later"),
+                                   n_spell_fallback = sum(a$fallback | b$fallback))
   out
 }
 ## COW inter-state war names for the build log (hand-entered from the COW Inter-State War Data v4.0 list; logging only,
