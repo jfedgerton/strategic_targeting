@@ -53,6 +53,7 @@ SPEC_CHOICES <- list(
   mu_shift  = c("none", "traits"),                  # ideal-point shifters under the directed comparison (PI-approved 2026-11-02): none (main; X = none, P = 0) | traits = X = the initiator's M_lvl, R_lvl, cowmaj_tm1, dem_tm1 at t-1 as they enter W (X_MU_TRAITS, assemble_cell.R; P = 4); needs --comparison=directed
   joiner_set = c("all", "opposing"),                 # joiner choice set (PI-approved 2026-11-04): all (main; every stage-2 alternative) | opposing = a joiner event (aprime group 2) is scored only against the states on the OTHER side of the dispute it joins in the onset year, intersected with the state-year's stage-2 set (joiner_sets_aprime.rds); needs --roles=aprime
   entry     = c("keep", "later"),                    # joiner entry direction (PI decision 2026-11-04): keep (main; v2/data) | later = a joiner initiates against the side it joins, two joiners: the later entrant (v2/data_entry, built by 01_build_data.R --entry=later); suffix _ent
+  events    = c("pairs", "dymid"),                   # event foundation (PI-approved 2026-11-04): pairs (main; every Side A x Side B pair of a MID, v2/data) | dymid = the interacting dyads of Maoz's Dyadic MID 4.03 + Directed Dyadic War data, with the entry rule built in (v2/data_dymid, built by 01_build_data.R --events=dymid; README section 6.9); suffix _dy
   variant   = c("all", "polrel")                    # choice set (un-archived 2026-11-04 for the role / AME models only): all (main) | polrel = the politically relevant alternatives (contiguous, conttype 1..5, or either state a major power; alts_lag<h>_polrel.rds of the build, data or data_entry); no suffix: it takes the "all" slot of the cell name
 )
 ## ---- the conventional comparison specification (PI-approved 2026-10-31; switch `comparison`, suffix _conv) --------------------------
@@ -148,6 +149,7 @@ SPEC_SUFFIX <- list(
   changes   = c(winsor = "_winsor"),
   direction = c(sideA = "_sideA"),
   entry     = c(later = "_ent"),                     # joiner entry direction (2026-11-04), a data variant like direction
+  events    = c(dymid = "_dy"),                      # event foundation (2026-11-04), a data variant like entry: e.g. fmid_lag3_all_pr_M2c_K2_cdir_bcj_jset_dy
   ## the prior switches (2026-10-30) come AFTER every data switch: they change the program's prior, not the cell's data, so every existing
   ## name is unchanged and a prior-sensitivity fit never collides with a main or preset fit (_rhoflat, _sigln05, both: _rhoflat_sigln05)
   rho_prior = c(flat = "_rhoflat"),
@@ -162,7 +164,19 @@ WINSOR_PROBS <- c(0.01, 0.99)
 
 ## ---- fixed design constants (not switches) -----------------------------------------------------------------------------------
 MAIN_SAMPLES <- c("mid", "fmid", "war")              # the main grid; fmidcow and fmidub are appendix samples a fit can still take
-ALL_SAMPLES  <- c("mid", "fmid", "fmidcow", "fmidub", "war")
+ALL_SAMPLES  <- c("mid", "fmid", "fmidcow", "fmidub", "war", "fmidany")
+## the samples each event foundation's build carries (2026-11-04): the pairs build has the COW / MIC / GML fatality codings (fmidcow), the dymid build the
+## dyadic ones (fmid = both states suffered deaths in the dyad's fighting or a war dyad; fmidany = the dyadic dispute was fatal or a war dyad; fmidub =
+## fmid with missing side fatalities counted fatal); a sample outside the cell's foundation is refused (sample_in_events())
+EVENTS_SAMPLES <- list(pairs = c("mid", "fmid", "fmidcow", "fmidub", "war"), dymid = c("mid", "fmid", "fmidany", "fmidub", "war"))
+## spec_events(spec): the event foundation of a spec ("pairs" for a spec saved before 2026-11-04, which has no events field)
+spec_events <- function(spec) if (is.null(spec$events)) "pairs" else spec$events
+## sample_in_events(sample, spec): stop unless the sample exists in the build of the spec's event foundation
+sample_in_events <- function(sample, spec) {
+  ev <- spec_events(spec)
+  if (!sample %in% EVENTS_SAMPLES[[ev]]) stop(sprintf("--sample=%s does not exist under --events=%s (its samples: %s)", sample, ev, paste(EVENTS_SAMPLES[[ev]], collapse = ", ")))
+  invisible(TRUE)
+}
 LAGS         <- c(1L, 3L, 5L, 10L)
 MODELS       <- c("M1m", "M1r", "M1a", "M1b", "M2m", "M2r", "M2a", "M2b")
 ## dual typology stage (b), 2026-10-27: M1c = the M1b joint model with group-specific ideal-point shifts (delta_lead, delta_join) and
@@ -338,8 +352,17 @@ parse_spec <- function(args = character(0)) {
   ## the joiner choice-set restriction (2026-11-04) is defined on the aprime joiner group only
   if (spec$joiner_set != SPEC_DEFAULTS$joiner_set && !spec$roles %in% JOINER_ROLES)
     stop(sprintf("--joiner_set=%s needs --roles=aprime, bc or bcj (the restriction applies to the joiner events; got roles=%s)", spec$joiner_set, spec$roles))
-  ## the bc / bcj codings (2026-11-04) have no late-target group, so they need the entry = later events (keep still has late-target events)
-  if (spec$roles %in% ENTRY_ROLES && spec$entry != "later") stop(sprintf("--roles=%s needs --entry=later (under --entry=keep the late-target events have no group)", spec$roles))
+  ## the bc / bcj codings (2026-11-04) have no late-target group, so they need the entry = later events (keep still has late-target events) or the dymid
+  ## events, whose direction rule has the entry rule built in
+  if (spec$roles %in% ENTRY_ROLES && spec$entry != "later" && spec$events != "dymid") stop(sprintf("--roles=%s needs --entry=later or --events=dymid (under --entry=keep the late-target events have no group)", spec$roles))
+  ## the interacting-dyads foundation (2026-11-04): built on the D1 direction with the entry rule as its rule (a), so --direction=sideA and --entry=later are
+  ## refused with it (the second would be redundant: the dymid build applies the entry rule itself); roles = aprime is refused (its group 3, target joined
+  ## late, cannot occur under the entry rule, so the four-group coding would carry an empty group; use bcj or bc)
+  if (spec$events == "dymid") {
+    if (spec$direction != SPEC_DEFAULTS$direction) stop("--events=dymid is built on the cowwar direction only (not with --direction=sideA)")
+    if (spec$entry != SPEC_DEFAULTS$entry) stop("--events=dymid has the entry rule built in (its direction rule (a)); --entry=later with it is redundant and refused; leave --entry out")
+    if (spec$roles == "aprime") stop("--roles=aprime is refused under --events=dymid (no target-joined-late event exists under the entry rule, so group 3 would be empty); use --roles=bcj (main) or --roles=bc")
+  }
   if (spec$entry != SPEC_DEFAULTS$entry && spec$direction != SPEC_DEFAULTS$direction) stop("--entry=later is built on the cowwar direction only (not with --direction=sideA)")
   if (spec$mu_shift != SPEC_DEFAULTS$mu_shift && spec$comparison != "directed")
     stop(sprintf("--mu_shift=%s needs --comparison=directed (the shifters are the directed comparison's W columns M_lvl, R_lvl, cowmaj_tm1, dem_tm1; got comparison=%s)", spec$mu_shift, spec$comparison))
@@ -371,13 +394,16 @@ spec_tag <- function(spec) if (is.null(spec$tag)) "" else spec$tag
 spec_is_main <- function(spec) all(vapply(names(SPEC_CHOICES), function(nm) identical(spec[[nm]], SPEC_DEFAULTS[[nm]]), logical(1))) && spec$ame_K == SPEC_DEFAULTS$ame_K
 ## spec_data_dir(spec, root): v2/data for the main direction, v2/data_sideA for direction = sideA
 ## entry = later (2026-11-04): v2/data_entry (a spec saved before has no entry field: keep)
-spec_data_dir <- function(spec, root) file.path(root, if (spec$direction == "sideA") "data_sideA" else if (!is.null(spec$entry) && identical(spec$entry, "later")) "data_entry" else "data")
+## events = dymid (2026-11-04): v2/data_dymid (a spec saved before has no events field: pairs)
+spec_data_dir <- function(spec, root) file.path(root, if (spec$direction == "sideA") "data_sideA" else if (!is.null(spec$entry) && identical(spec$entry, "later")) "data_entry" else
+                                                  if (identical(spec_events(spec), "dymid")) "data_dymid" else "data")
 ## spec_string(spec): one line for the logs
 ## mu_shift (2026-11-02) and joiner_set (2026-11-04) are left out at their defaults, so the spec string of every existing cell is unchanged
 spec_string <- function(spec) {
   if (!is.null(spec$mu_shift) && identical(spec$mu_shift, SPEC_DEFAULTS$mu_shift)) spec <- spec[setdiff(names(spec), "mu_shift")]
   if (!is.null(spec$joiner_set) && identical(spec$joiner_set, SPEC_DEFAULTS$joiner_set)) spec <- spec[setdiff(names(spec), "joiner_set")]
   if (!is.null(spec$entry) && identical(spec$entry, SPEC_DEFAULTS$entry)) spec <- spec[setdiff(names(spec), "entry")]
+  if (!is.null(spec$events) && identical(spec$events, SPEC_DEFAULTS$events)) spec <- spec[setdiff(names(spec), "events")]
   if (!is.null(spec$variant) && identical(spec$variant, SPEC_DEFAULTS$variant)) spec <- spec[setdiff(names(spec), "variant")]
   paste(sprintf("%s=%s", names(spec), unlist(spec)), collapse = " ")
 }
@@ -394,6 +420,7 @@ perm_part_spec_string <- function(spec) {
             if (is.null(spec$mu_shift) || identical(spec$mu_shift, SPEC_DEFAULTS$mu_shift)) "mu_shift",
             if (is.null(spec$joiner_set) || identical(spec$joiner_set, SPEC_DEFAULTS$joiner_set)) "joiner_set",
             if (is.null(spec$entry) || identical(spec$entry, SPEC_DEFAULTS$entry)) "entry",
+            if (is.null(spec$events) || identical(spec$events, SPEC_DEFAULTS$events)) "events",
             if (is.null(spec$variant) || identical(spec$variant, SPEC_DEFAULTS$variant)) "variant")   # joiner_set (2026-11-04): likewise   # mu_shift (2026-11-02): dropped at its default, kept when on
   spec_string(spec[setdiff(names(spec), drop)])
 }
@@ -407,6 +434,7 @@ spec_coal_col <- function(spec) c(inclusive = "coal_incl", strict = "coal_strict
 ## M1 model (M1m, M1r, M1a: no rho_x) is refused as well, since the fit would be the main model under a name that claims another prior.
 cell_name <- function(sample, lag, model, spec) {
   stopifnot(sample %in% ALL_SAMPLES, lag %in% LAGS, model %in% ALL_MODELS)
+  sample_in_events(sample, spec)                    # 2026-11-04: fmidany exists under events = dymid only, fmidcow under pairs only
   if (model_family(model) == "M1" && !identical(as.integer(spec$ame_K), SPEC_DEFAULTS$ame_K))
     stop(sprintf("cell_name: --ame_K=%s with the M1 model %s (K applies to the M2 family only and would not appear in the cell name)", spec$ame_K, model))
   ## the conventional comparison (2026-10-31) is specified for M1a, M1b and M1c only

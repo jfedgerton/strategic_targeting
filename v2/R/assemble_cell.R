@@ -183,7 +183,7 @@ assemble_cell <- function(SAMPLE, LAG, VARIANT, CENT = "pr", CONFLICT_HISTORY = 
                           EVENT_WEIGHTS = "dispute", PAIRS = "all", CHANGES = "raw", CONTEXT = "all", COAL_TIES = "inclusive", COAL_DROP = "none",
                           MAJOR = "none", INTERACT = "none", ROLES = "stageb", MU_SHIFT = "none", JOINER_SET = "all",
                           CONTEXT_MODEL = FALSE, CONVENTIONAL = FALSE, DIRECTED = FALSE, data_dir = file.path(v2_root(), "data"), manifest = NULL) {
-  stopifnot(SAMPLE %in% c("mid", "fmid", "fmidcow", "fmidub", "war"), LAG %in% c(1L, 3L, 5L, 10L), VARIANT %in% c("all", "polrel"), CENT %in% c("pr", "eig"),
+  stopifnot(SAMPLE %in% ALL_SAMPLES, LAG %in% c(1L, 3L, 5L, 10L), VARIANT %in% c("all", "polrel"), CENT %in% c("pr", "eig"),
             EVENT_WEIGHTS %in% c("dispute", "none"), PAIRS %in% c("all", "originators", "joiners"), CHANGES %in% c("raw", "winsor"),
             CONTEXT %in% c("all", "bilateral", "coalition"), COAL_TIES %in% c("inclusive", "strict"), COAL_DROP %in% c("none", "top3"),
             MAJOR %in% c("none", "joint"), INTERACT %in% c("none", "prefixed"),
@@ -233,7 +233,7 @@ assemble_cell <- function(SAMPLE, LAG, VARIANT, CENT = "pr", CONFLICT_HISTORY = 
   jsets <- if (JOINER_SET == "opposing") assert_matches_manifest(file.path(data_dir, "joiner_sets_aprime.rds"), manifest) else NULL
   stopifnot(all(panel$h == LAG), all(alts$h == LAG))
   stopifnot(all(c("escalation", "is_joiner_pair", "is_ww2", "target_has_pos_tm1", "fighting_at_ref", "dispnums", "n_disputes", "war_disp",
-                  "in_mid_noww2", "in_fmid_noww2", "in_fmidcow_noww2", "in_fmidub_noww2", "in_war_noww2") %in% names(events)),
+                  "in_mid_noww2", "in_fmid_noww2", "in_fmidub_noww2", "in_war_noww2", paste0("in_", SAMPLE), paste0("in_", SAMPLE, "_noww2")) %in% names(events)),   # fmidcow / fmidany: the build's own (2026-11-04)
             all(c("ongoing_tm1", "M_lvl", "R_lvl", "log_n_system_tm1") %in% names(panel)), all(c("dy_mid_tm1", "in_iv", "in_s2") %in% names(alts)),
             all(c("dir_flipped", "dir_source", paste0("w_", SAMPLE), "coal_incl", "coal_strict") %in% names(events)))
   stopifnot(!anyNA(events$coal_incl[!events$escalation]), !anyNA(events$coal_strict[!events$escalation]), all(events$coal_incl[!events$escalation] >= events$coal_strict[!events$escalation]))
@@ -907,8 +907,12 @@ assemble_cell_spec <- function(SAMPLE, LAG, spec, data_dir = spec_data_dir(spec,
   roles_v <- if (is.null(spec$roles)) "stageb" else spec$roles
   if (!is.null(model) && model %in% AME_CONTEXT_MODELS && !(dirc && roles_v %in% JOINER_ROLES)) stop(sprintf("the model %s is defined under --comparison=directed with --roles=aprime, bc or bcj only", model))
   entry_v <- if (is.null(spec$entry)) "keep" else spec$entry
-  if (roles_v %in% ENTRY_ROLES && entry_v != "later") stop(sprintf("--roles=%s needs --entry=later", roles_v))
+  if (roles_v %in% ENTRY_ROLES && entry_v != "later" && spec_events(spec) != "dymid") stop(sprintf("--roles=%s needs --entry=later or --events=dymid", roles_v))
   if (entry_v == "later") stopifnot(basename(data_dir) == "data_entry")
+  ## events = dymid (2026-11-04): the interacting-dyads build v2/data_dymid; its samples (fmidany, no fmidcow); bc / bcj need no entry switch there
+  events_v <- spec_events(spec)
+  sample_in_events(SAMPLE, spec)
+  if (events_v == "dymid") stopifnot(basename(data_dir) == "data_dymid", entry_v == "keep", spec$direction == "cowwar", roles_v != "aprime")
   jset <- if (is.null(spec$joiner_set)) "all" else spec$joiner_set
   if (jset != "all" && !roles_v %in% JOINER_ROLES) stop(sprintf("--joiner_set=%s needs --roles=aprime, bc or bcj", jset))
   if (jset != "all" && !is.null(model) && !model %in% ROLE_MODELS) stop(sprintf("--joiner_set=%s with the model %s (the restriction applies to %s only)", jset, model, paste(ROLE_MODELS, collapse = ", ")))

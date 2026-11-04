@@ -114,6 +114,7 @@ if (!spec_prior_is_main(spec)) stop(sprintf("--rho_prior / --sigma_prior are not
 ## (the refit presets would pass every switch explicitly, which the spec refuses, and perm_error is not wired to its W / Z / X)
 ## the joiner choice-set restriction and the AME role model M2c (2026-11-04) are single 02_fit_model.R cells: no preset takes them
 if (!is.null(spec$variant) && !identical(spec$variant, SPEC_DEFAULTS$variant)) stop(sprintf("--variant=%s is not an option of 05_robustness.R (the polrel choice set is a single-cell option of the role / AME models); run its cells through 02_fit_model.R directly", spec$variant))
+if (!identical(spec_events(spec), SPEC_DEFAULTS$events)) stop(sprintf("--events=%s is not an option of 05_robustness.R (no preset takes the interacting-dyads foundation); run its cells through 02_fit_model.R --events=%s directly", spec$events, spec$events))
 if (!is.null(spec$entry) && !identical(spec$entry, SPEC_DEFAULTS$entry)) stop(sprintf("--entry=%s is not an option of 05_robustness.R (no preset takes the joiner entry direction); run its cells through 02_fit_model.R --entry=%s directly", spec$entry, spec$entry))
 if (!is.null(spec$joiner_set) && !identical(spec$joiner_set, SPEC_DEFAULTS$joiner_set)) stop(sprintf("--joiner_set=%s is not an option of 05_robustness.R (no preset takes the joiner choice-set restriction); run its cells through 02_fit_model.R directly", spec$joiner_set))
 if (length(grep(sprintf(":(%s)(,|$)", paste(AME_CONTEXT_MODELS, collapse = "|")), grep("^--cells=", args, value = TRUE)))) stop(sprintf("the model %s is not an option of 05_robustness.R (no preset takes it); run its cells through 02_fit_model.R --comparison=directed --roles=aprime directly", paste(AME_CONTEXT_MODELS, collapse = ", ")))
@@ -138,7 +139,7 @@ if (PRESET != "perm_error") {
   } else if (PRESET == "context_b") {
     ## the M1c model on its fixed cells, every switch at its default: no --cells and no switch may be passed (the cell names would still be
     ## unique through the model code, but the stage-b run is defined on the main specification)
-    if (length(grep("^--(cells|pairs|context|coal_ties|coal_drop|direction|ww2|weights|controls|major|interact|distance|contiguity|changes|ame_K|rho_prior|sigma_prior|tag|comparison|roles|mu_shift|joiner_set|entry|variant)=", args)))
+    if (length(grep("^--(cells|pairs|context|coal_ties|coal_drop|direction|ww2|weights|controls|major|interact|distance|contiguity|changes|ame_K|rho_prior|sigma_prior|tag|comparison|roles|mu_shift|joiner_set|entry|events|variant)=", args)))
       stop("the context_b preset fixes its cells (CONTEXT_B_PRESET in spec.R) and runs M1c on the main specification; no --cells and no switch may be passed")
     parts <- strsplit(CONTEXT_B_PRESET$cells, ":", fixed = TRUE)
     cells_tab <- data.frame(sample = vapply(parts, `[`, "", 1), lag = as.integer(vapply(parts, `[`, "", 2)), model = vapply(parts, `[`, "", 3), variant = NA_character_, stringsAsFactors = FALSE)

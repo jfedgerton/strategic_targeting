@@ -43,6 +43,10 @@
 ##            bcj (suffix _bcj; needs --entry=later): G = 3, 0 bilateral, 1 coalition originator, 2 joiner. M1c / M1cr / M2c
 ##     --entry=keep|later (PI decision 2026-11-04, suffix _ent): later reads v2/data_entry (01_build_data.R --entry=later): a joiner initiates against the
 ##            side it joins (two joiners: the later entrant); every downstream quantity rebuilt from those events
+##     --events=pairs|dymid (PI-approved 2026-11-04, suffix _dy): dymid reads v2/data_dymid (01_build_data.R --events=dymid): one event per interacting dyad
+##            of Maoz's Dyadic MID 4.03 + Directed Dyadic War data, the entry rule built into its direction rule; samples mid, fmid (both states suffered
+##            deaths, or a war dyad; MAIN), fmidany, fmidub, war (no fmidcow); bc / bcj need no --entry there; refused with --entry=later, --direction=sideA
+##            and --roles=aprime (README section 6.9)
 ##     --joiner_set=all|opposing (PI-approved 2026-11-04, suffix _jset after _aprime; --roles=aprime only, M1c / M1cr / M2c): opposing scores every joiner
 ##            event (aprime group 2) only against the states on the opposite side of its dispute in the onset year (joiner_sets_aprime.rds of the build),
 ##            intersected with the state-year's stage-2 set; other events, stage 1 / IV and the weights unchanged; all = byte-identical to before
@@ -339,7 +343,7 @@ if (family == "m2_context") {
   assert_fit_current(o1, manifest_path)
   assert_fit_matches_cell(o1, dat, W_cols, X_cols, Z_cols, what = "init_from M1c fit")
   o1_js <- if (is.null(o1$spec$joiner_set)) "all" else o1$spec$joiner_set
-  if (!identical(o1$args$model, "M1c") || !identical(o1$cell, want) || !spec_is_directed(o1$spec) || !identical(o1$spec$roles, spec$roles) || !identical(if (is.null(o1$spec$entry)) "keep" else o1$spec$entry, if (is.null(spec$entry)) "keep" else spec$entry) || !identical(o1_js, JOINER_SET) ||
+  if (!identical(o1$args$model, "M1c") || !identical(o1$cell, want) || !spec_is_directed(o1$spec) || !identical(o1$spec$roles, spec$roles) || !identical(if (is.null(o1$spec$entry)) "keep" else o1$spec$entry, if (is.null(spec$entry)) "keep" else spec$entry) || !identical(spec_events(o1$spec), spec_events(spec)) || !identical(o1_js, JOINER_SET) ||
       !identical(spec_tag(o1$spec), spec_tag(spec)) || o1$dat$D_mode != 3L || o1$dat$joint != 1L || !identical(as.integer(o1$dat$G), as.integer(dat$G)) ||
       !identical(as.integer(o1$dat$ev_grp), as.integer(dat$ev_grp)) || !identical(o1$group_labels, A$group_table$group))
     stop(sprintf("the init fit %s (cell %s, model %s, roles %s, joiner_set %s) is not the M1c fit of this M2c cell (%s)", basename(m1_path), o1$cell, o1$args$model,
