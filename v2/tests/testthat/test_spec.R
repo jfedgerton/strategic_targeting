@@ -39,7 +39,8 @@ test_that("main-spec cell names are the pre-2026-10-25 names, and every non-defa
   all_on <- parse_spec(c("--pairs=originators", "--direction=sideA", "--ww2=drop", "--weights=none", "--controls=full", "--changes=winsor"))
   expect_equal(spec_suffix(all_on), "_orig_noww2_fullctrl_w1_winsor_sideA")
   ## every switch value has a suffix entry, and the suffixes are distinct
-  for (nm in names(SPEC_CHOICES)) for (v in SPEC_CHOICES[[nm]][-1]) expect_true(!is.null(SPEC_SUFFIX[[nm]][[v]]))
+  for (nm in setdiff(names(SPEC_CHOICES), "variant")) for (v in SPEC_CHOICES[[nm]][-1]) expect_true(!is.null(SPEC_SUFFIX[[nm]][[v]]))   # variant (2026-11-04) takes the name slot, no suffix
+  expect_null(SPEC_SUFFIX$variant)
   expect_false(any(duplicated(unlist(SPEC_SUFFIX))))
   expect_error(cell_name("mid", 7L, "M1b", main)); expect_error(cell_name("mid", 3L, "M3b", main))
   expect_equal(basename(spec_data_dir(main, "/r")), "data"); expect_equal(basename(spec_data_dir(parse_spec("--direction=sideA"), "/r")), "data_sideA")

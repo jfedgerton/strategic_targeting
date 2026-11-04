@@ -10,7 +10,7 @@
 #SBATCH --output=%x_%A_%a.out
 #SBATCH --open-mode=append
 # ENTRY DIRECTION, ROLE CODINGS bc / bcj, JOINER CHOICE SETS AND THE AME ROLE MODEL M2c (PI decisions 2026-11-04). Every cell: --entry=later
-# (v2/data_entry), --comparison=directed, lag 3; the role cells take --roles=$ROLES with ROLES=bc|bcj (environment, REQUIRED; one submission per coding).
+# (v2/data_entry), --comparison=directed, lag 3; the role cells take --roles=$ROLES, ROLES=bcj by default (the MAIN coding, PI decision 2026-11-04) or ROLES=bc (optional appendix coding; one submission per coding).
 #   idx  sample  model  K  joiner_set  needs (init fit in v2/output; M2c only)
 #    0   fmid    M1c    -  all         -   (baseline and M2c init)
 #    1   mid     M1c    -  all         -
@@ -83,7 +83,7 @@ case $i in
   21) s=mid;  m=M2c;  K=2; js=all; vr=polrel ;;
   *) echo "array index $i out of range 0-21" >&2; exit 1 ;;
 esac
-ROLES=${ROLES:?set ROLES=bc or ROLES=bcj}
+ROLES=${ROLES:-bcj}      # PI decision 2026-11-04: bcj is the main coding (especially for M2c); ROLES=bc is the optional appendix coding
 case $ROLES in bc|bcj) ;; *) echo "ROLES must be bc or bcj (got '$ROLES')" >&2; exit 1 ;; esac
 DRY=${DRY_RUN:-FALSE}
 THR=${THREADS_PER_CHAIN:-8}
