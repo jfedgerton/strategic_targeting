@@ -17,7 +17,7 @@
 ##   reach_<cell>.csv      (appendix) posterior mean / 90% interval of r_i = ||mu_i||, |mu_i1|, |mu_i2|
 ##   focus_sigma_<cell>.csv, focus_states_<cell>.csv  (appendix, descriptive) pooled Sigma summary and per-state
 ##                         empirical dispersion of chosen-target positions around mean mu_event (n < 5 flagged)
-##   M1c / M1cr fits only (dual typology stage b, 2026-10-27; M1cr 2026-10-31; context_model.R):
+##   M1c / M1cr / M2c fits only (dual typology stage b, 2026-10-27; M1cr 2026-10-31; M2c 2026-11-04, which also writes the AME files above; context_model.R):
 ##   context_model_<cell>.csv   delta[g], sigma_g per group, the shared rho (M1c) or rho_g per group (M1cr), the group population ideal
 ##                              points mu0_g and Sigma_g per group (posterior mean, sd, 90% interval); G groups as data since 2026-10-31
 ##   typology_<cell>_<group>.csv  the typology per group (bilateral / leader / joiner): the existing classifier on mu_state + delta_g;
@@ -56,8 +56,10 @@ log_open(paste0("03_extract_", cell))
 logf("fit %s; r0 = %.2f", cell, r0)
 if (nzchar(spec_tag(obj$spec))) logf("run tag %s: this is the TAGGED fit (%s); every output below carries %s%s", spec_tag(obj$spec), basename(fit_path), TAG_PREFIX, spec_tag(obj$spec))
 if (!spec_prior_is_main(obj$spec)) logf("prior sensitivity fit (%s): rho_prior = %s (Beta shape %s), sigma_prior = %s (lognormal sd %s)", obj$args$stan_program, obj$prior$rho_prior, obj$prior$prior_rho_shape, obj$prior$sigma_prior, obj$prior$prior_sigma_x_sd)
-is_context_model <- !is.null(obj$args$model) && obj$args$model %in% CONTEXT_MODELS
-if (is_context_model) logf("M1c fit (dual typology stage b): typology_<cell>, mu_state_<cell>, reach and focus_sigma below are the BILATERAL (reference) quantities; the per-group outputs follow")
+is_context_model <- !is.null(obj$args$model) && obj$args$model %in% ROLE_MODELS        # M1c / M1cr, and M2c (2026-11-04: role quantities + the AME block below)
+if (!is.null(obj$args$joiner_set) && obj$args$joiner_set != "all") logf("joiner_set = %s (2026-11-04): joiner events were scored against the opposing side of their dispute only (%s)", obj$args$joiner_set,
+                                                                        if (is.null(obj$jset_stats)) "no stats recorded" else sprintf("%d joiner events, %d with set size 1, %d alternatives removed", obj$jset_stats$n_joiner_events, obj$jset_stats$n_singleton, obj$jset_stats$n_removed))
+if (is_context_model) logf("%s fit (role groups): typology_<cell>, mu_state_<cell>, reach and focus_sigma below are the REFERENCE-group quantities; the per-group outputs follow", obj$args$model)
 
 ## ---- typology from mu_state (at x_ref) -----------------------------------------------------
 mu <- mu_state_draws(fit)

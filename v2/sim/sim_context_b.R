@@ -185,6 +185,7 @@ if (M1C) for (g in 0:2) if (sum(ev_sim$grp == g) == 0L) stop("no simulated event
 if (!M1C) ev_sim$grp <- NULL                                  # M1b: the observed group label of a slot is not part of the simulated data
 dat_sim <- build_stan_data(sy_sim, alts_s, ev_sim, A$W_cols, A$X_cols, A$Z_cols, joint = 1L, x_ref = x_ref, allow_orphan_initiations = FALSE, D_mode = 3L, S = S)
 if (M1C) { dat_sim$G <- length(STAGE2_GROUPS); dat_sim$ev_grp <- as.integer(ev_sim$grp) }   # G is data in m1_context.stan since 2026-10-31 (3 groups)
+if (M1C) dat_sim <- event_alt_sets(dat_sim)          # 2026-11-04: m1_context.stan takes the event-level allowed rows; the full stage-2 sets (joiner_set = all)
 stopifnot(identical(dat_sim$W, dat0$W), identical(dat_sim$Z, dat0$Z), identical(dat_sim$x, dat0$x), identical(dat_sim$in_iv, dat0$in_iv), identical(dat_sim$in_s2, dat0$in_s2),
           sum(dat_sim$y1) == sum(y1_sim), dat_sim$E == nrow(ev_sim))
 design <- if (M1C) { data.frame(group = STAGE2_GROUPS, n_events = as.integer(tabulate(dat_sim$ev_grp + 1L, nbins = 3L)),

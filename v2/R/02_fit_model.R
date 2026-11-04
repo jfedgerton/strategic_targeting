@@ -8,6 +8,9 @@
 ##   sample : mid (all MIDs) | fmid (fatal MIDs, main coding) | war (pair-level war); appendix: fmidcow | fmidub
 ##   lag    : 1 | 3 | 5 | 10   change-window length h
 ##   model  : M1m | M1r | M1a | M1b | M2m | M2r | M2a | M2b | M1c | M1cr (M1cr, 2026-10-31: M1c with a role-specific stage-2 correlation rho_g, stan/m1_context_rho.stan)
+##            | M2c (PI-approved 2026-11-04; stan/m2_context.stan): AME with initiation types = M2b plus the M1c role structure (mu_g = mu0 + delta[g - 1],
+##            sigma_g[g], shared rho); --comparison=directed and --roles=aprime only, --ame_K=1|2, with or without --joiner_set; every chain starts from
+##            the matching M1c fit (same sample, lag, switches, tag; K dropped), and the run REFUSES to sample when that fit is missing
 ##            m = material only, r = relational only, a = both independent, b = both joint; M2 = M1 + AME factors (ame_K)
 ##            M1bz (PI-approved 2026-11-02; stan/m1_latent_rhoreg.stan; --comparison=directed only, with or without --mu_shift=traits): M1b with
 ##            a state-year specific stage-2 correlation rho_n = tanh(g0 + Zr[n] g), Zr = the initiator's M_lvl, R_lvl, cowmaj_tm1, dem_tm1 as in W
@@ -36,6 +39,9 @@
 ##            mean X over the initiating state-years; a directed M2b with the switch starts from the directed M1b fit WITH the switch (asserted)
 ##     --roles=stageb|aprime (PI decision 2026-10-31, suffix _aprime; M1c / M1cr only): the stage-2 groups; aprime = 0 alone originator, 1 co-originator,
 ##            2 joiner, 3 target joined late (G = 4; roles_aprime.rds of the build); stageb (default) = bilateral / coalition leader / joiner
+##     --joiner_set=all|opposing (PI-approved 2026-11-04, suffix _jset after _aprime; --roles=aprime only, M1c / M1cr / M2c): opposing scores every joiner
+##            event (aprime group 2) only against the states on the opposite side of its dispute in the onset year (joiner_sets_aprime.rds of the build),
+##            intersected with the state-year's stage-2 set; other events, stage 1 / IV and the weights unchanged; all = byte-identical to before
 ##     --rho_prior=beta25|flat  --sigma_prior=ln1|ln05 (2026-10-30, prior sensitivity of the jointness result; M1 m / r / a / b only, the rho
 ##            prior with M1b only): a non-default value fits the SAME model with stan/m1_latent_prior.stan, the copy of the main program that
 ##            takes the Beta shape on (rho + 1) / 2 (2.5 | 1 = uniform on (-1, 1)) and the lognormal sd of sigma_x (1 | 0.5) as data
@@ -67,7 +73,7 @@
 ##                               review 2026-10-26 P1: rstan drops a failed parallel chain and returns the rest with mode 0)
 ##   v2/output/summary_<cell>.csv posterior summaries of the structural parameters, labelled by axis and covariate (written AFTER
 ##                               the fit file)
-## Cell name: <sample>_lag<h>_all_pr_<model>[_K<K>][_orig|_join][_bi|_co][_strict][_drop3][_noww2][_fullctrl][_dist][_nocontig][_major][_ix][_conv|_cdir][_mst][_aprime][_w1][_winsor][_sideA][_rhoflat][_sigln05][_t<tag>][_pilot]
+## Cell name: <sample>_lag<h>_all_pr_<model>[_K<K>][_orig|_join][_bi|_co][_strict][_drop3][_noww2][_fullctrl][_dist][_nocontig][_major][_ix][_conv|_cdir][_mst][_aprime][_jset][_w1][_winsor][_sideA][_rhoflat][_sigln05][_t<tag>][_pilot]
 ##            (model M1c: <sample>_lag<h>_all_pr_M1c<suffix>; its fit records args$stan_program = "m1_context" and args$context_model = TRUE)
 ## Seed 123 everywhere (audit F11).
 ## ============================================================================
@@ -93,7 +99,9 @@ stopifnot(CHAINS >= 1, ITER > WARMUP, WARMUP >= 0, THREADS >= 1, is.finite(ADAPT
 
 D_MODE <- model_D_mode(MODEL); joint <- model_joint(MODEL); family <- stan_program(MODEL, spec)   # m1_latent_additive | m2_ame | m1_context (M1c) | m1_latent_prior (a prior switch off its default)
 PRIOR_PROGRAM <- family == "m1_latent_prior"; prior <- prior_hyper(spec)   # the hyperparameters the prior program takes as data (2.5 / 1 = the main program's literals)
-CONTEXT_MODEL <- MODEL %in% CONTEXT_MODELS
+CONTEXT_MODEL <- MODEL %in% ROLE_MODELS                  # M1c / M1cr, and M2c (2026-11-04): the models that take the stage-2 groups
+AME_FAMILY <- family %in% c("m2_ame", "m2_context")      # the AME programs (K, anchors, U / V; M2c 2026-11-04)
+JOINER_SET <- if (is.null(spec$joiner_set)) "all" else spec$joiner_set
 RHOREG <- MODEL %in% RHOREG_MODELS                       # M1bz (2026-11-02): the rho-regression program m1_latent_rhoreg
 MU_SHIFT <- if (is.null(spec$mu_shift)) "none" else spec$mu_shift   # 2026-11-02
 if (RHOREG) stopifnot(family == "m1_latent_rhoreg", D_MODE == 3L, joint == 1L, spec_is_directed(spec))
@@ -137,7 +145,8 @@ if (!is.na(slurm_task_id) && slurm_task_id == "") slurm_task_id <- NA_character_
 logf("provenance at load: git commit %s (uncommitted changes under v2/R or v2/stan: %s); manifest built %s with %d files; SLURM_JOB_ID %s; SLURM_ARRAY_TASK_ID %s",
      git_commit_at_load, git_dirty_at_load, if ("built" %in% names(manifest_at_load)) manifest_at_load$built[1] else "NA", nrow(manifest_at_load), slurm_job_id, slurm_task_id)
 cell_files <- c(sprintf("stage1_panel_lag%d.rds", LAG), sprintf("alts_lag%d_%s.rds", LAG, VARIANT), "events.rds",
-                if (identical(spec$roles, "aprime")) "roles_aprime.rds")   # roles = aprime (2026-10-31) reads the build's role file as well
+                if (identical(spec$roles, "aprime")) "roles_aprime.rds",   # roles = aprime (2026-10-31) reads the build's role file as well
+                if (JOINER_SET == "opposing") "joiner_sets_aprime.rds")   # joiner_set = opposing (2026-11-04) reads the joiner sets as well
 stopifnot(all(cell_files %in% manifest_at_load$file))
 manifest_cell <- manifest_at_load[manifest_at_load$file %in% cell_files, ]
 
@@ -149,7 +158,7 @@ state_codes <- A$state_codes; x_ref <- A$x_ref; n_full <- A$n_full; sampled <- A
 
 ## ---- Stan data ---------------------------------------------------------------------------------------------
 dat <- build_stan_data(sy, alts, ev, W_cols, X_cols, Z_cols, joint = joint, sampled = sampled, n_full = n_full,
-                       x_ref = x_ref, K = if (family == "m2_ame") K else NULL, allow_orphan_initiations = TRUE,
+                       x_ref = x_ref, K = if (AME_FAMILY) K else NULL, allow_orphan_initiations = TRUE,
                        D_mode = D_MODE, grainsize = choose_grainsize(nrow(sy), THREADS))
 if (CONTEXT_MODEL) {
   ## stage b: the stage-2 group of every usable event goes to Stan as ev_grp (0..G-1; 0 = the reference group) with the group count G
@@ -164,6 +173,22 @@ if (CONTEXT_MODEL) {
   if (any(gt$n_usable == 0L)) stop(sprintf("%s needs events in every stage-2 group; usable events per group: %s", MODEL, paste(sprintf("%s %d", gt$group, gt$n_usable), collapse = ", ")))
   logf("%s stage-2 groups (ev_grp, G = %d; usable events, weight sum, distinct initiating states; sample events before the choice-set join): %s", MODEL, G_GRP,
        paste(sprintf("%d %s %d (%.1f, %d; %d)", gt$grp, gt$group, gt$n_usable, gt$w_usable, gt$n_states, gt$n_sample), collapse = "; "))
+  ## event-level allowed stage-2 rows (2026-11-04): the whole stage-2 set of the state-year for every event under joiner_set = all (the programs then
+  ## compute exactly what they computed before), the joiner events' opposing-side rows under joiner_set = opposing
+  stopifnot(identical(A$joiner_set, JOINER_SET), is.null(A$ev_sets) == (JOINER_SET == "all"))
+  dat <- event_alt_sets(dat, A$ev_sets)
+  s2_n <- tabulate(findInterval(which(dat$in_s2 == 1L), dat$cs_start), nbins = dat$N1)      # stage-2 set size per state-year (cs_start increasing)
+  stopifnot(identical(dat$cs_start, sort(dat$cs_start)), all(dat$ev_alt_n <= s2_n[dat$ev_sy]))
+  is_restr <- dat$ev_alt_n < s2_n[dat$ev_sy]; n_restr <- sum(is_restr)
+  if (JOINER_SET == "opposing") {
+    js <- A$jset_stats
+    stopifnot(!is.null(js), all(dat$ev_grp[is_restr] == 2L), n_restr == js$n_joiner_events - js$n_unrestricted)
+    logf("joiner_set = opposing (2026-11-04): %d joiner events (aprime group 2); restricted set size min %d / median %.1f / max %d; size 1: %d (log-prob 0 in stage 2, kept; weights %.1f); %d events actually restricted in Stan (ev_restr = 1); alternatives removed %d; n_ev_alt = %d",
+         js$n_joiner_events, js$size_min, js$size_median, js$size_max, js$n_singleton, js$w_singleton, n_restr, js$n_removed, dat$n_ev_alt)
+  } else {
+    stopifnot(n_restr == 0L)
+    logf("joiner_set = all: every event is scored against its state-year's whole stage-2 set (n_ev_alt = %d)", dat$n_ev_alt)
+  }
 }
 if (RHOREG) {
   ## M1bz (2026-11-02): the traits of the rho regression, N1 x Q, exactly the W columns M_lvl, R_lvl, cowmaj_tm1, dem_tm1 (rhoreg_Zr() asserts them)
@@ -194,7 +219,7 @@ if (CONVENTIONAL) {
             dat$P == length(X_EXPECTED), ncol(dat$X) == length(X_EXPECTED), nrow(dat$X) == dat$N1, length(dat$x_ref) == length(X_EXPECTED), dat$P1 == length(W_CONVENTIONAL), dat$Pz == length(Z_DIRECTED), dat$Pz == 9L,
             identical(colnames(dat$Z), Z_DIRECTED) || is.null(colnames(dat$Z)),
             !any(CHANGE_COLUMNS %in% c(W_cols, X_cols, Z_cols)), !any(PEACE_COLUMNS %in% c(W_cols, Z_cols)), !any(c("joint_dem", Z_MAJOR) %in% Z_cols), !anyNA(dat$W), !anyNA(dat$Z),
-            "multi_mid_jan" %in% W_cols, MODEL %in% c(DIRECTED_MODELS, RHOREG_MODELS))
+            "multi_mid_jan" %in% W_cols, MODEL %in% c(DIRECTED_MODELS, RHOREG_MODELS, AME_CONTEXT_MODELS))
   logf("directed comparison (2026-11-01, suffix _cdir): W = %s (P1 = %d); X = %s (P = %d, mu = mu0 + %sa_i%s); Z = %s (Pz = %d); distance = capital and major = joint are part of the spec (not of the switches)",
        paste(W_cols, collapse = ","), dat$P1, if (dat$P > 0L) paste(X_cols, collapse = ",") else "none", dat$P, if (dat$P > 0L) "X beta + " else "", if (CONTEXT_MODEL) " + delta[ev_grp]" else "", paste(Z_cols, collapse = ","), dat$Pz)
   if (MU_SHIFT == "traits") logf("mu_shift = traits (2026-11-02, suffix _mst): X = %s (P = %d; the W columns, centred as in W); x_ref (mean X over the initiating state-years) = %s",
@@ -207,7 +232,7 @@ if (PRIOR_PROGRAM) {
 }
 logf("reduce_sum grainsize = %d (N1 = %d)", dat$grainsize, dat$N1)
 logf("D_mode = %d (%s)", D_MODE, c("material only", "relational only", "both dimensions")[D_MODE])
-if (family == "m2_ame") logf("AME anchors (most initiations first): ccodes %s", paste(state_codes[dat$anchor], collapse = ", "))
+if (AME_FAMILY) logf("AME anchors (most initiations first): ccodes %s", paste(state_codes[dat$anchor], collapse = ", "))
 logf("Stan data: S=%d N1=%d N2=%d E=%d P1=%d P=%d Pz=%d joint=%d sampled=%d D_mode=%d; sum(y1)=%d; rows in the IV set %d, in the stage-2 set %d; event weights sum %.1f (min %.4f, %d events with weight 1); W = %s; X = %s; Z = %s",
      dat$S, dat$N1, dat$N2, dat$E, dat$P1, dat$P, dat$Pz, dat$joint, dat$sampled, dat$D_mode, sum(dat$y1), sum(dat$in_iv), sum(dat$in_s2),
      sum(dat$ev_w), min(dat$ev_w), sum(dat$ev_w == 1), paste(W_cols, collapse = ","), paste(X_cols, collapse = ","), paste(Z_cols, collapse = ","))
@@ -235,7 +260,7 @@ if (DRY_RUN) {
                manifest = manifest_cell, git_commit = git_commit_at_load, spec = spec, winsor = A$winsor, model = MODEL,
                full_controls = spec$controls == "full", event_weights = spec$weights, direction = spec$direction, group_table = A$group_table,
                stan_program = family, prior = c(spec[PRIOR_SWITCHES], prior), tag = spec_tag(spec), conventional = CONVENTIONAL, directed = DIRECTED,
-               mu_shift = MU_SHIFT, Zr_cols = if (RHOREG) X_MU_TRAITS else NULL),
+               mu_shift = MU_SHIFT, Zr_cols = if (RHOREG) X_MU_TRAITS else NULL, joiner_set = JOINER_SET, jset_stats = A$jset_stats),
           file.path(out_dir, paste0("standata_", cell, ".rds")))
   logf("DRY RUN: Stan data assembled and saved; no sampling"); quit(save = "no", status = 0)
 }
@@ -294,8 +319,41 @@ if (family == "m2_ame") {
          CHAINS, basename(m1_path), init_info$reason, init_info$n_copied, INIT_JITTER_SD, INIT_UV_RANGE[1], INIT_UV_RANGE[2])
   }
 }
-stopifnot(identical(init_info$source, if (family == "m2_ame" && !is.na(init_info$m1_fit)) "m1_posterior_means" else "stan_random"))
-if (nzchar(INIT_FROM) && family != "m2_ame") stop("--init_from applies to the M2 family only")
+## ---- M2c (PI-approved 2026-11-04): every chain starts from the matching M1c fit (same sample, lag, comparison, roles, joiner_set, tag; K dropped:
+## m1_cell_for_m2() maps M2c -> M1c). Unlike M2b there is NO random-init fallback: a missing M1c fit stops the run (PI spec). The M1c fit must be a
+## production fit of the current data scoring exactly this cell (events, weights, W / X / Z, groups, allowed sets).
+if (family == "m2_context") {
+  explicit <- nzchar(INIT_FROM)
+  want <- m1_cell_for_m2(SAMPLE, LAG, MODEL, spec)
+  m1_path <- if (explicit) INIT_FROM else locate_m1_fit(SAMPLE, LAG, MODEL, spec, out_dir)
+  if (is.na(m1_path) || !file.exists(m1_path))
+    stop(sprintf("M2c needs the matching M1c fit fit_%s.rds in %s (or --init_from=); it is missing, so the run stops (no random-init fallback for M2c)", want, out_dir))
+  o1 <- tryCatch(readRDS(m1_path), error = function(e) NULL)
+  if (is.null(o1) || is.null(o1$fit) || is.null(o1$dat)) stop("the M1c fit ", m1_path, " exists but is unreadable or not a fit object")
+  if (!PILOT) assert_production_fit(o1, allow_stale = FALSE, what = "init_from M1c fit")
+  assert_fit_current(o1, manifest_path)
+  assert_fit_matches_cell(o1, dat, W_cols, X_cols, Z_cols, what = "init_from M1c fit")
+  o1_js <- if (is.null(o1$spec$joiner_set)) "all" else o1$spec$joiner_set
+  if (!identical(o1$args$model, "M1c") || !identical(o1$cell, want) || !spec_is_directed(o1$spec) || !identical(o1$spec$roles, "aprime") || !identical(o1_js, JOINER_SET) ||
+      !identical(spec_tag(o1$spec), spec_tag(spec)) || o1$dat$D_mode != 3L || o1$dat$joint != 1L || !identical(as.integer(o1$dat$G), as.integer(dat$G)) ||
+      !identical(as.integer(o1$dat$ev_grp), as.integer(dat$ev_grp)) || !identical(o1$group_labels, A$group_table$group))
+    stop(sprintf("the init fit %s (cell %s, model %s, roles %s, joiner_set %s) is not the M1c fit of this M2c cell (%s)", basename(m1_path), o1$cell, o1$args$model,
+                 if (is.null(o1$spec$roles)) "stageb" else o1$spec$roles, o1_js, want))
+  ## the allowed sets: identical when the M1c fit carries them (fits saved before 2026-11-04 have none and are joiner_set = all, i.e. the full sets)
+  if (!is.null(o1$dat$ev_alt_n)) {
+    if (!identical(as.integer(o1$dat$ev_alt_n), as.integer(dat$ev_alt_n)) || !identical(as.integer(o1$dat$ev_alt_loc), as.integer(dat$ev_alt_loc)))
+      stop(sprintf("the init fit %s scores other event-level choice sets than this M2c cell", basename(m1_path)))
+  } else if (JOINER_SET != "all") stop(sprintf("the init fit %s carries no event-level choice sets but this cell has --joiner_set=%s", basename(m1_path), JOINER_SET))
+  res <- m1c_inits_for_m2c(o1, dat, CHAINS, seed = V2_SEED, jitter_sd = INIT_JITTER_SD, uv_range = INIT_UV_RANGE)
+  stopifnot(is.list(res), length(res) == CHAINS, !is.null(attr(res, "n_copied")))
+  init_arg <- res
+  init_info <- list(source = "m1_posterior_means", m1_fit = basename(m1_path), m1_cell = o1$cell, reason = if (explicit) "--init_from" else "auto-located in output/",
+                    jitter_sd = INIT_JITTER_SD, uv_range = INIT_UV_RANGE, n_copied = attr(res, "n_copied"), m1_git_commit = o1$args$git_commit, m1_saved = o1$args$saved)
+  logf("inits (M2c): %d chains start at the posterior means of the M1c fit %s (%s; %d parameter blocks copied, jitter sd %.3f, AME factors uniform on [%.2f, %.2f])",
+       CHAINS, basename(m1_path), init_info$reason, init_info$n_copied, INIT_JITTER_SD, INIT_UV_RANGE[1], INIT_UV_RANGE[2])
+}
+stopifnot(identical(init_info$source, if (AME_FAMILY && !is.na(init_info$m1_fit)) "m1_posterior_means" else "stan_random"))
+if (nzchar(INIT_FROM) && !AME_FAMILY) stop("--init_from applies to the M2 family only")
 ## test hook (tests/testthat/test_fit_smoke.R; review 2026-10-26, P1): V2_TEST_REJECT_CHAIN=<k> gives chain k an init Stan must reject
 ## (sigma_x < 0) so the test can check that a run with ONE failed parallel chain saves no production fit and exits non-zero. Never set it
 ## outside the tests; the log says loudly when it is.
@@ -320,7 +378,7 @@ sp <- get_sampler_params(fit, inc_warmup = FALSE)
 logf("divergences: %d; max-treedepth hits: %d", sum(sapply(sp, function(m) sum(m[, "divergent__"]))),
      sum(sapply(sp, function(m) sum(m[, "treedepth__"] >= MAX_TD))))
 pars_struct <- c("alpha0", "alpha", "tau", "mu0", if (dat$P > 0L) "beta", if (RHOREG) c("g0", "g"), if (CONTEXT_MODEL) c("delta", "sigma_g", if (family == "m1_context_rho") "rho_g" else "rho_x", "mu0_g") else "sigma_x",
-                 "sd_re", "sigma_b", "gamma", "Sigma", "Omega", "R_Om", if (family == "m2_ame") "u_diag")
+                 "sd_re", "sigma_b", "gamma", "Sigma", "Omega", "R_Om", if (AME_FAMILY) "u_diag")
 sm_tab <- summary(fit, pars = pars_struct)$summary
 logf("worst Rhat among structural parameters: %.3f; min n_eff: %.0f",
      max(sm_tab[, "Rhat"], na.rm = TRUE), min(sm_tab[, "n_eff"], na.rm = TRUE))
@@ -347,6 +405,7 @@ obj <- list(fit = fit, dat = dat, cell = cell, state_codes = state_codes, W_cols
             prior = c(spec[PRIOR_SWITCHES], prior, list(stan_program = family)),   # the prior switches and the hyperparameters the program saw (2026-10-30)
             param_labels = label_parameters(rownames(sm_tab), W_cols, X_cols, Z_cols, D_MODE, groups = A$group_table$group, Zr_cols = if (RHOREG) X_MU_TRAITS else NULL),
             Zr_cols = if (RHOREG) X_MU_TRAITS else NULL,                     # M1bz (2026-11-02): the traits of rho_n, dat$Zr
+            jset_stats = A$jset_stats,                                        # joiner_set = opposing (2026-11-04): joiner events, set sizes, singletons, removed rows
             group_labels = if (CONTEXT_MODEL) A$group_table$group else NULL,   # M1c / M1cr: the label of ev_grp g is group_labels[g + 1] (2026-10-31)
             args = list(sample = SAMPLE, lag = LAG, variant = VARIANT, model = MODEL, centrality = CENTRALITY, K = K, chains = CHAINS,
                         iter = ITER, warmup = WARMUP, pilot = PILOT, sampled_m = SAMPLED_M, conflict_history = CONFLICT_HISTORY,
@@ -356,6 +415,7 @@ obj <- list(fit = fit, dat = dat, cell = cell, state_codes = state_codes, W_cols
                         context_top3 = A$context_top3, major = A$major, major_stats = A$major_stats, interact = spec$interact,
                         comparison = spec$comparison, conventional = CONVENTIONAL, directed = DIRECTED, directed_stats = A$directed_stats,
                         mu_shift = MU_SHIFT, rhoreg = RHOREG,                  # 2026-11-02
+                        joiner_set = JOINER_SET,                               # 2026-11-04
                         D_mode = D_MODE, threads_per_chain = THREADS, context_model = CONTEXT_MODEL, stan_program = family,
                         rho_prior = spec$rho_prior, sigma_prior = spec$sigma_prior, prior_rho_shape = prior$prior_rho_shape, prior_sigma_x_sd = prior$prior_sigma_x_sd, tag = spec_tag(spec),
                         init_source = init_info$source, init_from = init_info$m1_fit,
