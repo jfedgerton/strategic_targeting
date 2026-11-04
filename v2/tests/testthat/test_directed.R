@@ -49,7 +49,7 @@ test_that("spec: comparison = directed adds _cdir in the _conv position; the fix
     expect_error(parse_spec(c("--comparison=directed", bad)), "conflicts with --comparison=directed", fixed = TRUE, info = bad)
   ## the other models, the role coding with a non-context model, the prior switches with M2b, a bad value
   for (m in c("M1m", "M1r", "M2a", "M2m", "M2r")) expect_error(cell_name("fmid", 3L, m, d), "the directed comparison is specified for M1a, M1b, M1c, M1cr, M2b only", fixed = TRUE, info = m)
-  expect_error(cell_name("fmid", 3L, "M2b", d_ap), "the role coding applies to M1c, M1cr only", fixed = TRUE); expect_error(cell_name("fmid", 3L, "M1b", d_ap), "the role coding applies")
+  expect_error(cell_name("fmid", 3L, "M2b", d_ap), "the role coding applies to M1c, M1cr, M2c only", fixed = TRUE); expect_error(cell_name("fmid", 3L, "M1b", d_ap), "the role coding applies")
   expect_error(cell_name("fmid", 3L, "M2b", parse_spec(c("--comparison=directed", "--rho_prior=flat"))), "the prior switches apply to the M1 m / r / a / b programs only")
   expect_error(parse_spec("--comparison=cdir"), "--comparison must be one of none | conventional | directed", fixed = TRUE)
   ## the M1-family K rule still holds
@@ -133,7 +133,8 @@ test_that("existing cells are unchanged: default, M1c, _dist_major, conventional
     for (cs in cases) {
       sn <- parse_spec(cs[[1]]); so <- old$parse_spec(cs[[1]])
       An <- quiet(assemble_cell_spec("mid", 3L, sn, data_dir = td, model = cs[[2]])); Ao <- quiet(old$assemble_cell_spec("mid", 3L, so, data_dir = td, model = cs[[2]]))
-      expect_identical(setdiff(names(An), names(Ao)), c("directed", "directed_stats"))
+      expect_identical(setdiff(names(An), names(Ao)), c("directed", "directed_stats", "joiner_set", "ev_sets", "jset_stats", "ev_joiner"))   # joiner sets 2026-11-04
+      expect_equal(An$joiner_set, "all"); expect_null(An$ev_sets); expect_null(An$jset_stats)
       for (nm in names(Ao)) expect_identical(An[[nm]], Ao[[nm]], info = paste(nm, cs[[2]], paste(cs[[1]], collapse = " ")))
       expect_false(An$directed); expect_null(An$directed_stats)
     }

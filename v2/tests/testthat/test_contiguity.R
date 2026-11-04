@@ -29,11 +29,11 @@ test_that("spec: contiguity defaults to land, none needs distance = capital, _no
   all_on <- parse_spec(c("--pairs=originators", "--context=coalition", "--coal_ties=strict", "--coal_drop=top3", "--ww2=drop", "--controls=full",
                          "--distance=capital", "--contiguity=none", "--major=joint", "--interact=prefixed", "--weights=none", "--changes=winsor", "--direction=sideA"))
   expect_equal(spec_suffix(all_on), "_orig_co_strict_drop3_noww2_fullctrl_dist_nocontig_major_ix_w1_winsor_sideA")
-  expect_equal(names(SPEC_SUFFIX), c("pairs", "context", "coal_ties", "coal_drop", "ww2", "controls", "distance", "contiguity", "major", "interact", "comparison", "mu_shift", "roles", "weights", "changes", "direction", "rho_prior", "sigma_prior"))   # rho_prior, sigma_prior appended 2026-10-30 (after every data switch); mu_shift 2026-11-02 after comparison
+  expect_equal(names(SPEC_SUFFIX), c("pairs", "context", "coal_ties", "coal_drop", "ww2", "controls", "distance", "contiguity", "major", "interact", "comparison", "mu_shift", "roles", "joiner_set", "weights", "changes", "direction", "entry", "rho_prior", "sigma_prior"))   # rho_prior, sigma_prior appended 2026-10-30 (after every data switch); mu_shift 2026-11-02 after comparison
   expect_equal(which(names(SPEC_SUFFIX) == "contiguity"), which(names(SPEC_SUFFIX) == "distance") + 1L)      # adjacent to _dist
   expect_false(any(duplicated(c(unlist(SPEC_SUFFIX), "_K2", "_pilot", "_STALE", "_samp10", "_noCH", "_polrel"))))
   ## every existing cell name is unchanged: the switch adds nothing at its default
-  for (nm in setdiff(names(SPEC_CHOICES), c("contiguity", "comparison", "roles", "mu_shift"))) for (v in SPEC_CHOICES[[nm]][-1]) {   # comparison = conventional refuses --contiguity in any value (test_conventional.R); roles = aprime is refused with M1b (test_roles_aprime.R); mu_shift = traits needs --comparison=directed (test_mu_shift_rhoreg.R)
+  for (nm in setdiff(names(SPEC_CHOICES), c("contiguity", "comparison", "roles", "mu_shift", "joiner_set"))) for (v in SPEC_CHOICES[[nm]][-1]) {   # comparison = conventional refuses --contiguity in any value (test_conventional.R); roles = aprime is refused with M1b (test_roles_aprime.R); mu_shift = traits needs --comparison=directed (test_mu_shift_rhoreg.R)
     a <- c(sprintf("--%s=%s", nm, v), if (nm %in% c("coal_drop", "coal_ties")) "--context=coalition")     # coal_drop needs the coalition context; coal_ties is inert without one
     sp <- parse_spec(a); sp2 <- parse_spec(c(a, "--contiguity=land"))
     expect_equal(cell_name("mid", 3L, "M1b", sp), cell_name("mid", 3L, "M1b", sp2)); expect_false(grepl("nocontig", cell_name("mid", 3L, "M1b", sp)))

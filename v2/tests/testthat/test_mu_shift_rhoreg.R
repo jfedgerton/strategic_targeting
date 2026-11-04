@@ -59,7 +59,7 @@ test_that("spec: mu_shift = traits adds _mst right after _cdir, directed only; M
   for (sp in list(parse_spec(character(0)), parse_spec("--distance=capital")))
     expect_error(cell_name("fmid", 3L, "M1bz", sp), "the model M1bz needs --comparison=directed", fixed = TRUE)
   expect_error(cell_name("fmid", 3L, "M1bz", parse_spec("--comparison=conventional")), "the conventional comparison is specified for M1a, M1b, M1c, M1cr only", fixed = TRUE)
-  expect_error(cell_name("fmid", 3L, "M1bz", parse_spec(c("--comparison=directed", "--roles=aprime"))), "the role coding applies to M1c, M1cr only", fixed = TRUE)
+  expect_error(cell_name("fmid", 3L, "M1bz", parse_spec(c("--comparison=directed", "--roles=aprime"))), "the role coding applies to M1c, M1cr, M2c only", fixed = TRUE)
   expect_error(cell_name("fmid", 3L, "M1bz", parse_spec(c("--comparison=directed", "--rho_prior=flat"))), "the prior switches apply to the M1 m / r / a / b programs only")
   expect_error(cell_name("fmid", 3L, "M1bz", parse_spec(c("--comparison=directed", "--sigma_prior=ln05"))), "the prior switches apply to the M1 m / r / a / b programs only")
   expect_error(cell_name("fmid", 3L, "M1bz", parse_spec(c("--comparison=directed", "--ame_K=1"))), "K applies to the M2 family only")
@@ -135,7 +135,8 @@ test_that("existing cells are unchanged: default, M1c, M2b, _dist_major, convent
   for (cs in cases) {
     sn <- parse_spec(cs[[1]]); so <- old$parse_spec(cs[[1]])
     An <- quiet(assemble_cell_spec("mid", 3L, cell_spec(cs[[2]], sn), data_dir = td, model = cs[[2]])); Ao <- quiet(old$assemble_cell_spec("mid", 3L, old$cell_spec(cs[[2]], so), data_dir = td, model = cs[[2]]))
-    expect_identical(names(An), names(Ao), info = paste(cs[[2]], paste(cs[[1]], collapse = " ")))
+    expect_identical(names(An), c(names(Ao), "joiner_set", "ev_sets", "jset_stats", "ev_joiner"), info = paste(cs[[2]], paste(cs[[1]], collapse = " ")))   # joiner sets 2026-11-04
+    expect_equal(An$joiner_set, "all"); expect_null(An$ev_sets)
     for (nm in names(Ao)) expect_identical(An[[nm]], Ao[[nm]], info = paste(nm, cs[[2]], paste(cs[[1]], collapse = " ")))
     K <- if (cs[[2]] == "M2b") sn$ame_K else NULL
     expect_identical(build_stan_data(An$sy, An$alts, An$ev, An$W_cols, An$X_cols, An$Z_cols, joint = model_joint(cs[[2]]), x_ref = An$x_ref, K = K, allow_orphan_initiations = TRUE),

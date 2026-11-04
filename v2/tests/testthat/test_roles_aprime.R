@@ -65,17 +65,17 @@ test_that("aprime_roles(): side switchers are counted, inconsistent sides and no
 })
 
 test_that("spec: roles = stageb | aprime, suffix _aprime after _conv, context models only, refused by every preset path, dropped from the perm string at its default", {
-  expect_equal(SPEC_CHOICES$roles, c("stageb", "aprime")); expect_equal(SPEC_SUFFIX$roles, c(aprime = "_aprime"))
+  expect_equal(SPEC_CHOICES$roles, c("stageb", "aprime", "bc", "bcj")); expect_equal(SPEC_SUFFIX$roles, c(aprime = "_aprime", bc = "_bc", bcj = "_bcj"))   # bc / bcj 2026-11-04
   expect_equal(which(names(SPEC_SUFFIX) == "roles"), which(names(SPEC_SUFFIX) == "comparison") + 2L)   # mu_shift (2026-11-02, directed only) sits between
   ap <- parse_spec(c("--comparison=conventional", "--roles=aprime"))
   expect_equal(cell_name("fmid", 3L, "M1c", ap), "fmid_lag3_all_pr_M1c_conv_aprime"); expect_equal(cell_name("mid", 3L, "M1cr", ap), "mid_lag3_all_pr_M1cr_conv_aprime")
   expect_equal(cell_name("mid", 3L, "M1c", parse_spec("--roles=aprime")), "mid_lag3_all_pr_M1c_aprime")
-  for (m in c("M1a", "M1b", "M2b")) expect_error(cell_name("fmid", 3L, m, parse_spec("--roles=aprime")), "the role coding applies to M1c, M1cr only", info = m)
+  for (m in c("M1a", "M1b", "M2b")) expect_error(cell_name("fmid", 3L, m, parse_spec("--roles=aprime")), "the role coding applies to M1c, M1cr, M2c only", info = m)
   expect_equal(cell_name("fmid", 3L, "M1c", parse_spec(character(0))), "fmid_lag3_all_pr_M1c")       # default names unchanged
   expect_equal(stage2_group_labels("stageb"), STAGE2_GROUPS); expect_equal(stage2_group_labels("aprime"), c("alone", "co_originator", "joiner", "target_late"))
   expect_false(grepl("roles", perm_part_spec_string(parse_spec("--distance=capital")), fixed = TRUE))
   expect_true(grepl("roles=aprime", perm_part_spec_string(parse_spec("--roles=aprime")), fixed = TRUE))
-  expect_error(parse_spec("--roles=4"), "--roles must be one of stageb | aprime", fixed = TRUE)
+  expect_error(parse_spec("--roles=4"), "--roles must be one of stageb | aprime | bc | bcj", fixed = TRUE)
 })
 
 ## toy roles: the six toy events (helper-toy-cell.R) with groups 0 / 1 / 2 / 3 / 3 / 0
