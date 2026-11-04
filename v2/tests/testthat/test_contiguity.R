@@ -33,7 +33,7 @@ test_that("spec: contiguity defaults to land, none needs distance = capital, _no
   expect_equal(which(names(SPEC_SUFFIX) == "contiguity"), which(names(SPEC_SUFFIX) == "distance") + 1L)      # adjacent to _dist
   expect_false(any(duplicated(c(unlist(SPEC_SUFFIX), "_K2", "_pilot", "_STALE", "_samp10", "_noCH", "_polrel"))))
   ## every existing cell name is unchanged: the switch adds nothing at its default
-  for (nm in setdiff(names(SPEC_CHOICES), c("contiguity", "comparison", "roles", "mu_shift", "joiner_set"))) for (v in SPEC_CHOICES[[nm]][-1]) {   # comparison = conventional refuses --contiguity in any value (test_conventional.R); roles = aprime is refused with M1b (test_roles_aprime.R); mu_shift = traits needs --comparison=directed (test_mu_shift_rhoreg.R)
+  for (nm in setdiff(names(SPEC_CHOICES), c("contiguity", "comparison", "roles", "mu_shift", "joiner_set", "variant"))) for (v in SPEC_CHOICES[[nm]][-1]) {   # comparison = conventional refuses --contiguity in any value (test_conventional.R); roles = aprime is refused with M1b (test_roles_aprime.R); mu_shift = traits needs --comparison=directed (test_mu_shift_rhoreg.R)
     a <- c(sprintf("--%s=%s", nm, v), if (nm %in% c("coal_drop", "coal_ties")) "--context=coalition")     # coal_drop needs the coalition context; coal_ties is inert without one
     sp <- parse_spec(a); sp2 <- parse_spec(c(a, "--contiguity=land"))
     expect_equal(cell_name("mid", 3L, "M1b", sp), cell_name("mid", 3L, "M1b", sp2)); expect_false(grepl("nocontig", cell_name("mid", 3L, "M1b", sp)))
