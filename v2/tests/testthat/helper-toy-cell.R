@@ -16,7 +16,7 @@ source(file.path(root, "R", "spec.R")); source(file.path(root, "R", "helpers_dat
 ## Stage-b (2026-10-27): the panel carries multi_mid_jan / n_multi_jan (the M1c stage-1 control); with the default flags (every initiator an
 ##   originator, orig1 = 1) the stage-2 groups are 10 -> 20 and 30 -> 40 bilateral, the four coalition events leaders; test_context_model.R
 ##   makes 30 a joiner (orig1 = 0 on its events) via events_edit
-write_toy_cell <- function(dir, alts_edit = identity, events_edit = identity, roles = NULL, jsets = NULL) {
+write_toy_cell <- function(dir, alts_edit = identity, events_edit = identity, roles = NULL, jsets = NULL, polrel = NULL) {
   dir.create(dir, showWarnings = FALSE, recursive = TRUE)
   panel <- tibble(ccode = c(10L, 20L, 30L, 40L), year = 1990L, h = 3L, y1_mid = c(1L, 0L, 1L, 1L), y1_fmid = c(1L, 0L, 1L, 1L),
                   mon_prior_mids_h = c(2L, 0L, 1L, 3L), mon_peace_years_h = c(3L, 10L, 1L, 2L),
@@ -54,7 +54,9 @@ write_toy_cell <- function(dir, alts_edit = identity, events_edit = identity, ro
   if (!is.null(roles)) saveRDS(roles, file.path(dir, "roles_aprime.rds"))
   ## joiner sets (2026-11-04): optional data.frame (initiator, target, year, dispnum, opp_ccode) written as joiner_sets_aprime.rds and added to the manifest
   if (!is.null(jsets)) saveRDS(jsets, file.path(dir, "joiner_sets_aprime.rds"))
-  man <- lapply(c("stage1_panel_lag3.rds", "alts_lag3_all.rds", "events.rds", if (!is.null(roles)) "roles_aprime.rds", if (!is.null(jsets)) "joiner_sets_aprime.rds"), function(f) { o <- readRDS(file.path(dir, f))
+  ## politically relevant alternatives (2026-11-04): optional function of the alternatives frame (e.g. a filter on polrel) written as alts_lag3_polrel.rds
+  if (!is.null(polrel)) saveRDS(polrel(alts), file.path(dir, "alts_lag3_polrel.rds"))
+  man <- lapply(c("stage1_panel_lag3.rds", "alts_lag3_all.rds", "events.rds", if (!is.null(roles)) "roles_aprime.rds", if (!is.null(jsets)) "joiner_sets_aprime.rds", if (!is.null(polrel)) "alts_lag3_polrel.rds"), function(f) { o <- readRDS(file.path(dir, f))
     data.frame(file = f, nrow = nrow(o), ncol = ncol(o), sha256 = file_digest(file.path(dir, f)), note = "toy") })
   write_manifest(man, file.path(dir, "manifest.csv"))
   invisible(dir)

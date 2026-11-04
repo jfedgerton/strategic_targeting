@@ -6,7 +6,7 @@
 #SBATCH --time=7-00:00:00
 #SBATCH --nodes=1 --ntasks=1 --cpus-per-task=32   # = chains (4) x threads_per_chain (8)
 #SBATCH --mem=128G                                 # basic bills 4 GB per core: 32 cores x 4 GB
-#SBATCH --array=0-15
+#SBATCH --array=0-21
 #SBATCH --output=%x_%A_%a.out
 #SBATCH --open-mode=append
 # ENTRY DIRECTION, ROLE CODINGS bc / bcj, JOINER CHOICE SETS AND THE AME ROLE MODEL M2c (PI decisions 2026-11-04). Every cell: --entry=later
@@ -28,8 +28,15 @@
 #   13   mid     M2c    1  opposing    fit_mid_lag3_all_pr_M1c_cdir_<ROLES>_jset_ent_t<TAG>.rds    (task 5)
 #   14   fmid    M2c    2  opposing    fit_fmid_lag3_all_pr_M1c_cdir_<ROLES>_jset_ent_t<TAG>.rds   (task 4)
 #   15   mid     M2c    2  opposing    fit_mid_lag3_all_pr_M1c_cdir_<ROLES>_jset_ent_t<TAG>.rds    (task 5)
-# Dependencies: tasks 8-15 need the M1c fits of tasks 0, 1, 4, 5 of the SAME ROLES -> submit_joiner_m2c.sh submits the M1 tasks (0-7, or 0-5 with
-# SKIP_M1B=TRUE for the second coding) as one array and the M2c tasks 8-15 with --dependency=afterok:<that array> --kill-on-invalid-dep=yes (one
+#  politically relevant choice set (--variant=polrel; cell names <sample>_lag3_polrel_pr_...; joiner_set all):
+#   16   fmid    M1c    -  all         -   (polrel baseline and M2c init)
+#   17   mid     M1c    -  all         -
+#   18   fmid    M2c    1  all         fit_fmid_lag3_polrel_pr_M1c_cdir_<ROLES>_ent_t<TAG>.rds     (task 16)
+#   19   mid     M2c    1  all         fit_mid_lag3_polrel_pr_M1c_cdir_<ROLES>_ent_t<TAG>.rds      (task 17)
+#   20   fmid    M2c    2  all         fit_fmid_lag3_polrel_pr_M1c_cdir_<ROLES>_ent_t<TAG>.rds     (task 16)
+#   21   mid     M2c    2  all         fit_mid_lag3_polrel_pr_M1c_cdir_<ROLES>_ent_t<TAG>.rds      (task 17)
+# Dependencies: tasks 8-15 need the M1c fits of tasks 0, 1, 4, 5 and tasks 18-21 those of tasks 16-17, of the SAME ROLES -> submit_joiner_m2c.sh
+# submits the M1 tasks (0-7,16-17, or 0-5,16-17 with SKIP_M1B=TRUE for the second coding) as one array and the M2c tasks 8-15,18-21 with --dependency=afterok:<that array> --kill-on-invalid-dep=yes (one
 # dependency on the whole M1 array, as in submit_main_grid.sh: a failed M1cr / M1b task also cancels the M2c array; resubmit with A_JOB=<id>).
 # 02_fit_model.R REFUSES to sample an M2c cell whose M1c fit is missing (no random-init fallback) and refuses an M1c fit of another roles /
 # joiner_set / entry / tag / cell.
@@ -50,6 +57,7 @@
 source "${SLURM_SUBMIT_DIR:?submit from the repo root}/v2/slurm/00_env.sh" || exit 1
 cd "$V2_ROOT/.." || exit 1
 i=${SLURM_ARRAY_TASK_ID:?run as an array}
+vr=all
 case $i in
    0) s=fmid; m=M1c;  K=;  js=all ;;
    1) s=mid;  m=M1c;  K=;  js=all ;;
@@ -67,7 +75,13 @@ case $i in
   13) s=mid;  m=M2c;  K=1; js=opposing ;;
   14) s=fmid; m=M2c;  K=2; js=opposing ;;
   15) s=mid;  m=M2c;  K=2; js=opposing ;;
-  *) echo "array index $i out of range 0-15" >&2; exit 1 ;;
+  16) s=fmid; m=M1c;  K=;  js=all; vr=polrel ;;
+  17) s=mid;  m=M1c;  K=;  js=all; vr=polrel ;;
+  18) s=fmid; m=M2c;  K=1; js=all; vr=polrel ;;
+  19) s=mid;  m=M2c;  K=1; js=all; vr=polrel ;;
+  20) s=fmid; m=M2c;  K=2; js=all; vr=polrel ;;
+  21) s=mid;  m=M2c;  K=2; js=all; vr=polrel ;;
+  *) echo "array index $i out of range 0-21" >&2; exit 1 ;;
 esac
 ROLES=${ROLES:?set ROLES=bc or ROLES=bcj}
 case $ROLES in bc|bcj) ;; *) echo "ROLES must be bc or bcj (got '$ROLES')" >&2; exit 1 ;; esac
@@ -76,7 +90,7 @@ THR=${THREADS_PER_CHAIN:-8}
 TAG=${TAG:-long}
 [[ "$TAG" =~ ^[A-Za-z0-9]+$ ]] || { echo "TAG must be letters and digits (got '$TAG')" >&2; exit 1; }
 if [ "$m" = "M1b" ]; then ROLE_ARGS=""; else ROLE_ARGS="--roles=$ROLES --joiner_set=$js"; fi
-BASE="--sample=$s --lag=3 --model=$m --comparison=directed --entry=later $ROLE_ARGS --tag=$TAG --dry_run=$DRY --threads_per_chain=$THR"
+BASE="--sample=$s --lag=3 --model=$m --comparison=directed --entry=later --variant=$vr $ROLE_ARGS --tag=$TAG --dry_run=$DRY --threads_per_chain=$THR"
 if [ "$m" != "M2c" ]; then
   IT=${LONG_ITER:-6000}; WU=${LONG_WARMUP:-3000}; AD=${LONG_ADAPT_DELTA:-0.9}
   SAMP="--iter=$IT --warmup=$WU --adapt_delta=$AD"
@@ -89,9 +103,9 @@ if [ "$m" != "M2c" ]; then
 else
   SAMP="--ame_K=$K${M2_ITER:+ --iter=$M2_ITER}${M2_WARMUP:+ --warmup=$M2_WARMUP}${M2_ADAPT_DELTA:+ --adapt_delta=$M2_ADAPT_DELTA}"
   if [ "$DRY" != "TRUE" ]; then
-    want="v2/output/fit_${s}_lag3_all_pr_M1c_cdir_${ROLES}$([ "$js" = opposing ] && echo _jset)_ent_t${TAG}.rds"
+    want="v2/output/fit_${s}_lag3_${vr}_pr_M1c_cdir_${ROLES}$([ "$js" = opposing ] && echo _jset)_ent_t${TAG}.rds"
     [ -f "$want" ] || { echo "ERROR: task $i ($s M2c K$K joiner_set=$js) needs $want (see the table above)" >&2; exit 1; }
   fi
 fi
-echo "task $i -> sample=$s model=$m roles=$ROLES (M1b: none) entry=later K=${K:--} joiner_set=$js tag=$TAG; $SAMP; threads_per_chain=$THR cpus=${SLURM_CPUS_PER_TASK:-?} dry_run=$DRY"
+echo "task $i -> sample=$s model=$m roles=$ROLES (M1b: none) entry=later variant=$vr K=${K:--} joiner_set=$js tag=$TAG; $SAMP; threads_per_chain=$THR cpus=${SLURM_CPUS_PER_TASK:-?} dry_run=$DRY"
 Rscript v2/R/02_fit_model.R $BASE $SAMP

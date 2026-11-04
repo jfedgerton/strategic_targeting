@@ -49,7 +49,7 @@ test_that("spec: contiguity defaults to land, none needs distance = capital, _no
   expect_error(parse_spec(c("--distance=capital", "--contiguity")), "--contiguity needs a value", fixed = TRUE)
   for (nm in names(SPEC_CHOICES)) expect_error(parse_spec(paste0("--", nm)), sprintf("--%s needs a value", nm), fixed = TRUE)   # the f4a8a98 refusal holds for every switch
   expect_false("contiguity" %in% ARCHIVED_OPTIONS); expect_false("distance" %in% ARCHIVED_OPTIONS)
-  expect_equal(ARCHIVED_OPTIONS, c("variant", "sampled_m", "centrality", "conflict_history", "dy_peace_years", "drop_ww2", "full_controls", "event_weights", "K"))
+  expect_equal(ARCHIVED_OPTIONS, c("sampled_m", "centrality", "conflict_history", "dy_peace_years", "drop_ww2", "full_controls", "event_weights", "K"))
   expect_true(refuse_archived_options(c("--contiguity=none", "--distance=capital"), "02_fit_model.R")); expect_true(refuse_archived_options("--contiguity=land", "02_fit_model.R"))
   for (old in ARCHIVED_OPTIONS) expect_error(refuse_archived_options(paste0("--", old, "=1"), "02_fit_model.R"), "is not an option")
   ## the build still takes --direction only, so --contiguity is refused there through the switch list

@@ -31,7 +31,7 @@ test_that("spec: distance defaults to none, adds _dist after _fullctrl and befor
   expect_equal(parse_spec("--distance=capital")$distance, "capital")                                   # the valued form is unaffected
   expect_false("distance" %in% ARCHIVED_OPTIONS)
   expect_true(refuse_archived_options("--distance=capital", "02_fit_model.R"))
-  for (old in c("variant", "sampled_m", "centrality", "conflict_history", "dy_peace_years", "drop_ww2", "full_controls", "event_weights", "K")) {   # contiguity left the list the same day
+  for (old in c("sampled_m", "centrality", "conflict_history", "dy_peace_years", "drop_ww2", "full_controls", "event_weights", "K")) {   # contiguity left the list the same day
     expect_true(old %in% ARCHIVED_OPTIONS); expect_error(refuse_archived_options(paste0("--", old, "=1"), "02_fit_model.R"), "is not an option")
   }
   ## the build still takes --direction only, so --distance is refused there through the switch list

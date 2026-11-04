@@ -135,3 +135,27 @@ test_that("real entry build (when built): UK -> Germany 1939 and not the reverse
     }
   }
 })
+
+test_that("polrel (variant switch, 2026-11-04): names, refusals; with bc / bcj and M2c on a toy entry cell the choice sets are the polrel subset, dropped events logged per group, joiner sets intersected", {
+  pr <- parse_spec(c("--comparison=directed", "--entry=later", "--roles=bcj", "--variant=polrel"))
+  expect_equal(cell_name("fmid", 3L, "M1c", pr), "fmid_lag3_polrel_pr_M1c_cdir_bcj_ent"); expect_equal(cell_name("mid", 3L, "M2c", pr), "mid_lag3_polrel_pr_M2c_K2_cdir_bcj_ent")
+  expect_equal(m1_cell_for_m2("mid", 3L, "M2c", pr), "mid_lag3_polrel_pr_M1c_cdir_bcj_ent")
+  for (m in c("M1b", "M2b", "M1a")) expect_error(cell_name("fmid", 3L, m, parse_spec("--variant=polrel")), "the politically relevant choice set is specified for", info = m)
+  expect_equal(cell_name("fmid", 3L, "M1b", parse_spec(character(0))), "fmid_lag3_all_pr_M1b"); expect_false(grepl("variant", spec_string(parse_spec(character(0))), fixed = TRUE))
+  expect_false("variant" %in% ARCHIVED_OPTIONS)
+  drop_pr <- function(a) a |> filter(!(ccode1 == 10L & ccode2 == 30L), !(ccode1 == 40L & ccode2 == 30L))
+  base <- tempfile("entrypr"); td <- file.path(base, "data_entry")
+  write_toy_cell(td, alts_edit = toy_dirstat, roles = toy_roles_e, jsets = toy_jsets_e, polrel = drop_pr)
+  for (r in c("bc", "bcj")) for (m in c("M1c", "M2c")) {
+    sa <- parse_spec(c("--comparison=directed", "--entry=later", paste0("--roles=", r), "--joiner_set=opposing")); sp <- parse_spec(c("--comparison=directed", "--entry=later", paste0("--roles=", r), "--joiner_set=opposing", "--variant=polrel"))
+    Aa <- quiet(assemble_cell_spec("mid", 3L, sa, data_dir = td, model = m)); out <- capture.output(Ap <- assemble_cell_spec("mid", 3L, sp, data_dir = td, model = m))
+    key <- function(A, rows) paste(A$sy$ccode[A$alts$sy_row[rows]], A$alts$ccode2[rows])
+    expect_equal(nrow(Ap$alts), nrow(Aa$alts) - 2L, info = paste(r, m)); expect_setequal(key(Ap, seq_len(nrow(Ap$alts))), setdiff(key(Aa, seq_len(nrow(Aa$alts))), c("10 30", "40 30")))
+    expect_false("10 30" %in% paste(Ap$sy$ccode[Ap$ev$sy_row], Ap$alts$ccode2[Ap$ev$alt_row])); expect_equal(nrow(Ap$ev), nrow(Aa$ev) - 1L)
+    expect_true(any(grepl("variant polrel: 1 of", out, fixed = TRUE)), info = paste(r, m))
+    i40 <- which(paste(Ap$sy$ccode[Ap$ev$sy_row], Ap$alts$ccode2[Ap$ev$alt_row]) == "40 20")
+    expect_equal(Ap$alts$ccode2[Ap$ev_sets$alt_row[Ap$ev_sets$ev_idx == i40]], 20L)                       # {20, 30} intersected with the polrel set {10, 20}
+    expect_setequal(unique(Ap$ev_sets$ev_idx), which(Ap$ev_joiner))
+  }
+  unlink(base, recursive = TRUE)
+})
