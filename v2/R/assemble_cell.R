@@ -181,7 +181,7 @@ SY_INDICATORS <- c("cowmaj_tm1", "dem_tm1", "ongoing_tm1")
 assemble_cell <- function(SAMPLE, LAG, VARIANT, CENT = "pr", CONFLICT_HISTORY = TRUE, SAMPLED_M = 0L,
                           DISTANCE = "none", CONTIGUITY = "land", DY_PEACE_YEARS = FALSE, DROP_WW2 = FALSE, FULL_CONTROLS = FALSE,
                           EVENT_WEIGHTS = "dispute", PAIRS = "all", CHANGES = "raw", CONTEXT = "all", COAL_TIES = "inclusive", COAL_DROP = "none",
-                          MAJOR = "none", INTERACT = "none", ROLES = "stageb", MU_SHIFT = "none",
+                          MAJOR = "none", INTERACT = "none", ROLES = "stageb", MU_SHIFT = "none", JOINER_SET = "all",
                           CONTEXT_MODEL = FALSE, CONVENTIONAL = FALSE, DIRECTED = FALSE, data_dir = file.path(v2_root(), "data"), manifest = NULL) {
   stopifnot(SAMPLE %in% c("mid", "fmid", "fmidcow", "fmidub", "war"), LAG %in% c(1L, 3L, 5L, 10L), VARIANT %in% c("all", "polrel"), CENT %in% c("pr", "eig"),
             EVENT_WEIGHTS %in% c("dispute", "none"), PAIRS %in% c("all", "originators", "joiners"), CHANGES %in% c("raw", "winsor"),
@@ -224,6 +224,12 @@ assemble_cell <- function(SAMPLE, LAG, VARIANT, CENT = "pr", CONFLICT_HISTORY = 
   ## cell reads exactly the three files it read before)
   stopifnot(is.character(ROLES), length(ROLES) == 1L, ROLES %in% c("stageb", "aprime"))
   roles_ap <- if (ROLES == "aprime") assert_matches_manifest(file.path(data_dir, "roles_aprime.rds"), manifest) else NULL
+  ## JOINER_SET = opposing (PI-approved 2026-11-04): the joiner choice sets of the build's joiner_sets_aprime.rds (read only under this switch, so
+  ## every other cell reads exactly the files it read before); needs the aprime groups (role 2 = joiner) and full choice sets
+  stopifnot(is.character(JOINER_SET), length(JOINER_SET) == 1L, JOINER_SET %in% c("all", "opposing"))
+  if (JOINER_SET == "opposing" && ROLES != "aprime") stop("JOINER_SET = opposing needs ROLES = aprime (the restriction applies to the aprime joiner group, role 2; switch joiner_set needs --roles=aprime)")
+  if (JOINER_SET == "opposing" && SAMPLED_M > 0) stop("JOINER_SET = opposing is not defined with sampled alternatives (SAMPLED_M > 0)")
+  jsets <- if (JOINER_SET == "opposing") assert_matches_manifest(file.path(data_dir, "joiner_sets_aprime.rds"), manifest) else NULL
   stopifnot(all(panel$h == LAG), all(alts$h == LAG))
   stopifnot(all(c("escalation", "is_joiner_pair", "is_ww2", "target_has_pos_tm1", "fighting_at_ref", "dispnums", "n_disputes", "war_disp",
                   "in_mid_noww2", "in_fmid_noww2", "in_fmidcow_noww2", "in_fmidub_noww2", "in_war_noww2") %in% names(events)),
@@ -777,6 +783,42 @@ assemble_cell <- function(SAMPLE, LAG, VARIANT, CENT = "pr", CONFLICT_HISTORY = 
   ## stage-2 event weights (D8): w_<sample> from the build (or 1 under EVENT_WEIGHTS = "none"); build_stan_data() passes them as ev_w
   logf("event weights (D8, %s): %d usable events, sum of weights %.1f; weight 1 on %d events, min %.4f; weights of the events in the panel's (initiator, dispute, year) groups whose other targets left stage 2 through the choice set no longer sum to 1 (logged, not rescaled; only the pairs filter rescales, see above)",
        EVENT_WEIGHTS, nrow(ev), sum(ev$w), sum(ev$w == 1), min(ev$w))
+  ## ---- joiner choice sets (JOINER_SET = opposing, PI-approved 2026-11-04) ------------------------------------------------------------------
+  ## Every usable event of aprime group 2 (joiner) is scored only against the stage-2 rows (in_s2 = 1) of its state-year whose target is on the side
+  ## of its (weight-group) dispute opposite to the joiner's, in the onset year (joiner_sets_aprime.rds). Every other event keeps the full stage-2 set.
+  ## ev_sets: one row per (event index in ev, allowed alternative row) for the joiner events; set size 1 is kept (log-prob 0, the D8 weights stay).
+  ev_sets <- NULL; jset_stats <- NULL
+  if (JOINER_SET == "opposing") {
+    stopifnot(all(c("initiator", "target", "year", "dispnum", "opp_ccode") %in% names(jsets)), !anyNA(jsets[, c("initiator", "target", "year", "dispnum", "opp_ccode")]))
+    assert_no_dup_keys(jsets, c("initiator", "target", "year", "opp_ccode"), "joiner_sets_aprime.rds")
+    ev$.ev_idx <- seq_len(nrow(ev))
+    jev <- ev |> filter(grp == 2L)
+    if (nrow(jev) == 0L) stop(sprintf("joiner_set = opposing: no usable joiner event (aprime group 2) in sample %s", SAMPLE))
+    js <- jev |> select(.ev_idx, ccode1, ccode2, year, dispnum, sy_row, alt_row) |>
+      inner_join(jsets |> select(ccode1 = initiator, ccode2 = target, year, dispnum, opp_ccode), by = c("ccode1", "ccode2", "year", "dispnum"), relationship = "one-to-many")
+    no_set <- jev |> filter(!.ev_idx %in% js$.ev_idx)
+    if (nrow(no_set) > 0L) stop(sprintf("joiner_set = opposing: %d joiner events have no row in joiner_sets_aprime.rds (rebuild the data): %s", nrow(no_set),
+                                        paste(sprintf("%d->%d %d (dispute %d)", no_set$ccode1, no_set$ccode2, no_set$year, no_set$dispnum), collapse = "; ")))
+    s2_alt <- alts |> mutate(.row = row_number()) |> filter(in_s2 == 1L) |> select(sy_row, opp_ccode = ccode2, .row)
+    ev_sets <- js |> inner_join(s2_alt, by = c("sy_row", "opp_ccode")) |> transmute(ev_idx = .ev_idx, alt_row = .row, opp_ccode) |> arrange(ev_idx, alt_row)
+    ## the chosen target is in its restricted set (loud failure with the list)
+    bad <- jev |> anti_join(ev_sets, by = c(".ev_idx" = "ev_idx", "alt_row"))
+    if (nrow(bad) > 0L) stop(sprintf("joiner_set = opposing: the chosen target of %d joiner events is not in its restricted set: %s", nrow(bad),
+                                     paste(sprintf("%d->%d %d (dispute %d)", bad$ccode1, bad$ccode2, bad$year, bad$dispnum), collapse = "; ")))
+    ## every allowed row is a stage-2 row of the event's own state-year and an opposing state of the event's dispute (by construction; asserted)
+    stopifnot(all(alts$in_s2[ev_sets$alt_row] == 1L), all(alts$sy_row[ev_sets$alt_row] == ev$sy_row[ev_sets$ev_idx]), all(alts$ccode2[ev_sets$alt_row] == ev_sets$opp_ccode),
+              !anyDuplicated(ev_sets[, c("ev_idx", "alt_row")]), setequal(unique(ev_sets$ev_idx), jev$.ev_idx), all(ev$grp[ev_sets$ev_idx] == 2L))
+    n_set <- tabulate(ev_sets$ev_idx, nbins = nrow(ev))[jev$.ev_idx]
+    n_full_s2 <- vapply(jev$sy_row, function(n) sum(alts$in_s2[alts$sy_row == n]), 1L)
+    stopifnot(all(n_set >= 1L), all(n_set <= n_full_s2))
+    jset_stats <- list(n_joiner_events = nrow(jev), size_min = min(n_set), size_median = stats::median(n_set), size_max = max(n_set), n_singleton = sum(n_set == 1L),
+                       n_unrestricted = sum(n_set == n_full_s2), n_removed = sum(n_full_s2 - n_set), n_full_rows = sum(n_full_s2), w_joiner = sum(jev$w), w_singleton = sum(jev$w[n_set == 1L]))
+    logf("joiner_set = opposing (2026-11-04): %d usable joiner events (aprime group 2, weights %.1f) scored against the opposing side of their dispute only; restricted set size min %d / median %.1f / max %d; %d events with set size 1 (log-prob 0 in stage 2, kept so the D8 weights are unchanged; weights %.1f); %d events whose restricted set equals their full stage-2 set; alternatives removed in total %d of %d stage-2 rows of the joiner events; every other event (%d) keeps its full stage-2 set; stage 1 / IV unchanged",
+         jset_stats$n_joiner_events, jset_stats$w_joiner, jset_stats$size_min, jset_stats$size_median, jset_stats$size_max, jset_stats$n_singleton, jset_stats$w_singleton,
+         jset_stats$n_unrestricted, jset_stats$n_removed, jset_stats$n_full_rows, nrow(ev) - nrow(jev))
+    ev_sets <- ev_sets |> select(ev_idx, alt_row)
+    ev$.ev_idx <- NULL
+  }
   ev <- ev |> select(sy_row, alt_row, w, grp)        # grp: the stage-b group (0 bilateral, 1 leader, 2 joiner); build_stan_data() ignores it, 02_fit_model.R passes it for M1c only
   
   ## ---- optional sampled alternatives ------------------------------------------------------------------
@@ -814,7 +856,8 @@ assemble_cell <- function(SAMPLE, LAG, VARIANT, CENT = "pr", CONFLICT_HISTORY = 
        pairs = PAIRS, pairs_weights = pairs_w, changes = CHANGES, winsor = winsor, context = CONTEXT, coal_ties = COAL_TIES, coal_drop = COAL_DROP, context_top3 = context_top3,
        n_context_dropped = n_context_dropped, n_context_split_groups = n_split_groups, context_model = CONTEXT_MODEL, group_table = group_table,
        major = MAJOR, major_stats = major_stats, interact = INTERACT, distance = DISTANCE, distance_stats = distance_stats, contiguity = CONTIGUITY,
-       conventional = CONVENTIONAL, roles = ROLES, directed = DIRECTED, directed_stats = directed_stats)
+       conventional = CONVENTIONAL, roles = ROLES, directed = DIRECTED, directed_stats = directed_stats,
+       joiner_set = JOINER_SET, ev_sets = ev_sets, jset_stats = jset_stats)        # 2026-11-04: ev_sets = NULL unless JOINER_SET = opposing
 }
 ## assemble_cell_spec(SAMPLE, LAG, spec, ...): the main-specification constants of spec.R plus the switches of `spec`
 ## model = NULL or a model code: the M1c model (CONTEXT_MODELS) switches CONTEXT_MODEL on; every other model leaves it off
@@ -828,17 +871,23 @@ assemble_cell_spec <- function(SAMPLE, LAG, spec, data_dir = spec_data_dir(spec,
   ## the directed comparison (2026-11-01): the same lag / variant rule and the same internal DISTANCE / MAJOR mapping; models DIRECTED_MODELS
   dirc <- spec_is_directed(spec)
   if (dirc && (LAG != 3L || VARIANT != "all")) stop(sprintf("--comparison=directed is defined on the lag-3 data with all-states choice sets (got lag %s, variant %s)", LAG, VARIANT))
-  if (dirc) stopifnot(!conv, all(vapply(CONVENTIONAL_FIXED, function(nm) identical(spec[[nm]], SPEC_DEFAULTS[[nm]]), logical(1))), is.null(model) || model %in% c(DIRECTED_MODELS, RHOREG_MODELS))
+  if (dirc) stopifnot(!conv, all(vapply(CONVENTIONAL_FIXED, function(nm) identical(spec[[nm]], SPEC_DEFAULTS[[nm]]), logical(1))), is.null(model) || model %in% c(DIRECTED_MODELS, RHOREG_MODELS, AME_CONTEXT_MODELS))
   ## mu_shift (2026-11-02): directed only, models MU_SHIFT_MODELS; M1bz (RHOREG_MODELS) directed only. A spec saved before has no field: none
   mu_shift <- if (is.null(spec$mu_shift)) "none" else spec$mu_shift
   if (mu_shift != "none") stopifnot(dirc, is.null(model) || model %in% MU_SHIFT_MODELS)
   if (!is.null(model) && model %in% RHOREG_MODELS && !dirc) stop(sprintf("the model %s is defined under --comparison=directed only", model))
+  ## M2c (2026-11-04): directed with roles = aprime only; joiner_set (2026-11-04): roles = aprime and a role model only (a spec saved before: all)
+  roles_v <- if (is.null(spec$roles)) "stageb" else spec$roles
+  if (!is.null(model) && model %in% AME_CONTEXT_MODELS && !(dirc && roles_v == "aprime")) stop(sprintf("the model %s is defined under --comparison=directed with --roles=aprime only", model))
+  jset <- if (is.null(spec$joiner_set)) "all" else spec$joiner_set
+  if (jset != "all" && roles_v != "aprime") stop(sprintf("--joiner_set=%s needs --roles=aprime", jset))
+  if (jset != "all" && !is.null(model) && !model %in% ROLE_MODELS) stop(sprintf("--joiner_set=%s with the model %s (the restriction applies to %s only)", jset, model, paste(ROLE_MODELS, collapse = ", ")))
   assemble_cell(SAMPLE, LAG, VARIANT, CENTRALITY, CONFLICT_HISTORY, SAMPLED_M, DISTANCE = if (conv || dirc) "capital" else spec$distance, CONTIGUITY = spec$contiguity,
                 DY_PEACE_YEARS = DY_PEACE_YEARS, DROP_WW2 = spec$ww2 == "drop", FULL_CONTROLS = spec$controls == "full",
                 EVENT_WEIGHTS = spec$weights, PAIRS = spec$pairs, CHANGES = spec$changes, CONTEXT = spec$context, COAL_TIES = spec$coal_ties,
                 COAL_DROP = spec$coal_drop, MAJOR = if (conv || dirc) "joint" else spec$major, INTERACT = spec$interact,
-                CONTEXT_MODEL = !is.null(model) && model %in% CONTEXT_MODELS, CONVENTIONAL = conv, DIRECTED = dirc,
-                ROLES = if (is.null(spec$roles)) "stageb" else spec$roles, MU_SHIFT = mu_shift, data_dir = data_dir, manifest = manifest)
+                CONTEXT_MODEL = !is.null(model) && model %in% ROLE_MODELS, CONVENTIONAL = conv, DIRECTED = dirc,
+                ROLES = if (is.null(spec$roles)) "stageb" else spec$roles, MU_SHIFT = mu_shift, JOINER_SET = jset, data_dir = data_dir, manifest = manifest)
 }
 ## rhoreg_Zr(A): the N1 x Q trait matrix Zr of the rho-regression model M1bz (PI-approved 2026-11-02), rho_n = tanh(g0 + Zr[n] g): the columns
 ## X_MU_TRAITS (M_lvl, R_lvl, cowmaj_tm1, dem_tm1) of the assembled directed cell's state-years, i.e. exactly the W columns as they enter W (the

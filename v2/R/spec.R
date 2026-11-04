@@ -50,7 +50,8 @@ SPEC_CHOICES <- list(
   sigma_prior = c("ln1", "ln05"),                   # prior on the tolerance scales sigma_x (M1 family only, 2026-10-30): lognormal(0, 1) (main) | lognormal(0, 0.5)
   comparison = c("none", "conventional", "directed"), # the conventional comparison specification (PI-approved 2026-10-31): none (main) | conventional = W, Z, X fixed to W_CONVENTIONAL / Z_CONVENTIONAL / no X (P = 0) | directed (PI-approved 2026-11-01) = conventional with the directed Z_DIRECTED; see below
   roles     = c("stageb", "aprime"),                # stage-2 role groups of the M1c / M1cr models (PI decision 2026-10-31): stageb (main) = the 3 stage-b groups (bilateral / leader / joiner) | aprime = 4 groups (alone originator / co-originator / joiner / target joined late; roles_aprime.rds, aprime_roles())
-  mu_shift  = c("none", "traits")                   # ideal-point shifters under the directed comparison (PI-approved 2026-11-02): none (main; X = none, P = 0) | traits = X = the initiator's M_lvl, R_lvl, cowmaj_tm1, dem_tm1 at t-1 as they enter W (X_MU_TRAITS, assemble_cell.R; P = 4); needs --comparison=directed
+  mu_shift  = c("none", "traits"),                  # ideal-point shifters under the directed comparison (PI-approved 2026-11-02): none (main; X = none, P = 0) | traits = X = the initiator's M_lvl, R_lvl, cowmaj_tm1, dem_tm1 at t-1 as they enter W (X_MU_TRAITS, assemble_cell.R; P = 4); needs --comparison=directed
+  joiner_set = c("all", "opposing")                 # joiner choice set (PI-approved 2026-11-04): all (main; every stage-2 alternative) | opposing = a joiner event (aprime group 2) is scored only against the states on the OTHER side of the dispute it joins in the onset year, intersected with the state-year's stage-2 set (joiner_sets_aprime.rds); needs --roles=aprime
 )
 ## ---- the conventional comparison specification (PI-approved 2026-10-31; switch `comparison`, suffix _conv) --------------------------
 ## One switch fixes the three design matrices at once; it is NOT a combination of the other switches, although it carries the distance
@@ -90,6 +91,16 @@ DIRECTED_MODELS <- c("M1a", "M1b", "M1c", "M1cr", "M2b")
 ## M1bz (model code; stan/m1_latent_rhoreg.stan): the joint M1b model with a state-year specific stage-2 correlation rho_n = tanh(g0 + Zr[n] g),
 ## Zr = the same four columns (N1 x Q, Q = 4, data). Only with comparison = directed, with or without mu_shift = traits. Not in MODELS (main grid).
 RHOREG_MODELS   <- c("M1bz")
+## ---- the AME model with initiation types (PI-approved 2026-11-04): M2c = M2b (m2_ame.stan, joint b variant) plus the M1c role structure (mu_g =
+## mu0 + delta[g - 1], sigma_g[g], one shared rho), stan/m2_context.stan. Defined ONLY with --comparison=directed and --roles=aprime (cell_name()
+## refuses anything else; no mu_shift, no prior switch); K = 1 | 2; every chain starts from the matching M1c fit (same sample, lag, comparison, roles,
+## joiner_set, tag; 02_fit_model.R refuses to run without it). Family M2 (sampler settings, _K<K> in the name), not in MODELS (the main grid).
+AME_CONTEXT_MODELS <- c("M2c")
+## ---- the joiner choice-set restriction (PI-approved 2026-11-04; switch joiner_set, suffix _jset right after _aprime) ---------------------------
+## joiner_set = opposing: an event of aprime group 2 (joiner) is scored against the states on the side of its dispute OPPOSITE to the joiner's own side
+## (COW sides after the direction rule, as in aprime_roles()) that take part in the dispute in the event's onset year, intersected with the state-year's
+## stage-2 set; every other event keeps the full stage-2 set; stage 1 / IV and the weights are unchanged. Needs roles = aprime (parse_spec() refuses it
+## otherwise), so only the role models (ROLE_MODELS) can take it.
 MU_SHIFT_MODELS <- c(DIRECTED_MODELS, RHOREG_MODELS)
 SPEC_DEFAULTS <- lapply(SPEC_CHOICES, function(v) v[1])
 SPEC_DEFAULTS$ame_K <- 2L                            # latent dimensions of the M2 (AME) family; "_K<K>" is always in an M2 cell name
@@ -126,6 +137,8 @@ SPEC_SUFFIX <- list(
   mu_shift  = c(traits = "_mst"),
   ## the role coding (2026-10-31) follows the comparison switch: e.g. fmid_lag3_all_pr_M1c_conv_aprime
   roles     = c(aprime = "_aprime"),
+  ## the joiner choice-set restriction (2026-11-04) follows the role coding it needs: e.g. fmid_lag3_all_pr_M1c_cdir_aprime_jset
+  joiner_set = c(opposing = "_jset"),
   weights   = c(none = "_w1"),
   changes   = c(winsor = "_winsor"),
   direction = c(sideA = "_sideA"),
@@ -152,19 +165,22 @@ MODELS       <- c("M1m", "M1r", "M1a", "M1b", "M2m", "M2r", "M2a", "M2b")
 ## grid's 0-95 index mapping and 04_compare.R's eight-model groups stay as they are); 02_fit_model.R and 03_extract.R accept it.
 ## M1cr (PI request 2026-10-31): M1c with a ROLE-SPECIFIC stage-2 correlation rho_g[G] (stan/m1_context_rho.stan); same data, same groups
 CONTEXT_MODELS <- c("M1c", "M1cr")
-ALL_MODELS     <- c(MODELS, CONTEXT_MODELS, RHOREG_MODELS)   # RHOREG_MODELS (M1bz, 2026-11-02) defined above with the directed comparison
+ALL_MODELS     <- c(MODELS, CONTEXT_MODELS, RHOREG_MODELS, AME_CONTEXT_MODELS)   # RHOREG_MODELS (M1bz, 2026-11-02), AME_CONTEXT_MODELS (M2c, 2026-11-04) defined above
+## ROLE_MODELS (2026-11-04): every model that takes the stage-2 groups (ev_grp, G), the role switch and the joiner choice-set restriction
+ROLE_MODELS    <- c(CONTEXT_MODELS, AME_CONTEXT_MODELS)
 ## stan_program(model, spec): the Stan source / build name of a model code (m1_latent_additive | m2_ame | m1_context), and, since 2026-10-30,
 ## m1_latent_prior for an M1 m / r / a / b model whose spec has a prior switch off its default (the copy of m1_latent_additive.stan with the
 ## hyperparameters as data). spec = NULL (or a spec saved before the switches existed, which lacks the fields) means the main priors.
 stan_program <- function(model, spec = NULL) {
   stopifnot(model %in% ALL_MODELS)
   if (model %in% RHOREG_MODELS) return("m1_latent_rhoreg")      # M1bz (2026-11-02): the rho-regression program, no prior-switch copy
+  if (model %in% AME_CONTEXT_MODELS) return("m2_context")        # M2c (2026-11-04): AME with initiation types
   if (model == "M1cr") return("m1_context_rho")
   if (model %in% CONTEXT_MODELS) return("m1_context")
   if (substr(model, 1, 2) == "M2") return("m2_ame")
   if (spec_prior_is_main(spec)) "m1_latent_additive" else "m1_latent_prior"
 }
-STAN_PROGRAMS  <- c("m1_latent_additive", "m2_ame", "m1_context", "m1_latent_prior", "m1_context_rho", "m1_latent_rhoreg")
+STAN_PROGRAMS  <- c("m1_latent_additive", "m2_ame", "m1_context", "m1_latent_prior", "m1_context_rho", "m1_latent_rhoreg", "m2_context")
 ## spec_prior_is_main(spec): TRUE when both prior switches are at their default (a NULL spec, or one saved before 2026-10-30 without the
 ## fields, counts as the main priors: every fit before that date sampled the main program)
 spec_prior_is_main <- function(spec) {
@@ -310,6 +326,9 @@ parse_spec <- function(args = character(0)) {
     stopifnot(all(vapply(CONVENTIONAL_FIXED, function(nm) identical(spec[[nm]], SPEC_DEFAULTS[[nm]]), logical(1))))
   }
   ## the ideal-point shifters (2026-11-02) are defined under the directed comparison only (X_MU_TRAITS are its W columns)
+  ## the joiner choice-set restriction (2026-11-04) is defined on the aprime joiner group only
+  if (spec$joiner_set != SPEC_DEFAULTS$joiner_set && spec$roles != "aprime")
+    stop(sprintf("--joiner_set=%s needs --roles=aprime (the restriction applies to the aprime joiner group, role 2; got roles=%s)", spec$joiner_set, spec$roles))
   if (spec$mu_shift != SPEC_DEFAULTS$mu_shift && spec$comparison != "directed")
     stop(sprintf("--mu_shift=%s needs --comparison=directed (the shifters are the directed comparison's W columns M_lvl, R_lvl, cowmaj_tm1, dem_tm1; got comparison=%s)", spec$mu_shift, spec$comparison))
   ## contiguity = none is only meaningful when the distance replaces it (PI request 2026-10-28): a Z without contiguity AND without distance is refused
@@ -341,9 +360,10 @@ spec_is_main <- function(spec) all(vapply(names(SPEC_CHOICES), function(nm) iden
 ## spec_data_dir(spec, root): v2/data for the main direction, v2/data_sideA for direction = sideA
 spec_data_dir <- function(spec, root) file.path(root, if (spec$direction == "sideA") "data_sideA" else "data")
 ## spec_string(spec): one line for the logs
-## mu_shift (2026-11-02) is left out at its default, so the spec string of every existing cell is unchanged
+## mu_shift (2026-11-02) and joiner_set (2026-11-04) are left out at their defaults, so the spec string of every existing cell is unchanged
 spec_string <- function(spec) {
   if (!is.null(spec$mu_shift) && identical(spec$mu_shift, SPEC_DEFAULTS$mu_shift)) spec <- spec[setdiff(names(spec), "mu_shift")]
+  if (!is.null(spec$joiner_set) && identical(spec$joiner_set, SPEC_DEFAULTS$joiner_set)) spec <- spec[setdiff(names(spec), "joiner_set")]
   paste(sprintf("%s=%s", names(spec), unlist(spec)), collapse = " ")
 }
 ## spec_is_conventional(spec): TRUE under --comparison=conventional (a spec saved before 2026-10-31 has no field: not conventional)
@@ -356,7 +376,8 @@ spec_is_directed <- function(spec) !is.null(spec$comparison) && identical(spec$c
 ## conventional cell's parts must never combine with another cell's (the driver refuses the switch anyway, see 05_robustness.R).
 perm_part_spec_string <- function(spec) {
   drop <- c(PRIOR_SWITCHES, "tag", if (!spec_is_conventional(spec) && !spec_is_directed(spec)) "comparison", if (is.null(spec$roles) || identical(spec$roles, SPEC_DEFAULTS$roles)) "roles",
-            if (is.null(spec$mu_shift) || identical(spec$mu_shift, SPEC_DEFAULTS$mu_shift)) "mu_shift")   # mu_shift (2026-11-02): dropped at its default, kept when on
+            if (is.null(spec$mu_shift) || identical(spec$mu_shift, SPEC_DEFAULTS$mu_shift)) "mu_shift",
+            if (is.null(spec$joiner_set) || identical(spec$joiner_set, SPEC_DEFAULTS$joiner_set)) "joiner_set")   # joiner_set (2026-11-04): likewise   # mu_shift (2026-11-02): dropped at its default, kept when on
   spec_string(spec[setdiff(names(spec), drop)])
 }
 ## spec_coal_col(spec): the events.rds column the context switch filters on ("coal_incl" / "coal_strict")
@@ -375,7 +396,7 @@ cell_name <- function(sample, lag, model, spec) {
   if (spec_is_conventional(spec) && !model %in% CONVENTIONAL_MODELS)
     stop(sprintf("cell_name: --comparison=conventional with the model %s (the conventional comparison is specified for %s only)", model, paste(CONVENTIONAL_MODELS, collapse = ", ")))
   ## the directed comparison (2026-11-01): the conventional models plus the AME model M2b; the rho-regression model M1bz (2026-11-02) as well
-  if (spec_is_directed(spec) && !model %in% c(DIRECTED_MODELS, RHOREG_MODELS))
+  if (spec_is_directed(spec) && !model %in% c(DIRECTED_MODELS, RHOREG_MODELS, AME_CONTEXT_MODELS))
     stop(sprintf("cell_name: --comparison=directed with the model %s (the directed comparison is specified for %s only; and the rho regression %s)", model, paste(DIRECTED_MODELS, collapse = ", "), paste(RHOREG_MODELS, collapse = ", ")))
   ## M1bz (2026-11-02) is defined under the directed comparison only
   if (model %in% RHOREG_MODELS && !spec_is_directed(spec))
@@ -385,9 +406,17 @@ cell_name <- function(sample, lag, model, spec) {
     if (!spec_is_directed(spec)) stop(sprintf("cell_name: --mu_shift=%s needs --comparison=directed", spec$mu_shift))
     if (!model %in% MU_SHIFT_MODELS) stop(sprintf("cell_name: --mu_shift=%s with the model %s (specified for %s only)", spec$mu_shift, model, paste(MU_SHIFT_MODELS, collapse = ", ")))
   }
-  ## the role coding (2026-10-31) applies to the stage-2 groups of the context models only (no other model sees the groups)
-  if (!is.null(spec$roles) && !identical(spec$roles, SPEC_DEFAULTS$roles) && !model %in% CONTEXT_MODELS)
-    stop(sprintf("cell_name: --roles=%s with the model %s (the role coding applies to %s only)", spec$roles, model, paste(CONTEXT_MODELS, collapse = ", ")))
+  ## the role coding (2026-10-31) applies to the stage-2 groups of the context models only (no other model sees the groups); M2c (2026-11-04) as well
+  if (!is.null(spec$roles) && !identical(spec$roles, SPEC_DEFAULTS$roles) && !model %in% ROLE_MODELS)
+    stop(sprintf("cell_name: --roles=%s with the model %s (the role coding applies to %s only)", spec$roles, model, paste(ROLE_MODELS, collapse = ", ")))
+  ## the joiner choice-set restriction (2026-11-04): roles = aprime only (parse_spec() refuses it otherwise), hence the role models only
+  if (!is.null(spec$joiner_set) && !identical(spec$joiner_set, SPEC_DEFAULTS$joiner_set)) {
+    if (!identical(spec$roles, "aprime")) stop(sprintf("cell_name: --joiner_set=%s needs --roles=aprime", spec$joiner_set))
+    if (!model %in% ROLE_MODELS) stop(sprintf("cell_name: --joiner_set=%s with the model %s (the restriction applies to %s only)", spec$joiner_set, model, paste(ROLE_MODELS, collapse = ", ")))
+  }
+  ## M2c (2026-11-04): the AME model with initiation types is specified under --comparison=directed with --roles=aprime only
+  if (model %in% AME_CONTEXT_MODELS && (!spec_is_directed(spec) || !identical(spec$roles, "aprime")))
+    stop(sprintf("cell_name: the model %s needs --comparison=directed and --roles=aprime (got comparison=%s, roles=%s)", model, if (is.null(spec$comparison)) "none" else spec$comparison, if (is.null(spec$roles)) "stageb" else spec$roles))
   if (!spec_prior_is_main(spec)) {
     off <- PRIOR_SWITCHES[vapply(PRIOR_SWITCHES, function(nm) !is.null(spec[[nm]]) && !identical(spec[[nm]], SPEC_DEFAULTS[[nm]]), logical(1))]
     if (stan_program(model) != "m1_latent_additive")
