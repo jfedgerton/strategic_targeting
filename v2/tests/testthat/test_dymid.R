@@ -1,6 +1,7 @@
 ## The interacting-dyads event foundation (switch events = pairs | dymid, suffix _dy, build variant v2/data_dymid; PI-approved 2026-11-04; README 6.9).
 ## (a) helpers_dymid.R on hand-built DYMID and war rows: the dyad key, max-over-years fatality, re-entries, linking (merged / war-only / DYMID-only
-## war), the samples strict / any / ub, the direction rules (a) / (c) / (b) / fallback with ties, the participation table and the spell override;
+## war), recip validation (2 accepted explicitly as not reciprocated, other values refused), the samples strict / any / ub (definition of
+## 2026-11-05), the direction rules in the order (a) / (b) / (c) / fallback with ties (PI decision 2026-11-05), the participation table and the spell override;
 ## (b) the switch, suffix, data directory, samples and refusals; strings and names unchanged at the default; (c) 02_fit_model.R end to end on a toy
 ## dymid cell (M1b, M1c bcj with joiner_set, M2c from the matching M1c); (d) the real dymid build (skipped when absent).
 suppressPackageStartupMessages({ library(testthat); library(dplyr) })
@@ -12,7 +13,7 @@ source(file.path(root, "R", "assemble_cell.R")); source(file.path(root, "R", "he
 ##   1: 10-20 two years; fatleva -9 in 2000 (listed only in the last year), 2 in 2001; fatlevb 1 in 2001 -> max 2 / 1, strict fatal; dyad_rolea 3 (20 initiated)
 ##   1: 10-30 fatleva 1, fatlevb -9 -> strict FALSE, ub TRUE, any TRUE (fatlev 1)
 ##   1: 30-40 both joiners, non-fatal; 1: 20-40 DYMID war == 1 without a war-data row (DYMID-only war dyad)
-## dispute 2 (1990): 50-60 both originators, war dyad also in the war data (merged); dyad_rolea 1 (50) but D1 says 60
+## dispute 2 (1990): 50-60 both originators, war dyad also in the war data (merged); dyad_rolea 1 (50) but D1 says 60 (rule (b) decides: 50 -> 60)
 ## dispute 5: 13-14 with two spells (2000-03 and 2002-06): one event dated 2000-03
 ## dispute 4: 11-12 with dyad_rolea 2 (simultaneous): no rule decides
 dyrow <- function(disno, a, b, year, sy, sm, ey, em, fl = 0L, fa = 0L, fb = 0L, war = 0L, ra = 1L, oa = 1L, ob = 1L, sa = 1L, recip = 0L)
@@ -54,6 +55,15 @@ test_that("read_dymid / read_ddiw: structure checks, the mirror check, the day /
   sw <- toy_wr(); sw$warstrtmnth[c(1, 4)] <- 24L; sw$warstrtday[c(1, 4)] <- 4L; sw$warendmnth[c(1, 4)] <- 1L; sw$warenday[c(1, 4)] <- 7L
   write.csv(sw, file.path(td, "sw.csv"), row.names = FALSE); w2 <- read_ddiw(file.path(td, "sw.csv"))
   expect_equal(attr(w2, "n_swapped"), 2L); expect_equal(w2$warstrtmnth[1], 4L); expect_equal(w2$warstrtday[1], 24L); expect_equal(w2$warendmnth[1], 7L)
+  ## recip: 0 / 1 per the codebook; 2 (undocumented, 4 rows of 4.03) accepted and treated as NOT reciprocated, explicitly; anything else refused
+  r2 <- toy_dy(); r2$recip[r2$disno == 4L] <- 2L; write.csv(r2, file.path(td, "r2.csv"), row.names = FALSE)
+  d2 <- read_dymid(file.path(td, "r2.csv")); expect_equal(nrow(attr(d2, "recip2_rows")), 2L); expect_equal(nrow(attr(dy, "recip2_rows")), 0L)
+  dd2 <- dymid_dyads(d2); expect_false(dd2$recip[dd2$disno == 4L]); expect_true(dd2$recip_code2[dd2$disno == 4L]); expect_false(any(dd2$recip_code2[dd2$disno != 4L]))
+  r1 <- toy_dy(); r1$recip[r1$disno == 4L] <- 1L; write.csv(r1, file.path(td, "r1.csv"), row.names = FALSE)
+  dd1 <- dymid_dyads(read_dymid(file.path(td, "r1.csv"))); expect_true(dd1$recip[dd1$disno == 4L]); expect_false(dd1$recip_code2[dd1$disno == 4L])
+  r3 <- toy_dy(); r3$recip[1] <- 3L; write.csv(r3, file.path(td, "r3.csv"), row.names = FALSE); expect_error(read_dymid(file.path(td, "r3.csv")), "recip takes values")
+  rn <- toy_dy(); rn$recip[1] <- -9L; write.csv(rn, file.path(td, "rn.csv"), row.names = FALSE); expect_error(read_dymid(file.path(td, "rn.csv")), "recip takes values")
+  ra <- toy_dy(); ra$recip[1] <- NA; write.csv(ra, file.path(td, "ra.csv"), row.names = FALSE); expect_error(read_dymid(file.path(td, "ra.csv")), "recip takes values")
   unlink(td, recursive = TRUE)
 })
 
@@ -76,11 +86,21 @@ test_that("dymid_dyads / ddiw_dyads / dymid_link: dyad key, max-over-years fatal
   w2 <- bind_rows(w, w[w$disno == 2L, ] |> mutate(warnum = 8L)); expect_error(dymid_link(d, w2), "two war dyads")
 })
 
-test_that("dymid_fatal_codes: strict / any / ub, missing sides, wars", {
-  fc <- dymid_fatal_codes(fatleva = c(2L, 1L, NA, 0L, NA, 0L), fatlevb = c(1L, NA, NA, 0L, NA, 0L), fatlev = c(3L, 1L, NA, 0L, NA, 2L), war = c(FALSE, FALSE, FALSE, FALSE, TRUE, FALSE))
-  expect_equal(fc$strict, c(TRUE, FALSE, FALSE, FALSE, TRUE, FALSE))
-  expect_equal(fc$any,    c(TRUE, TRUE, FALSE, FALSE, TRUE, TRUE))      # the last: only the dyadic dispute's fatlev
-  expect_equal(fc$ub,     c(TRUE, TRUE, TRUE, FALSE, TRUE, FALSE))      # missing sides counted fatal
+test_that("dymid_fatal_codes: strict / any / ub (definition of 2026-11-05), missing sides, wars", {
+  ## 1 both sides >= 1; 2 one side >= 1, other missing, fatlev 1; 3 all missing; 4 non-fatal; 5 war; 6 only the dyadic fatlev;
+  ## 7 one side >= 1, other missing, fatlev 0; 8 both sides missing, fatlev 0; 9 both missing, fatlev 2; 10 one side 0, other missing, fatlev 1;
+  ## 11 both sides >= 1 while fatlev 0 (inconsistent dyadic codes: strict decides); 12 one side missing, other >= 1, fatlev missing
+  fc <- dymid_fatal_codes(fatleva = c(2L, 1L, NA, 0L, NA, 0L, 1L, NA, NA, 0L, 1L, NA), fatlevb = c(1L, NA, NA, 0L, NA, 0L, NA, NA, NA, NA, 1L, 2L),
+                          fatlev = c(3L, 1L, NA, 0L, NA, 2L, 0L, 0L, 2L, 1L, 0L, NA), war = c(FALSE, FALSE, FALSE, FALSE, TRUE, rep(FALSE, 7)))
+  expect_equal(fc$strict, c(TRUE, FALSE, FALSE, FALSE, TRUE, FALSE, FALSE, FALSE, FALSE, FALSE, TRUE, FALSE))
+  expect_equal(fc$any,    c(TRUE, TRUE, FALSE, FALSE, TRUE, TRUE, TRUE, FALSE, TRUE, TRUE, TRUE, TRUE))       # 6: only the dyadic dispute's fatlev
+  expect_equal(fc$ub,     c(TRUE, TRUE, TRUE, FALSE, TRUE, FALSE, FALSE, FALSE, TRUE, FALSE, TRUE, TRUE))
+  expect_false(fc$ub[7]); expect_false(fc$ub[8])     # dyadic fatlev = 0 (coded non-fatal): a missing per-state field never makes it fatal
+  expect_true(fc$ub[2]); expect_true(fc$ub[12])      # one side >= 1 and the other missing IS fatal (fatlev >= 1 or missing)
+  expect_equal(fc$ub_branch, c("strict", "one_side_missing", "both_missing", "none", "strict", "none", "none", "none", "both_missing", "none", "strict", "one_side_missing"))
+  expect_true(all(fc$ub[fc$strict])); expect_true(all(fc$any[fc$strict]))
+  ## a fatlev = 0 dyad with BOTH per-state fields missing is not fatal (the previous definition counted it)
+  expect_false(dymid_fatal_codes(NA_integer_, NA_integer_, 0L, FALSE)$ub)
 })
 
 ## psd rows for the entry comparison (as in test_entry_roles.R)
@@ -90,25 +110,28 @@ ev_d <- function(disp, i, j, o1, o2, war = FALSE, d1 = NA_integer_, b = NA_integ
   tibble(dispnum = disp, initiator = as.integer(i), target = as.integer(j), year = y, sidea1 = 1L, sidea2 = 0L, orig1 = as.integer(o1), orig2 = as.integer(o2),
          fatality1 = 1L, fatality2 = 2L, hostlev1 = 3L, hostlev2 = 4L, war = war, d1_init = as.integer(d1), init_b = as.integer(b))
 
-test_that("dymid_direction: (a) one joiner / two joiners by entry date, ties -> (c) / (b); (c) D1 for war dyads with both originators; (b) dyadic initiator; fallback", {
+test_that("dymid_direction: order (a) -> (b) -> (c): (a) one joiner / two joiners by entry date, ties -> (b); (b) dyadic initiator, also for war dyads where D1 disagrees; (c) D1 only without (b); fallback", {
   ev <- bind_rows(ev_d(1L, 10L, 20L, 1, 1, b = 20L),                      # both originators, non-war: (b) -> 20 -> 10
                   ev_d(1L, 10L, 30L, 1, 0, b = 10L),                      # one joiner: (a) -> 30 -> 10 whatever (b) says
                   ev_d(1L, 40L, 30L, 0, 0, b = 30L),                      # two joiners: 30 May, 40 August -> 40 -> 30 (later entrant) although (b) says 30
                   ev_d(1L, 40L, 20L, 0, 1, war = TRUE, d1 = 20L),         # one joiner, war: (a) beats (c) -> 40 -> 20
-                  ev_d(2L, 50L, 60L, 1, 1, war = TRUE, d1 = 60L, b = 50L, y = 1990L),   # war, both originators: (c) -> 60 -> 50 (b and c disagree)
+                  ev_d(2L, 50L, 60L, 1, 1, war = TRUE, d1 = 60L, b = 50L, y = 1990L),   # war, both originators, D1 says 60 but (b) says 50: (b) decides -> 50 -> 60
                   ev_d(2L, 70L, 80L, 0, 0, b = 80L, y = 1990L),           # two joiners, same entry month (tie): (b) -> 80 -> 70
-                  ev_d(2L, 71L, 81L, 0, 0, war = TRUE, d1 = 71L, b = 81L, y = 1990L),   # tie in a war dyad: (c) -> 71 -> 81
+                  ev_d(2L, 71L, 81L, 0, 0, war = TRUE, d1 = 71L, b = 81L, y = 1990L),   # tie in a war dyad, D1 and (b) disagree: (b) -> 81 -> 71
                   ev_d(4L, 11L, 12L, 1, 1, y = 1995L),                    # simultaneous, no D1: Side A kept
-                  ev_d(6L, 15L, 16L, 1, 1, war = FALSE, d1 = 16L, b = 15L))   # non-war dyad in a war-level dispute: (c) not applied -> (b) 15 -> 16
+                  ev_d(6L, 15L, 16L, 1, 1, war = FALSE, d1 = 16L, b = 15L),   # non-war dyad in a war-level dispute: (b) 15 -> 16
+                  ev_d(7L, 17L, 18L, 1, 1, war = TRUE, d1 = 18L))         # war dyad without a dyadic initiator: (c) D1 -> 18 -> 17
   psd <- bind_rows(psd_d(1L, 10, 2L, 1L), psd_d(1L, 20, 2L, 1L), psd_d(1L, 30, 2L, 5L), psd_d(1L, 40, 2L, 8L),
                    psd_d(2L, 50, 2L, 2L, 1990L), psd_d(2L, 60, 2L, 2L, 1990L), psd_d(2L, 70, 2L, 3L, 1990L), psd_d(2L, 80, 2L, 3L, 1990L), psd_d(2L, 71, 2L, 3L, 1990L), psd_d(2L, 81, 2L, 3L, 1990L),
-                   psd_d(4L, 11, 2L, 1L, 1995L), psd_d(4L, 12, 2L, 1L, 1995L), psd_d(6L, 15, 2L, 1L), psd_d(6L, 16, 2L, 1L))
+                   psd_d(4L, 11, 2L, 1L, 1995L), psd_d(4L, 12, 2L, 1L, 1995L), psd_d(6L, 15, 2L, 1L), psd_d(6L, 16, 2L, 1L), psd_d(7L, 17, 2L, 1L), psd_d(7L, 18, 2L, 1L))
   r <- dymid_direction(ev, psd)
-  expect_equal(paste(r$initiator, r$target), c("20 10", "30 10", "40 30", "40 20", "60 50", "80 70", "71 81", "11 12", "15 16"))
-  expect_equal(r$dir_source, c("b_dyadic", "a_joiner_orig", "a_joiner_later", "a_joiner_orig", "c_cowwar", "b_dyadic", "c_cowwar", "fallback_sideA", "b_dyadic"))
-  expect_equal(r$dir_rule[6:7], c("b_dyadic (joiner tie)", "c_cowwar (joiner tie)"))
-  expect_equal(r$dir_flipped, r$sidea1 == 0L); expect_equal(r$dir_flipped, c(TRUE, TRUE, FALSE, FALSE, TRUE, TRUE, FALSE, FALSE, FALSE))
-  expect_equal(r$b_c_disagree, c(FALSE, FALSE, FALSE, FALSE, TRUE, FALSE, TRUE, FALSE, FALSE))
+  expect_equal(paste(r$initiator, r$target), c("20 10", "30 10", "40 30", "40 20", "50 60", "80 70", "81 71", "11 12", "15 16", "18 17"))
+  expect_equal(r$dir_source, c("b_dyadic", "a_joiner_orig", "a_joiner_later", "a_joiner_orig", "b_dyadic", "b_dyadic", "b_dyadic", "fallback_sideA", "b_dyadic", "c_cowwar"))
+  expect_equal(r$dir_rule[6:7], c("b_dyadic (joiner tie)", "b_dyadic (joiner tie)"))
+  expect_equal(r$dir_flipped, r$sidea1 == 0L); expect_equal(r$dir_flipped, c(TRUE, TRUE, FALSE, FALSE, FALSE, TRUE, TRUE, FALSE, FALSE, TRUE))
+  expect_equal(r$b_c_disagree, c(FALSE, FALSE, FALSE, FALSE, TRUE, FALSE, TRUE, FALSE, TRUE, FALSE))   # D1 decides and differs from (b), any dyad
+  expect_equal(r$dir_changed, c(FALSE, FALSE, FALSE, FALSE, TRUE, FALSE, TRUE, FALSE, FALSE, FALSE))   # war dyads the previous (c)-first order gave to D1
+  expect_equal(names(DYMID_DIR_LABELS), c("a_joiner_orig", "a_joiner_later", "b_dyadic", "c_cowwar", "fallback_sideA"))
   ## reoriented rows swap every pair column; no late-target event remains
   expect_equal(unlist(r[1, c("orig1", "orig2", "fatality1", "fatality2", "hostlev1", "hostlev2")]), c(orig1 = 1, orig2 = 1, fatality1 = 2, fatality2 = 1, hostlev1 = 4, hostlev2 = 3))
   expect_false(any(r$orig1 == 1L & r$orig2 == 0L))
@@ -216,6 +239,11 @@ test_that("real dymid build (when built): the PI's cases, counts per sample and 
   expect_true(all(c("in_fmidany", "w_fmidany", "fatal_any", "ev_source") %in% names(ev))); expect_false("in_fmidcow" %in% names(ev))
   expect_true(all(ne$in_fmidany[ne$in_fmid])); expect_true(all(ne$in_fmidub[ne$in_fmid])); expect_true(all(ne$in_fmid[ne$in_war]))
   expect_false(any(ne$orig1 == 1L & ne$orig2 == 0L))
+  ## fmidub (2026-11-05): a dyad coded non-fatal by its dyadic fatlev (0) is in fmidub only through the strict rule or war
+  expect_false(any(ev$fatal_ub & !ev$fatal_main & ev$fatality_disp %in% 0L))
+  ## README 6.9 examples: Morocco -> Iraq 1990 (dispute 3957) is a mid event by rule (a), not fmid; the war-only dyad 816 -> 811 1970 (1617) is an escalation
+  mi <- ev |> filter(initiator == 600L, target == 645L, year == 1990L); expect_equal(nrow(mi), 1L); expect_true(mi$in_mid); expect_false(mi$in_fmid); expect_equal(mi$dir_source, "a_joiner_orig")
+  wo <- ev |> filter(ev_source == "ddiw_only"); expect_equal(paste(wo$dispnum, wo$initiator, wo$target, wo$year), "1617 816 811 1970"); expect_true(wo$escalation)
   ro <- readRDS(file.path(dir, "roles_aprime.rds")); expect_false(any(ro$grp_aprime == 3L))
   pl <- readRDS(file.path(dir, "stage1_panel_lag3.rds")); expect_true(all(paste0("y1_", EVENTS_SAMPLES$dymid) %in% names(pl)))
   for (s in EVENTS_SAMPLES$dymid) {

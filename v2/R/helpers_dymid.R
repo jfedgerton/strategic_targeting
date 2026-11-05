@@ -6,7 +6,7 @@
 ##   dyadic_mid_4.03.csv     Maoz et al., Dyadic MID 4.03 (1816-2014): one row per DIRECTED dyad-year of a dyadic dispute, both directions
 ##                           listed (A, B) and (B, A); only directly interacting pairs. In 4.03 the column dyindex is an integer equal to disno
 ##                           on every row (the .001 dyad suffix of 4.01 is lost), so it cannot identify a dyad: the dyadic dispute is keyed by
-##                           (disno, unordered pair) here, and a pair re-entering the same dispute (separate dyindices in 4.01; 27 pairs, mostly
+##                           (disno, unordered pair) here, and a pair re-entering the same dispute (separate dyindices in 4.01; 25 pairs, 18 in
 ##                           WWI / WWII) is ONE event dated by its first spell (the later spells stay in the already-fighting spells).
 ##   directed_dyadic_war.csv Maoz, Directed Dyadic Interstate War data (1816-2010): one row per directed war dyad-year (warnum = COW war number,
 ##                           disno, dyindex with the decimal suffix). A dyadic war = direct battles with >= 1,000 battle deaths across both states.
@@ -15,9 +15,13 @@
 DYMID_CSV_SHA256 <- "9d26eedd792a0067f590f038c3b7b240bd373cd70200ee729241e1078c6957c3"   # data_raw/dymid/dyadic_mid_4.03.csv
 DDIW_CSV_SHA256  <- "aa2eb5244a0cb0b579867e50eb02e4297fb29250e67120fb132e3c0618dceda0"   # data_raw/dymid/directed_dyadic_war.csv
 DYMID_DIR_LABELS <- c(a_joiner_orig = "(a) exactly one joiner: the joiner initiates", a_joiner_later = "(a) two joiners: the later entrant initiates",
-                      c_cowwar = "(c) war dyad, both originators (or a joiner tie): COW war-initiating side (D1)",
                       b_dyadic = "(b) both originators (or a joiner tie): the dataset's dyadic initiator (dyad_rolea / wardyadrolea = 1)",
+                      c_cowwar = "(c) war dyad that (a) and (b) do not decide (no dyadic initiator): COW war-initiating side (D1)",
                       fallback_sideA = "no rule decides (simultaneous first action, no D1 decision): COW Side A kept")
+## the codebook values of DYMID recip (1 = reciprocated, initiator not identifiable, roles assigned randomly; 0 = not). 4.03 also carries recip = 2 on
+## 4 rows (dispute 4721, 2012: 731 - 732 and 731 - 740, both directions), a value the codebook does not define: accepted explicitly and treated as
+## NOT reciprocated (recip flag = recip == 1); any other value stops read_dymid()
+DYMID_RECIP_CODEBOOK <- 0:1; DYMID_RECIP_UNDOCUMENTED <- 2L
 
 ## na9(v): the DYMID / COW missing codes (negative) as NA
 na9 <- function(v) ifelse(v < 0L, NA_integer_, as.integer(v))
@@ -35,12 +39,16 @@ read_dymid <- function(path) {
   stopifnot(!anyNA(x[, c("disno", "statea", "stateb", "year", "strtyr", "strtmnth", "endyear", "endmnth", "orignata", "orignatb", "dyad_rolea", "war")]),
             all(x$statea != x$stateb), all(x$strtmnth %in% 1:12), all(x$endmnth %in% 1:12), all(x$war %in% 0:1), all(x$orignata %in% 0:1),
             all(x$dyad_rolea %in% 1:3), all(x$strtyr <= x$year))
+  bad_r <- is.na(x$recip) | !x$recip %in% c(DYMID_RECIP_CODEBOOK, DYMID_RECIP_UNDOCUMENTED)
+  if (any(bad_r)) stop("read_dymid: recip takes values outside {0, 1} and the documented undocumented code 2 on ", sum(bad_r), " rows: ", paste(unique(x$recip[bad_r]), collapse = ", "))
+  attr_r2 <- x[x$recip == DYMID_RECIP_UNDOCUMENTED, c("disno", "statea", "stateb", "year", "recip")]
   if (!all(x$dyindex == x$disno)) stop("read_dymid: dyindex differs from disno on some rows; the (disno, pair) key of helpers_dymid.R assumes the 4.03 truncation, review")
   ## both directions of every dyad-year: the multiset of (disno, a, b, year) keys of the A < B rows equals that of the A > B rows. The start month of
   ## the two copies differs on a few rows (3250 Russia - China 1900: July / August); the A < B copy is used, the count is in attr "n_start_mismatch"
   k <- function(d, s = FALSE) sort(paste(d$disno, pmin(d$statea, d$stateb), pmax(d$statea, d$stateb), d$year, if (s) paste(d$strtyr, d$strtmnth) else ""))
   if (!identical(k(x[x$statea < x$stateb, ]), k(x[x$statea > x$stateb, ]))) stop("read_dymid: the two directions of the dyad-years do not mirror each other")
   attr(x, "n_start_mismatch") <- length(setdiff(k(x[x$statea < x$stateb, ], TRUE), k(x[x$statea > x$stateb, ], TRUE)))
+  attr(x, "recip2_rows") <- attr_r2          # the recip = 2 rows (not in the codebook; treated as recip = 0), for the build log
   x
 }
 ## read_ddiw(path): the columns of the Directed Dyadic Interstate War data the build uses
@@ -79,13 +87,14 @@ read_ddiw <- function(path) {
 ##   init_dyadic                 the dyadic initiator of the FIRST spell (dyad_rolea == 1 -> a, == 3 -> b, == 2 simultaneous -> NA); NA as well when
 ##                               the first-spell rows disagree (counted: role_varies_first); role_varies = dyad_rolea differs over all the dyad's rows
 ##   orig_a_dy / orig_b_dy       DYMID orignata / orignatb (max over the rows; orig_varies counts disagreement)
-##   recip                       any row with recip == 1 (the codebook: initiator unidentifiable, roles assigned randomly)
+##   recip                       any row with recip == 1 (the codebook: initiator unidentifiable, roles assigned randomly); recip = 2 (undocumented,
+##                               read_dymid()) counts as NOT reciprocated, explicitly; recip_code2 = any row with recip == 2 (for the log)
 ##   hihosta / hihostb / hihost  max over the rows
 ## attr "years": one row per (disno, a, b, year) with the row's spell start / end month and the DYMID sides of a / b (sideaa / sideab).
 dymid_dyads <- function(dy) {
   r <- dy[dy$statea < dy$stateb, ] |> rename(a = statea, b = stateb) |>
     mutate(rs = ym_index(strtyr, strtmnth), re = ym_index(endyear, endmnth), fatlev = na9(fatlev), fatleva = na9(fatleva), fatlevb = na9(fatlevb))
-  ## row-level dates are rs / re so that no summarise() expression below sees an already-reduced column
+  ## row-level dates are rs / re so that no summarise() expression below sees an already-reduced column (recip_code2 before recip, for the same reason)
   out <- r |> group_by(disno, a, b) |> arrange(rs, year, .by_group = TRUE) |>
     summarise(onset_year = min(strtyr), start_ym = min(rs), end_ym = max(re), y_first = min(year), y_last = max(year),
               n_spells = n_distinct(rs), n_rows = n(),
@@ -94,7 +103,7 @@ dymid_dyads <- function(dy) {
               war_dymid = any(war == 1L),
               role_first = list(unique(dyad_rolea[rs == min(rs)])), role_varies = n_distinct(dyad_rolea) > 1L,
               orig_a_dy = max(orignata), orig_b_dy = max(orignatb), orig_varies = n_distinct(orignata) > 1L | n_distinct(orignatb) > 1L,
-              recip = any(recip == 1L), hihosta = max_na(hihosta), hihostb = max_na(hihostb), hihost = max_na(hihost), .groups = "drop")
+              recip_code2 = any(recip == DYMID_RECIP_UNDOCUMENTED), recip = any(recip == 1L), hihosta = max_na(hihosta), hihostb = max_na(hihostb), hihost = max_na(hihost), .groups = "drop")
   out <- out |> mutate(role_varies_first = lengths(role_first) > 1L,
                        role1 = vapply(role_first, function(z) if (length(z) == 1L) as.integer(z) else NA_integer_, 1L),
                        init_dyadic = case_when(role1 == 1L ~ a, role1 == 3L ~ b, TRUE ~ NA_integer_)) |> select(-role_first, -role1)
@@ -140,7 +149,7 @@ dymid_link <- function(dyads, wdy) {
   wo <- wdy |> anti_join(dyads, by = c("disno", "a", "b")) |>
     transmute(disno, a, b, onset_year = war_onset_year, start_ym = war_start_ym, end_ym = war_end_ym, y_first, y_last, n_spells = 1L, n_rows = NA_integer_,
               war_dymid = FALSE, war_ddiw = TRUE, warnum_ddiw = warnum, war_start_ym, war_end_ym, war_onset_year, init_wardyadic, warole_a, warole_b,
-              dyindex_ddiw = dyindex, source = "ddiw_only", init_b = init_wardyadic, init_dyadic = NA_integer_, recip = FALSE, role_varies = FALSE,
+              dyindex_ddiw = dyindex, source = "ddiw_only", init_b = init_wardyadic, init_dyadic = NA_integer_, recip = FALSE, recip_code2 = FALSE, role_varies = FALSE,
               role_varies_first = FALSE, orig_varies = FALSE)
   out <- bind_rows(m, wo) |> mutate(war = war_dymid | war_ddiw) |> arrange(disno, a, b)
   stopifnot(!anyDuplicated(out[, c("disno", "a", "b")]), nrow(out) == nrow(dyads) + nrow(wo), !anyNA(out$war), !anyNA(out$onset_year))
@@ -259,7 +268,7 @@ dymid_disputes <- function(disp_cow, dy, evd, dd_ev) {
   dy_disp <- r |> group_by(dispnum = disno) |> summarise(sd = min(sd), ed = max(ed), hihost = max_na(hihost), fatlev = max_na(na9(fatlev)), .groups = "drop")
   wd <- evd |> filter(war) |> distinct(dispnum = disno) |> mutate(has_war = TRUE)
   new_ids <- setdiff(ids, cw$dispnum)
-  ## a war-only dyad whose dispute number is in neither COW nor DYMID (1617, Cambodia - South Vietnam 1970): dated by the dyadic war
+  ## a war-only dyad whose dispute number is in neither COW nor DYMID (1617, Cambodia (811) - North Vietnam / DRV (816), 1970): dated by the dyadic war
   wo <- evd |> filter(source == "ddiw_only", disno %in% setdiff(new_ids, dy_disp$dispnum))
   if (nrow(wo)) wo <- wo |> group_by(dispnum = disno) |>
     summarise(sd = as.Date(sprintf("%d-%02d-01", ym_year(min(start_ym)), min(start_ym) %% 12L + 1L)),
@@ -304,34 +313,43 @@ dymid_override_pdi <- function(pdi, years) {
 ## dymid_fatal_codes(fatleva, fatlevb, fatlev, war): the fatality codings of the dymid samples (fatality levels already max-over-years, NA = missing)
 ##   strict (fmid, MAIN) : fatleva >= 1 AND fatlevb >= 1 (both states suffered deaths in this dyad's fighting), OR a war dyad; missing -> not fatal
 ##   any    (fmidany)    : fatlev >= 1 (the dyadic dispute's fatality, either side) or fatleva >= 1 or fatlevb >= 1, OR a war dyad
-##   ub     (fmidub)     : the strict rule with a missing fatleva / fatlevb counted as fatal (bounds check), OR a war dyad
-## Returns a data.frame of three logicals, never NA; strict implies any and ub.
+##   ub     (fmidub)     : upper bound for the missing per-state fields (PI decision 2026-11-05): the strict rule, OR a war dyad, OR one side >= 1
+##                         and the other side missing, OR both sides missing and the dyadic fatlev >= 1 or missing. A dyad whose dyadic fatlev is
+##                         0 (coded non-fatal) is never made fatal by a missing side (it is fatal under ub only through the strict rule or war).
+## Returns a data.frame of three logicals, never NA, plus ub_branch (the first branch that makes a dyad ub-fatal: "strict", "one_side_missing",
+## "both_missing", or "none"); strict implies any and ub (asserted).
 dymid_fatal_codes <- function(fatleva, fatlevb, fatlev, war) {
   n <- length(war); stopifnot(length(fatleva) == n, length(fatlevb) == n, length(fatlev) == n, !anyNA(war))
-  strict <- war | (fatleva %in% 1:6 & fatlevb %in% 1:6)
-  any_ <- war | fatlev %in% 1:6 | fatleva %in% 1:6 | fatlevb %in% 1:6
-  ub <- war | ((fatleva %in% 1:6 | is.na(fatleva)) & (fatlevb %in% 1:6 | is.na(fatlevb)))
-  stopifnot(all(any_[strict]), all(ub[strict]))
-  data.frame(strict = strict, any = any_, ub = ub)
+  f1 <- function(v) v %in% 1:6
+  strict <- war | (f1(fatleva) & f1(fatlevb))
+  any_ <- war | f1(fatlev) | f1(fatleva) | f1(fatlevb)
+  dy_not0 <- !(fatlev %in% 0L)                                                    # the dyadic fatlev is not coded 0 (>= 1 or missing)
+  one_miss <- dy_not0 & ((f1(fatleva) & is.na(fatlevb)) | (is.na(fatleva) & f1(fatlevb)))
+  both_miss <- is.na(fatleva) & is.na(fatlevb) & (f1(fatlev) | is.na(fatlev))
+  ub <- strict | one_miss | both_miss
+  stopifnot(!anyNA(strict), !anyNA(any_), !anyNA(ub), all(any_[strict]), all(ub[strict]), !any(ub & !strict & fatlev %in% 0L))
+  data.frame(strict = strict, any = any_, ub = ub,
+             ub_branch = ifelse(strict, "strict", ifelse(one_miss, "one_side_missing", ifelse(both_miss, "both_missing", "none"))))
 }
 
 ## dymid_direction(ev, psd): the initiator of every event dyad. ev = one row per event dyad oriented COW Side A -> Side B in its onset year (dispnum,
 ## initiator, target, year, sidea1 = 1, sidea2 = 0, orig1, orig2, fatality1 / 2, hostlev1 / 2) with war (logical), d1_init (the D1 initiator from
 ## cow_war_direction(): the COW war-initiating side's state, NA when D1 does not decide) and init_b (the rule-(b) dyadic initiator, NA when simultaneous).
-## Rules, in the PI's order:
+## Rules, in the PI's order (PI decision 2026-11-05: (a) -> (b) -> (c)):
 ##   (a) the entry rule of section 6.8 adapted to dyads (entry_later_direction(), the existing participant-date logic): exactly one joiner -> the joiner
 ##       initiates; two joiners -> the later entrant initiates; an exact tie falls through
-##   (c) war dyads with both originators (or a joiner tie): the COW war-initiating side (D1, as in the pairs build) where D1 decides
-##   (b) otherwise: the dataset's dyadic initiator (DYMID dyad_rolea == 1 / the war data's wardyadrolea == 1 for war-only dyads)
-##   neither decides (simultaneous first action and no D1 decision): COW Side A kept, listed as fallback_sideA
-## (c) is placed before (b) for war dyads so a war dyad keeps the direction the pairs and entry builds give it ("as now"); the build logs how often (b)
-## and (c) disagree. Returns ev reoriented, with dir_source (one of names(DYMID_DIR_LABELS)), dir_rule (the same plus " (joiner tie)" for ties),
-## dir_flipped (= the initiator is not on COW Side A), entry_reversed / entry_rule (entry_later_direction()), init_c / init_b kept for the log.
+##   (b) both originators (or a joiner tie): the dataset's dyadic initiator (DYMID dyad_rolea == 1 / the war data's wardyadrolea == 1 for war-only dyads)
+##   (c) only when (a) and (b) cannot decide (no dyadic initiator) and the dyad is a war dyad: the COW war-initiating side (D1, as in the pairs build)
+##   none decides (simultaneous first action and no D1 decision): COW Side A kept, listed as fallback_sideA
+## Until 2026-11-05 (c) ran before (b) for war dyads; dir_changed marks the events whose initiator differs from what that order gave (a war dyad
+## where D1 and (b) disagree and (a) does not decide). No half-weight / both-directions option (PI declined). Returns ev reoriented, with dir_source
+## (one of names(DYMID_DIR_LABELS)), dir_rule (the same plus " (joiner tie)" for ties), dir_flipped (= the initiator is not on COW Side A),
+## entry_reversed / entry_rule (entry_later_direction()), b_c_disagree (D1 decides and differs from (b), any dyad), dir_changed.
 dymid_direction <- function(ev, psd) {
   stopifnot(all(c("dispnum", "initiator", "target", "year", "sidea1", "sidea2", "orig1", "orig2", "fatality1", "fatality2", "hostlev1", "hostlev2", "war", "d1_init", "init_b") %in% names(ev)),
             all(ev$sidea1 == 1L), all(ev$sidea2 == 0L), !anyNA(ev$war))
   stopifnot(all(is.na(ev$d1_init) | ev$d1_init == ev$initiator | ev$d1_init == ev$target), all(is.na(ev$init_b) | ev$init_b == ev$initiator | ev$init_b == ev$target))
-  pre <- case_when(ev$war & !is.na(ev$d1_init) ~ "c_cowwar", !is.na(ev$init_b) ~ "b_dyadic", TRUE ~ "fallback_sideA")
+  pre <- case_when(!is.na(ev$init_b) ~ "b_dyadic", ev$war & !is.na(ev$d1_init) ~ "c_cowwar", TRUE ~ "fallback_sideA")
   init0 <- ifelse(pre == "c_cowwar", ev$d1_init, ifelse(pre == "b_dyadic", ev$init_b, ev$initiator))
   out <- ev; f <- init0 == ev$target
   swap <- function(x, y) { tmp <- out[[x]][f]; out[[x]][f] <<- out[[y]][f]; out[[y]][f] <<- tmp }
@@ -341,7 +359,11 @@ dymid_direction <- function(ev, psd) {
   out$dir_source <- ifelse(out$entry_rule == "joiner_orig", "a_joiner_orig", ifelse(out$entry_rule == "joiner_joiner_later", "a_joiner_later", pre))
   out$dir_rule <- ifelse(out$entry_rule == "joiner_joiner_tie", paste0(pre, " (joiner tie)"), out$dir_source)
   out$dir_flipped <- out$sidea1 == 0L
-  out$b_c_disagree <- ev$war & !is.na(ev$d1_init) & !is.na(ev$init_b) & ev$d1_init != ev$init_b
+  out$b_c_disagree <- !is.na(ev$d1_init) & !is.na(ev$init_b) & ev$d1_init != ev$init_b
+  ## the previous order ((c) before (b) for war dyads) gave the D1 initiator wherever (a) did not decide; the entry rule (a) does not depend on the
+  ## pre-orientation except through ties, which fall through to the pre-rule, so the change is exactly: war, disagreement, (a) not deciding
+  out$dir_changed <- ev$war & out$b_c_disagree & !out$dir_source %in% c("a_joiner_orig", "a_joiner_later")
+  stopifnot(all(out$initiator[out$dir_changed] == ev$init_b[out$dir_changed]))
   stopifnot(all(out$dir_source %in% names(DYMID_DIR_LABELS)), !any(out$orig1 == 1L & out$orig2 == 0L), all(out$sidea1 + out$sidea2 == 1L))
   out
 }

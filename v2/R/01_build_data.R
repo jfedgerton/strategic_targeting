@@ -49,7 +49,7 @@
 ## EVENT FOUNDATION (PI-approved 2026-11-04; README section 6.9): --events=pairs (main, every output above in v2/data) | --events=dymid (V2_EVENTS=dymid):
 ##   the same files in v2/data_dymid, built on the INTERACTING DYADS of Maoz's Dyadic MID 4.03 and Directed Dyadic Interstate War data (data_raw/dymid,
 ##   helpers_dymid.R) instead of the Side A x Side B pairs: one event per dyadic dispute (disno, pair), dated by the dyad's own start, direction rules
-##   (a) entry rule, (c) D1 for war dyads, (b) the dataset's dyadic initiator; samples mid / fmid (both states suffered deaths in the dyad, or war) /
+##   (a) entry rule, (b) the dataset's dyadic initiator, (c) D1 for war dyads (b) cannot decide (order of 2026-11-05); samples mid / fmid (both states suffered deaths in the dyad, or war) /
 ##   fmidany / fmidub / war. Everything after the event list reuses the code below; the conflict-history controls keep the COW source.
 ##
 ## Timing conventions (audit F5): event onset year = t. Positions x_ij = (M_i - M_j, R_i - R_j)
@@ -363,6 +363,10 @@ if (file_digest(wr_path) != DDIW_CSV_SHA256) stop("data_raw/dymid/directed_dyadi
 dy_raw <- read_dymid(dy_path); wr_raw <- read_ddiw(wr_path)
 blog("dymid sources: Dyadic MID 4.03 %d directed dyad-year rows (%d disputes, %d-%d; dyindex == disno on every row, so the dyad key is (disno, pair); A/B copies with different start months %d); Directed Dyadic War %d directed war dyad-years (%d COW wars; rows with day / month swapped and repaired %d)",
      nrow(dy_raw), n_distinct(dy_raw$disno), min(dy_raw$year), max(dy_raw$year), attr(dy_raw, "n_start_mismatch"), nrow(wr_raw), n_distinct(wr_raw$warnum), attr(wr_raw, "n_swapped"))
+r2_ <- attr(dy_raw, "recip2_rows")
+blog("dymid recip: values 0 %d, 1 %d, 2 %d rows (any other value stops read_dymid()); recip = 2 is not a codebook value and is treated EXPLICITLY as not reciprocated (recip flag = recip == 1): %s",
+     sum(dy_raw$recip == 0L), sum(dy_raw$recip == 1L), nrow(r2_), paste(sprintf("%d %d-%d %d", r2_$disno, r2_$statea, r2_$stateb, r2_$year), collapse = "; "))
+stopifnot(nrow(r2_) == 4L, all(r2_$disno == 4721L), all(r2_$year == 2012L))   # the 4 documented rows (data sha256 checked above)
 dyads <- dymid_dyads(dy_raw); wdy <- ddiw_dyads(wr_raw)
 blog("dymid dyadic disputes (disno, pair): %d in %d disputes; re-entered pairs (several start months within one dispute; ONE event dated by the first spell) %d: %s",
      nrow(dyads), n_distinct(dyads$disno), sum(dyads$n_spells > 1L), paste(sprintf("%d %d-%d (%d spells)", dyads$disno, dyads$a, dyads$b, dyads$n_spells)[dyads$n_spells > 1L], collapse = "; "))
@@ -422,13 +426,21 @@ blog("dymid direction: joiner ties falling through to (c) / (b) %d (%s); entry r
      sum(grepl("joiner tie", events$dir_rule)), paste(names(table(events$dir_rule[grepl("joiner tie", events$dir_rule)])), table(events$dir_rule[grepl("joiner tie", events$dir_rule)]), sep = "=", collapse = ", "),
      sum(events$entry_reversed), sum(events$entry_reversed & events$entry_rule == "joiner_orig"), sum(events$entry_reversed & events$entry_rule == "joiner_joiner_later"),
      attr(events, "diagnostics")$n_spell_fallback)
-blog("dymid direction: war dyads with both originators where (c) D1 and (b) the dyadic initiator DISAGREE %d (decided by (c)); (b)-decided events with recip == 1 (the codebook's random roles) %d of %d; merged war dyads decided by (b) whose war-data dyadic initiator differs %d; non-war dyads in war-level disputes where D1 would decide differently from (b) (not applied: (c) is for war dyads) %d",
-     sum(events$b_c_disagree & events$dir_source == "c_cowwar"), sum(events$dir_source == "b_dyadic" & events$recip), sum(events$dir_source == "b_dyadic"),
-     sum(events$dir_source == "b_dyadic" & events$ev_source == "merged" & events$init_wardyadic != events$initiator),
-     sum(!ev0$war & !is.na(ev0$d1_init) & !is.na(ev0$init_b) & ev0$d1_init != ev0$init_b))
+blog("dymid direction (order (a) -> (b) -> (c), PI decision 2026-11-05): dyads where D1 decides and differs from (b) the dyadic initiator %d (war dyads %d, non-war dyads in war-level disputes %d); decided by (a) %d, by (b) %d, by (c) %d; DIRECTION CHANGED against the previous order ((c) before (b) for war dyads) %d events (escalations included); (b)-decided events with recip == 1 (the codebook's random roles) %d of %d; merged war dyads decided by (b) whose war-data dyadic initiator differs %d",
+     sum(events$b_c_disagree), sum(events$b_c_disagree & ev0$war), sum(events$b_c_disagree & !ev0$war),
+     sum(events$b_c_disagree & events$dir_source %in% c("a_joiner_orig", "a_joiner_later")), sum(events$b_c_disagree & events$dir_source == "b_dyadic"), sum(events$b_c_disagree & events$dir_source == "c_cowwar"),
+     sum(events$dir_changed), sum(events$dir_source == "b_dyadic" & events$recip), sum(events$dir_source == "b_dyadic"),
+     sum(events$dir_source == "b_dyadic" & events$ev_source == "merged" & events$init_wardyadic != events$initiator))
+bcd_ <- events |> filter(b_c_disagree) |> arrange(desc(dir_changed), desc(war), dispnum, year, initiator)
+cat("  every dyad where D1 and (b) disagree (initiator -> target as decided now; changed = the previous order gave target -> initiator):\n", file = build_log, append = TRUE)
+for (r in seq_len(nrow(bcd_))) cat(sprintf("    disno %4d  %3d -> %3d  %d  war %-5s recip %d  decided by %-26s %s\n", bcd_$dispnum[r], bcd_$initiator[r], bcd_$target[r], bcd_$year[r],
+                                           bcd_$war[r], as.integer(bcd_$recip[r]), bcd_$dir_rule[r], if (bcd_$dir_changed[r]) "CHANGED (previously decided by (c) D1)" else "unchanged"),
+                                   file = build_log, append = TRUE)
+stopifnot(all(events$dir_changed == (events$b_c_disagree & ev0$war & events$dir_source == "b_dyadic")))   # (c) never decides a dyad (b) can decide
 fb_ <- events |> filter(dir_source == "fallback_sideA")
 blog("dymid direction: ambiguous events (no rule decides; COW Side A kept) %d%s", nrow(fb_), if (nrow(fb_)) paste0(": ", paste(sprintf("%d %d->%d %d", fb_$dispnum, fb_$initiator, fb_$target, fb_$year), collapse = "; ")) else "")
-events <- events |> mutate(war_link = coalesce(war_link, warnum_ddiw)) |> select(-d1_init, -init_b, -init_wardyadic, -war, -b_c_disagree)
+dir_changed_keys_ <- events |> filter(dir_changed) |> select(dispnum, initiator, target, year)   # for the per-sample counts after the fatal coding
+events <- events |> mutate(war_link = coalesce(war_link, warnum_ddiw)) |> select(-d1_init, -init_b, -init_wardyadic, -war, -b_c_disagree, -dir_changed)
 attr(events, "diagnostics") <- NULL
 ## the PI's cases (verified on the data before hard-coding): Germany -> Poland 1939 (dispute 258, a war dyad of both sources) exists and Poland -> Germany
 ## 1939 does not; Japan and Poland never interacted, so no event links them in any year
@@ -437,7 +449,7 @@ stopifnot(any(events$initiator == 255L & events$target == 290L & events$year == 
 blog("dymid events: %d directed events (one per event dyad); Germany -> Poland 1939 (dispute 258) present, Poland -> Germany 1939 absent, no Japan - Poland event (asserted); direction source %s",
      nrow(events), paste(names(table(events$dir_source)), table(events$dir_source), sep = "=", collapse = ", "))
 n_ev_dir <- nrow(events)
-rm(on_, ev0, d1, dir_tab, fb_, fw, pd_, cons_, lc, n9)
+rm(on_, ev0, d1, dir_tab, fb_, fw, pd_, cons_, lc, n9, bcd_, r2_)
 }
 events <- events |>
   mutate(is_joiner_pair = orig1 == 0L | orig2 == 0L,          # tabulation only; NOT a model covariate (originator status moved with the state)
@@ -697,7 +709,8 @@ stopifnot(nrow(events) == n_ev_before, !anyNA(events$in_fmid), !anyNA(events$in_
 ## dyad's fatleva / fatlevb / fatlev (max over its years; missing -> NA). MIC and GML are not used: the dyadic codes are the source.
 ##   fmid (MAIN) : both states suffered deaths in this dyad's fighting (fatleva >= 1 AND fatlevb >= 1), or a war dyad; a missing side -> not fatal
 ##   fmidany     : the dyadic dispute was fatal (fatlev >= 1, or either side >= 1), or a war dyad
-##   fmidub      : fmid with a missing side counted fatal (bounds check)
+##   fmidub      : upper bound for missing per-state fields (PI decision 2026-11-05): strict, OR war, OR one side >= 1 and the other missing, OR both
+##                 missing and the dyadic fatlev >= 1 or missing; a dyad with dyadic fatlev = 0 is never fatal through a missing side
 fc_ <- dymid_fatal_codes(na9(events$fatality1), na9(events$fatality2), na9(events$fatality_disp), events$war)
 events <- events |>
   mutate(fatal_main = fc_$strict, fatal_any = fc_$any, fatal_ub = fc_$ub,
@@ -715,12 +728,22 @@ stopifnot(nrow(events) == n_ev_before, !anyNA(events$in_fmid), !anyNA(events$in_
 blog("dymid fatal coding (escalations included): strict (fmid) %d, any (fmidany) %d, upper bound (fmidub) %d, war %d; fatal_source %s; events where only fatlev (not fatleva / fatlevb) makes them fatal under fmidany %d; dyadic codes inconsistent (a side >= 1 while fatlev = 0) %d",
      sum(events$fatal_main), sum(events$fatal_any), sum(events$fatal_ub), sum(events$war), paste(names(table(events$fatal_source)), table(events$fatal_source), sep = "=", collapse = ", "),
      sum(events$fatal_any & !events$war & !(events$fatal1 %in% TRUE) & !(events$fatal2 %in% TRUE)), sum((events$fatal1 %in% TRUE | events$fatal2 %in% TRUE) & events$fatality_disp == 0L))
+ub_old_ <- events$war | ((events$fatal1 %in% TRUE | is.na(events$fatal1)) & (events$fatal2 %in% TRUE | is.na(events$fatal2)))   # the definition before 2026-11-05, log only
+blog("dymid fmidub (PI decision 2026-11-05), pre-collapse: escalations included %d events (strict %d, one side >= 1 and the other missing %d, both sides missing with dyadic fatlev >= 1 or missing %d); non-escalation %d (strict %d, one side missing %d, both missing %d); the previous definition (missing side = fatal, whatever fatlev) gave %d / %d; removed by the fatlev = 0 rule and the one-side-0 rule %d non-escalation events; strict subset of fmidub (asserted)",
+     sum(events$fatal_ub), sum(fc_$ub_branch == "strict"), sum(fc_$ub_branch == "one_side_missing"), sum(fc_$ub_branch == "both_missing"),
+     sum(events$in_fmidub), sum(events$in_fmidub & fc_$ub_branch == "strict"), sum(events$in_fmidub & fc_$ub_branch == "one_side_missing"), sum(events$in_fmidub & fc_$ub_branch == "both_missing"),
+     sum(ub_old_), sum(ub_old_ & !events$escalation), sum(ub_old_ & !events$escalation & !events$fatal_ub))
+stopifnot(all(events$fatal_ub[events$fatal_main]), all(ub_old_[events$fatal_ub]))
+dch_ <- events |> semi_join(dir_changed_keys_, by = c("dispnum", "initiator", "target", "year"))
+stopifnot(nrow(dch_) == nrow(dir_changed_keys_))
+blog("dymid direction changed against the previous order, by sample (pre-collapse, non-escalation): mid %d, fmid %d, fmidany %d, fmidub %d, war %d (escalations %d)",
+     sum(dch_$in_mid), sum(dch_$in_fmid), sum(dch_$in_fmidany), sum(dch_$in_fmidub), sum(dch_$in_war), sum(dch_$escalation))
 for (g in c("originator initiator", "joiner initiator")) {
   f <- if (g == "originator initiator") events$orig1 == 1L else events$orig1 == 0L
   blog("  dymid fatal coding, %s (%d events): a side missing (not fatal under fmid, fatal under fmidub) %d; strict %d, any %d; missing fatleva or fatlevb among the non-war events %d",
        g, sum(f), sum(f & !events$fatal_main & events$fatal_ub), sum(f & events$fatal_main), sum(f & events$fatal_any), sum(f & !events$war & (is.na(events$fatal1) | is.na(events$fatal2))))
 }
-rm(fc_)
+rm(fc_, ub_old_, dch_, dir_changed_keys_)
 }
 ## ---- stage-2 event weights (PI decision 2026-10-25, D8; README "Coalition expansion") ---------------------------------------
 ## w_<sample> = 1 / (number of the initiator's targets in the same dispute and onset year that are in the sample), computed on the
@@ -958,7 +981,12 @@ if (EVENTS == "dymid") {
   stopifnot(nrow(rb_) == nrow(roles_ap), !any(rb_$grp_aprime == 3L))
   for (s in SAMPLES_EV) { f <- rb_[[paste0("in_", s)]]
     blog("  dymid events by bcj group, sample %-7s: %4d events; bilateral %4d, coalition originator %4d, joiner %4d", s, sum(f), sum(f & rb_$grp_aprime == 0L), sum(f & rb_$grp_aprime == 1L), sum(f & rb_$grp_aprime == 2L)) }
-  rm(rb_)
+  ## recip after the collapse, and how DYMID's dyadic initiator relates to COW Side A on the recip dyads with two originators (all decided by (b))
+  ne_ <- events |> filter(!escalation)
+  for (s in SAMPLES_EV) { f <- ne_[[paste0("in_", s)]]; oo <- f & ne_$recip & ne_$orig1 == 1L & ne_$orig2 == 1L
+    blog("  dymid recip, sample %-7s (after the collapse): %4d of %4d events have recip == 1; recip events with two originators %d, of which the dyadic initiator (dyad_rolea) is COW Side A %d (%.1f%%; decided by (b) %d)",
+         s, sum(f & ne_$recip), sum(f), sum(oo), sum(oo & !ne_$dir_flipped), 100 * mean(!ne_$dir_flipped[oo]), sum(oo & ne_$dir_source == "b_dyadic")) }
+  rm(rb_, ne_)
 }
 rm(roles_pre, roles_src, roles_mixed, rd, jset_pre, jd, jn_keys, jsz)
 saveRDS(events, file.path(out_dir, "events.rds"))
@@ -1130,7 +1158,7 @@ add_manifest <- function(obj, fname, note) {
   blog("wrote %s: %d x %d", fname, nrow(obj), ncol(obj))
 }
 add_manifest(pos, "sy_positions.rds", "state-year positions: M = log CINC share, R_pr = log PageRank (raw log shares), R_eig std within year")
-add_manifest(events, "events.rds", if (EVENTS == "dymid") "directed events of the INTERACTING-DYADS foundation (events = dymid, 2026-11-04): one per dyadic dispute (disno, pair) of Dyadic MID 4.03 plus the war-only dyads of the Directed Dyadic War data; direction rules (a) entry rule, (c) D1 for war dyads, (b) dyadic initiator (dir_source); war = war dyad (war_ddiw | war_dymid); fatal_main = both sides fatal or war (fmid), fatal_any (fmidany), fatal_ub (fmidub); month-rule escalation on the event dyads' own spells; same-year duplicates collapsed; fighting_at_ref; is_ww2; target_has_pos_tm1; stage-2 weights w_<sample>; coalition context" else sprintf("directed events (Side A x Side B pairs; DIRECTION=%s: war-level disputes follow COW's war-initiating side, dir_flipped / dir_source / war_link), joiners %s (is_joiner_pair); month-rule escalation flag with participant-level dates where gml_part matches (excluded from all in_* flags); pair-level war; same-year duplicates collapsed (dispnums); fighting_at_ref; is_ww2; target_has_pos_tm1; stage-2 weights w_<sample>; coalition context coal_incl / coal_strict / coal_onset_ambiguous",
+add_manifest(events, "events.rds", if (EVENTS == "dymid") "directed events of the INTERACTING-DYADS foundation (events = dymid, 2026-11-04): one per dyadic dispute (disno, pair) of Dyadic MID 4.03 plus the war-only dyads of the Directed Dyadic War data; direction rules (a) entry rule, (b) dyadic initiator, (c) D1 for war dyads (b) cannot decide (dir_source; order of 2026-11-05); war = war dyad (war_ddiw | war_dymid); fatal_main = both sides fatal or war (fmid), fatal_any (fmidany), fatal_ub (fmidub: strict, war, one side fatal and the other missing, or both missing with dyadic fatlev >= 1 or missing; 2026-11-05); month-rule escalation on the event dyads' own spells; same-year duplicates collapsed; fighting_at_ref; is_ww2; target_has_pos_tm1; stage-2 weights w_<sample>; coalition context" else sprintf("directed events (Side A x Side B pairs; DIRECTION=%s: war-level disputes follow COW's war-initiating side, dir_flipped / dir_source / war_link), joiners %s (is_joiner_pair); month-rule escalation flag with participant-level dates where gml_part matches (excluded from all in_* flags); pair-level war; same-year duplicates collapsed (dispnums); fighting_at_ref; is_ww2; target_has_pos_tm1; stage-2 weights w_<sample>; coalition context coal_incl / coal_strict / coal_onset_ambiguous",
                                            DIRECTION, if (INCLUDE_JOINERS) "included" else "excluded"))
 add_manifest(roles_ap, "roles_aprime.rds", "stage-2 role groups aprime per non-escalation event (PI decision 2026-10-31; switch roles = aprime): grp_aprime 0 alone originator / 1 co-originator / 2 joiner / 3 target joined late, from the weight-group dispute (smallest dispnum) of a collapsed key; aprime_roles()")
 add_manifest(jset_ap, "joiner_sets_aprime.rds", "joiner choice sets (PI-approved 2026-11-04; switch joiner_set = opposing): per aprime joiner event (initiator, target, year, dispnum = its weight-group dispute) the states opp_ccode on the opposite side of that dispute in the onset year (opp_two_sides: a within-year switcher); joiner_opposing_sets()")
