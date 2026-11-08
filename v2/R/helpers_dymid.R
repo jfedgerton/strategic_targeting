@@ -263,7 +263,11 @@ dymid_dyads <- function(dy, adj = NULL, war_pairs = NULL) {
   sk <- paste(spells1$disno, spells1$a, spells1$b)
   dk_s <- paste(dis$disno, dis$a, dis$b)[dis$field == "start_ym"]; dk_e <- paste(dis$disno, dis$a, dis$b)[dis$field == "end_ym"]
   s_dis <- spells1$spell_start_ym != spells2$spell_start_ym; e_dis <- spells1$spell_end_ym != spells2$spell_end_ym
-  inner <- (s_dis & !(spells1$spell == 1L & sk %in% dk_s)) | (e_dis & !(sk %in% dk_e))
+  ## the end rule resolves ONE spell per dyad, the one carrying the latest end over both copies (which.max, the same choice as below); an end
+  ## disagreement on any other spell has no row and stops (audit P2-2, 2026-11-08)
+  emax <- pmax(spells1$spell_end_ym, spells2$spell_end_ym)
+  kmax <- ave(seq_along(emax), sk, FUN = function(i) rep(i[which.max(emax[i])], length(i)))
+  inner <- (s_dis & !(spells1$spell == 1L & sk %in% dk_s)) | (e_dis & !(seq_along(sk) == kmax & sk %in% dk_e))
   if (any(inner)) stop("dymid_dyads: a copy disagreement on the dates of a spell that is not the dyad's start or end (no adjudication field for it): ",
                        paste(sprintf("dispute %d %d-%d spell %d", spells1$disno[inner], spells1$a[inner], spells1$b[inner], spells1$spell[inner]), collapse = "; "))
   spells <- spells1
@@ -286,7 +290,7 @@ dymid_dyads <- function(dy, adj = NULL, war_pairs = NULL) {
       adj$resolved_check[i] <- dymid_adj_format(f, res)
       if (rl == "fatal_ub_higher") out[[sub("_max$", "_ub", f)]][j] <- res else out[[f]][j] <- res
       if (f == "start_ym") { out$onset_year[j] <- ym_year(res); k <- spells$disno == adj$disno[i] & spells$a == adj$a[i] & spells$b == adj$b[i] & spells$spell == 1L; spells$spell_start_ym[k] <- res }
-      if (f == "end_ym") { k <- spells$disno == adj$disno[i] & spells$a == adj$a[i] & spells$b == adj$b[i]; kk <- which(k)[which.max(pmax(spells1$spell_end_ym[k], spells2$spell_end_ym[k]))]; spells$spell_end_ym[kk] <- res }
+      if (f == "end_ym") { k <- spells$disno == adj$disno[i] & spells$a == adj$a[i] & spells$b == adj$b[i]; kk <- which(k)[which.max(emax[k])]; stopifnot(kmax[kk] == kk); spells$spell_end_ym[kk] <- res }
     }
     out$copy_adjudicated[j] <- TRUE; out$adj_fields[j] <- paste(unique(c(strsplit(out$adj_fields[j], ";")[[1]], f)), collapse = ";")
   }

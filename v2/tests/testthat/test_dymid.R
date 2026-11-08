@@ -174,13 +174,15 @@ test_that("dymid_participation / dymid_disputes / dymid_override_pdi: COW pairs 
 
 ## ---- copy disagreements and the adjudication table (2026-11-08) --------------------------------------------------------------------------------
 ## toy_dy() with the A > B copy of chosen rows altered: the (B, A) row of a dyad-year says something else than the (A, B) row
-disagree_dy <- function(what = c("direction", "war", "fatal", "fatal_missing", "start", "sides", "hostility", "orig")) {
+disagree_dy <- function(what = c("direction", "war", "fatal", "fatal_missing", "start", "end_last", "end_both", "sides", "hostility", "orig")) {
   what <- match.arg(what); d <- toy_dy(); m <- d$statea > d$stateb
   if (what == "direction") { k <- m & d$disno == 1L & d$statea == 20L & d$stateb == 10L; d$dyad_rolea[k] <- 3L; d$dyad_roleb[k] <- 1L }   # 20-10 copy: 10 initiated; the 10-20 copy (dyad_rolea 3) says 20 did
   if (what == "war") d$war[m & d$disno == 1L & d$statea == 30L & d$stateb == 10L] <- 1L                          # 30-10 copy flags war, 10-30 copy does not; no war-data dyad
   if (what == "fatal") { d$fatlevb[m & d$disno == 5L & d$year == 2002L] <- 0L; d$fatlev[m & d$disno == 5L & d$year == 2002L] <- 0L }   # 14-13 copy 2002: 13's deaths (its fatlevb) 0 (copy1: 1), fatlev 0 (copy1: 1)
   if (what == "fatal_missing") d$fatlevb[m & d$disno == 5L] <- -9L                                             # 14-13 copy, both years: 13's deaths missing (copy1: max 1)
   if (what == "start") d$strtmnth[m & d$disno == 2L] <- 4L                                                       # 60-50 copy: start April (copy1: February)
+  if (what == "end_last") d$endmnth[m & d$disno == 5L & d$year == 2002L] <- 9L                                   # 14-13 copy, second spell: end September (copy1: August) = the dyad's end
+  if (what == "end_both") d$endmnth[m & d$disno == 5L] <- c(5L, 9L)[match(d$year[m & d$disno == 5L], c(2000L, 2002L))]   # ... and the FIRST spell's end May (copy1: April), not visible at the dyad level
   if (what == "sides") { d$sideaa[m & d$disno == 1L & d$statea == 40L & d$stateb == 30L] <- 0L; d$sideab[m & d$disno == 1L & d$statea == 40L & d$stateb == 30L] <- 1L }   # 40-30 copy: sides inverted
   if (what == "hostility") d$hihosta[m & d$disno == 2L] <- 5L                                                   # 60-50 copy: 60 at hostility 5 (copy1: 4)
   if (what == "orig") d$orignata[m & d$disno == 2L] <- 0L                                                       # 60-50 copy: 60 a joiner (copy1: originator): no rule for orig_a_dy / orig_b_dy
@@ -275,6 +277,11 @@ test_that("adjudication rules earliest_start / latest_end / hostility_higher / s
   d <- dymid_dyads(disagree_dy("start"), adj = adj_row(2L, 50L, 60L, "start_ym", "1990-02", "1990-04", "1990-02", "earliest_start"))
   expect_equal(d$start_ym[d$disno == 2L], ym_index(1990L, 2L)); expect_equal(attr(d, "spells")$spell_start_ym[attr(d, "spells")$disno == 2L], ym_index(1990L, 2L))
   expect_error(dymid_dyads(disagree_dy("start"), adj = adj_row(2L, 50L, 60L, "start_ym", "1990-02", "1990-04", "1990-04", "earliest_start")), "does not follow")
+  ## latest_end resolves the spell carrying the dyad's latest end only; an end disagreement on another spell of the dyad has no row and stops (P2-2)
+  er <- adj_row(5L, 13L, 14L, "end_ym", "2002-08", "2002-09", "2002-09", "latest_end")
+  d <- dymid_dyads(disagree_dy("end_last"), adj = er); sp <- attr(d, "spells")[attr(d, "spells")$disno == 5L, ]
+  expect_equal(d$end_ym[d$disno == 5L], ym_index(2002L, 9L)); expect_equal(sp$spell_end_ym, c(ym_index(2000L, 4L), ym_index(2002L, 9L)))
+  expect_error(dymid_dyads(disagree_dy("end_both"), adj = er), "dates of a spell that is not the dyad's start or end.*dispute 5 13-14 spell 1")
   d <- dymid_dyads(disagree_dy("hostility"), adj = adj_row(2L, 50L, 60L, "hihostb", "4", "5", "5", "hostility_higher")); expect_equal(d$hihostb[d$disno == 2L], 5L)
   d <- dymid_dyads(disagree_dy("sides"), adj = bind_rows(adj_row(1L, 30L, 40L, "side_a_dy", "0", "1", "NA", "sides_uninformative"), adj_row(1L, 30L, 40L, "side_b_dy", "1", "0", "NA", "sides_uninformative")))
   y <- attr(d, "years"); expect_true(all(is.na(y$side_a_dy[y$disno == 1L & y$a == 30L]))); expect_false(anyNA(y$side_a_dy[!(y$disno == 1L & y$a == 30L)]))
@@ -394,6 +401,10 @@ test_that("real dymid build (when built): the PI's cases, counts per sample and 
   nd <- ev |> filter(dispnum == 2970L, year == 1981L); expect_equal(nrow(nd), 1L); expect_equal(nd$dir_source, "fallback_sideA"); expect_equal(c(nd$initiator, nd$target), c(385L, 390L))   # Norway - Denmark: (b) uninformative, Side A kept
   cr <- ev |> filter(dispnum == 4339L, (initiator == 483L & target == 517L) | (initiator == 517L & target == 483L)); expect_equal(nrow(cr), 1L); expect_false(cr$war); expect_false(cr$in_war)   # Chad - Rwanda: no war-data dyad
   rl <- ev |> filter(dispnum == 1353L, initiator == 365L, target == 812L, year == 1962L); expect_equal(nrow(rl), 1L); expect_true(rl$in_fmidany); expect_false(rl$in_fmid); expect_false(rl$in_fmidub)   # Russia - Laos: fatlev 0 (fmid) / 6 (fmidany)
+  gs <- ev |> filter(dispnum == 3833L, year == 1939L); expect_equal(nrow(gs), 1L); expect_equal(c(gs$initiator, gs$target), c(165L, 200L)); expect_equal(gs$dir_source, "fallback_sideA")   # Uruguay -> UK (Graf Spee): the A < B copy said 200 -> 165
+  si <- ev |> filter(dispnum == 4182L, initiator == 652L, target == 666L, year == 1993L); expect_equal(nrow(si), 1L); expect_false(si$in_fmid); expect_true(si$in_fmidany); expect_true(si$in_fmidub)   # Syria -> Israel 1993: lower fatlevb 0
+  expect_false(any(ne$in_fmid & ne$dispnum == 4182L & ne$year == 1993L & ((ne$initiator == 652L & ne$target == 666L) | (ne$initiator == 666L & ne$target == 652L))))
+  expect_equal(c(sum(ne$in_mid), sum(ne$in_fmid), sum(ne$in_fmidany), sum(ne$in_fmidub), sum(ne$in_war)), c(3208L, 532L, 771L, 549L, 278L))   # post-collapse counts of 2026-11-08
   ## re-entry spells (2026-11-08): USA - Bulgaria (258) is not already fighting in 1943 (the gap Jun 1942 - Nov 1943), so both directions are lag-3 alternatives in both sets
   al <- readRDS(file.path(dir, "alts_lag3_all.rds")); ub <- al |> filter((ccode1 == 2L & ccode2 == 355L) | (ccode1 == 355L & ccode2 == 2L), year == 1943L)
   expect_equal(nrow(ub), 2L); expect_true(all(ub$in_s2 == 1L)); expect_true(all(ub$in_iv == 1L))
