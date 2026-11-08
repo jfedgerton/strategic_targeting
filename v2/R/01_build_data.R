@@ -367,8 +367,20 @@ r2_ <- attr(dy_raw, "recip2_rows")
 blog("dymid recip: values 0 %d, 1 %d, 2 %d rows (any other value stops read_dymid()); recip = 2 is not a codebook value and is treated EXPLICITLY as not reciprocated (recip flag = recip == 1): %s",
      sum(dy_raw$recip == 0L), sum(dy_raw$recip == 1L), nrow(r2_), paste(sprintf("%d %d-%d %d", r2_$disno, r2_$statea, r2_$stateb, r2_$year), collapse = "; "))
 stopifnot(nrow(r2_) == 4L, all(r2_$disno == 4721L), all(r2_$year == 2012L))   # the 4 documented rows (data sha256 checked above)
-dyads <- dymid_dyads(dy_raw); wdy <- ddiw_dyads(wr_raw)
-blog("dymid dyadic disputes (disno, pair): %d in %d disputes; re-entered pairs (several start months within one dispute; ONE event dated by the first spell) %d: %s",
+wdy <- ddiw_dyads(wr_raw)
+## the two directed copies of every dyad-dispute, validated field by field and resolved through the checked-in adjudication table (2026-11-08;
+## dymid_dyads() stops on a disagreement the table does not cover, a stale or inconsistent row, or a resolved value that does not follow from its rule)
+adj_path <- file.path(v2_root(), "data_raw", "dymid", "adjudication.csv")
+adj_tbl <- dymid_adjudication_read(adj_path)
+dyads <- dymid_dyads(dy_raw, adj = adj_tbl, war_pairs = wdy |> distinct(disno, a, b))
+adj_ <- attr(dyads, "adjudication")
+blog("dymid copy validation (2026-11-08): the two directed copies of every dyadic dispute compared on %d dyad-level fields (%s); disagreements %d on %d dyads, every one resolved by %s (%d rows; checked against the data: copy values, coverage both ways, resolved value recomputed from the rule); by field %s; by rule %s",
+     length(DYMID_COPY_FIELDS), paste(DYMID_COPY_FIELDS, collapse = ", "), nrow(distinct(adj_, disno, a, b, field)), sum(dyads$copy_adjudicated), "data_raw/dymid/adjudication.csv", nrow(adj_),
+     paste(names(table(adj_$field)), table(adj_$field), sep = "=", collapse = ", "), paste(names(table(adj_$rule)), table(adj_$rule), sep = "=", collapse = ", "))
+for (r in seq_len(nrow(adj_))) cat(sprintf("  adjudicated: dispute %4d  %3d-%3d  %-12s copy1 %-8s copy2 %-8s -> %-8s (%s; %s)%s\n", adj_$disno[r], adj_$a[r], adj_$b[r], adj_$field[r], adj_$value_copy1[r], adj_$value_copy2[r],
+                                            adj_$resolved_value[r], adj_$rule[r], adj_$applies_to[r], ifelse(nzchar(adj_$note[r]), paste0("  [", adj_$note[r], "]"), "")), file = build_log, append = TRUE)
+for (nm in unique(adj_$rule)) cat(sprintf("  rule %-24s %s\n", nm, DYMID_ADJ_RULES[[nm]]), file = build_log, append = TRUE)
+blog("dymid dyadic disputes (disno, pair): %d in %d disputes; re-entered pairs (several start months within one dispute; ONE event dated by the first spell; every spell its own activity period in the pair-dispute spells, 2026-11-08) %d: %s",
      nrow(dyads), n_distinct(dyads$disno), sum(dyads$n_spells > 1L), paste(sprintf("%d %d-%d (%d spells)", dyads$disno, dyads$a, dyads$b, dyads$n_spells)[dyads$n_spells > 1L], collapse = "; "))
 blog("dymid fatality (max over the dyad's years; -9 = missing): fatlev >= 1 %d; fatleva >= 1 AND fatlevb >= 1 %d; fatleva or fatlevb missing %d (fatlev missing %d); the last-year value differs from the max for fatlev %d, fatleva %d, fatlevb %d dyads",
      sum(dyads$fatlev_max >= 1L, na.rm = TRUE), sum(dyads$fatleva_max >= 1L & dyads$fatlevb_max >= 1L, na.rm = TRUE), sum(is.na(dyads$fatleva_max) | is.na(dyads$fatlevb_max)), sum(is.na(dyads$fatlev_max)),
@@ -377,7 +389,15 @@ blog("dymid fatality (max over the dyad's years; -9 = missing): fatlev >= 1 %d; 
 blog("dymid dyadic roles: dyad_rolea differs across a dyad's rows %d (the first spell's value is used; no first spell is ambiguous: %d); recip == 1 (initiator unidentifiable, roles assigned randomly per the codebook) %d dyads; DYMID orignat differs across a dyad's rows %d",
      sum(dyads$role_varies), sum(dyads$role_varies_first), sum(dyads$recip), sum(dyads$orig_varies))
 evd <- dymid_link(dyads, wdy); lc <- attr(evd, "counts")
-dymid_years <- attr(evd, "years")
+dymid_years <- attr(evd, "years"); dymid_spells <- attr(evd, "spells")
+## the dyad-level fatal flags of the samples that take the HIGHER code under a copy disagreement (fmidany, fmidub; symmetric in a / b, so computed
+## here, before the orientation, and carried into the events as dy_fatal_any / dy_fatal_ub / dy_ub_branch); fmid uses the lower codes below
+fc_dy <- dymid_fatal_codes(evd$fatleva_ub, evd$fatlevb_ub, evd$fatlev_ub, evd$war)
+evd <- evd |> mutate(dy_fatal_any = fc_dy$any, dy_fatal_ub = fc_dy$ub, dy_ub_branch = fc_dy$ub_branch)
+blog("dymid copy validation: dyads with an adjudicated fatality code %d (strict fmid takes the lower code, fmidany / fmidub the higher one); with an adjudicated dyadic initiator (rule (b) uninformative) %d; war flag %d; dates %d; hostility %d; sides %d",
+     sum(grepl("fatlev", evd$adj_fields)), sum(grepl("init_dyadic", evd$adj_fields)), sum(grepl("war_dymid", evd$adj_fields)), sum(grepl("start_ym|end_ym", evd$adj_fields)),
+     sum(grepl("hihost", evd$adj_fields)), sum(grepl("side_", evd$adj_fields)))
+rm(fc_dy)
 blog("dymid war linking (by disno + pair; the 4.03 dyindex is not a dyad key): war dyads (warnum, disno, pair) %d; merged with a DYMID dyad %d (DYMID war == 0 among them %d); war-only (no DYMID dyad; event dated by the war start) %d; DYMID-only war == 1 dyads (war dyads without a war-data row) %d; merged dyads whose DYMID dyadic initiator differs from the war data's %d (the DYMID dyad is the event: its initiator is rule (b))",
      lc$n_war_dyads, lc$n_merged, lc$n_merged_dymid_war0, lc$n_ddiw_only, lc$n_dymid_only_war, lc$n_merged_role_disagree)
 for (r in which(evd$source == "ddiw_only")) cat(sprintf("  war-only dyad: war %d, dispute %d, %d-%d, war start %s (dyindex %s)\n", evd$warnum_ddiw[r], evd$disno[r], evd$a[r], evd$b[r], ym_label(evd$start_ym[r]), evd$dyindex_ddiw[r]), file = build_log, append = TRUE)
@@ -407,7 +427,7 @@ ev0 <- evd |> transmute(dispnum = disno, initiator = ifelse(sa == 1L, a, b), tar
                         fatality1 = n9(ifelse(sa == 1L, fatleva_max, fatlevb_max)), fatality2 = n9(ifelse(sa == 1L, fatlevb_max, fatleva_max)),
                         hostlev1 = ifelse(source == "ddiw_only", 5L, n9(ifelse(sa == 1L, hihosta, hihostb))), hostlev2 = ifelse(source == "ddiw_only", 5L, n9(ifelse(sa == 1L, hihostb, hihosta))),
                         fatality_disp = n9(fatlev_max), ev_source = source, war_ddiw, war_dymid, warnum_ddiw, n_spells, recip = coalesce(recip, FALSE),
-                        init_b, init_wardyadic, war = war_ddiw | war_dymid) |>
+                        init_b, init_wardyadic, war = war_ddiw | war_dymid, dy_fatal_any, dy_fatal_ub, dy_ub_branch, copy_adjudicated, adj_fields) |>
   left_join(disp_evt |> select(dispnum, hostlev_disp = hostlev_ev), by = "dispnum")
 stopifnot(!anyNA(ev0$hostlev_disp), all(ev0$hostlev_disp[ev0$war] == 5L), !anyNA(ev0$orig1), !anyNA(ev0$orig2))
 war_dy <- war_dyad_years(cow_war_inter)
@@ -439,6 +459,11 @@ for (r in seq_len(nrow(bcd_))) cat(sprintf("    disno %4d  %3d -> %3d  %d  war %
 stopifnot(all(events$dir_changed == (events$b_c_disagree & ev0$war & events$dir_source == "b_dyadic")))   # (c) never decides a dyad (b) can decide
 fb_ <- events |> filter(dir_source == "fallback_sideA")
 blog("dymid direction: ambiguous events (no rule decides; COW Side A kept) %d%s", nrow(fb_), if (nrow(fb_)) paste0(": ", paste(sprintf("%d %d->%d %d", fb_$dispnum, fb_$initiator, fb_$target, fb_$year), collapse = "; ")) else "")
+## the dyads whose dyadic initiator the two copies contradict (adjudication rule direction_uninformative): (b) is skipped, the direction is (a), (c) or the fallback
+ad_ <- events |> filter(grepl("init_dyadic", adj_fields)) |> arrange(dispnum, year)
+stopifnot(!any(ad_$dir_source == "b_dyadic"))
+blog("dymid direction: events whose dyadic initiator the two directed copies contradict (adjudicated: rule (b) uninformative, so decided by (a), (c) or the fallback) %d: %s", nrow(ad_),
+     paste(sprintf("%d %d->%d %d [%s, war %s]", ad_$dispnum, ad_$initiator, ad_$target, ad_$year, ad_$dir_rule, ad_$war), collapse = "; "))
 dir_changed_keys_ <- events |> filter(dir_changed) |> select(dispnum, initiator, target, year)   # for the per-sample counts after the fatal coding
 events <- events |> mutate(war_link = coalesce(war_link, warnum_ddiw)) |> select(-d1_init, -init_b, -init_wardyadic, -war, -b_c_disagree, -dir_changed)
 attr(events, "diagnostics") <- NULL
@@ -449,7 +474,7 @@ stopifnot(any(events$initiator == 255L & events$target == 290L & events$year == 
 blog("dymid events: %d directed events (one per event dyad); Germany -> Poland 1939 (dispute 258) present, Poland -> Germany 1939 absent, no Japan - Poland event (asserted); direction source %s",
      nrow(events), paste(names(table(events$dir_source)), table(events$dir_source), sep = "=", collapse = ", "))
 n_ev_dir <- nrow(events)
-rm(on_, ev0, d1, dir_tab, fb_, fw, pd_, cons_, lc, n9, bcd_, r2_)
+rm(on_, ev0, d1, dir_tab, fb_, fw, pd_, cons_, lc, n9, bcd_, r2_, ad_, adj_)
 }
 events <- events |>
   mutate(is_joiner_pair = orig1 == 0L | orig2 == 0L,          # tabulation only; NOT a model covariate (originator status moved with the state)
@@ -494,9 +519,19 @@ pdi_nopart <- pair_dispute_intervals(dd_evt, disp_dates, part = NULL)
 pdi <- pair_dispute_intervals(dd_evt, disp_dates, part = part_tbl)
 ## events = dymid: the event dyads' spells carry the dyads' own dates (dymid_override_pdi()); the co-participant pairs keep the rule above
 if (EVENTS == "dymid") {
-  pdi_nopart <- dymid_override_pdi(pdi_nopart, dymid_years); pdi <- dymid_override_pdi(pdi, dymid_years)
+  n_pdi_runs_ <- nrow(pdi)
+  pdi_nopart <- dymid_override_pdi(pdi_nopart, dymid_spells); pdi <- dymid_override_pdi(pdi, dymid_spells)
   blog("dymid spells: %d of %d directed pair-dispute spells are event-dyad spells dated by the dyads' own start / end months (clamped into the spell's years %d); the other %d (co-participant pairs that are not event dyads) keep the dispute / participant bounds",
        attr(pdi, "n_dymid"), nrow(pdi), attr(pdi, "n_clamped"), nrow(pdi) - attr(pdi, "n_dymid"))
+  sp_ <- attr(pdi, "split_pairs") |> filter(ccode1 < ccode2) |> arrange(dispnum, ccode1, ccode2)
+  blog("dymid re-entry spells (2026-11-08): a dyad that left its dispute and re-entered it in a later year is no longer bridged into one spell; directed pairs split %d (%d undirected), rows added %d (runs of consecutive years %d -> spells %d): %s",
+       attr(pdi, "n_split_pairs"), nrow(sp_), attr(pdi, "n_split_rows"), n_pdi_runs_, nrow(pdi), paste(sprintf("%d %d-%d (%d -> %d)", sp_$dispnum, sp_$ccode1, sp_$ccode2, sp_$n0, sp_$n1), collapse = "; "))
+  ## the PI's example: USA - Bulgaria in dispute 258, Dec 1941 - Jun 1942 and Nov 1943 - Apr 1944, two spells (asserted)
+  ub_ <- pdi |> filter(dispnum == 258L, ccode1 == 2L, ccode2 == 355L) |> arrange(spell)
+  stopifnot(nrow(ub_) == 2L, ub_$start_lo == c(ym_index(1941L, 12L), ym_index(1943L, 11L)), ub_$end_hi == c(ym_index(1942L, 6L), ym_index(1944L, 4L)), ub_$spell_first == c(1941L, 1943L), ub_$spell_last == c(1942L, 1944L))
+  blog("dymid re-entry spells: USA - Bulgaria in 258 has two spells, %s..%s and %s..%s (asserted; one spell %s..%s until 2026-11-08)",
+       ym_label(ub_$start_lo[1]), ym_label(ub_$end_hi[1]), ym_label(ub_$start_lo[2]), ym_label(ub_$end_hi[2]), ym_label(ub_$start_lo[1]), ym_label(ub_$end_hi[2]))
+  rm(n_pdi_runs_, sp_, ub_)
 }
 stopifnot(nrow(pdi) == nrow(pdi_nopart), identical(pdi$dispnum, pdi_nopart$dispnum), identical(pdi$ccode1, pdi_nopart$ccode1))
 blog("pair-dispute spells (both directions): %d (pairs %d, pairs with a re-entry spell %d); entry month exact %d; entry month unknown %d; spells ending before the dispute's last year (exit month unknown) %d",
@@ -513,7 +548,7 @@ blog("participant dates (D5): spells whose entry bound exceeded the feasible exi
 ## [dispute start, December of that year] (start_exact FALSE). The pre-review intervals are rebuilt here ONLY to log the
 ## before / after counts; every downstream object uses `pdi`.
 pdi_old <- pair_dispute_intervals(dd_evt, disp_dates, joiner_entry_unknown = FALSE, part = part_tbl)
-if (EVENTS == "dymid") pdi_old <- dymid_override_pdi(pdi_old, dymid_years)
+if (EVENTS == "dymid") pdi_old <- dymid_override_pdi(pdi_old, dymid_spells)
 stopifnot(nrow(pdi_old) == nrow(pdi), identical(pdi_old$start_lo, pdi$start_lo), identical(pdi_old$end_lo, pdi$end_lo), identical(pdi_old$end_hi, pdi$end_hi))
 chg_spell <- pdi$start_hi != pdi_old$start_hi
 stopifnot(all(!pdi$both_orig[chg_spell]), all(pdi$date_source[chg_spell] == "dispute"), all(pdi$spell_first[chg_spell] == disp_dates$y0[match(pdi$dispnum[chg_spell], disp_dates$dispnum)]),
@@ -711,9 +746,15 @@ stopifnot(nrow(events) == n_ev_before, !anyNA(events$in_fmid), !anyNA(events$in_
 ##   fmidany     : the dyadic dispute was fatal (fatlev >= 1, or either side >= 1), or a war dyad
 ##   fmidub      : upper bound for missing per-state fields (PI decision 2026-11-05): strict, OR war, OR one side >= 1 and the other missing, OR both
 ##                 missing and the dyadic fatlev >= 1 or missing; a dyad with dyadic fatlev = 0 is never fatal through a missing side
+## Copy disagreements (2026-11-08, adjudication.csv): fatality1 / fatality2 / fatality_disp carry the LOWER code (fmid, the strict sample); fmidany
+## and fmidub are coded from the HIGHER code at the dyad level (dy_fatal_any / dy_fatal_ub, computed before the orientation). The two codings agree
+## on every dyad without an adjudicated fatality field (asserted).
 fc_ <- dymid_fatal_codes(na9(events$fatality1), na9(events$fatality2), na9(events$fatality_disp), events$war)
+adj_fat_ <- grepl("fatlev", events$adj_fields)
+stopifnot(all(fc_$any[!adj_fat_] == events$dy_fatal_any[!adj_fat_]), all(fc_$ub[!adj_fat_] == events$dy_fatal_ub[!adj_fat_]), all(fc_$ub_branch[!adj_fat_] == events$dy_ub_branch[!adj_fat_]),
+          all(events$dy_fatal_any[fc_$strict]), all(events$dy_fatal_ub[fc_$strict]))
 events <- events |>
-  mutate(fatal_main = fc_$strict, fatal_any = fc_$any, fatal_ub = fc_$ub,
+  mutate(fatal_main = fc_$strict, fatal_any = dy_fatal_any, fatal_ub = dy_fatal_ub,
          fatal_source = case_when(war & !(fatal1 %in% TRUE & fatal2 %in% TRUE) ~ "war_rule",
                                   fatal1 %in% TRUE & fatal2 %in% TRUE ~ "dymid_both_sides",
                                   is.na(fatal1) | is.na(fatal2) ~ "dymid_side_missing",
@@ -728,12 +769,18 @@ stopifnot(nrow(events) == n_ev_before, !anyNA(events$in_fmid), !anyNA(events$in_
 blog("dymid fatal coding (escalations included): strict (fmid) %d, any (fmidany) %d, upper bound (fmidub) %d, war %d; fatal_source %s; events where only fatlev (not fatleva / fatlevb) makes them fatal under fmidany %d; dyadic codes inconsistent (a side >= 1 while fatlev = 0) %d",
      sum(events$fatal_main), sum(events$fatal_any), sum(events$fatal_ub), sum(events$war), paste(names(table(events$fatal_source)), table(events$fatal_source), sep = "=", collapse = ", "),
      sum(events$fatal_any & !events$war & !(events$fatal1 %in% TRUE) & !(events$fatal2 %in% TRUE)), sum((events$fatal1 %in% TRUE | events$fatal2 %in% TRUE) & events$fatality_disp == 0L))
-ub_old_ <- events$war | ((events$fatal1 %in% TRUE | is.na(events$fatal1)) & (events$fatal2 %in% TRUE | is.na(events$fatal2)))   # the definition before 2026-11-05, log only
-blog("dymid fmidub (PI decision 2026-11-05), pre-collapse: escalations included %d events (strict %d, one side >= 1 and the other missing %d, both sides missing with dyadic fatlev >= 1 or missing %d); non-escalation %d (strict %d, one side missing %d, both missing %d); the previous definition (missing side = fatal, whatever fatlev) gave %d / %d; removed by the fatlev = 0 rule and the one-side-0 rule %d non-escalation events; strict subset of fmidub (asserted)",
-     sum(events$fatal_ub), sum(fc_$ub_branch == "strict"), sum(fc_$ub_branch == "one_side_missing"), sum(fc_$ub_branch == "both_missing"),
-     sum(events$in_fmidub), sum(events$in_fmidub & fc_$ub_branch == "strict"), sum(events$in_fmidub & fc_$ub_branch == "one_side_missing"), sum(events$in_fmidub & fc_$ub_branch == "both_missing"),
+## the adjudicated dyads in the samples (2026-11-08): per event, the codings from the lower (fmid) and the higher (fmidany / fmidub) codes
+ad_ <- events |> filter(copy_adjudicated) |> arrange(dispnum, year, initiator)
+blog("dymid copy validation: adjudicated dyads among the events %d (escalations %d); in mid %d, fmid %d, fmidany %d, fmidub %d, war %d; events where the lower-code coding differs from the higher-code one: fmidany %d, fmidub %d",
+     nrow(ad_), sum(ad_$escalation), sum(ad_$in_mid), sum(ad_$in_fmid), sum(ad_$in_fmidany), sum(ad_$in_fmidub), sum(ad_$in_war), sum(fc_$any != events$dy_fatal_any), sum(fc_$ub != events$dy_fatal_ub))
+for (r in seq_len(nrow(ad_))) cat(sprintf("  adjudicated event: dispute %4d  %3d -> %3d  %d  fields %-28s escalation %-5s mid %-5s fmid %-5s fmidany %-5s fmidub %-5s war %-5s dir %s\n", ad_$dispnum[r], ad_$initiator[r], ad_$target[r], ad_$year[r],
+                                           ad_$adj_fields[r], ad_$escalation[r], ad_$in_mid[r], ad_$in_fmid[r], ad_$in_fmidany[r], ad_$in_fmidub[r], ad_$in_war[r], ad_$dir_rule[r]), file = build_log, append = TRUE)
+ub_old_ <- events$war | ((events$fatal1 %in% TRUE | is.na(events$fatal1)) & (events$fatal2 %in% TRUE | is.na(events$fatal2)))   # the definition before 2026-11-05, log only (lower codes)
+blog("dymid fmidub (PI decision 2026-11-05), pre-collapse: escalations included %d events (strict %d, one side >= 1 and the other missing %d, both sides missing with dyadic fatlev >= 1 or missing %d); non-escalation %d (strict %d, one side missing %d, both missing %d); the previous definition (missing side = fatal, whatever fatlev) gave %d / %d; removed by the fatlev = 0 rule and the one-side-0 rule %d non-escalation events; strict subset of fmidub (asserted; the previous definition is compared on the dyads without an adjudicated fatality code)",
+     sum(events$fatal_ub), sum(events$dy_ub_branch == "strict"), sum(events$dy_ub_branch == "one_side_missing"), sum(events$dy_ub_branch == "both_missing"),
+     sum(events$in_fmidub), sum(events$in_fmidub & events$dy_ub_branch == "strict"), sum(events$in_fmidub & events$dy_ub_branch == "one_side_missing"), sum(events$in_fmidub & events$dy_ub_branch == "both_missing"),
      sum(ub_old_), sum(ub_old_ & !events$escalation), sum(ub_old_ & !events$escalation & !events$fatal_ub))
-stopifnot(all(events$fatal_ub[events$fatal_main]), all(ub_old_[events$fatal_ub]))
+stopifnot(all(events$fatal_ub[events$fatal_main]), all(ub_old_[events$fatal_ub & !adj_fat_]))
 dch_ <- events |> semi_join(dir_changed_keys_, by = c("dispnum", "initiator", "target", "year"))
 stopifnot(nrow(dch_) == nrow(dir_changed_keys_))
 blog("dymid direction changed against the previous order, by sample (pre-collapse, non-escalation): mid %d, fmid %d, fmidany %d, fmidub %d, war %d (escalations %d)",
@@ -743,7 +790,9 @@ for (g in c("originator initiator", "joiner initiator")) {
   blog("  dymid fatal coding, %s (%d events): a side missing (not fatal under fmid, fatal under fmidub) %d; strict %d, any %d; missing fatleva or fatlevb among the non-war events %d",
        g, sum(f), sum(f & !events$fatal_main & events$fatal_ub), sum(f & events$fatal_main), sum(f & events$fatal_any), sum(f & !events$war & (is.na(events$fatal1) | is.na(events$fatal2))))
 }
-rm(fc_, ub_old_, dch_, dir_changed_keys_)
+## the dyad-level adjudication columns served the fatal coding and the log; they are not event columns (the collapse classifies every column)
+events <- events |> select(-dy_fatal_any, -dy_fatal_ub, -dy_ub_branch, -copy_adjudicated, -adj_fields)
+rm(fc_, ub_old_, dch_, dir_changed_keys_, ad_, adj_fat_)
 }
 ## ---- stage-2 event weights (PI decision 2026-10-25, D8; README "Coalition expansion") ---------------------------------------
 ## w_<sample> = 1 / (number of the initiator's targets in the same dispute and onset year that are in the sample), computed on the

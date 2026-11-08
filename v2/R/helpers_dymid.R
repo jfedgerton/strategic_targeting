@@ -7,21 +7,48 @@
 ##                           listed (A, B) and (B, A); only directly interacting pairs. In 4.03 the column dyindex is an integer equal to disno
 ##                           on every row (the .001 dyad suffix of 4.01 is lost), so it cannot identify a dyad: the dyadic dispute is keyed by
 ##                           (disno, unordered pair) here, and a pair re-entering the same dispute (separate dyindices in 4.01; 25 pairs, 18 in
-##                           WWI / WWII) is ONE event dated by its first spell (the later spells stay in the already-fighting spells).
+##                           WWI / WWII) is ONE event dated by its first spell; every spell is its own activity period in the pair-dispute
+##                           spells (2026-11-08, dymid_override_pdi()). The two directed copies of a dyad-dispute do not always agree
+##                           (2026-11-08): dymid_dyads() validates them field by field and resolves every disagreement through the checked-in
+##                           adjudication table data_raw/dymid/adjudication.csv (rules in DYMID_ADJ_RULES); an uncovered one stops the build.
 ##   directed_dyadic_war.csv Maoz, Directed Dyadic Interstate War data (1816-2010): one row per directed war dyad-year (warnum = COW war number,
 ##                           disno, dyindex with the decimal suffix). A dyadic war = direct battles with >= 1,000 battle deaths across both states.
 ##                           batdtha / batdthb are sometimes national totals: never used as dyadic magnitudes.
+##   adjudication.csv        the copy disagreements of dyadic_mid_4.03.csv the build resolves (one row per dyad, field and sample it applies to:
+##                           disno, a, b, field, value_copy1, value_copy2, resolved_value, applies_to, rule, note). copy1 = the row listing the
+##                           smaller ccode as state A, copy2 = the other row mirrored into the same (a, b) frame. Checked against the data on
+##                           every build: a row whose copy values differ from the data, a disagreement without a row, a row without a
+##                           disagreement, or a resolved value that does not follow from its rule stops the build.
 ## ============================================================================
 DYMID_CSV_SHA256 <- "9d26eedd792a0067f590f038c3b7b240bd373cd70200ee729241e1078c6957c3"   # data_raw/dymid/dyadic_mid_4.03.csv
 DDIW_CSV_SHA256  <- "aa2eb5244a0cb0b579867e50eb02e4297fb29250e67120fb132e3c0618dceda0"   # data_raw/dymid/directed_dyadic_war.csv
 DYMID_DIR_LABELS <- c(a_joiner_orig = "(a) exactly one joiner: the joiner initiates", a_joiner_later = "(a) two joiners: the later entrant initiates",
                       b_dyadic = "(b) both originators (or a joiner tie): the dataset's dyadic initiator (dyad_rolea / wardyadrolea = 1)",
                       c_cowwar = "(c) war dyad that (a) and (b) do not decide (no dyadic initiator): COW war-initiating side (D1)",
-                      fallback_sideA = "no rule decides (simultaneous first action, no D1 decision): COW Side A kept")
+                      fallback_sideA = "no rule decides (no dyadic initiator: simultaneous first action or the two copies contradict each other; no D1 decision): COW Side A kept")
 ## the codebook values of DYMID recip (1 = reciprocated, initiator not identifiable, roles assigned randomly; 0 = not). 4.03 also carries recip = 2 on
 ## 4 rows (dispute 4721, 2012: 731 - 732 and 731 - 740, both directions), a value the codebook does not define: accepted explicitly and treated as
 ## NOT reciprocated (recip flag = recip == 1); any other value stops read_dymid()
 DYMID_RECIP_CODEBOOK <- 0:1; DYMID_RECIP_UNDOCUMENTED <- 2L
+## ---- copy disagreements (2026-11-08) -------------------------------------------------------------------------------------------------------
+## The dyad-level fields of dymid_dyads() that the build uses and that are validated between the two directed copies of every dyad-dispute, with
+## the rule the adjudication table may apply to each (DYMID_ADJ_RULES; a disagreement on a field with no rule, or on a field not listed here, has
+## no resolution and stops the build). Values as written in adjudication.csv: start_ym / end_ym as "YYYY-MM", fatality and hostility codes as
+## integers with -9 for missing, init_dyadic as the initiator's ccode or NA, war_dymid as 0 / 1, side_a_dy / side_b_dy as the distinct per-year
+## codes of the copy joined by ";" (NA = not used).
+DYMID_COPY_FIELDS <- c("start_ym", "end_ym", "fatlev_max", "fatleva_max", "fatlevb_max", "war_dymid", "init_dyadic", "orig_a_dy", "orig_b_dy", "recip",
+                       "hihost", "hihosta", "hihostb", "side_a_dy", "side_b_dy")
+DYMID_ADJ_RULES <- c(
+  direction_uninformative = "the copies name different dyadic initiators: rule (b) is uninformative for this dyad (init_dyadic = NA), so the direction falls to the next rule, (c) D1, else the Side A fallback (PI-approved 2026-11-08)",
+  war_defer_to_war_data   = "the copies disagree on the war flag: the dyad is a war dyad iff the Directed Dyadic War data has a war dyad for (disno, pair) (PI-approved 2026-11-08)",
+  fatal_strict_lower      = "the copies disagree on a fatality code: the strict sample fmid takes the LOWER code (PI-approved 2026-11-08); the order is 0 < missing (-9) < 1 < ... < 6, so a missing code never makes a dyad strict-fatal",
+  fatal_ub_higher         = "the copies disagree on a fatality code: fmidub (upper bound) and fmidany ('any') take the HIGHER code (PI-approved 2026-11-08); the order is 0 < missing (-9) < 1 < ... < 6, so a missing code is the upper bound of a 0 and a positive code the upper bound of a missing one",
+  earliest_start          = "the copies disagree on the dyad's start month: the earliest start, as the dyad's start is the minimum over its rows within a copy (the convention of the build before 2026-11-08, when the A < B copy was used and the mismatch counted)",
+  latest_end              = "the copies disagree on the dyad's end month: the latest end, as the dyad's end is the maximum over its rows within a copy",
+  hostility_higher        = "the copies disagree on a hostility level: the higher level, as the dyad's hostility is the maximum over its rows within a copy (hostlev1 / hostlev2 / hostlev_ev are not sample inputs under dymid)",
+  sides_uninformative     = "the copies disagree on a state's side: DYMID's sides are not used for this dyad (NA in every year); the participation table takes COW's sides, else the side opposite the partner (DYMID sides enter only for states COW lacks, none in this data)")
+## the fatality order of the two fatal rules: 0 < missing < 1 < ... < 6 (missing codes sit between 0 and the positive codes, see DYMID_ADJ_RULES)
+fat_rank <- function(v) ifelse(is.na(v), 0.5, as.numeric(v))
 
 ## na9(v): the DYMID / COW missing codes (negative) as NA
 na9 <- function(v) ifelse(v < 0L, NA_integer_, as.integer(v))
@@ -77,22 +104,20 @@ read_ddiw <- function(path) {
   x
 }
 
-## dymid_dyads(dy): one row per dyadic dispute (disno, a < b) from the A < B rows of read_dymid() (the A > B rows are their mirror). Columns:
-##   onset_year / start_ym       the dyad's own first start (dyad-level dates: strtyr / strtmnth of its earliest spell; month index ym_index)
-##   end_ym                      the latest dyad end (endyear / endmnth) over its rows
-##   n_spells                    distinct start months of the dyad within the dispute (> 1: the pair re-entered; one event, first spell)
-##   fatlev / fatleva / fatlevb  the MAXIMUM non-missing value over the dyad's rows (the codebook lists them for the last year of the dyadic dispute
-##                               only; -9 = missing -> NA); *_last = the value in the dyad's last year (max over that year's rows), for the log
-##   war_dymid                   any row with war == 1
-##   init_dyadic                 the dyadic initiator of the FIRST spell (dyad_rolea == 1 -> a, == 3 -> b, == 2 simultaneous -> NA); NA as well when
-##                               the first-spell rows disagree (counted: role_varies_first); role_varies = dyad_rolea differs over all the dyad's rows
-##   orig_a_dy / orig_b_dy       DYMID orignata / orignatb (max over the rows; orig_varies counts disagreement)
-##   recip                       any row with recip == 1 (the codebook: initiator unidentifiable, roles assigned randomly); recip = 2 (undocumented,
-##                               read_dymid()) counts as NOT reciprocated, explicitly; recip_code2 = any row with recip == 2 (for the log)
-##   hihosta / hihostb / hihost  max over the rows
-## attr "years": one row per (disno, a, b, year) with the row's spell start / end month and the DYMID sides of a / b (sideaa / sideab).
-dymid_dyads <- function(dy) {
-  r <- dy[dy$statea < dy$stateb, ] |> rename(a = statea, b = stateb) |>
+## dymid_copies(dy): the two directed copies of every dyad-year of read_dymid() in ONE frame (a < b): copy1 = the rows with statea < stateb as they
+## are; copy2 = the rows with statea > stateb with the per-state columns swapped (statea / stateb, sideaa / sideab, fatleva / fatlevb, hihosta /
+## hihostb, orignata / orignatb, rolea / roleb, dyad_rolea / dyad_roleb), so that both describe the same (a, b) and can be compared field by field.
+dymid_copies <- function(dy) {
+  c2 <- dy[dy$statea > dy$stateb, ]
+  for (p in list(c("statea", "stateb"), c("sideaa", "sideab"), c("fatleva", "fatlevb"), c("hihosta", "hihostb"), c("orignata", "orignatb"), c("rolea", "roleb"), c("dyad_rolea", "dyad_roleb"))) {
+    tmp <- c2[[p[1]]]; c2[[p[1]]] <- c2[[p[2]]]; c2[[p[2]]] <- tmp
+  }
+  list(copy1 = dy[dy$statea < dy$stateb, ], copy2 = c2)
+}
+## dymid_dyads_copy(r): the dyad-level aggregation of ONE copy (rows with statea < stateb, or a mirrored copy); the columns of dymid_dyads() below
+## without the adjudication columns; attr "years" and attr "spells".
+dymid_dyads_copy <- function(r) {
+  r <- r |> rename(a = statea, b = stateb) |>
     mutate(rs = ym_index(strtyr, strtmnth), re = ym_index(endyear, endmnth), fatlev = na9(fatlev), fatleva = na9(fatleva), fatlevb = na9(fatlevb))
   ## row-level dates are rs / re so that no summarise() expression below sees an already-reduced column (recip_code2 before recip, for the same reason)
   out <- r |> group_by(disno, a, b) |> arrange(rs, year, .by_group = TRUE) |>
@@ -111,6 +136,168 @@ dymid_dyads <- function(dy) {
   attr(out, "years") <- r |> group_by(disno, a, b, year) |>
     summarise(start_ym = min(rs), end_ym = max(re), side_a_dy = as.integer(sideaa[1]), side_b_dy = as.integer(sideab[1]),
               n_side = n_distinct(sideaa), .groups = "drop")
+  ## one row per spell (distinct start month within the dyad-dispute): its end = the latest end over its rows, its years = the rows' years
+  attr(out, "spells") <- r |> group_by(disno, a, b, spell_start_ym = rs) |>
+    summarise(spell_end_ym = max(re), y_first = min(year), y_last = max(year), .groups = "drop") |> arrange(disno, a, b, spell_start_ym) |>
+    group_by(disno, a, b) |> mutate(spell = row_number()) |> ungroup()
+  out
+}
+## dymid_adjudication_read(path): the adjudication table (see the header), validated: the columns, every rule known, applies_to in the allowed set,
+## no duplicated (disno, a, b, field, applies_to). An absent file is an error (the build needs the checked-in table).
+dymid_adjudication_read <- function(path) {
+  if (!file.exists(path)) stop("dymid_adjudication_read: the adjudication table ", path, " does not exist")
+  adj <- read.csv(path, stringsAsFactors = FALSE, colClasses = "character", na.strings = character(0))
+  need <- c("disno", "a", "b", "field", "value_copy1", "value_copy2", "resolved_value", "applies_to", "rule", "note")
+  miss <- setdiff(need, names(adj)); if (length(miss)) stop("dymid_adjudication_read: columns absent: ", paste(miss, collapse = ", "))
+  adj <- adj[, need]; for (cc in c("disno", "a", "b")) adj[[cc]] <- as.integer(adj[[cc]])
+  stopifnot(!anyNA(adj$disno), !anyNA(adj$a), !anyNA(adj$b), all(adj$a < adj$b))
+  bad <- setdiff(adj$rule, names(DYMID_ADJ_RULES)); if (length(bad)) stop("dymid_adjudication_read: unknown rule(s): ", paste(bad, collapse = ", "))
+  bad <- setdiff(adj$field, DYMID_COPY_FIELDS); if (length(bad)) stop("dymid_adjudication_read: field(s) the build does not validate: ", paste(bad, collapse = ", "))
+  stopifnot(all(adj$applies_to %in% c("all", "fmid", "fmidany,fmidub")))
+  if (anyDuplicated(adj[, c("disno", "a", "b", "field", "applies_to")])) stop("dymid_adjudication_read: duplicated (disno, a, b, field, applies_to) rows")
+  adj
+}
+## dymid_adj_format(field, v): a field value as adjudication.csv writes it (see DYMID_COPY_FIELDS)
+dymid_adj_format <- function(field, v) {
+  if (field %in% c("start_ym", "end_ym")) return(ifelse(is.na(v), "NA", ym_label(v)))
+  if (field %in% c("fatlev_max", "fatleva_max", "fatlevb_max", "hihost", "hihosta", "hihostb")) return(ifelse(is.na(v), "-9", as.character(as.integer(v))))
+  if (field == "war_dymid") return(as.character(as.integer(v)))
+  ifelse(is.na(v), "NA", as.character(v))
+}
+## dymid_copy_disagreements(d1, d2): the dyad-level disagreements between two dymid_dyads_copy() results (same dyads, asserted) on DYMID_COPY_FIELDS:
+## one row per (disno, a, b, field) with value_copy1 / value_copy2 as formatted strings and the raw values (v1 / v2 lists). The sides are compared
+## over the dyad's years (attr "years"): a disagreement in any year lists the distinct codes of each copy.
+dymid_copy_disagreements <- function(d1, d2) {
+  stopifnot(nrow(d1) == nrow(d2), all(d1$disno == d2$disno), all(d1$a == d2$a), all(d1$b == d2$b))
+  y1 <- attr(d1, "years"); y2 <- attr(d2, "years")
+  stopifnot(nrow(y1) == nrow(y2), all(y1$disno == y2$disno), all(y1$a == y2$a), all(y1$b == y2$b), all(y1$year == y2$year))
+  rows <- list()
+  for (f in setdiff(DYMID_COPY_FIELDS, c("side_a_dy", "side_b_dy"))) {
+    v1 <- d1[[f]]; v2 <- d2[[f]]
+    d <- !((is.na(v1) & is.na(v2)) | (!is.na(v1) & !is.na(v2) & v1 == v2))
+    if (any(d)) rows[[f]] <- data.frame(disno = d1$disno[d], a = d1$a[d], b = d1$b[d], field = f, value_copy1 = dymid_adj_format(f, v1[d]), value_copy2 = dymid_adj_format(f, v2[d]), stringsAsFactors = FALSE)
+  }
+  for (f in c("side_a_dy", "side_b_dy")) {
+    v1 <- y1[[f]]; v2 <- y2[[f]]
+    d <- !((is.na(v1) & is.na(v2)) | (!is.na(v1) & !is.na(v2) & v1 == v2))
+    if (any(d)) {
+      k <- distinct(y1[d, c("disno", "a", "b")])
+      key_y <- paste(y1$disno, y1$a, y1$b); key_k <- paste(k$disno, k$a, k$b)
+      pv <- function(v) vapply(key_k, function(z) paste(unique(dymid_adj_format(f, v[key_y == z])), collapse = ";"), "")
+      rows[[f]] <- data.frame(disno = k$disno, a = k$a, b = k$b, field = f, value_copy1 = unname(pv(v1)), value_copy2 = unname(pv(v2)), stringsAsFactors = FALSE)
+    }
+  }
+  out <- bind_rows(rows)
+  if (!nrow(out)) out <- data.frame(disno = integer(0), a = integer(0), b = integer(0), field = character(0), value_copy1 = character(0), value_copy2 = character(0), stringsAsFactors = FALSE)
+  out |> arrange(disno, a, b, field)
+}
+## dymid_dyads(dy, adj, war_pairs): one row per dyadic dispute (disno, a < b) of read_dymid(), built from BOTH directed copies: the aggregation of
+## dymid_dyads_copy() on each copy, validated field by field (DYMID_COPY_FIELDS), every disagreement resolved by the adjudication table adj
+## (dymid_adjudication_read(); NULL = an empty table, so any disagreement stops) under its rule (DYMID_ADJ_RULES), the table itself checked against
+## the data (copy values, coverage both ways, resolved value recomputed from the rule). war_pairs = distinct (disno, a, b) of the war dyads of the
+## Directed Dyadic War data (ddiw_dyads()), needed by the rule war_defer_to_war_data. Columns:
+##   onset_year / start_ym       the dyad's own first start (dyad-level dates: strtyr / strtmnth of its earliest spell; month index ym_index)
+##   end_ym                      the latest dyad end (endyear / endmnth) over its rows
+##   n_spells                    distinct start months of the dyad within the dispute (> 1: the pair re-entered; one event, first spell; every
+##                               spell its own activity period in the pair-dispute spells, attr "spells")
+##   fatlev / fatleva / fatlevb  the MAXIMUM non-missing value over the dyad's rows (the codebook lists them for the last year of the dyadic dispute
+##                               only; -9 = missing -> NA); *_last = the value in the dyad's last year (max over that year's rows), for the log.
+##                               Under a copy disagreement *_max carries the STRICT (lower) code (fmid) and *_ub the HIGHER code (fmidany, fmidub);
+##                               without one *_ub == *_max
+##   war_dymid                   any row with war == 1 (a copy disagreement: the war data decides)
+##   init_dyadic                 the dyadic initiator of the FIRST spell (dyad_rolea == 1 -> a, == 3 -> b, == 2 simultaneous -> NA); NA as well when
+##                               the first-spell rows disagree (counted: role_varies_first) or the copies disagree (copy_adjudicated, field
+##                               init_dyadic); role_varies = dyad_rolea differs over all the dyad's rows
+##   orig_a_dy / orig_b_dy       DYMID orignata / orignatb (max over the rows; orig_varies counts disagreement)
+##   recip                       any row with recip == 1 (the codebook: initiator unidentifiable, roles assigned randomly); recip = 2 (undocumented,
+##                               read_dymid()) counts as NOT reciprocated, explicitly; recip_code2 = any row with recip == 2 (for the log)
+##   hihosta / hihostb / hihost  max over the rows (a copy disagreement: the higher level)
+##   copy_adjudicated            TRUE when any field of the dyad was resolved by the table; adj_fields lists them (";")
+## attr "years": one row per (disno, a, b, year) with the row's spell start / end month and the DYMID sides of a / b (sideaa / sideab; NA for a dyad
+## whose sides were adjudicated as uninformative). attr "spells": one row per (disno, a, b, spell) with spell_start_ym, spell_end_ym, y_first,
+## y_last (the resolved dates for the first / last spell under earliest_start / latest_end). attr "adjudication": the applied table (the
+## disagreements with rule, resolved value and applies_to), for the build log.
+dymid_dyads <- function(dy, adj = NULL, war_pairs = NULL) {
+  cp <- dymid_copies(dy)
+  d1 <- dymid_dyads_copy(cp$copy1); d2 <- dymid_dyads_copy(cp$copy2)
+  dis <- dymid_copy_disagreements(d1, d2)
+  if (is.null(adj)) adj <- data.frame(disno = integer(0), a = integer(0), b = integer(0), field = character(0), value_copy1 = character(0), value_copy2 = character(0),
+                                      resolved_value = character(0), applies_to = character(0), rule = character(0), note = character(0), stringsAsFactors = FALSE)
+  adj <- adj[order(adj$disno, adj$a, adj$b, adj$field, adj$applies_to), , drop = FALSE]; rownames(adj) <- NULL
+  key <- function(z) paste(z$disno, z$a, z$b, z$field)
+  ## coverage both ways and the copy values
+  unc <- dis[!key(dis) %in% key(adj), ]
+  if (nrow(unc)) stop("dymid_dyads: ", nrow(unc), " copy disagreement(s) of dyadic_mid_4.03.csv are not covered by the adjudication table (add a row per field, with a rule from DYMID_ADJ_RULES): ",
+                      paste(sprintf("dispute %d %d-%d %s (copy1 %s, copy2 %s)", unc$disno, unc$a, unc$b, unc$field, unc$value_copy1, unc$value_copy2), collapse = "; "))
+  stale <- adj[!key(adj) %in% key(dis), ]
+  if (nrow(stale)) stop("dymid_dyads: ", nrow(stale), " adjudication row(s) match no copy disagreement of the data (stale table): ",
+                        paste(sprintf("dispute %d %d-%d %s", stale$disno, stale$a, stale$b, stale$field), collapse = "; "))
+  m <- match(key(adj), key(dis))
+  badv <- adj$value_copy1 != dis$value_copy1[m] | adj$value_copy2 != dis$value_copy2[m]
+  if (any(badv)) stop("dymid_dyads: adjudication row(s) whose copy values differ from the data: ",
+                      paste(sprintf("dispute %d %d-%d %s (table %s / %s, data %s / %s)", adj$disno[badv], adj$a[badv], adj$b[badv], adj$field[badv], adj$value_copy1[badv], adj$value_copy2[badv],
+                                    dis$value_copy1[m][badv], dis$value_copy2[m][badv]), collapse = "; "))
+  ## the rule allowed per field, and the applies_to each rule needs
+  fld_rule <- list(init_dyadic = "direction_uninformative", war_dymid = "war_defer_to_war_data", fatlev_max = c("fatal_strict_lower", "fatal_ub_higher"),
+                   fatleva_max = c("fatal_strict_lower", "fatal_ub_higher"), fatlevb_max = c("fatal_strict_lower", "fatal_ub_higher"), start_ym = "earliest_start", end_ym = "latest_end",
+                   hihost = "hostility_higher", hihosta = "hostility_higher", hihostb = "hostility_higher", side_a_dy = "sides_uninformative", side_b_dy = "sides_uninformative")
+  rule_applies <- c(fatal_strict_lower = "fmid", fatal_ub_higher = "fmidany,fmidub")
+  for (i in seq_len(nrow(adj))) {
+    ok <- adj$field[i] %in% names(fld_rule) && adj$rule[i] %in% fld_rule[[adj$field[i]]]
+    if (!ok) stop(sprintf("dymid_dyads: rule %s is not a rule for field %s (dispute %d %d-%d); no resolution", adj$rule[i], adj$field[i], adj$disno[i], adj$a[i], adj$b[i]))
+    want <- if (adj$rule[i] %in% names(rule_applies)) rule_applies[[adj$rule[i]]] else "all"
+    if (adj$applies_to[i] != want) stop(sprintf("dymid_dyads: rule %s needs applies_to = %s, the table has %s (dispute %d %d-%d %s)", adj$rule[i], want, adj$applies_to[i], adj$disno[i], adj$a[i], adj$b[i], adj$field[i]))
+  }
+  ## a fatality disagreement needs BOTH rules (fmid and fmidany / fmidub)
+  fk <- dis[dis$field %in% c("fatlev_max", "fatleva_max", "fatlevb_max"), ]
+  for (i in seq_len(nrow(fk))) {
+    r <- adj[key(adj) == key(fk)[i], ]
+    if (!setequal(r$rule, c("fatal_strict_lower", "fatal_ub_higher"))) stop(sprintf("dymid_dyads: fatality disagreement dispute %d %d-%d %s needs one fatal_strict_lower row (fmid) and one fatal_ub_higher row (fmidany,fmidub)", fk$disno[i], fk$a[i], fk$b[i], fk$field[i]))
+  }
+  ## resolve: start from copy1, apply each row; recompute the resolved value from the rule and compare with the table
+  out <- d1 |> mutate(fatlev_ub = fatlev_max, fatleva_ub = fatleva_max, fatlevb_ub = fatlevb_max, copy_adjudicated = FALSE, adj_fields = "")
+  years <- attr(d1, "years"); spells1 <- attr(d1, "spells"); spells2 <- attr(d2, "spells")
+  stopifnot(nrow(spells1) == nrow(spells2), all(spells1$disno == spells2$disno), all(spells1$a == spells2$a), all(spells1$b == spells2$b), all(spells1$spell == spells2$spell),
+            all(spells1$y_first == spells2$y_first), all(spells1$y_last == spells2$y_last))
+  ## a spell-level date disagreement must be the dyad-level one (first spell's start / the spell carrying the latest end), else there is no table row for it
+  sk <- paste(spells1$disno, spells1$a, spells1$b)
+  dk_s <- paste(dis$disno, dis$a, dis$b)[dis$field == "start_ym"]; dk_e <- paste(dis$disno, dis$a, dis$b)[dis$field == "end_ym"]
+  s_dis <- spells1$spell_start_ym != spells2$spell_start_ym; e_dis <- spells1$spell_end_ym != spells2$spell_end_ym
+  inner <- (s_dis & !(spells1$spell == 1L & sk %in% dk_s)) | (e_dis & !(sk %in% dk_e))
+  if (any(inner)) stop("dymid_dyads: a copy disagreement on the dates of a spell that is not the dyad's start or end (no adjudication field for it): ",
+                       paste(sprintf("dispute %d %d-%d spell %d", spells1$disno[inner], spells1$a[inner], spells1$b[inner], spells1$spell[inner]), collapse = "; "))
+  spells <- spells1
+  adj$resolved_check <- rep(NA_character_, nrow(adj))
+  for (i in seq_len(nrow(adj))) {
+    j <- which(out$disno == adj$disno[i] & out$a == adj$a[i] & out$b == adj$b[i]); stopifnot(length(j) == 1L)
+    f <- adj$field[i]; rl <- adj$rule[i]; v1 <- d1[[f]][j]; v2 <- d2[[f]][j]
+    res <- switch(rl,
+      direction_uninformative = NA_integer_,
+      war_defer_to_war_data = { if (is.null(war_pairs)) stop("dymid_dyads: the rule war_defer_to_war_data needs war_pairs (the war data's dyads)")
+        any(war_pairs$disno == adj$disno[i] & war_pairs$a == adj$a[i] & war_pairs$b == adj$b[i]) },
+      fatal_strict_lower = c(v1, v2)[which.min(fat_rank(c(v1, v2)))],
+      fatal_ub_higher = c(v1, v2)[which.max(fat_rank(c(v1, v2)))],
+      earliest_start = min(v1, v2), latest_end = max(v1, v2), hostility_higher = max(v1, v2, na.rm = TRUE),
+      sides_uninformative = NA_integer_)
+    if (f %in% c("side_a_dy", "side_b_dy")) {
+      adj$resolved_check[i] <- "NA"
+      years[[f]][years$disno == adj$disno[i] & years$a == adj$a[i] & years$b == adj$b[i]] <- NA_integer_
+    } else {
+      adj$resolved_check[i] <- dymid_adj_format(f, res)
+      if (rl == "fatal_ub_higher") out[[sub("_max$", "_ub", f)]][j] <- res else out[[f]][j] <- res
+      if (f == "start_ym") { out$onset_year[j] <- ym_year(res); k <- spells$disno == adj$disno[i] & spells$a == adj$a[i] & spells$b == adj$b[i] & spells$spell == 1L; spells$spell_start_ym[k] <- res }
+      if (f == "end_ym") { k <- spells$disno == adj$disno[i] & spells$a == adj$a[i] & spells$b == adj$b[i]; kk <- which(k)[which.max(pmax(spells1$spell_end_ym[k], spells2$spell_end_ym[k]))]; spells$spell_end_ym[kk] <- res }
+    }
+    out$copy_adjudicated[j] <- TRUE; out$adj_fields[j] <- paste(unique(c(strsplit(out$adj_fields[j], ";")[[1]], f)), collapse = ";")
+  }
+  badr <- adj$resolved_value != adj$resolved_check
+  if (any(badr)) stop("dymid_dyads: adjudication row(s) whose resolved_value does not follow from the rule: ",
+                      paste(sprintf("dispute %d %d-%d %s rule %s (table %s, rule gives %s)", adj$disno[badr], adj$a[badr], adj$b[badr], adj$field[badr], adj$rule[badr], adj$resolved_value[badr], adj$resolved_check[badr]), collapse = "; "))
+  stopifnot(all(ym_year(out$start_ym) == out$onset_year), all(out$start_ym <= out$end_ym), all(fat_rank(out$fatlev_ub) >= fat_rank(out$fatlev_max)),
+            all(fat_rank(out$fatleva_ub) >= fat_rank(out$fatleva_max)), all(fat_rank(out$fatlevb_ub) >= fat_rank(out$fatlevb_max)),
+            all(spells$spell_start_ym <= spells$spell_end_ym), sum(out$copy_adjudicated) == nrow(distinct(dis, disno, a, b)))
+  attr(out, "years") <- years; attr(out, "spells") <- spells
+  attr(out, "adjudication") <- adj |> select(-resolved_check)
   out
 }
 ## ddiw_dyads(wr): one row per war dyad (warnum, disno, a < b) of the directed war data: war_start_ym / war_end_ym (the dyadic war's dates, first and
@@ -150,11 +337,16 @@ dymid_link <- function(dyads, wdy) {
     transmute(disno, a, b, onset_year = war_onset_year, start_ym = war_start_ym, end_ym = war_end_ym, y_first, y_last, n_spells = 1L, n_rows = NA_integer_,
               war_dymid = FALSE, war_ddiw = TRUE, warnum_ddiw = warnum, war_start_ym, war_end_ym, war_onset_year, init_wardyadic, warole_a, warole_b,
               dyindex_ddiw = dyindex, source = "ddiw_only", init_b = init_wardyadic, init_dyadic = NA_integer_, recip = FALSE, recip_code2 = FALSE, role_varies = FALSE,
-              role_varies_first = FALSE, orig_varies = FALSE)
+              role_varies_first = FALSE, orig_varies = FALSE, copy_adjudicated = FALSE, adj_fields = "")
   out <- bind_rows(m, wo) |> mutate(war = war_dymid | war_ddiw) |> arrange(disno, a, b)
-  stopifnot(!anyDuplicated(out[, c("disno", "a", "b")]), nrow(out) == nrow(dyads) + nrow(wo), !anyNA(out$war), !anyNA(out$onset_year))
+  stopifnot(!anyDuplicated(out[, c("disno", "a", "b")]), nrow(out) == nrow(dyads) + nrow(wo), !anyNA(out$war), !anyNA(out$onset_year),
+            all(c("fatlev_ub", "fatleva_ub", "fatlevb_ub", "copy_adjudicated") %in% names(out)), !anyNA(out$copy_adjudicated))
   wy <- attr(wdy, "years") |> semi_join(wo, by = c("disno", "a", "b")) |> transmute(disno, a, b, year, start_ym, end_ym, side_a_dy = NA_integer_, side_b_dy = NA_integer_, n_side = 1L)
   attr(out, "years") <- bind_rows(attr(dyads, "years"), wy) |> arrange(disno, a, b, year)
+  ## the spells of the event dyads (dymid_override_pdi()): DYMID's per dyad; a war-only dyad is one spell dated by the dyadic war
+  ws <- wo |> transmute(disno, a, b, spell_start_ym = start_ym, spell_end_ym = end_ym, y_first, y_last, spell = 1L)
+  attr(out, "spells") <- bind_rows(attr(dyads, "spells"), ws) |> arrange(disno, a, b, spell)
+  stopifnot(nrow(distinct(attr(out, "spells"), disno, a, b)) == nrow(out))
   attr(out, "counts") <- list(n_dymid = nrow(dyads), n_war_dyads = nrow(wdy), n_merged = sum(out$source == "merged"), n_ddiw_only = nrow(wo),
                               n_dymid_only_war = sum(out$source == "dymid_only" & out$war_dymid), n_merged_dymid_war0 = sum(out$source == "merged" & !out$war_dymid),
                               n_merged_role_disagree = sum(out$source == "merged" & !is.na(out$init_dyadic) & out$init_dyadic != out$init_wardyadic))
@@ -287,27 +479,57 @@ dymid_disputes <- function(disp_cow, dy, evd, dd_ev) {
   out
 }
 
-## dymid_override_pdi(pdi, years): the pair-dispute spells of the event dyads (pair_dispute_intervals() on the participation table) dated by the
-## dyads' own dates instead of the dispute / participant bounds. A spell (run of consecutive years) of an event dyad starts at the earliest DYMID
-## spell start among its years and ends at the latest end (war-only dyads: the dyadic war's dates), exact months, clamped into the spell's first /
-## last year (counted: the source dates sometimes disagree with the listed years). date_source = "dymid", start_exact = TRUE. Every other spell
-## (COW pairs that are not event dyads) is unchanged.
-dymid_override_pdi <- function(pdi, years) {
-  stopifnot(all(c("dispnum", "ccode1", "ccode2", "spell", "spell_first", "spell_last", "start_lo", "start_hi", "end_lo", "end_hi", "start_exact", "date_source", "part_reason") %in% names(pdi)))
-  yb <- bind_rows(years |> transmute(dispnum = disno, ccode1 = a, ccode2 = b, year, start_ym, end_ym), years |> transmute(dispnum = disno, ccode1 = b, ccode2 = a, year, start_ym, end_ym))
+## dymid_override_pdi(pdi, spells): the pair-dispute spells of the event dyads (pair_dispute_intervals() on the participation table) replaced by the
+## dyads' OWN spells (attr "spells" of dymid_link(): one per distinct DYMID start month within the dyad-dispute, dated by its start and its latest
+## end; a war-only dyad's spell is the dyadic war), instead of the dispute / participant bounds. A pair_dispute_intervals() spell is a run of
+## consecutive participation years, which BRIDGED a dyad that left the dispute and re-entered it in a later year (USA - Bulgaria in 258: Dec 1941 -
+## Jun 1942 and Nov 1943 - Apr 1944 were one spell Dec 1941 - Apr 1944) until 2026-11-08: now each DYMID spell is its own row (spell_first /
+## spell_last = the spell's years, exact months clamped into them, counted: the source dates sometimes disagree with the listed years), so the
+## already-fighting rule, the choice-set reference dates and the escalation comparisons see the gap. Spells of one dyad may share a year (a pair
+## leaving and re-entering within one year, 8 dyad-years): the year rule and the already-fighting keys take any() over them, as they do over the
+## spells of a pair. `spell` is renumbered per directed pair in date order (spell 1 = the dyad's first spell = the event's date, pair_onset
+## unchanged). date_source = "dymid", start_exact = TRUE. Every other spell (COW pairs that are not event dyads) is unchanged, as is the row
+## order of the other pairs. attr: n_dymid (event-dyad rows after the split), n_clamped, n_split_pairs (directed pairs with more rows than before),
+## n_split_rows (rows added).
+dymid_override_pdi <- function(pdi, spells) {
+  stopifnot(all(c("dispnum", "ccode1", "ccode2", "spell", "spell_first", "spell_last", "pair_onset", "start_lo", "start_hi", "end_lo", "end_hi", "start_exact", "date_source", "part_reason") %in% names(pdi)),
+            all(c("disno", "a", "b", "spell", "spell_start_ym", "spell_end_ym", "y_first", "y_last") %in% names(spells)))
+  sb <- bind_rows(spells |> transmute(dispnum = disno, ccode1 = a, ccode2 = b, sp = spell, sp_s = spell_start_ym, sp_e = spell_end_ym, y_first, y_last),
+                  spells |> transmute(dispnum = disno, ccode1 = b, ccode2 = a, sp = spell, sp_s = spell_start_ym, sp_e = spell_end_ym, y_first, y_last))
   p <- pdi |> mutate(.r = row_number())
-  j <- p |> select(.r, dispnum, ccode1, ccode2, spell_first, spell_last) |> inner_join(yb, by = c("dispnum", "ccode1", "ccode2"), relationship = "many-to-many") |>
-    filter(year >= spell_first, year <= spell_last) |> group_by(.r, spell_first, spell_last) |>
-    summarise(s = min(start_ym), e = max(end_ym), n_y = n_distinct(year), .groups = "drop") |>
-    mutate(s_c = pmin(pmax(s, ym_index(spell_first, 1L)), ym_index(spell_first, 12L)), e_c = pmin(pmax(e, ym_index(spell_last, 1L)), ym_index(spell_last, 12L)),
-           e_c = pmax(e_c, s_c), clamped = s_c != s | e_c != e)
-  stopifnot(all(j$n_y == j$spell_last - j$spell_first + 1L))
-  p$start_lo[j$.r] <- j$s_c; p$start_hi[j$.r] <- j$s_c; p$end_lo[j$.r] <- j$e_c; p$end_hi[j$.r] <- j$e_c
-  p$start_exact[j$.r] <- TRUE; p$date_source[j$.r] <- "dymid"; p$part_reason[j$.r] <- ifelse(j$clamped, "dymid dyad dates (clamped into the spell's years)", "dymid dyad dates")
-  if ("start_clipped" %in% names(p)) p$start_clipped[j$.r] <- FALSE
-  stopifnot(all(p$start_lo <= p$start_hi), all(p$start_hi <= p$end_hi), all(p$end_lo <= p$end_hi))
-  attr(p, "n_dymid") <- nrow(j); attr(p, "n_clamped") <- sum(j$clamped)
-  p |> select(-.r)
+  ## the dyad spells overlapping each pair_dispute_intervals() run of an event dyad; a spell must lie inside one run, and the runs of a pair must
+  ## be covered exactly by its spells (the participation years ARE the dyads' years)
+  j <- p |> select(.r, dispnum, ccode1, ccode2, spell_first, spell_last) |> inner_join(sb, by = c("dispnum", "ccode1", "ccode2"), relationship = "many-to-many") |>
+    filter(y_last >= spell_first, y_first <= spell_last)
+  stopifnot(all(j$y_first >= j$spell_first), all(j$y_last <= j$spell_last))
+  cov <- j |> group_by(.r, spell_first, spell_last) |> summarise(n_y = n_distinct(unlist(mapply(seq.int, y_first, y_last, SIMPLIFY = FALSE))), .groups = "drop")
+  stopifnot(all(cov$n_y == cov$spell_last - cov$spell_first + 1L))
+  ev_rows <- p |> semi_join(sb, by = c("dispnum", "ccode1", "ccode2"))
+  if (!setequal(ev_rows$.r, unique(j$.r))) stop("dymid_override_pdi: an event dyad's pair-dispute run has no dyad spell")
+  if (nrow(anti_join(sb, p, by = c("dispnum", "ccode1", "ccode2")))) stop("dymid_override_pdi: a dyad spell belongs to no pair-dispute of the participation table")
+  new <- p[j$.r, ] |> mutate(spell_first = j$y_first, spell_last = j$y_last,
+                             s_c = pmin(pmax(j$sp_s, ym_index(spell_first, 1L)), ym_index(spell_first, 12L)), e_c = pmin(pmax(j$sp_e, ym_index(spell_last, 1L)), ym_index(spell_last, 12L)),
+                             e_c = pmax(e_c, s_c), clamped = s_c != j$sp_s | e_c != j$sp_e,
+                             start_lo = s_c, start_hi = s_c, end_lo = e_c, end_hi = e_c, start_exact = TRUE, date_source = "dymid",
+                             part_reason = ifelse(clamped, "dymid dyad dates (clamped into the spell's years)", "dymid dyad dates"), .sp = j$sp)
+  if ("start_clipped" %in% names(new)) new$start_clipped <- FALSE
+  n_clamped <- sum(new$clamped); new <- new |> select(-s_c, -e_c, -clamped)
+  stopifnot(nrow(distinct(new, dispnum, ccode1, ccode2, .sp)) == nrow(new))
+  ## renumber the event dyads' spells in date order; the other pairs keep their rows and numbering; the original row order (dispnum, ccode1, ccode2, spell)
+  new <- new |> arrange(dispnum, ccode1, ccode2, .sp) |> group_by(dispnum, ccode1, ccode2) |> mutate(spell = row_number()) |> ungroup() |> select(-.sp)
+  out <- bind_rows(p[!p$.r %in% ev_rows$.r, ], new) |> arrange(dispnum, ccode1, ccode2, spell) |> select(-.r)
+  stopifnot(all(out$start_lo <= out$start_hi), all(out$start_hi <= out$end_hi), all(out$end_lo <= out$end_hi),
+            all(out$spell_first[out$spell == 1L] == out$pair_onset[out$spell == 1L]), nrow(out) == nrow(pdi) - nrow(ev_rows) + nrow(new),
+            nrow(distinct(out, dispnum, ccode1, ccode2)) == nrow(distinct(pdi, dispnum, ccode1, ccode2)))
+  assert_no_dup_keys(out, c("dispnum", "ccode1", "ccode2", "spell"), "dymid pair dispute intervals")
+  ## the union of years per pair is unchanged (every year of the participation table stays a spell year)
+  yrs <- function(d) d |> group_by(dispnum, ccode1, ccode2) |> summarise(y = list(sort(unique(unlist(mapply(seq.int, spell_first, spell_last, SIMPLIFY = FALSE))))), .groups = "drop")
+  stopifnot(identical(yrs(out), yrs(pdi)))
+  n_before <- ev_rows |> count(dispnum, ccode1, ccode2, name = "n0"); n_after <- new |> count(dispnum, ccode1, ccode2, name = "n1")
+  split <- inner_join(n_before, n_after, by = c("dispnum", "ccode1", "ccode2")) |> filter(n1 > n0)
+  attr(out, "n_dymid") <- nrow(new); attr(out, "n_clamped") <- n_clamped; attr(out, "n_split_pairs") <- nrow(split); attr(out, "n_split_rows") <- nrow(new) - nrow(ev_rows)
+  attr(out, "split_pairs") <- split
+  out
 }
 
 ## dymid_fatal_codes(fatleva, fatlevb, fatlev, war): the fatality codings of the dymid samples (fatality levels already max-over-years, NA = missing)
@@ -340,7 +562,8 @@ dymid_fatal_codes <- function(fatleva, fatlevb, fatlev, war) {
 ##       initiates; two joiners -> the later entrant initiates; an exact tie falls through
 ##   (b) both originators (or a joiner tie): the dataset's dyadic initiator (DYMID dyad_rolea == 1 / the war data's wardyadrolea == 1 for war-only dyads)
 ##   (c) only when (a) and (b) cannot decide (no dyadic initiator) and the dyad is a war dyad: the COW war-initiating side (D1, as in the pairs build)
-##   none decides (simultaneous first action and no D1 decision): COW Side A kept, listed as fallback_sideA
+##   none decides (no dyadic initiator: simultaneous first action, or the two directed copies contradict each other (adjudication rule
+##       direction_uninformative, init_b = NA); and no D1 decision): COW Side A kept, listed as fallback_sideA
 ## Until 2026-11-05 (c) ran before (b) for war dyads; dir_changed marks the events whose initiator differs from what that order gave (a war dyad
 ## where D1 and (b) disagree and (a) does not decide). No half-weight / both-directions option (PI declined). Returns ev reoriented, with dir_source
 ## (one of names(DYMID_DIR_LABELS)), dir_rule (the same plus " (joiner tie)" for ties), dir_flipped (= the initiator is not on COW Side A),
