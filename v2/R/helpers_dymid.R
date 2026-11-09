@@ -78,6 +78,55 @@ read_dymid <- function(path) {
   attr(x, "recip2_rows") <- attr_r2          # the recip = 2 rows (not in the codebook; treated as recip = 0), for the build log
   x
 }
+## dymid_year_conflicts(x): the rows of read_dymid() whose listed year falls AFTER their own end date (year > endyear; year < strtyr already stops
+## read_dymid()), one row per (disno, a < b, spell start, spell end) with the conflicting years of each direction (";"-joined, sorted). Codex second
+## review P1 (2026-11-09): the aggregation used to take y_last from such years and dymid_override_pdi() clamped the explicit end date forward into
+## them, labelled exact. 4.03 has one case (4182 Syria - Israel, rows 1997-1999 dated 1995-05 to 1996-10, both directions).
+dymid_year_conflicts <- function(x) {
+  b <- x[x$year > x$endyear, c("disno", "statea", "stateb", "year", "strtyr", "strtmnth", "endyear", "endmnth")]
+  if (!nrow(b)) return(data.frame(disno = integer(0), a = integer(0), b = integer(0), spell_start = character(0), spell_end = character(0),
+                                  years_ab = character(0), years_ba = character(0), stringsAsFactors = FALSE))
+  b |> mutate(a = pmin(statea, stateb), b = pmax(statea, stateb), ab = statea < stateb,
+              spell_start = ym_label(ym_index(strtyr, strtmnth)), spell_end = ym_label(ym_index(endyear, endmnth))) |>
+    group_by(disno, a, b, spell_start, spell_end) |>
+    summarise(years_ab = paste(sort(unique(year[ab])), collapse = ";"), years_ba = paste(sort(unique(year[!ab])), collapse = ";"), .groups = "drop") |>
+    arrange(disno, a, b, spell_start) |> as.data.frame()
+}
+## dymid_resolve_year_conflicts(x, tbl): resolves every dymid_year_conflicts() case through the checked-in table data_raw/dymid/year_date_conflicts.csv
+## (columns disno, a, b, spell_start, spell_end, years_outside, resolution, note; PI decision 2026-11-09). The table is checked against the data both
+## ways: a conflict without a row, a row without a conflict, or listed years that differ from the data (either direction) stops the build. The only
+## resolution is trust_dates: the explicit start / end dates stand and the rows whose year falls outside them are dropped (both directions), so no
+## spell is extended past its stated end. Returns x without those rows (attr "year_conflicts" = the applied table, for the build log).
+DYMID_YEAR_RESOLUTIONS <- c(trust_dates = "the explicit dates stand; rows listed in years outside them are dropped (both directions)")
+dymid_resolve_year_conflicts <- function(x, tbl) {
+  need <- c("disno", "a", "b", "spell_start", "spell_end", "years_outside", "resolution", "note")
+  miss <- setdiff(need, names(tbl)); if (length(miss)) stop("dymid_resolve_year_conflicts: columns absent: ", paste(miss, collapse = ", "))
+  tbl <- tbl[, need]; for (cc in c("disno", "a", "b")) tbl[[cc]] <- as.integer(tbl[[cc]])
+  stopifnot(!anyNA(tbl$disno), !anyNA(tbl$a), !anyNA(tbl$b), all(tbl$a < tbl$b))
+  bad <- setdiff(tbl$resolution, names(DYMID_YEAR_RESOLUTIONS)); if (length(bad)) stop("dymid_resolve_year_conflicts: unknown resolution(s): ", paste(bad, collapse = ", "))
+  key <- function(z) paste(z$disno, z$a, z$b, z$spell_start, z$spell_end)
+  if (anyDuplicated(key(tbl))) stop("dymid_resolve_year_conflicts: duplicated (disno, a, b, spell_start, spell_end) rows")
+  cf <- dymid_year_conflicts(x)
+  unc <- cf[!key(cf) %in% key(tbl), ]
+  if (nrow(unc)) stop("dymid_resolve_year_conflicts: ", nrow(unc), " spell(s) of dyadic_mid_4.03.csv list years after their own end date and are not in ",
+                      "data_raw/dymid/year_date_conflicts.csv (historical adjudication needed; the build does not extend a stated end date): ",
+                      paste(sprintf("dispute %d %d-%d %s..%s years %s / %s", unc$disno, unc$a, unc$b, unc$spell_start, unc$spell_end, unc$years_ab, unc$years_ba), collapse = "; "))
+  stale <- tbl[!key(tbl) %in% key(cf), ]
+  if (nrow(stale)) stop("dymid_resolve_year_conflicts: ", nrow(stale), " table row(s) match no year / date conflict of the data (stale table): ",
+                        paste(sprintf("dispute %d %d-%d %s..%s", stale$disno, stale$a, stale$b, stale$spell_start, stale$spell_end), collapse = "; "))
+  m <- match(key(tbl), key(cf))
+  badv <- tbl$years_outside != cf$years_ab[m] | tbl$years_outside != cf$years_ba[m]
+  if (any(badv)) stop("dymid_resolve_year_conflicts: listed years differ from the data (both directions must list exactly years_outside): ",
+                      paste(sprintf("dispute %d %d-%d table %s, data %s / %s", tbl$disno[badv], tbl$a[badv], tbl$b[badv], tbl$years_outside[badv], cf$years_ab[m][badv], cf$years_ba[m][badv]), collapse = "; "))
+  drop <- x$year > x$endyear
+  out <- x[!drop, , drop = FALSE]; rownames(out) <- NULL
+  stopifnot(nrow(out) == nrow(x) - sum(vapply(strsplit(tbl$years_outside, ";"), length, 1L)) * 2L, nrow(dymid_year_conflicts(out)) == 0L)
+  k <- function(d) sort(paste(d$disno, pmin(d$statea, d$stateb), pmax(d$statea, d$stateb), d$year))
+  if (!identical(k(out[out$statea < out$stateb, ]), k(out[out$statea > out$stateb, ]))) stop("dymid_resolve_year_conflicts: the two directions no longer mirror each other")
+  for (a_ in c("n_start_mismatch", "recip2_rows")) attr(out, a_) <- attr(x, a_)
+  attr(out, "year_conflicts") <- tbl
+  out
+}
 ## read_ddiw(path): the columns of the Directed Dyadic Interstate War data the build uses
 read_ddiw <- function(path) {
   x <- read.csv(path, stringsAsFactors = FALSE)
@@ -360,7 +409,7 @@ dymid_link <- function(dyads, wdy) {
 ## dymid_participation(dd, evd, years): the participation table the event machinery of the dymid build reads (escalation and choice-set spells,
 ## participant entry dates, roles, joiner sets), in the schema of COW's directed dispute-years: dispnum, ccode1, ccode2, year, sidea1, sidea2, orig1,
 ## orig2 (both directions). It is COW's table (dd) with the (dispnum, pair) of every event dyad REPLACED by the event dyad's own years, and the event
-## dyads COW lacks ADDED (DYMID-only dispute numbers, pairs absent from COW's dispute). COW pairs that are not event dyads (e.g. Japan - Poland in
+## dyads COW lacks ADDED (DYMID-only dispute numbers, pairs absent from COW's dispute). COW pairs that are not event dyads (e.g. USA - Finland in
 ## dispute 258) stay as COW has them: they are co-participants of the dispute, so the already-fighting rule, the participant spells and the joiner
 ## sets keep their current definition. Per participant (dispnum, ccode):
 ##   originator flag : COW's orig1 when the state is a COW participant of that dispute; else DYMID orignat; else (a war-only dyad's state) its war

@@ -367,6 +367,15 @@ r2_ <- attr(dy_raw, "recip2_rows")
 blog("dymid recip: values 0 %d, 1 %d, 2 %d rows (any other value stops read_dymid()); recip = 2 is not a codebook value and is treated EXPLICITLY as not reciprocated (recip flag = recip == 1): %s",
      sum(dy_raw$recip == 0L), sum(dy_raw$recip == 1L), nrow(r2_), paste(sprintf("%d %d-%d %d", r2_$disno, r2_$statea, r2_$stateb, r2_$year), collapse = "; "))
 stopifnot(nrow(r2_) == 4L, all(r2_$disno == 4721L), all(r2_$year == 2012L))   # the 4 documented rows (data sha256 checked above)
+## rows whose listed year falls after their own end date: resolved through the checked-in table (2026-11-09, Codex second review P1); an unlisted
+## case stops the build, and no stated end date is ever extended into such years
+yc_path <- file.path(v2_root(), "data_raw", "dymid", "year_date_conflicts.csv")
+if (!file.exists(yc_path)) stop("data_raw/dymid/year_date_conflicts.csv does not exist (the build needs the checked-in table)")
+n_dy_before_ <- nrow(dy_raw)
+dy_raw <- dymid_resolve_year_conflicts(dy_raw, read.csv(yc_path, stringsAsFactors = FALSE, colClasses = "character", na.strings = character(0)))
+yc_ <- attr(dy_raw, "year_conflicts")
+blog("dymid year / date conflicts (2026-11-09): %d spell(s) list years after their own end date, every one resolved by data_raw/dymid/year_date_conflicts.csv (checked both ways); %d directed rows dropped: %s",
+     nrow(yc_), n_dy_before_ - nrow(dy_raw), paste(sprintf("dispute %d %d-%d %s..%s years %s -> %s", yc_$disno, yc_$a, yc_$b, yc_$spell_start, yc_$spell_end, yc_$years_outside, yc_$resolution), collapse = "; "))
 wdy <- ddiw_dyads(wr_raw)
 ## the two directed copies of every dyad-dispute, validated field by field and resolved through the checked-in adjudication table (2026-11-08;
 ## dymid_dyads() stops on a disagreement the table does not cover, a stale or inconsistent row, or a resolved value that does not follow from its rule)

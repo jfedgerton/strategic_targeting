@@ -317,6 +317,44 @@ test_that("re-entry spells (2026-11-08): a dyad leaving and re-entering its disp
   ev <- tibble(initiator = 17L, target = 18L, year = 2000L, dispnum = 8L); fe <- flag_escalations_month(ev, po); expect_equal(fe$ev_start_lo, ym_index(2000L, 12L)); expect_false(fe$escalation)
 })
 
+test_that("year / date conflicts (2026-11-09, Codex second review P1): rows listed after their own end date stop unless the table resolves them; trust_dates drops them and never extends the end", {
+  ## dispute 9: 19 - 21, spell 2000-05..2001-10 listed in 2000, 2001 AND 2002-2003 (conflicting years), then a second spell 2005-05..2005-09
+  r <- rbind(dyrow(9L, 19L, 21L, 2000L, 2000L, 5L, 2001L, 10L), dyrow(9L, 19L, 21L, 2001L, 2000L, 5L, 2001L, 10L),
+             dyrow(9L, 19L, 21L, 2002L, 2000L, 5L, 2001L, 10L), dyrow(9L, 19L, 21L, 2003L, 2000L, 5L, 2001L, 10L),
+             dyrow(9L, 19L, 21L, 2005L, 2005L, 5L, 2005L, 9L))
+  dy <- bind_rows(toy_dy(), mirror_dy(r))
+  cf <- dymid_year_conflicts(dy)
+  expect_equal(nrow(cf), 1L); expect_equal(cf$spell_start, "2000-05"); expect_equal(cf$spell_end, "2001-10"); expect_equal(cf$years_ab, "2002;2003"); expect_equal(cf$years_ba, "2002;2003")
+  expect_equal(nrow(dymid_year_conflicts(toy_dy())), 0L)   # the toy rows have none
+  tb <- function(...) data.frame(disno = "9", a = "19", b = "21", spell_start = "2000-05", spell_end = "2001-10", years_outside = "2002;2003", resolution = "trust_dates", note = "", stringsAsFactors = FALSE) |> mutate(...)
+  ## an unlisted conflict stops; so do a stale row, wrong listed years, an unknown resolution, a duplicated row
+  empty <- tb()[0, ]
+  expect_error(dymid_resolve_year_conflicts(dy, empty), "not in data_raw/dymid/year_date_conflicts.csv")
+  expect_error(dymid_resolve_year_conflicts(toy_dy(), tb()), "stale table")
+  expect_error(dymid_resolve_year_conflicts(dy, tb(years_outside = "2002")), "listed years differ")
+  expect_error(dymid_resolve_year_conflicts(dy, tb(resolution = "trust_years")), "unknown resolution")
+  expect_error(dymid_resolve_year_conflicts(dy, rbind(tb(), tb())), "duplicated")
+  ## a conflict in one direction only (the mirror rows disagree on the listed years) is not the table's years
+  dy1 <- dy; k <- dy1$disno == 9L & dy1$statea == 21L & dy1$year == 2003L; dy1$endyear[k] <- 2003L
+  expect_error(dymid_resolve_year_conflicts(dy1, tb()), "listed years differ")
+  ## trust_dates: the four conflicting directed rows are dropped, nothing else; the spell ends at its stated end; the second spell is untouched
+  out <- dymid_resolve_year_conflicts(dy, tb())
+  expect_equal(nrow(out), nrow(dy) - 4L); expect_false(any(out$disno == 9L & out$year %in% 2002:2003)); expect_true(all(out$year <= out$endyear))
+  expect_equal(nrow(attr(out, "year_conflicts")), 1L)
+  d <- dymid_dyads(out); sp <- attr(d, "spells") |> filter(disno == 9L)
+  expect_equal(sp$y_last, c(2001L, 2005L)); expect_equal(sp$spell_end_ym, c(ym_index(2001L, 10L), ym_index(2005L, 9L)))
+  ## without the resolution the old behaviour is visible: y_last runs into the conflicting years past the stated end (what dymid_override_pdi() used to clamp to)
+  d0 <- dymid_dyads(dy); sp0 <- attr(d0, "spells") |> filter(disno == 9L); expect_equal(sp0$y_last[1], 2003L); expect_lt(ym_year(sp0$spell_end_ym[1]), sp0$y_last[1])
+  ## the checked-in table is valid against the real data when the CSV is present
+  yc <- file.path(root, "data_raw", "dymid", "year_date_conflicts.csv"); dyp <- file.path(root, "data_raw", "dymid", "dyadic_mid_4.03.csv")
+  if (file.exists(yc) && file.exists(dyp)) {
+    real <- read_dymid(dyp); cfr <- dymid_year_conflicts(real)
+    expect_equal(nrow(cfr), 1L); expect_equal(cfr$disno, 4182L); expect_equal(c(cfr$a, cfr$b), c(652L, 666L)); expect_equal(cfr$years_ab, "1997;1998;1999")
+    rr <- dymid_resolve_year_conflicts(real, read.csv(yc, stringsAsFactors = FALSE, colClasses = "character", na.strings = character(0)))
+    expect_equal(nrow(real) - nrow(rr), 6L)
+  }
+})
+
 test_that("spec: events = pairs | dymid (suffix _dy after _ent, v2/data_dymid), samples per foundation, refusals; defaults unchanged", {
   expect_equal(SPEC_CHOICES$events, c("pairs", "dymid")); expect_equal(SPEC_SUFFIX$events, c(dymid = "_dy"))
   expect_equal(which(names(SPEC_SUFFIX) == "events"), which(names(SPEC_SUFFIX) == "entry") + 1L)
