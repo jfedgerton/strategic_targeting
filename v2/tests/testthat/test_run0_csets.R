@@ -1,4 +1,7 @@
 ## Run 0 and the lag-3 MID-history choice set (built 2026-11-10; README section 13).
+## Revised the same day after the audit of d60da78 (PI decisions): --variant=mid3 is REFUSED by parse_spec() and cell_name() (tested here); its construction
+## stays in the code and the blocks (B), (C) and the mid3 half of (F) are kept as UNIT TESTS of mid3_history() and of the assembly called directly with a
+## hand-set spec (spec_mid3() below), not as tests of a runnable cell. Run 0b carries the polrel cell's events, roles and weights (no D8 rescale).
 ## (A) the switches reach / subsample and the variant value mid3: choices, suffixes, positions, names, refusals; every existing name and spec string unchanged
 ##     (hard-coded, and against the git version before the change); defaults byte-identical: the toy assembly of the existing cells is identical() to the
 ##     assembly by the code of commit aeb876b.
@@ -39,6 +42,8 @@ key_evy <- function(A) paste(A$sy$ccode[A$ev$sy_row], A$alts$ccode2[A$ev$alt_row
 toy_dir2 <- function(a) { a <- toy_dir(a); a$dy_mid_tm1[a$ccode1 == 10L & a$ccode2 == 40L] <- 1L; a }
 key_row <- function(A, rows) paste(A$sy$ccode[A$alts$sy_row[rows]], A$alts$ccode2[rows])
 spec_dir <- function(...) parse_spec(c("--comparison=directed", "--entry=later", ...))
+## the mid3 spec set by hand: parse_spec() refuses --variant=mid3, so the unit tests of the construction build the spec without the command line
+spec_mid3 <- function(data_arg = "--entry=later") { s <- parse_spec(c("--comparison=directed", data_arg, "--roles=bcj")); s$variant <- "mid3"; s }
 
 ## ---- (A) the switches ----------------------------------------------------------------------------------------------------------------------------------
 test_that("spec: reach, subsample and variant = mid3: choices, suffixes, positions, names; existing names and strings unchanged (hard-coded)", {
@@ -54,11 +59,13 @@ test_that("spec: reach, subsample and variant = mid3: choices, suffixes, positio
   expect_equal(cell_name("mid", 3L, "M1b", spec_dir("--subsample=bilateral")), "mid_lag3_all_pr_M1b_cdir_sbil_ent")
   expect_equal(cell_name("fmid", 3L, "M1c", parse_spec(c("--comparison=directed", "--events=dymid", "--roles=bcj", "--subsample=majinit"))), "fmid_lag3_all_pr_M1c_cdir_bcj_smaj_dy")
   expect_equal(cell_name("mid", 3L, "M1c", spec_dir("--roles=bcj", "--subsample=mininit")), "mid_lag3_all_pr_M1c_cdir_bcj_smin_ent")
-  s3 <- spec_dir("--roles=bcj", "--variant=mid3", "--tag=long")
-  expect_equal(cell_name("fmid", 3L, "M1c", s3), "fmid_lag3_mid3_pr_M1c_cdir_bcj_ent_tlong"); expect_equal(cell_name("fmid", 3L, "M2c", s3), "fmid_lag3_mid3_pr_M2c_K2_cdir_bcj_ent_tlong")
-  expect_equal(m1_cell_for_m2("fmid", 3L, "M2c", s3), "fmid_lag3_mid3_pr_M1c_cdir_bcj_ent_tlong")           # the M2c init lookup finds the mid3 M1c fit
+  ## mid3 (audit P1-1, PI decision 2026-11-10): refused on the command line and as a cell name; the value stays in SPEC_CHOICES so the refusal can say why
+  expect_error(spec_dir("--roles=bcj", "--variant=mid3", "--tag=long"), "--variant=mid3 is refused \\(audit P1-1, PI decision 2026-11-10\\).*ONLY non-history member.*year t would define the set by the outcome")
+  s3 <- spec_mid3()
+  for (m in c("M1c", "M2c", "M1b")) expect_error(cell_name("fmid", 3L, m, s3), "cell_name: --variant=mid3 is refused", info = m)
+  expect_error(m1_cell_for_m2("fmid", 3L, "M2c", s3), "is refused")
   expect_equal(spec_alts_variant(s3), "all"); expect_equal(spec_alts_variant(spec_dir("--roles=bcj", "--variant=polrel")), "polrel"); expect_equal(spec_alts_variant(parse_spec()), "all")
-  expect_true(grepl("variant=mid3", spec_string(s3), fixed = TRUE)); expect_true(grepl("reach=capdist", spec_string(spec_dir("--reach=capdist")), fixed = TRUE))
+  expect_true(grepl("reach=capdist", spec_string(spec_dir("--reach=capdist")), fixed = TRUE))
   expect_true(grepl("subsample=prtarget", perm_part_spec_string(spec_dir("--subsample=prtarget")), fixed = TRUE))
   ## every existing name and string, hard-coded from the code before the change
   expect_identical(spec_string(parse_spec()), "pairs=all context=all coal_ties=inclusive coal_drop=none direction=cowwar ww2=include weights=dispute controls=minimal major=none interact=none distance=none contiguity=land changes=raw rho_prior=beta25 sigma_prior=ln1 comparison=none roles=stageb ame_K=2 tag=")
@@ -78,20 +85,21 @@ test_that("spec: reach, subsample and variant = mid3: choices, suffixes, positio
 
 test_that("spec: refusals of the invalid combinations (parse_spec and cell_name), bare flags and bad values", {
   expect_error(parse_spec("--reach=capdist"), "needs --comparison=directed"); expect_error(parse_spec("--subsample=prtarget"), "needs --comparison=directed")
-  expect_error(parse_spec(c("--variant=mid3", "--roles=aprime")), "needs --comparison=directed")
+  expect_error(parse_spec(c("--variant=mid3", "--roles=aprime")), "--variant=mid3 is refused"); expect_error(parse_spec("--variant=mid3"), "--variant=mid3 is refused")
   expect_error(parse_spec("--reach"), "needs a value"); expect_error(parse_spec("--subsample"), "needs a value"); expect_error(parse_spec("--reach=TRUE"), "must be one of")
   expect_error(parse_spec(c("--comparison=directed", "--subsample=majors")), "must be one of"); expect_error(parse_spec(c("--comparison=directed", "--variant=mid5")), "must be one of")
   d <- "--comparison=directed"
   expect_error(parse_spec(c(d, "--reach=capdist", "--mu_shift=traits")), "not specified"); expect_error(parse_spec(c(d, "--entry=later", "--roles=bcj", "--reach=capdist", "--variant=polrel")), "full choice set")
   expect_error(parse_spec(c(d, "--reach=capdist", "--subsample=prtarget")), "one switch each")
   expect_error(parse_spec(c(d, "--entry=later", "--roles=bcj", "--subsample=prtarget", "--variant=polrel")), "full choice set")
-  expect_error(parse_spec(c(d, "--entry=later", "--roles=bcj", "--subsample=prtarget", "--variant=mid3")), "full choice set")
+  expect_error(parse_spec(c(d, "--entry=later", "--roles=bcj", "--subsample=prtarget", "--variant=mid3")), "--variant=mid3 is refused")
+  expect_error(parse_spec(c(d, "--entry=later", "--roles=bcj", "--reach=capdist", "--variant=mid3")), "--variant=mid3 is refused")
   for (sw in c("--pairs=joiners", "--context=bilateral", "--ww2=drop", "--mu_shift=traits")) {
     expect_error(parse_spec(c(d, "--subsample=majinit", sw)), "one event / sample filter at a time", info = sw)
-    expect_error(parse_spec(c(d, "--entry=later", "--roles=bcj", "--variant=mid3", sw)), "--variant=mid3 with", info = sw)
+    expect_error(parse_spec(c(d, "--entry=later", "--roles=bcj", "--variant=mid3", sw)), "--variant=mid3 is refused", info = sw)
   }
   expect_error(parse_spec(c(d, "--entry=later", "--roles=bcj", "--joiner_set=opposing", "--subsample=prtarget")), "one event / sample filter at a time")
-  expect_error(parse_spec(c(d, "--entry=later", "--roles=bcj", "--joiner_set=opposing", "--variant=mid3")), "joiner sets are not intersected")
+  expect_error(parse_spec(c(d, "--entry=later", "--roles=bcj", "--joiner_set=opposing", "--variant=mid3")), "--variant=mid3 is refused")
   expect_error(parse_spec(c(d, "--entry=later", "--roles=bcj", "--subsample=bilateral")), "pooled model M1b and no --roles")
   expect_error(parse_spec(c(d, "--subsample=bilateral")), "needs --entry=later or --events=dymid")
   expect_silent(parse_spec(c(d, "--events=dymid", "--subsample=bilateral")))
@@ -100,8 +108,7 @@ test_that("spec: refusals of the invalid combinations (parse_spec and cell_name)
   expect_error(cell_name("fmid", 3L, "M1c", spec_dir("--subsample=bilateral")), "specified for M1b only.*M1c stops on an empty group")
   for (sb in c("prtarget", "majinit", "mininit")) { expect_error(cell_name("fmid", 3L, "M1b", spec_dir(paste0("--subsample=", sb))), "specified for M1c only", info = sb)
     expect_error(cell_name("fmid", 3L, "M2c", spec_dir("--roles=bcj", paste0("--subsample=", sb))), "specified for M1c only", info = sb) }
-  for (m in c("M1b", "M1cr", "M2b", "M1a")) expect_error(cell_name("fmid", 3L, m, spec_dir("--variant=mid3")), "mid3", info = m)
-  expect_error(cell_name("fmid", 3L, "M1c", spec_dir("--variant=mid3")), "needs --roles=aprime, bc or bcj")
+  for (m in c("M1b", "M1cr", "M2b", "M1a", "M1c", "M2c")) expect_error(cell_name("fmid", 3L, m, spec_mid3()), "--variant=mid3 is refused", info = m)
   for (m in c("M1b", "M2b", "M1a")) expect_error(cell_name("fmid", 3L, m, parse_spec("--variant=polrel")), "the politically relevant choice set is specified for", info = m)   # unchanged
   ## the assembly refuses the same combinations when called directly
   td <- file.path(tempfile("r0ref"), "data_entry"); write_toy_cell(td, alts_edit = toy_dir, roles = toy_roles)
@@ -179,7 +186,7 @@ test_that("mid3_history(): onsets in [t - 3, t - 1] only, NEVER year t, both dir
 test_that("mid3 assembly (toy): IV = history rows, each event scored against history rows + its OWN chosen target, chosen-only events dropped by role, year t excluded", {
   base <- tempfile("r0mid3"); td <- file.path(base, "data_entry")
   write_toy_cell(td, alts_edit = toy_dir, events_edit = add_history(HIST_A), roles = toy_roles)
-  s3 <- spec_dir("--roles=bcj", "--variant=mid3"); sa <- spec_dir("--roles=bcj")
+  s3 <- spec_mid3(); sa <- spec_dir("--roles=bcj")
   out <- capture.output(A <- assemble_cell_spec("mid", 3L, s3, data_dir = td, model = "M1c")); Aa <- quiet(assemble_cell_spec("mid", 3L, sa, data_dir = td, model = "M1c"))
   expect_equal(A$variant, "mid3"); expect_equal(nrow(A$sy), 4L)                                       # every state-year has a history IV alternative here
   ## history per (i, j): 10-20, 10-40, 20-40 by an onset in 1987-1989 (both directions); 30 -> 40 by dy_mid_tm1; 10-30 NOT (its onsets are 1986 and 1990 = t)
@@ -220,7 +227,7 @@ test_that("mid3 assembly (toy): a state-year without a history alternative in it
   histB <- rbind(HIST_A, data.frame(initiator = 10L, target = 30L, year = 1988L))
   cutB <- function(a) { a <- toy_dir(a); a$in_iv[a$ccode1 == 20L & a$ccode2 %in% c(10L, 40L)] <- 0L; a }
   write_toy_cell(td, alts_edit = cutB, events_edit = add_history(histB), roles = toy_roles)
-  out <- capture.output(A <- assemble_cell_spec("mid", 3L, spec_dir("--roles=bcj", "--variant=mid3"), data_dir = td, model = "M1c"))
+  out <- capture.output(A <- assemble_cell_spec("mid", 3L, spec_mid3(), data_dir = td, model = "M1c"))
   expect_equal(A$sy$ccode, c(10L, 30L, 40L)); expect_equal(A$mid3_stats$n_sy_dropped, 1L); expect_equal(A$mid3_stats$y1_dropped, 0L); expect_false(20L %in% A$sy$ccode[A$alts$sy_row])
   expect_true(any(grepl("1 of 4 panel state-years have NO history alternative in their IV set and leave stage 1", out, fixed = TRUE)))
   expect_true(any(grepl("dropped from stage 1: 1 panel state-years without a MID-history alternative", out, fixed = TRUE)))
@@ -235,13 +242,13 @@ test_that("mid3 assembly (toy): a state-year without a history alternative in it
   td2 <- file.path(base, "data_entry")
   cutC <- function(a) { a <- toy_dir(a); a$dy_mid_tm1 <- as.integer(a$ccode1 == 20L & a$ccode2 == 40L); a }
   write_toy_cell(td2, alts_edit = cutC, events_edit = add_history(HIST_A), roles = toy_roles)
-  out <- capture.output(A2 <- assemble_cell_spec("mid", 3L, spec_dir("--roles=bcj", "--variant=mid3"), data_dir = td2, model = "M1c"))
+  out <- capture.output(A2 <- assemble_cell_spec("mid", 3L, spec_mid3(), data_dir = td2, model = "M1c"))
   expect_equal(A2$sy$ccode, c(10L, 20L, 40L)); expect_equal(A2$mid3_stats$n_sy_dropped, 1L); expect_equal(A2$mid3_stats$y1_dropped, 1L); expect_equal(sum(A2$sy$y1), 2L)
   expect_equal(A2$mid3_stats$by_role$n_lost_with_sy, c(1L, 0L, 1L)); expect_equal(A2$mid3_stats$n_lost_with_sy, 2L); expect_setequal(key_ev(A2), c("10 20", "10 30", "40 20"))
   expect_true(any(grepl("2 expected stage-2 events of sample mid leave with the 1 state-years", out, fixed = TRUE)))
   ## history that would be left-censored (alternatives of 1990, events file starting in 1990) is refused, not treated as "no history"
   td3 <- file.path(tempfile("r0mid3c"), "data_entry"); write_toy_cell(td3, alts_edit = toy_dir, roles = toy_roles)
-  expect_error(quiet(assemble_cell_spec("mid", 3L, spec_dir("--roles=bcj", "--variant=mid3"), data_dir = td3, model = "M1c")), "min\\(alts\\$year\\) - MID3_WINDOW >= min\\(events\\$year\\)")
+  expect_error(quiet(assemble_cell_spec("mid", 3L, spec_mid3(), data_dir = td3, model = "M1c")), "min\\(alts\\$year\\) - MID3_WINDOW >= min\\(events\\$year\\)")
   unlink(c(base, dirname(td3)), recursive = TRUE)
 })
 
@@ -265,10 +272,10 @@ test_that("run 0a (toy): reach = capdist appends the squared centred distance an
   unlink(base, recursive = TRUE)
 })
 
-test_that("run 0b (toy): prtarget drops exactly the events polrel drops, keeps the FULL choice set and stage 1, and renormalises the D8 weights to 1 per split group", {
+test_that("run 0b (toy): prtarget = the polrel cell's events, roles and weights (no D8 rescale) on the FULL choice set, stage 1 unchanged", {
   base <- tempfile("r0prt"); td <- file.path(base, "data_entry")
   ## 10 -> 30 and 40 -> 30 are not politically relevant. 10's two events are made ONE dispute (dispnum 4, weights 0.5 each, both co-originator events), so
-  ## dropping 10 -> 30 splits a D8 group; 30 -> 20 and 30 -> 10 are made one dispute (2) with weights 0.25 / 0.75 and stay whole
+  ## dropping 10 -> 30 splits a D8 group (which is NOT rescaled, as in the polrel cell); 30 -> 20 and 30 -> 10 are made one dispute (2) with weights 0.25 / 0.75 and stay whole
   ev_ed <- function(ev) { ev$dispnum[ev$initiator == 10L & ev$target == 20L] <- 4L; ev$dispnums[ev$initiator == 10L & ev$target == 20L] <- "4"
     ev$w_mid[ev$initiator == 10L] <- 0.5; ev$dispnum[ev$initiator == 30L & ev$target == 10L] <- 2L; ev$dispnums[ev$initiator == 30L & ev$target == 10L] <- "2"
     ev$w_mid[ev$initiator == 30L & ev$target == 20L] <- 0.25; ev$w_mid[ev$initiator == 30L & ev$target == 10L] <- 0.75; ev }
@@ -283,15 +290,17 @@ test_that("run 0b (toy): prtarget drops exactly the events polrel drops, keeps t
   expect_identical(A$alts, A0$alts); expect_equal(nrow(Ap$alts), nrow(A0$alts) - 2L)                  # ... on the FULL choice set (polrel loses two rows)
   expect_identical(A$sy, A0$sy); expect_equal(sum(A$sy$y1), 3L)                                       # stage 1 unchanged: y1 not recomputed
   expect_identical(A$W_cols, A0$W_cols); expect_identical(A$Z_cols, A0$Z_cols)
-  ## weights: the split group (10, dispute 4, 1990) sums to 1 again (0.5 -> 1); the whole group of 30 keeps 0.25 / 0.75; polrel does NOT rescale (0.5)
-  w <- setNames(A$ev$w, key_ev(A)); wp <- setNames(Ap$ev$w, key_ev(Ap)); w0 <- setNames(A0$ev$w, key_ev(A0))
-  expect_equal(unname(w[["10 20"]]), 1); expect_equal(unname(w0[["10 20"]]), 0.5); expect_equal(unname(wp[["10 20"]]), 0.5)
-  expect_equal(unname(w[c("30 20", "30 10")]), c(0.25, 0.75)); expect_equal(unname(w[["40 20"]]), unname(w0[["40 20"]]))
-  grp <- c("10 20" = "10-4", "30 20" = "30-2", "30 10" = "30-2", "40 20" = "40-7")
-  expect_equal(as.numeric(tapply(w[names(grp)], grp, sum)), c(1, 1, 1))                               # every (initiator, dispute, year) group of the kept events sums to 1
+  ## 0b = the polrel cell on the full choice set (audit of d60da78, PI decision 2026-11-10): identical events, roles AND weights. No D8 rescale: the
+  ## split group (10, dispute 4, 1990) keeps the build's 0.5 on 10 -> 20, exactly as in the polrel cell
+  o <- order(key_ev(A)); op <- order(key_ev(Ap))
+  expect_identical(key_ev(A)[o], key_ev(Ap)[op]); expect_identical(A$ev$grp[o], Ap$ev$grp[op]); expect_identical(A$ev$w[o], Ap$ev$w[op])
+  expect_identical(A$group_table[, c("group", "n_usable", "w_usable")], Ap$group_table[, c("group", "n_usable", "w_usable")])
+  w <- setNames(A$ev$w, key_ev(A)); w0 <- setNames(A0$ev$w, key_ev(A0))
+  expect_equal(unname(w[["10 20"]]), 0.5); expect_identical(w[names(w)], w0[names(w)])                 # every kept event keeps its weight of the unfiltered cell
+  expect_equal(unname(w[c("30 20", "30 10")]), c(0.25, 0.75)); expect_lt(sum(w[c("10 20")]), 1)       # the split group no longer sums to 1 (logged, as in polrel)
   st <- A$subsample_stats
-  expect_equal(st$labels, c("bilateral", "coalition_originator", "joiner")); expect_equal(st$n_dropped, c(0L, 1L, 0L)); expect_equal(st$n_events_rescaled, 1L); expect_equal(st$n_groups_split, 1L)
-  expect_equal(st$w_kept_before, 3.5, tolerance = 1e-12); expect_equal(st$w_kept_after, 4, tolerance = 1e-12)       # the five kept sample events (30 -> 40 is stage 1 only): 0.5 + 0.25 + 1 + 0.75 + 1, then 10 -> 20 at 1
+  expect_equal(st$labels, c("bilateral", "coalition_originator", "joiner")); expect_equal(st$n_dropped, c(0L, 1L, 0L)); expect_equal(st$n_events_rescaled, 0L); expect_equal(st$n_groups_split, 1L)
+  expect_equal(st$w_kept_before, 3.5, tolerance = 1e-12); expect_identical(st$w_kept_after, st$w_kept_before)       # the five kept sample events (30 -> 40 is stage 1 only): 0.5 + 0.25 + 1 + 0.75 + 1
   expect_true(any(grepl("subsample = prtarget", out, fixed = TRUE)))
   ## weights = none: no rescale, weight 1 everywhere
   Aw <- quiet(assemble_cell_spec("mid", 3L, spec_dir("--roles=bcj", "--subsample=prtarget", "--weights=none"), data_dir = td, model = "M1c")); expect_true(all(Aw$ev$w == 1))
@@ -334,13 +343,12 @@ test_that("02_fit_model.R --dry_run end to end on a toy cell for every new cell 
   run <- function(...) { out <- suppressWarnings(system2("Rscript", c(file.path(v2, "R", "02_fit_model.R"), "--sample=mid", "--lag=3", "--comparison=directed", "--entry=later", "--dry_run=TRUE", ...), stdout = TRUE, stderr = TRUE,
                                                  env = "V2_ROOT=")); list(status = if (is.null(attr(out, "status"))) 0L else attr(out, "status"), out = out) }
   rd <- function(cell) readRDS(file.path(out_dir, paste0("standata_", cell, ".rds")))
-  r <- run("--model=M1c", "--roles=bcj", "--variant=mid3"); expect_equal(r$status, 0L, info = paste(tail(r$out, 15), collapse = "\n"))
-  o <- rd("mid_lag3_mid3_pr_M1c_cdir_bcj_ent"); expect_equal(o$dat$E, 3L); expect_equal(o$dat$n_ev_alt, 7L); expect_true(all(o$dat$ev_alt_n >= 2L)); expect_equal(o$mid3_stats$n_set1, 2L)
-  expect_equal(o$manifest$file[grepl("^alts", o$manifest$file)], "alts_lag3_all.rds")                 # mid3 reads (and records) the all-states file
-  r <- run("--model=M2c", "--roles=bcj", "--variant=mid3", "--ame_K=2"); expect_equal(r$status, 0L, info = paste(tail(r$out, 15), collapse = "\n"))
-  o2 <- rd("mid_lag3_mid3_pr_M2c_K2_cdir_bcj_ent"); expect_identical(o2$dat$ev_alt_loc, o$dat$ev_alt_loc); expect_equal(o2$dat$K, 2L)
+  ## mid3 is refused at the command line for both models, with the reason, and writes nothing
+  for (m in list(c("--model=M1c"), c("--model=M2c", "--ame_K=2"))) { r <- run(m, "--roles=bcj", "--variant=mid3"); expect_true(r$status != 0L); expect_true(any(grepl("--variant=mid3 is refused (audit P1-1", r$out, fixed = TRUE))) }
+  expect_length(list.files(out_dir, pattern = "mid3"), 0L)
   r <- run("--model=M1c", "--roles=bcj", "--reach=capdist"); expect_equal(r$status, 0L, info = paste(tail(r$out, 15), collapse = "\n"))
   o <- rd("mid_lag3_all_pr_M1c_cdir_reach_bcj_ent"); expect_equal(o$dat$Pz, 11L); expect_identical(o$Z_cols, c(Z_DIRECTED, Z_REACH)); expect_false(is.null(o$reach_stats)); expect_null(o$mid3_stats)
+  r <- run("--model=M1c", "--roles=bcj", "--subsample=prtarget"); expect_equal(r$status, 0L, info = paste(tail(r$out, 15), collapse = "\n")); expect_equal(rd("mid_lag3_all_pr_M1c_cdir_bcj_sprt_ent")$subsample_stats$n_events_rescaled, 0L)
   r <- run("--model=M1b", "--subsample=bilateral"); expect_equal(r$status, 0L, info = paste(tail(r$out, 15), collapse = "\n"))
   o <- rd("mid_lag3_all_pr_M1b_cdir_sbil_ent"); expect_equal(o$dat$E, 2L); expect_equal(sum(o$dat$y1), 3L); expect_true("roles_aprime.rds" %in% o$manifest$file)
   r <- run("--model=M1c", "--roles=bcj", "--subsample=majinit"); expect_equal(r$status, 0L, info = paste(tail(r$out, 15), collapse = "\n"))
@@ -350,7 +358,7 @@ test_that("02_fit_model.R --dry_run end to end on a toy cell for every new cell 
   expect_false(any(c("mid3_stats", "reach_stats", "subsample_stats", "init_sub_stats") %in% names(o))); expect_equal(o$dat$Pz, 9L); expect_identical(o$Z_cols, Z_DIRECTED)
   ## refusals
   for (bad in list(c("--model=M1b", "--reach=capdist"), c("--model=M1c", "--roles=bcj", "--subsample=bilateral"), c("--model=M1c", "--subsample=bilateral"), c("--model=M1b", "--variant=mid3"),
-                   c("--model=M1c", "--roles=bcj", "--variant=mid3", "--joiner_set=opposing"), c("--model=M1c", "--roles=bcj", "--subsample=prtarget", "--variant=polrel"), c("--model=M1c", "--roles=bcj", "--reach")))
+                   c("--model=M1c", "--roles=bcj", "--subsample=prtarget", "--variant=polrel"), c("--model=M1c", "--roles=bcj", "--reach")))
     expect_true(run(bad)$status != 0L, info = paste(bad, collapse = " "))
   unlink(tmp, recursive = TRUE)
 })
@@ -367,23 +375,23 @@ test_that("slurm: 11_cset_grid.sbatch and 12_run0.sbatch issue valid cells (stub
   task <- function(file, i, env = character(0)) { unlink(rec); out <- suppressWarnings(system2("bash", file.path(tmp, "v2", "slurm", file), stdout = TRUE, stderr = TRUE, env = c(env0, sprintf("SLURM_ARRAY_TASK_ID=%d", i), env)))
     list(status = if (is.null(attr(out, "status"))) 0L else attr(out, "status"), out = out, call = if (file.exists(rec)) readLines(rec) else character(0)) }
   cell_of <- function(call) { a <- strsplit(sub("^v2/R/02_fit_model.R +", "", call), " +")[[1]]; sp <- parse_spec(a); m <- get_arg(a, "model", ""); cell_name(get_arg(a, "sample", ""), as.integer(get_arg(a, "lag", 0)), m, cell_spec(m, sp)) }
-  ## the choice-set grid: 12 cells, dry run (no init fit needed)
-  want11 <- c("fmid_lag3_all_pr_M1c_cdir_bcj_ent_tlong", "fmid_lag3_polrel_pr_M1c_cdir_bcj_ent_tlong", "fmid_lag3_mid3_pr_M1c_cdir_bcj_ent_tlong",
-              "fmid_lag3_all_pr_M1c_cdir_bcj_dy_tlong", "fmid_lag3_polrel_pr_M1c_cdir_bcj_dy_tlong", "fmid_lag3_mid3_pr_M1c_cdir_bcj_dy_tlong",
-              "fmid_lag3_all_pr_M2c_K2_cdir_bcj_ent_tlong", "fmid_lag3_polrel_pr_M2c_K2_cdir_bcj_ent_tlong", "fmid_lag3_mid3_pr_M2c_K2_cdir_bcj_ent_tlong",
-              "fmid_lag3_all_pr_M2c_K2_cdir_bcj_dy_tlong", "fmid_lag3_polrel_pr_M2c_K2_cdir_bcj_dy_tlong", "fmid_lag3_mid3_pr_M2c_K2_cdir_bcj_dy_tlong")
-  for (i in 0:11) { r <- task("11_cset_grid.sbatch", i, "DRY_RUN=TRUE"); expect_equal(r$status, 0L, info = paste(i, paste(r$out, collapse = "\n"))); expect_length(r$call, 1L)
-    expect_equal(cell_of(r$call), want11[i + 1L], info = i); expect_match(r$call, "--dry_run=TRUE", fixed = TRUE)
-    expect_equal(grepl("--iter=6000 --warmup=3000 --adapt_delta=0.9", r$call, fixed = TRUE), i <= 5L, info = i); expect_equal(grepl("--ame_K=2", r$call, fixed = TRUE), i >= 6L, info = i) }
-  ## the first two runs of each model are the run-7 cells (their names are the run-7 names): not in the default array
-  hdr <- readLines(file.path(root, "slurm", "11_cset_grid.sbatch")); expect_true("#SBATCH --array=2-5" %in% hdr); expect_true(all(c("#SBATCH --account=open", "#SBATCH --partition=open", "#SBATCH --requeue", "#SBATCH --time=48:00:00") %in% hdr))
+  ## the choice-set grid: 8 cells ({all, polrel} x {pairs, dymid} x {M1c, M2c K2}; mid3 dropped 2026-11-10), dry run (no init fit needed)
+  want11 <- c("fmid_lag3_all_pr_M1c_cdir_bcj_ent_tlong", "fmid_lag3_polrel_pr_M1c_cdir_bcj_ent_tlong", "fmid_lag3_all_pr_M1c_cdir_bcj_dy_tlong", "fmid_lag3_polrel_pr_M1c_cdir_bcj_dy_tlong",
+              "fmid_lag3_all_pr_M2c_K2_cdir_bcj_ent_tlong", "fmid_lag3_polrel_pr_M2c_K2_cdir_bcj_ent_tlong", "fmid_lag3_all_pr_M2c_K2_cdir_bcj_dy_tlong", "fmid_lag3_polrel_pr_M2c_K2_cdir_bcj_dy_tlong")
+  for (i in 0:7) { r <- task("11_cset_grid.sbatch", i, "DRY_RUN=TRUE"); expect_equal(r$status, 0L, info = paste(i, paste(r$out, collapse = "\n"))); expect_length(r$call, 1L)
+    expect_equal(cell_of(r$call), want11[i + 1L], info = i); expect_match(r$call, "--dry_run=TRUE", fixed = TRUE); expect_false(grepl("mid3", r$call))
+    expect_equal(grepl("--iter=6000 --warmup=3000 --adapt_delta=0.9", r$call, fixed = TRUE), i <= 3L, info = i); expect_equal(grepl("--ame_K=2", r$call, fixed = TRUE), i >= 4L, info = i) }
+  ## the pairs cells are the run-7 cells (their names are the run-7 names): not in the default array. Open-account convention of the repository: --partition=basic
+  hdr <- readLines(file.path(root, "slurm", "11_cset_grid.sbatch")); expect_true("#SBATCH --array=2-3" %in% hdr); expect_true(all(c("#SBATCH --account=open", "#SBATCH --requeue", "#SBATCH --time=48:00:00") %in% hdr))
+  expect_true(any(grepl("^#SBATCH --partition=basic( |$)", hdr))); expect_false(any(grepl("partition=open", hdr))); expect_false(any(grepl("vr=mid3", hdr)))
+  expect_identical(grep("^#SBATCH --(account|partition|requeue)", hdr, value = TRUE)[1:3], grep("^#SBATCH --(account|partition|requeue)", readLines(file.path(root, "slurm", "01_build.sbatch")), value = TRUE)[1:3])
   ## a real (non-dry) M2c task: refused on the open account, and refused without its M1c fit on the paid account; an M1c task runs
-  r <- task("11_cset_grid.sbatch", 8L); expect_true(r$status != 0L); expect_true(any(grepl("M2c cell on the open account", r$out))); expect_length(r$call, 0L)
-  r <- task("11_cset_grid.sbatch", 8L, "SLURM_JOB_ACCOUNT=jfe4_cr_default"); expect_true(r$status != 0L); expect_true(any(grepl("needs v2/output/fit_fmid_lag3_mid3_pr_M1c_cdir_bcj_ent_tlong.rds", r$out, fixed = TRUE)))
-  dir.create(file.path(tmp, "v2", "output"), showWarnings = FALSE); file.create(file.path(tmp, "v2", "output", "fit_fmid_lag3_mid3_pr_M1c_cdir_bcj_ent_tlong.rds"))
-  r <- task("11_cset_grid.sbatch", 8L, "SLURM_JOB_ACCOUNT=jfe4_cr_default"); expect_equal(r$status, 0L, info = paste(r$out, collapse = "\n")); expect_equal(cell_of(r$call), want11[9])
+  r <- task("11_cset_grid.sbatch", 6L); expect_true(r$status != 0L); expect_true(any(grepl("M2c cell on the open account", r$out))); expect_length(r$call, 0L)
+  r <- task("11_cset_grid.sbatch", 6L, "SLURM_JOB_ACCOUNT=jfe4_cr_default"); expect_true(r$status != 0L); expect_true(any(grepl("needs v2/output/fit_fmid_lag3_all_pr_M1c_cdir_bcj_dy_tlong.rds", r$out, fixed = TRUE)))
+  dir.create(file.path(tmp, "v2", "output"), showWarnings = FALSE); file.create(file.path(tmp, "v2", "output", "fit_fmid_lag3_all_pr_M1c_cdir_bcj_dy_tlong.rds"))
+  r <- task("11_cset_grid.sbatch", 6L, "SLURM_JOB_ACCOUNT=jfe4_cr_default"); expect_equal(r$status, 0L, info = paste(r$out, collapse = "\n")); expect_equal(cell_of(r$call), want11[7])
   r <- task("11_cset_grid.sbatch", 2L); expect_equal(r$status, 0L); expect_match(r$call, "--dry_run=FALSE", fixed = TRUE)
-  expect_true(task("11_cset_grid.sbatch", 12L)$status != 0L)
+  expect_true(task("11_cset_grid.sbatch", 8L)$status != 0L)
   ## run 0: 20 cells
   sw <- c("reach", "sprt", "sbil", "smaj", "smin")
   for (i in 0:19) { r <- task("12_run0.sbatch", i, "DRY_RUN=TRUE"); expect_equal(r$status, 0L, info = paste(i, paste(r$out, collapse = "\n"))); expect_length(r$call, 1L)
@@ -391,16 +399,17 @@ test_that("slurm: 11_cset_grid.sbatch and 12_run0.sbatch issue valid cells (stub
     want <- switch(sw[k], reach = sprintf("%s_lag3_all_pr_M1c_cdir_reach_bcj%s_tlong", s, ds), sbil = sprintf("%s_lag3_all_pr_M1b_cdir_sbil%s_tlong", s, ds), sprintf("%s_lag3_all_pr_M1c_cdir_bcj_%s%s_tlong", s, sw[k], ds))
     expect_equal(cell_of(r$call), want, info = i); expect_match(r$call, "--iter=6000 --warmup=3000 --adapt_delta=0.9", fixed = TRUE) }
   expect_true(task("12_run0.sbatch", 20L)$status != 0L)
-  hdr <- readLines(file.path(root, "slurm", "12_run0.sbatch")); expect_true(all(c("#SBATCH --account=open", "#SBATCH --partition=open", "#SBATCH --requeue", "#SBATCH --array=0-19") %in% hdr))
+  hdr <- readLines(file.path(root, "slurm", "12_run0.sbatch")); expect_true(all(c("#SBATCH --account=open", "#SBATCH --requeue", "#SBATCH --array=0-19") %in% hdr))
+  expect_true(any(grepl("^#SBATCH --partition=basic( |$)", hdr))); expect_false(any(grepl("partition=open", hdr)))
   ## the submit helper: the M1c array on the header's open account, the M2c array on the paid allocation, afterok on it
   unlink(rec); old <- setwd(tmp); on.exit(setwd(old), add = TRUE)
   out <- suppressWarnings(system2("bash", "v2/slurm/submit_cset_grid.sh", stdout = TRUE, stderr = TRUE, env = env0)); expect_null(attr(out, "status"), info = paste(out, collapse = "\n"))
   calls <- readLines(rec); expect_length(calls, 2L)
-  expect_match(calls[1], "^sbatch job=1001 args: --parsable --array=2-5 --export=ALL v2/slurm/11_cset_grid.sbatch$")
-  expect_match(calls[2], "^sbatch job=1002 args: --parsable --array=8-11 --export=ALL --account=jfe4_cr_default --partition=basic --time=7-00:00:00 --dependency=afterok:1001 --kill-on-invalid-dep=yes v2/slurm/11_cset_grid.sbatch$")
+  expect_match(calls[1], "^sbatch job=1001 args: --parsable --array=2-3 --export=ALL v2/slurm/11_cset_grid.sbatch$")
+  expect_match(calls[2], "^sbatch job=1002 args: --parsable --array=6-7 --export=ALL --account=jfe4_cr_default --partition=basic --time=7-00:00:00 --dependency=afterok:1001 --kill-on-invalid-dep=yes v2/slurm/11_cset_grid.sbatch$")
   out <- suppressWarnings(system2("bash", c("v2/slurm/submit_cset_grid.sh", "--array=0-3"), stdout = TRUE, stderr = TRUE, env = env0)); expect_false(is.null(attr(out, "status")))
-  out <- suppressWarnings(system2("bash", "v2/slurm/submit_cset_grid.sh", stdout = TRUE, stderr = TRUE, env = c(env0, "A_JOB=777", "M2_IDX=6-11"))); calls <- readLines(rec); expect_length(calls, 3L)
-  expect_match(calls[3], "--array=6-11 .*--dependency=afterok:777 --kill-on-invalid-dep=yes")
+  out <- suppressWarnings(system2("bash", "v2/slurm/submit_cset_grid.sh", stdout = TRUE, stderr = TRUE, env = c(env0, "A_JOB=777", "M2_IDX=4-7"))); calls <- readLines(rec); expect_length(calls, 3L)
+  expect_match(calls[3], "--array=4-7 .*--dependency=afterok:777 --kill-on-invalid-dep=yes")
   unlink(tmp, recursive = TRUE)
 })
 
@@ -409,7 +418,7 @@ test_that("real lag-3 builds: mid3 history recomputed independently, never a yea
   for (dd in c("data_entry", "data_dymid")) {
     td <- file.path(root, dd); if (!file.exists(file.path(td, "manifest.csv"))) skip(paste("no build in", td))
     da <- if (dd == "data_entry") "--entry=later" else "--events=dymid"
-    A <- quiet(assemble_cell_spec("fmid", 3L, parse_spec(c("--comparison=directed", da, "--roles=bcj", "--variant=mid3")), data_dir = td, model = "M1c"))
+    A <- quiet(assemble_cell_spec("fmid", 3L, spec_mid3(da), data_dir = td, model = "M1c"))             # the refused construction, called directly (unit test)
     ev <- readRDS(file.path(td, "events.rds"))
     ## independent recomputation: for every IV row, an onset of the unordered pair with 1 <= t - onset <= 3, or dy_mid_tm1 = 1
     on <- unique(data.frame(a = pmin(ev$initiator, ev$target), b = pmax(ev$initiator, ev$target), onset = ev$year))
@@ -430,7 +439,9 @@ test_that("real lag-3 builds: mid3 history recomputed independently, never a yea
     Ap <- quiet(assemble_cell_spec("fmid", 3L, parse_spec(c("--comparison=directed", da, "--roles=bcj", "--variant=polrel")), data_dir = td, model = "M1c"))
     As <- quiet(assemble_cell_spec("fmid", 3L, parse_spec(c("--comparison=directed", da, "--roles=bcj", "--subsample=prtarget")), data_dir = td, model = "M1c"))
     expect_false(any(duplicated(key_evy(As)))); expect_setequal(key_evy(As), key_evy(Ap)); expect_identical(As$ev$grp[order(key_evy(As))], Ap$ev$grp[order(key_evy(Ap))], info = dd); expect_gt(nrow(As$alts), nrow(Ap$alts))
-    expect_gt(sum(As$ev$w), sum(Ap$ev$w))                    # the rescale restores weight overall (a split group holding a collapsed key can be scaled DOWN to 1: the pairs rule)             # the rescale only raises weights
+    expect_identical(As$ev$w[order(key_evy(As))], Ap$ev$w[order(key_evy(Ap))], info = dd)             # no D8 rescale: the polrel cell's weights exactly
+    expect_identical(As$group_table[, c("group", "n_usable", "w_usable")], Ap$group_table[, c("group", "n_usable", "w_usable")], info = dd)
+    if (dd == "data_entry") expect_equal(round(As$group_table$w_usable[3], 1), 238.9)                    # pairs fmid joiner weight = the polrel cell's             # the rescale only raises weights
     rm(A, Ap, As, ev, rows, j); gc()
     if (dd == "data_entry") {
       ## 0d on the real cell: minor-power initiators only, in both stages
