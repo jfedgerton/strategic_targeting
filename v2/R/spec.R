@@ -126,16 +126,26 @@ MU_SHIFT_MODELS <- c(DIRECTED_MODELS, RHOREG_MODELS)
 ##                   minors) leaves Z. Model M1c.
 ## After an event filter (prtarget, bilateral) the D8 weights are rescaled within the (initiator, dispute, year) groups the filter split, exactly as under
 ## pairs = originators | joiners (d8_rescale_split_groups()).
+## SUPERSEDED the same day (audit of d60da78, PI decision 2026-11-10): the event subsamples do NOT rescale the D8 weights. The polrel cell does not rescale
+## either (events that leave through the choice set are logged, not rescaled), so 0b carries exactly the polrel cell's events, roles and weights and differs
+## from it in the choice set only.
 ## variant = mid3 (the lag-3 MID-history choice set; takes the variant slot of the cell name like polrel): alternatives j of initiator i in year t with a
 ## MID onset between i and j (either direction; every row of the build's events.rds, all hostility levels, escalations included) in [t - MID3_WINDOW, t - 1],
 ## OR dy_mid_tm1 == 1. Year t is never used. Built at assembly from alts_lag<h>_all.rds (no file of its own). Only with comparison = directed, models
-## MID3_MODELS, pairs = all, context = all, ww2 = include, joiner_set = all, subsample = none.
+## MID3_MODELS, pairs = all, context = all, ww2 = include, joiner_set = all, subsample = none. REFUSED since the audit of 2026-11-10 (MID3_REFUSAL below).
 REACH_MODELS      <- c("M1c")
 SUBSAMPLE_MODELS  <- list(prtarget = "M1c", bilateral = "M1b", majinit = "M1c", mininit = "M1c")
 INIT_SUBSAMPLES   <- c("majinit", "mininit")          # the subsamples that restrict the stage-1 population as well
 EVENT_SUBSAMPLES  <- c("prtarget", "bilateral")       # the subsamples that filter stage-2 events only (stage 1 unchanged)
 MID3_MODELS       <- c("M1c", "M2c")
 MID3_WINDOW       <- 3L                               # years of MID history before t: onsets in [t - 3, t - 1]
+## REFUSED since the audit of 2026-11-10 (P1-1; PI decision the same day): --variant=mid3 stops in parse_spec() and cell_name(), so no script can run a mid3
+## cell and no mid3 cell name exists. The construction (mid3_history(), the VARIANT = "mid3" block of assemble_cell()) stays in the code, reachable only by
+## calling the assembly directly, and is exercised by unit tests alone.
+MID3_REFUSAL <- paste("--variant=mid3 is refused (audit P1-1, PI decision 2026-11-10): with a MID-history window of t-3..t-1 the chosen target must be kept in the set, and a chosen",
+                      "target without history is then the ONLY non-history member of its set (60% of the usable fatal pairs events, 53% of the jointly fatal ones), so its stage-2",
+                      "term is not a valid conditional probability; widening the window to include year t would define the set by the outcome instead. Use --variant=all or",
+                      "--variant=polrel. The construction code is kept for reference (README section 13.2).")
 ## spec_reach(spec) / spec_subsample(spec): the values of the two run-0 switches ("none" for a spec saved before 2026-11-10, which has neither field)
 spec_reach     <- function(spec) if (is.null(spec$reach)) "none" else spec$reach
 spec_subsample <- function(spec) if (is.null(spec$subsample)) "none" else spec$subsample
@@ -409,11 +419,13 @@ parse_spec <- function(args = character(0)) {
   if (spec$reach != SPEC_DEFAULTS$reach) {
     if (spec$comparison != "directed") stop(sprintf("--reach=%s needs --comparison=directed (the terms extend the directed Z; got comparison=%s)", spec$reach, spec$comparison))
     if (spec$mu_shift != SPEC_DEFAULTS$mu_shift) stop(sprintf("--reach=%s with --mu_shift=%s is not specified (run 0a is the directed M1c cell without ideal-point shifters)", spec$reach, spec$mu_shift))
+    if (spec$variant == "mid3") stop(MID3_REFUSAL)
     if (spec$variant != "all") stop(sprintf("--reach=%s is defined on the full choice set (got --variant=%s)", spec$reach, spec$variant))
     if (spec$subsample != SPEC_DEFAULTS$subsample) stop(sprintf("--reach=%s with --subsample=%s is not specified (the run-0 cells flip one switch each)", spec$reach, spec$subsample))
   }
   if (spec$subsample != SPEC_DEFAULTS$subsample) {
     if (spec$comparison != "directed") stop(sprintf("--subsample=%s needs --comparison=directed (run 0 is defined on the directed specification; got comparison=%s)", spec$subsample, spec$comparison))
+    if (spec$variant == "mid3") stop(MID3_REFUSAL)
     if (spec$variant != "all") stop(sprintf("--subsample=%s is defined on the full choice set (got --variant=%s)", spec$subsample, spec$variant))
     for (nm in c("pairs", "context", "ww2", "joiner_set", "mu_shift")) if (spec[[nm]] != SPEC_DEFAULTS[[nm]])
       stop(sprintf("--subsample=%s with --%s=%s is not specified (one event / sample filter at a time)", spec$subsample, nm, spec[[nm]]))
@@ -422,11 +434,7 @@ parse_spec <- function(args = character(0)) {
       if (spec$entry != "later" && spec$events != "dymid") stop("--subsample=bilateral needs --entry=later or --events=dymid (the bcj role coding is defined on those events only)")
     }
   }
-  if (spec$variant == "mid3") {
-    if (spec$comparison != "directed") stop(sprintf("--variant=mid3 needs --comparison=directed (the MID-history choice set is specified for the directed role / AME cells; got comparison=%s)", spec$comparison))
-    for (nm in c("pairs", "context", "ww2", "joiner_set", "mu_shift")) if (spec[[nm]] != SPEC_DEFAULTS[[nm]])
-      stop(sprintf("--variant=mid3 with --%s=%s is not specified (the MID-history sets are built from every event of the sample; joiner sets are not intersected)", nm, spec[[nm]]))
-  }
+  if (spec$variant == "mid3") stop(MID3_REFUSAL)        # audit P1-1 (2026-11-10): refused on every command line
   ## run tag (2026-10-30): letters and digits only, so the suffix _t<tag> is one unambiguous token of the file name; "" = no tag
   spec$tag <- get_arg(args, "tag", SPEC_DEFAULTS$tag)
   if (!is.character(spec$tag) || length(spec$tag) != 1 || is.na(spec$tag)) stop("--tag must be one string")
@@ -495,6 +503,7 @@ spec_coal_col <- function(spec) c(inclusive = "coal_incl", strict = "coal_strict
 ## M1 model (M1m, M1r, M1a: no rho_x) is refused as well, since the fit would be the main model under a name that claims another prior.
 cell_name <- function(sample, lag, model, spec) {
   stopifnot(sample %in% ALL_SAMPLES, lag %in% LAGS, model %in% ALL_MODELS)
+  if (identical(spec_variant(spec), "mid3")) stop(paste("cell_name:", MID3_REFUSAL))      # audit P1-1 (2026-11-10): no mid3 cell name exists
   sample_in_events(sample, spec)                    # 2026-11-04: fmidany exists under events = dymid only, fmidcow under pairs only
   if (model_family(model) == "M1" && !identical(as.integer(spec$ame_K), SPEC_DEFAULTS$ame_K))
     stop(sprintf("cell_name: --ame_K=%s with the M1 model %s (K applies to the M2 family only and would not appear in the cell name)", spec$ame_K, model))
@@ -537,10 +546,6 @@ cell_name <- function(sample, lag, model, spec) {
   if (spec_subsample(spec) != "none" && !identical(model, SUBSAMPLE_MODELS[[spec_subsample(spec)]]))
     stop(sprintf("cell_name: --subsample=%s with the model %s (specified for %s only%s)", spec_subsample(spec), model, SUBSAMPLE_MODELS[[spec_subsample(spec)]],
                  if (spec_subsample(spec) == "bilateral") ": one role, so the pooled model; M1c stops on an empty group" else ""))
-  if (identical(spec_variant(spec), "mid3") && !model %in% MID3_MODELS)
-    stop(sprintf("cell_name: --variant=mid3 with the model %s (the MID-history choice set is specified for %s only)", model, paste(MID3_MODELS, collapse = ", ")))
-  if (identical(spec_variant(spec), "mid3") && !isTRUE(spec$roles %in% JOINER_ROLES))
-    stop(sprintf("cell_name: --variant=mid3 needs --roles=aprime, bc or bcj (got roles=%s)", if (is.null(spec$roles)) "stageb" else spec$roles))
   if (identical(spec_variant(spec), "polrel") && !model %in% POLREL_MODELS)
     stop(sprintf("cell_name: --variant=%s with the model %s (the politically relevant choice set is specified for %s only)", spec_variant(spec), model, paste(POLREL_MODELS, collapse = ", ")))
   sprintf("%s_lag%d_%s_%s_%s%s%s", sample, as.integer(lag), spec_variant(spec), CENTRALITY, model,
