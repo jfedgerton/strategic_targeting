@@ -274,7 +274,7 @@ if (A$distance == "capital") logf("distance = capital (2026-10-28%s): log_capdis
                                      A$distance_stats$mean_iv, A$distance_stats$sd_iv, A$distance_stats$cor_contig_iv, A$distance_stats$mean_chosen, A$distance_stats$mean_s2)
 if (REACH != "none") logf("reach = %s (run 0a, 2026-11-10, suffix _reach): Z carries %s (centred log_capdist squared, and x the initiator's M_lvl; both centred over the IV rows); IV-row SDs %.4f / %.4f; correlation of the linear term with the square %.3f, with the product %.3f",
                           REACH, paste(Z_REACH, collapse = ","), A$reach_stats$sd_sq, A$reach_stats$sd_x, A$reach_stats$cor_lin_sq, A$reach_stats$cor_lin_x)
-if (SUBSAMPLE != "none") logf("subsample = %s (run 0, 2026-11-10): events dropped by role %s; %d events kept in the sample, %d rescaled in %d split D8 groups (weights %.1f -> %.1f); stage 1 %s; %d state-years with y1 = 1 and no stage-2 event",
+if (SUBSAMPLE != "none") logf("subsample = %s (run 0, 2026-11-10): events dropped by role %s; %d events kept in the sample, %d rescaled, %d D8 groups split (no rescale: weights %.1f -> %.1f); stage 1 %s; %d state-years with y1 = 1 and no stage-2 event",
                               SUBSAMPLE, paste(sprintf("%s %d of %d", A$subsample_stats$labels, A$subsample_stats$n_dropped, A$subsample_stats$n_before), collapse = ", "), A$subsample_stats$n_kept, A$subsample_stats$n_events_rescaled,
                               A$subsample_stats$n_groups_split, A$subsample_stats$w_kept_before, A$subsample_stats$w_kept_after,
                               if (SUBSAMPLE %in% INIT_SUBSAMPLES) sprintf("restricted to %d of %d state-years", A$init_sub_stats$n_kept, A$init_sub_stats$n_panel) else "unchanged", A$n_orphan)

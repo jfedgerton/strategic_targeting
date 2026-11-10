@@ -95,7 +95,7 @@
 ##                   log_capdist and its product with the initiator's M_lvl, both centred over the IV rows). "none" leaves every cell byte-identical.
 ##   SUBSAMPLE     = "none" | "prtarget" | "bilateral" | "majinit" | "mininit" (runs 0b-0d, 2026-11-10, switch subsample; DIRECTED only, full choice set):
 ##                   prtarget / bilateral filter the STAGE-2 events (chosen target politically relevant / bcj role bilateral; stage 1 unchanged, D8 weights
-##                   rescaled in the split groups as under PAIRS); majinit / mininit restrict BOTH stages to the state-years of major / minor initiators
+##                   NOT rescaled, as in the polrel cell: PI decision 2026-11-10); majinit / mininit restrict BOTH stages to the state-years of major / minor initiators
 ##                   (cowmaj_tm1 leaves W, tgt_major_x_init_major leaves Z). "none" leaves every cell byte-identical.
 ##   VARIANT       = "all" | "polrel" | "mid3" (2026-11-10): mid3 = the lag-3 MID-history choice set, cut from alts_lag<h>_all.rds at assembly (the block
 ##                   after the input checks); every event gets its own set (history rows of its state-year + its chosen target) through ev_sets.
@@ -288,6 +288,9 @@ assemble_cell <- function(SAMPLE, LAG, VARIANT, CENT = "pr", CONFLICT_HISTORY = 
   ## of every event of the sample (a conditional logit needs the chosen alternative; each event is then scored against the history rows of its
   ## state-year plus its OWN chosen target only, through the event-level sets below). A state-year without any history row in its IV set has no
   ## inclusive value and leaves stage 1 with its events, exactly as a polrel state-year without a politically relevant alternative does.
+  ## REFUSED since the audit of 2026-11-10 (P1-1): parse_spec() and cell_name() stop on --variant=mid3 (MID3_REFUSAL, spec.R), so this block and the
+  ## event-level block below are reachable only by calling the assembly directly (the unit tests). A chosen target without history is the only non-history
+  ## member of its set, so its stage-2 term is not a valid conditional probability; the code is kept for reference, not for fits.
   mid3_stats <- NULL; mid3_sy_dropped <- NULL
   if (VARIANT == "mid3") {
     stopifnot(all(c("ccode1", "ccode2", "year", "dy_mid_tm1") %in% names(alts)), !anyNA(alts$dy_mid_tm1), min(alts$year) - MID3_WINDOW >= min(events$year),
@@ -739,9 +742,9 @@ assemble_cell <- function(SAMPLE, LAG, VARIANT, CENT = "pr", CONFLICT_HISTORY = 
   ##   Events without a stage-2 row (stage 1 only anyway) are untouched. Stage 1 is unchanged: y1 is NOT recomputed (orphans counted below).
   ## bilateral (0c): only the events of bcj role bilateral (aprime group 0, alone originator; roles_aprime.rds) stay in stage 2. Stage 1 unchanged.
   ## majinit / mininit (0d): the events of initiators outside the kept state-years leave (their state-years left stage 1 above).
-  ## D8 weights: after an EVENT filter (prtarget, bilateral) the kept events' weights are rescaled within every (initiator, dispute, year) group the
-  ## filter split, exactly as under pairs = originators | joiners (d8_rescale_split_groups(); EVENT_WEIGHTS = dispute only). The initiator subsamples
-  ## keep or drop every group whole (a group has one initiator and one year), so nothing is rescaled there (asserted).
+  ## D8 weights: NOT rescaled under any subsample (PI decision 2026-11-10 after the audit; the first build rescaled the split groups by the pairs rule).
+  ## The polrel cell does not rescale the groups its choice set splits, so 0b keeps the build's weights and matches that cell event for event. The
+  ## initiator subsamples keep or drop every group whole (a group has one initiator and one year; asserted).
   subsample_stats <- NULL
   if (SUBSAMPLE != "none") {
     ev_before <- ev_all
@@ -768,20 +771,17 @@ assemble_cell <- function(SAMPLE, LAG, VARIANT, CENT = "pr", CONFLICT_HISTORY = 
     stopifnot(length(keep) == nrow(ev_before), !anyNA(keep))
     ev_all <- ev_before[keep, ]
     if (nrow(ev_all) == 0L) stop(sprintf("subsample = %s leaves no event in sample %s", SUBSAMPLE, SAMPLE))
-    w_before_kept <- sum(ev_all[[w_col]]); n_resc <- 0L; n_split <- 0L
-    if (SUBSAMPLE %in% EVENT_SUBSAMPLES && EVENT_WEIGHTS == "dispute") {
-      ev_all <- d8_rescale_split_groups(ev_before, ev_all, w_col)
-      n_resc <- attr(ev_all, "n_events_rescaled"); n_split <- attr(ev_all, "n_groups_split")
-      for (a in c("n_groups_split", "n_groups_rescaled", "n_events_rescaled", "n_events_in_split", "w_before", "w_after", "n_split_with_collapsed", "groups")) attr(ev_all, a) <- NULL
-    } else if (INIT_SUB) {
-      g <- d8_group_table(ev_before, ev_all, w_col)
-      stopifnot(all(g$n_kept == 0L | g$n_kept == g$n))    # a D8 group has one initiator-year: kept or dropped whole
-    }
+    ## NO D8 rescale (audit of d60da78, PI decision 2026-11-10): the kept events keep the build's weights, as the events of the polrel cell do, so
+    ## 0b = the polrel cell's events, roles AND weights on the full choice set. The groups the filter split are counted and logged.
+    w_before_kept <- sum(ev_all[[w_col]]); n_resc <- 0L
+    g <- d8_group_table(ev_before, ev_all, w_col); n_split <- sum(g$n_kept > 0L & g$n_kept < g$n)
+    if (INIT_SUB) stopifnot(n_split == 0L)                # a D8 group has one initiator-year: kept or dropped whole
+    stopifnot(identical(ev_all[[w_col]], ev_before[[w_col]][keep]))
     nG <- length(sub_lab)
     subsample_stats <- list(labels = sub_lab, n_before = as.integer(tabulate(sub_role + 1L, nbins = nG)), n_dropped = as.integer(tabulate(sub_role[!keep] + 1L, nbins = nG)),
                             w_dropped = vapply(0:(nG - 1L), function(g) sum(ev_before[[w_col]][!keep & sub_role == g]), 0), n_kept = nrow(ev_all),
                             w_kept_before = w_before_kept, w_kept_after = sum(ev_all[[w_col]]), n_events_rescaled = n_resc, n_groups_split = n_split)
-    logf("subsample = %s (run 0, 2026-11-10): sample %s %d -> %d events; dropped by role (events of the sample, D8 weights as built): %s; D8 groups split by the filter %d, %d kept events rescaled so every split group sums to 1 again (the pairs rule); weights of the kept events %.1f -> %.1f; stage 1 %s",
+    logf("subsample = %s (run 0, 2026-11-10): sample %s %d -> %d events; dropped by role (events of the sample, D8 weights as built): %s; D8 groups split by the filter %d, %d kept events rescaled (NO rescale since 2026-11-10: the weights are the build's, as in the polrel cell; a split group no longer sums to 1); weights of the kept events %.1f -> %.1f; stage 1 %s",
          SUBSAMPLE, SAMPLE, nrow(ev_before), nrow(ev_all), paste(sprintf("%s %d of %d (weights %.1f)", sub_lab, subsample_stats$n_dropped, subsample_stats$n_before, subsample_stats$w_dropped), collapse = "; "),
          n_split, n_resc, w_before_kept, subsample_stats$w_kept_after, if (INIT_SUB) "restricted to the same state-years (above)" else sprintf("unchanged (y1 stays %d initiations)", sum(sy$y1)))
   }
