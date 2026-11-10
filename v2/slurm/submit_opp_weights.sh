@@ -1,7 +1,7 @@
 #!/bin/bash
 # Submit run 1 (13_opp_weights.sbatch; README section 14) as three chained jobs, from the repo root. Nothing is submitted unless this script is run.
 #   (a) the auxiliary model (STEP=aux; open account, one task, AUX_OPTS)                                                          -> job A
-#   (b) the M1c cells (STEP=fit; array FIT_IDX, default 0-31; open account / open partition / requeue, 48 h, the M1 resources of 12_run0.sbatch, as the
+#   (b) the M1c cells (STEP=fit; array FIT_IDX, default 0-31; open account / basic partition / requeue, 48 h, the M1 resources of 12_run0.sbatch, as the
 #       sbatch header says), --dependency=afterok:A --kill-on-invalid-dep=yes                                                      -> job B
 #   (c) the mixture over the five auxiliary draws at lambda = 1 (STEP=combine; open account, one task, MIX_OPTS), --dependency=afterok:B (the whole array)
 # Environment passed through: TAG, LONG_ITER, LONG_WARMUP, LONG_ADAPT_DELTA, THREADS_PER_CHAIN, OPP_OUTCOME (fit / combine; default mid), OPP_OUTCOMES (aux).

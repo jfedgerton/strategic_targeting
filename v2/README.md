@@ -566,7 +566,7 @@ Diagnostics per cell (`oppw_cell_<cell>.csv`, the log, and `obj$opp` of the save
 
 ### 14.3 Grid, commands, defaults for sign-off
 
-Cells. M1c, `--comparison=directed --roles=bcj`, lag 3, `--tag=long`, samples `fmid` and `mid`, events pairs (`--entry=later`, fmid all-fatal) and dymid (`--events=dymid`, fmid jointly fatal), λ ∈ {0, 0.5, 1} at the MLE weights plus λ = 1 with the five draws. 32 cells, no AME. `slurm/13_opp_weights.sbatch` holds the three steps and `slurm/submit_opp_weights.sh` chains them (auxiliary job, then the array `afterok`, then the mixture `afterok`). The array uses the open account with the M1 resources of `12_run0.sbatch`. Whether a long M1c fit ends inside 48 h there has not been measured. Nothing is submitted by the repository.
+Cells. M1c, `--comparison=directed --roles=bcj`, lag 3, `--tag=long`, samples `fmid` and `mid`, events pairs (`--entry=later`, fmid all-fatal) and dymid (`--events=dymid`, fmid jointly fatal), λ ∈ {0, 0.5, 1} at the MLE weights plus λ = 1 with the five draws. 32 cells, no AME. `slurm/13_opp_weights.sbatch` holds the three steps and `slurm/submit_opp_weights.sh` chains them (auxiliary job, then the array `afterok`, then the mixture `afterok`). The array uses `--account=open --partition=basic --requeue` with the M1 resources of `12_run0.sbatch`. Whether a long M1c fit ends inside 48 h there has not been measured. Nothing is submitted by the repository.
 
 ```
 Rscript v2/R/compile_models.R                                                        # compiles m1_context_offset (the eighth program)

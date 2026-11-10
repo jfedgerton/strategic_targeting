@@ -466,7 +466,8 @@ test_that("slurm: 13_opp_weights.sbatch issues the auxiliary runs, the 32 valid 
                c("fmid_lag3_all_pr_M1c_cdir_bcj_ent_opw1_tlong", "mid_lag3_all_pr_M1c_cdir_bcj_ent_opw1_tlong", "fmid_lag3_all_pr_M1c_cdir_bcj_dy_opw1_tlong", "mid_lag3_all_pr_M1c_cdir_bcj_dy_opw1_tlong"))
   expect_true(task(0L, "STEP=other")$status != 0L)
   hdr <- readLines(file.path(root, "slurm", "13_opp_weights.sbatch")); hdr0 <- readLines(file.path(root, "slurm", "12_run0.sbatch"))
-  expect_true(all(c("#SBATCH --account=open", "#SBATCH --partition=open", "#SBATCH --requeue", "#SBATCH --time=48:00:00", "#SBATCH --array=0-31", "#SBATCH --mem=128G") %in% hdr))
+  expect_true(all(c("#SBATCH --account=open", "#SBATCH --requeue", "#SBATCH --time=48:00:00", "#SBATCH --array=0-31", "#SBATCH --mem=128G") %in% hdr))
+  expect_true(any(grepl("^#SBATCH --partition=basic", hdr))); expect_false(any(grepl("partition=open", hdr)))                    # the convention of 3ee000e: open account on the basic partition
   for (k in c("--account", "--partition", "--requeue", "--time", "--mem", "--nodes")) expect_identical(grep(paste0("^#SBATCH ", k), hdr, value = TRUE), grep(paste0("^#SBATCH ", k), hdr0, value = TRUE), info = k)   # the M1 resources of run 0
   ## the submit helper: aux, then the array afterok on it, then the mixture afterok on the array; nothing else
   owd <- setwd(tmp); on.exit(setwd(owd), add = TRUE); unlink(rec); unlink(ctr)

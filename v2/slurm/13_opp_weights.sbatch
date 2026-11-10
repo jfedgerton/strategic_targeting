@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name=v2_oppw
 #SBATCH --account=open
-#SBATCH --partition=open
+#SBATCH --partition=basic   # the open partition no longer exists; --account=open bills the free READ credits
 #SBATCH --requeue
 #SBATCH --time=48:00:00
 #SBATCH --nodes=1 --ntasks=1 --cpus-per-task=32   # = chains (4) x threads_per_chain (8)
@@ -22,7 +22,7 @@
 #                 OPP_OUTCOME=host3 runs the same grid on the hostility >= 3 weights (suffix _oh3 after the weight); default mid.
 #   STEP=combine  one job (submit with --array=0): 09_opp_combine.R for the four lambda = 1 cells (the equally weighted mixture over the five draws).
 # The fit cells use the open account like run 0 (same data size and sampler settings as its full-set M1c cells); a preempted task is requeued and starts
-# again from the beginning (log appended). Whether a long M1c fit ends inside 48 h on the open partition has NOT been measured here: check a run-0 log
+# again from the beginning (log appended). Whether a long M1c fit ends inside 48 h on the open account has NOT been measured here: check a run-0 log
 # ("sampling finished in") before submitting, and move the array to the allocation (--account=jfe4_cr_default --partition=basic) if it does not.
 # DRY RUN of the fit cells (needs the weights; open account): sbatch --export=ALL,DRY_RUN=TRUE --time=00:30:00 --mem=16G --cpus-per-task=1 v2/slurm/13_opp_weights.sbatch
 # Needs both builds (01_build_data.R --entry=later and --events=dymid) and the compiled m1_context_offset program (compile_models.R).
