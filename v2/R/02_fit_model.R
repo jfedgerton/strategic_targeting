@@ -54,6 +54,12 @@
 ##            prior with M1b only): a non-default value fits the SAME model with stan/m1_latent_prior.stan, the copy of the main program that
 ##            takes the Beta shape on (rho + 1) / 2 (2.5 | 1 = uniform on (-1, 1)) and the lognormal sd of sigma_x (1 | 0.5) as data
 ##            (prior_hyper(), spec.R); suffixes _rhoflat / _sigln05 after every data switch; refused with M2 and M1c (cell_name())
+##     --opp_weight=none|0|0.5|1 (run 1, 2026-11-10; README section 14; M1c with --comparison=directed --roles=bcj on the full choice set only): the fixed
+##            offset lambda x ln q_ij of the MID-propensity OPPORTUNITY WEIGHT in the stage-2 utility and inside the stage-1 IV (stan/m1_context_offset.stan;
+##            q from 08_opportunity_weights.R, output/oppw_<foundation>_<outcome>_lag3.rds, which must exist and match the cell's data files). A sensitivity
+##            specification, not a consideration-set model. lambda = 0 = the Stan data of the cell without the switch plus a zero offset (same log
+##            density). Suffixes _opw0 / _opw05 / _opw1. --opp_outcome=mid|host3 (suffix _oh3): the auxiliary outcome. --opp_draw=0|1..5 (suffix _d<d>;
+##            needs --opp_weight=1): q at the auxiliary MLE | at the d-th coherent full-vector draw. Writes output/oppw_cell_<cell>.csv (per-role diagnostics)
 ##   tag    : --tag=<alnum> (2026-10-30) appends _t<tag> LAST to the cell name, so the fit, summary, standata and log files of this run never
 ##            overwrite an existing fit (e.g. --iter=6000 --warmup=3000 --tag=long for a longer-chain refit while jobs read the untagged fit).
 ##            Default "" = every name unchanged. The tag reaches every name built from the spec: an M2 run with a tag looks for the
@@ -81,7 +87,7 @@
 ##                               review 2026-10-26 P1: rstan drops a failed parallel chain and returns the rest with mode 0)
 ##   v2/output/summary_<cell>.csv posterior summaries of the structural parameters, labelled by axis and covariate (written AFTER
 ##                               the fit file)
-## Cell name: <sample>_lag<h>_all_pr_<model>[_K<K>][_orig|_join][_bi|_co][_strict][_drop3][_noww2][_fullctrl][_dist][_nocontig][_major][_ix][_conv|_cdir][_mst][_aprime|_bc|_bcj][_jset][_w1][_winsor][_sideA][_ent][_rhoflat][_sigln05][_t<tag>][_pilot]
+## Cell name: <sample>_lag<h>_all_pr_<model>[_K<K>][_orig|_join][_bi|_co][_strict][_drop3][_noww2][_fullctrl][_dist][_nocontig][_major][_ix][_conv|_cdir][_mst][_aprime|_bc|_bcj][_jset][_w1][_winsor][_sideA][_ent|_dy][_opw0|_opw05|_opw1][_oh3][_d<d>][_rhoflat][_sigln05][_t<tag>][_pilot]
 ##            (model M1c: <sample>_lag<h>_all_pr_M1c<suffix>; its fit records args$stan_program = "m1_context" and args$context_model = TRUE)
 ## Seed 123 everywhere (audit F11).
 ## ============================================================================
@@ -89,7 +95,7 @@ suppressPackageStartupMessages({ library(rstan); library(dplyr); library(tidyr) 
 this_file <- sub("^--file=", "", grep("^--file=", commandArgs(FALSE), value = TRUE))
 R_DIR <- dirname(this_file)
 source(file.path(R_DIR, "spec.R")); source(file.path(R_DIR, "helpers_data.R")); source(file.path(R_DIR, "helpers_model.R"))
-source(file.path(R_DIR, "assemble_cell.R"))
+source(file.path(R_DIR, "assemble_cell.R")); source(file.path(R_DIR, "opp_weights.R"))   # opp_weights.R: run 1 (2026-11-10), functions only
 Sys.setenv(V2_ROOT = normalizePath(file.path(R_DIR, "..")))
 
 ## ---- arguments -------------------------------------------------------------------------
@@ -283,12 +289,48 @@ if (spec$interact == "prefixed") logf("interact = prefixed (2026-10-27): Z carri
 ## run 0 / mid3 (2026-11-10): the statistics of the new switches, saved with the Stan data and the fit ONLY when a switch is on (an empty list
 ## otherwise, so the saved objects of every existing cell keep exactly their fields)
 RUN0_STATS <- Filter(Negate(is.null), list(mid3_stats = A$mid3_stats, reach_stats = A$reach_stats, subsample_stats = A$subsample_stats, init_sub_stats = A$init_sub_stats))
+## ---- run 1 (2026-11-10; README section 14): the opportunity-weight offset lambda x ln q, a fixed data vector of the M1c offset program ------------------
+## Nothing above is changed by the switch: the Stan data are those of the cell without it plus opp_off (asserted field by field below); lambda = 0 gives an
+## exact zero vector. The per-cell diagnostics (low-q chosen targets by role, sum q and N_eff per state-year) are logged, written to oppw_cell_<cell>.csv and
+## saved with the Stan data and the fit ONLY when the switch is on (OPP_STATS; an empty list otherwise).
+OPP_STATS <- list()
+if (spec_opp_on(spec)) {
+  LAMBDA <- OPP_LAMBDA[[spec_opp_weight(spec)]]; OPP_DRAW <- as.integer(spec_opp_draw(spec))
+  stopifnot(MODEL %in% OPP_MODELS, family == "m1_context_offset", DIRECTED, CONTEXT_MODEL, identical(spec$roles, "bcj"), VARIANT_SPEC == "all", JOINER_SET == "all", REACH == "none",
+            SUBSAMPLE == "none", MU_SHIFT == "none", spec$ww2 == "include", LAG == OPPW_LAG, identical(Z_cols, Z_DIRECTED), is.null(dat$opp_off), OPP_DRAW == 0L || LAMBDA == 1)
+  w_path <- oppw_path(spec, out_dir)
+  if (!file.exists(w_path)) stop(sprintf("--opp_weight=%s needs the opportunity weights %s; run `Rscript v2/R/08_opportunity_weights.R %s --opp_outcome=%s` first", spec_opp_weight(spec), w_path,
+                                         if (spec_events(spec) == "dymid") "--events=dymid" else "--entry=later", spec_opp_outcome(spec)))
+  OW <- readRDS(w_path)
+  stopifnot(identical(OW$outcome, spec_opp_outcome(spec)), identical(OW$foundation, basename(data_dir)), OW$lag == LAG, OW$n_draws == OPPW_N_DRAWS, identical(OW$a_cols, OPPW_A_COLS),
+            !any(OPPW_TARGET_STRENGTH %in% OW$a_cols))
+  oo <- oppw_offset(alts, OW, LAMBDA, OPP_DRAW, manifest = manifest_at_load)     # stops when the weights were built from other data files or a row has no weight
+  dat_before <- dat
+  dat$opp_off <- oo$off
+  stopifnot(identical(dat[names(dat_before)], dat_before), identical(setdiff(names(dat), names(dat_before)), "opp_off"), length(dat$opp_off) == dat$N2, all(is.finite(dat$opp_off)),
+            LAMBDA != 0 || all(dat$opp_off == 0), LAMBDA == 0 || isTRUE(all.equal(dat$opp_off, LAMBDA * oo$lq, tolerance = 0)))
+  rm(dat_before)
+  os <- oppw_cell_stats(dat, oo$lq, A$group_table$group)
+  write.csv(cbind(cell = cell, lambda = LAMBDA, draw = OPP_DRAW, outcome = spec_opp_outcome(spec), low_q_threshold = os$threshold, os$by_role), file.path(out_dir, paste0("oppw_cell_", cell, ".csv")), row.names = FALSE)
+  logf("opp_weight (run 1, 2026-11-10): lambda = %s, auxiliary outcome %s, draw %d (%s); weights %s (built %s, commit %s); offset = lambda x ln q on all %d rows (ln q min %.2f / median %.2f / max %.2f); SENSITIVITY specification, q is an opportunity weight",
+       spec_opp_weight(spec), spec_opp_outcome(spec), OPP_DRAW, if (OPP_DRAW == 0L) "auxiliary MLE" else "full-vector draw", basename(w_path), OW$built, OW$git_commit, dat$N2, min(oo$lq), stats::median(oo$lq), max(oo$lq))
+  logf("opp_weight diagnostics: low q = below the %.0fth percentile of q over all alternative rows (%.3g). Per role: events (weight sum); chosen target with low q: n (share), weight (share); state-years: median sum q / N_eff / IV set size",
+       100 * os$low_prob, os$threshold)
+  for (r in seq_len(nrow(os$by_role))) { b <- os$by_role[r, ]
+    logf("  %-20s %s state-years %5d: sum q %.4f, N_eff %.1f, IV rows %.0f", b$role,
+         if (is.na(b$n_events)) "" else sprintf("events %4d (%.1f); low-q chosen %3d (%.3f), weight %.1f (%.3f); median q chosen %.4f;", b$n_events, b$w_events, b$n_low, b$share_low_n, b$w_low, b$share_low_w, b$q_chosen_median),
+         b$n_sy, b$sum_q_median, b$n_eff_median, b$n_iv_median) }
+  OPP_STATS <- list(opp = list(lambda = LAMBDA, draw = OPP_DRAW, outcome = spec_opp_outcome(spec), weights_file = basename(w_path), weights_sha256 = file_digest(w_path), weights_built = OW$built,
+                               weights_git_commit = OW$git_commit, weights_input = OW$input, a_cols = OW$a_cols, burn_in = OW$burn_in, low_prob = os$low_prob, threshold = os$threshold,
+                               by_role = os$by_role, q_summary = os$q_summary))
+  rm(OW)
+}
 if (DRY_RUN) {
   saveRDS(c(list(dat = dat, cell = cell, state_codes = state_codes, W_cols = W_cols, X_cols = X_cols, Z_cols = Z_cols,
                manifest = manifest_cell, git_commit = git_commit_at_load, spec = spec, winsor = A$winsor, model = MODEL,
                full_controls = spec$controls == "full", event_weights = spec$weights, direction = spec$direction, group_table = A$group_table,
                stan_program = family, prior = c(spec[PRIOR_SWITCHES], prior), tag = spec_tag(spec), conventional = CONVENTIONAL, directed = DIRECTED,
-               mu_shift = MU_SHIFT, Zr_cols = if (RHOREG) X_MU_TRAITS else NULL, joiner_set = JOINER_SET, jset_stats = A$jset_stats), RUN0_STATS),
+               mu_shift = MU_SHIFT, Zr_cols = if (RHOREG) X_MU_TRAITS else NULL, joiner_set = JOINER_SET, jset_stats = A$jset_stats), RUN0_STATS, OPP_STATS),
           file.path(out_dir, paste0("standata_", cell, ".rds")))
   logf("DRY RUN: Stan data assembled and saved; no sampling"); quit(save = "no", status = 0)
 }
@@ -457,6 +499,7 @@ obj <- list(fit = fit, dat = dat, cell = cell, state_codes = state_codes, W_cols
 fit_name <- paste0("fit_", cell, if (!is.null(stale)) "_STALE" else "", ".rds")
 fit_path <- file.path(out_dir, fit_name); tmp_path <- paste0(fit_path, ".tmp")
 if (length(RUN0_STATS)) obj <- c(obj, RUN0_STATS)      # run 0 / mid3 (2026-11-10): only when a switch is on
+if (length(OPP_STATS)) obj <- c(obj, OPP_STATS)        # run 1 (2026-11-10): obj$opp (lambda, draw, weights provenance, per-role diagnostics), only when the switch is on
 saveRDS(obj, tmp_path)
 chk <- tryCatch(readRDS(tmp_path), error = function(e) NULL)
 if (is.null(chk) || !identical(chk$cell, cell)) stop("the saved fit could not be read back from ", tmp_path, "; not renamed")
