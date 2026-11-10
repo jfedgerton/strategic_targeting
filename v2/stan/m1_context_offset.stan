@@ -1,0 +1,351 @@
+// ============================================================================
+// m1_context_offset.stan  -- v2 strategic targeting, model M1c WITH A FIXED UTILITY OFFSET (run 1, built 2026-11-10; README section 14)
+//
+// A copy of m1_context.stan with ONE addition: the data vector opp_off[N2], added to the utility of every alternative row,
+//   U_g[r] = -1/2 (x[r] - mu_e)' Sigma_g^{-1} (x[r] - mu_e) + b_j + Z[r] gamma + opp_off[r],     opp_off[r] = lambda * ln q[r]
+// (lambda and the opportunity weight q are fixed on the data side: 02_fit_model.R, opp_weights.R; no new parameter). The offset is added to Z gamma
+// where that vector is formed, so it enters the stage-2 utility of every group AND the reference-group utility whose log-sum-exp over the in_iv rows
+// is the stage-1 inclusive value, identically (IV[n] = log sum_j q_j^lambda exp(V_j)); the reference-group convention is unchanged. With opp_off = 0
+// the program computes the log density of m1_context.stan to the last bit (x + 0 = x; tests/testthat/test_opp_weights.R); m1_context.stan itself and
+// every fit made with it are untouched. Everything below is the text of m1_context.stan except the lines marked "run 1".
+//
+// Derived from the joint ("b") variant of m1_latent_additive.stan: the same two-stage spatial choice model, estimated
+// jointly, with ONE change in stage 2 and ONE in stage 1.
+//
+// Stage 1 (monadic, state-year n):  y1[n] ~ Bernoulli(inv_logit(eta1[n]))
+//   eta1[n] = alpha0 + W[n] alpha + c_i + tau * IV[n]
+//   W carries one extra outcome-blind control (multi_mid_jan, appended by assemble_cell(CONTEXT_MODEL = TRUE)); the
+//   program does not know which column it is (P1 is data).
+//
+// Stage 2 (dyadic choice, event e made by state-year n = ev_sy[e], in group g = ev_grp[e] in 0..G-1):
+//   U_g[r] = -1/2 (x[r] - mu_e)' Sigma_g^{-1} (x[r] - mu_e) + b_j + Z[r] gamma
+//   mu_e   = mu0 + delta[g] * [g >= 1] + X[n] beta + a_i                                    (row_vector[2])
+//   Sigma_g = diag(sigma_g[g + 1]) R diag(sigma_g[g + 1]),  R = [[1, rho], [rho, 1]]  shared across the G groups
+//   P(chosen = r | e) = softmax of U_g over the state-year's stage-2 set (in_s2 rows)
+// Groups (data G and ev_grp, from assemble_cell()): G is DATA since 2026-10-31 (G >= 2). Group 0 is the reference (no shift,
+// sigma_g[1]); group g >= 1 has the shift delta[g] and the scales sigma_g[g + 1]. With the default 3-group coding (G = 3):
+// 0 = bilateral, 1 = coalition leader (delta[1], formerly delta_lead), 2 = joiner (delta[2], formerly delta_join); G = 3 gives the
+// log density of the pre-2026-10-31 program term for term and in the same summation order (test_context_model.R). A state-year
+// can hold events of several groups, so the utilities are computed per group present.
+//
+// The inclusive value IV[n] = log_sum_exp over the in_iv rows of the REFERENCE (group 0, bilateral) utility U_0 (mu_n = mu0 + X[n] beta + a_i,
+// Sigma_1): the opportunity value of acting alone, defined for every state-year whether or not it initiates (a
+// non-initiating state-year has no group). Implementation decision, flagged for the PI in the README.
+//
+// Priors: as the b variant (mu0 ~ normal(0, prior_mu0_sd); beta ~ normal(0, prior_beta_sd); each sigma_g[g] ~ lognormal(0, 1),
+// the prior of sigma_x; sd_re ~ half-normal(0, 1); LKJ(2) on the 3x3 correlation of (c, a_1, a_2); (rho + 1)/2 ~ Beta(2.5, 2.5);
+// gamma, alpha, tau ~ normal(0, 1); alpha0 ~ normal(0, 2.5)), plus delta[g] ~ normal(0, prior_mu0_sd) per element (g = 1..G-1),
+// the same family and scale as mu0 (a shift of the population ideal point is on the scale of the ideal point itself).
+//
+// Event weights (D8), the choice-set flags (in_iv / in_s2), the reduce_sum_static slicing over state-years and the generated
+// quantities follow m1_latent_additive.stan. Restrictions: D_mode = 3 (both axes), joint = 1 and sampled = 0 are REQUIRED
+// (rejected otherwise); the data list of build_stan_data() plus ev_grp is the input.
+// Generated quantities: log_lik_stage1[N1], log_lik_stage2[E] (unweighted, with the event's own group), mu_state[S, 2] (the
+// reference-group ideal point at x_ref: mu0 + x_ref' beta + a_i; the other groups' ideal points are mu_state + delta[g]),
+// mu_event[E, 2] (at the event's own X, WITH its group shift), Sigma (reference group), Sigma_g[G], mu0_g[G] (mu0_g[1] = mu0,
+// mu0_g[g + 1] = mu0 + delta[g]), Omega, R_Om. P = 0 (no X) is allowed since 2026-10-31.
+// Event-level choice sets (PI-approved 2026-11-04; switch joiner_set): the data carry a ragged index of each event's allowed stage-2 rows
+// (n_ev_alt, ev_alt_first[E], ev_alt_n[E], ev_alt_loc: block-local positions, strictly increasing, all in the state-year's in_s2 set, the chosen
+// row among them; event_alt_sets() in helpers_model.R). An event whose set is its state-year's whole stage-2 set (every event under
+// joiner_set = all) takes the code path of the program before 2026-11-04 term for term; a restricted event (ev_restr = 1, a joiner under
+// joiner_set = opposing) is scored by the log-softmax of its group utility over its allowed rows only (a set of size 1 contributes 0). Stage 1 / IV
+// and the event weights are unchanged.
+// ============================================================================
+functions {
+  // Utility of the alternative rows s..e for one state-year and one group: quadratic form in (dM, dR) around mu_n with scales
+  // sig (length 2) and the shared correlation rho, plus the target intercept and the dyadic controls.
+  vector util_block_c(int s, int e, matrix x, row_vector mu_n, vector sig, real rho, vector b_j, array[] int alt_target, vector zg_local) {   // zg_local = Z gamma + opp_off of the rows (run 1)
+    int L = e - s + 1;
+    vector[L] d1 = (segment(col(x, 1), s, L) - mu_n[1]) / sig[1];
+    vector[L] d2 = (segment(col(x, 2), s, L) - mu_n[2]) / sig[2];
+    vector[L] q = (d1 .* d1 - 2 * rho * (d1 .* d2) + d2 .* d2) / (1 - rho * rho);
+    return -0.5 * q + b_j[segment(alt_target, s, L)] + zg_local;
+  }
+  vector zg_block(matrix Z, vector gamma, int s, int e, int Pz) {
+    int L = e - s + 1;
+    if (Pz > 0) return block(Z, s, 1, L, Pz) * gamma;
+    return rep_vector(0, L);
+  }
+  // Partial log-likelihood (stage 1 + stage 2) for a slice of state-years; used by reduce_sum.
+  real sy_partial_sum_c(array[] int sy_slice, int start, int end,
+                        array[] int y1, array[] int sy_state, matrix W, matrix X,
+                        array[] int cs_start, array[] int cs_end,
+                        array[] int cs_mixed, array[] int iv_first, array[] int iv_count, array[] int iv_loc,
+                        array[] int s2_first, array[] int s2_count, array[] int s2_loc,
+                        matrix x, array[] int alt_target, matrix Z, int Pz, vector opp_off,
+                        array[] int ev_first, array[] int ev_count, array[] int ev_sorted,
+                        array[] int ev_row, array[] int ev_grp, vector ev_w, int G, array[,] int has_g,
+                        array[] int ev_restr, array[] int ev_alt_first, array[] int ev_alt_n, array[] int ev_alt_loc,
+                        real alpha0, vector alpha, real tau, row_vector mu0, array[] row_vector delta,
+                        matrix beta, matrix a_i, vector c_i, array[] vector sigma_g, real rho, vector b_j, vector gamma) {
+    int L = end - start + 1;
+    vector[L] eta;
+    real lp = 0;
+    for (k in 1:L) {
+      int n = sy_slice[k];
+      int s = cs_start[n];
+      int e = cs_end[n];
+      row_vector[2] mu_n = mu0 + X[n] * beta + a_i[sy_state[n]];
+      vector[e - s + 1] zg = zg_block(Z, gamma, s, e, Pz) + segment(opp_off, s, e - s + 1);   // run 1: the fixed offset, in stage 2 and in the IV
+      array[G] vector[e - s + 1] u_g;          // u_g[1]: reference group (IV and group-0 events); u_g[g + 1]: group g, filled when present
+      vector[G] lse_g = rep_vector(0, G);      // lse_g[1] = the stage-2 lse of the reference group (lse2 before 2026-10-31)
+      real lse;
+      u_g[1] = util_block_c(s, e, x, mu_n, sigma_g[1], rho, b_j, alt_target, zg);
+      if (cs_mixed[n] == 0) {
+        lse = log_sum_exp(u_g[1]);
+        lse_g[1] = lse;
+      } else {
+        lse = log_sum_exp(u_g[1][segment(iv_loc, iv_first[n], iv_count[n])]);
+        lse_g[1] = (ev_count[n] > 0) ? log_sum_exp(u_g[1][segment(s2_loc, s2_first[n], s2_count[n])]) : lse;
+      }
+      eta[k] = alpha0 + W[n] * alpha + c_i[sy_state[n]] + tau * lse;
+      for (g in 2:G) {
+        if (has_g[n, g] == 1) {
+          u_g[g] = util_block_c(s, e, x, mu_n + delta[g - 1], sigma_g[g], rho, b_j, alt_target, zg);
+          lse_g[g] = (cs_mixed[n] == 0) ? log_sum_exp(u_g[g]) : log_sum_exp(u_g[g][segment(s2_loc, s2_first[n], s2_count[n])]);
+        }
+      }
+      for (j in 1:ev_count[n]) {
+        int ev = ev_sorted[ev_first[n] + j - 1];
+        int r = ev_row[ev] - s + 1;
+        int gg = ev_grp[ev] + 1;
+        if (ev_restr[ev] == 0) {
+          lp += ev_w[ev] * (u_g[gg][r] - lse_g[gg]);
+        } else {
+          lp += ev_w[ev] * (u_g[gg][r] - log_sum_exp(u_g[gg][segment(ev_alt_loc, ev_alt_first[ev], ev_alt_n[ev])]));   // restricted set (2026-11-04)
+        }
+      }
+    }
+    lp += bernoulli_logit_lpmf(y1[sy_slice] | eta);
+    return lp;
+  }
+}
+data {
+  int<lower=1> S;
+  int<lower=1> N1;
+  int<lower=1> N2;
+  int<lower=0> E;
+  int<lower=0> P1;
+  int<lower=0> P;                              // 0 = no X (conventional comparison, 2026-10-31: beta is 0 x 2, mu = mu0 + shifts + a_i)
+  int<lower=0> Pz;
+  array[N1] int<lower=0, upper=1> y1;
+  array[N1] int<lower=1, upper=S> sy_state;
+  matrix[N1, P1] W;
+  matrix[N1, P] X;
+  array[N1] int<lower=1, upper=N2> cs_start;
+  array[N1] int<lower=1, upper=N2> cs_end;
+  array[N1] int<lower=1> n_full;               // unused here (sampled = 0 required); kept for the common data list
+  array[N2] int<lower=1, upper=S> alt_target;
+  matrix[N2, 2] x;
+  matrix[N2, Pz] Z;
+  vector[N2] opp_off;                          // run 1: fixed utility offset of every alternative row (lambda * ln q; all zeros = m1_context.stan)
+  array[N2] int<lower=0, upper=1> in_iv;
+  array[N2] int<lower=0, upper=1> in_s2;
+  array[E] int<lower=1, upper=N1> ev_sy;
+  array[E] int<lower=1, upper=N2> ev_row;
+  array[E] int<lower=1, upper=N2> ev_start;
+  array[E] int<lower=1, upper=N2> ev_end;
+  vector<lower=0, upper=1>[E] ev_w;
+  int<lower=2> G;                              // number of stage-2 groups (data since 2026-10-31; 3 = bilateral / coalition leader / joiner)
+  array[E] int<lower=0, upper=G - 1> ev_grp;   // stage-b group of the event, 0..G-1 (0 = the reference group)
+  int<lower=0> n_ev_alt;                       // 2026-11-04: event-level allowed stage-2 rows (ragged): total length
+  array[E] int<lower=1> ev_alt_first;          //   first position of event e's rows in ev_alt_loc
+  array[E] int<lower=1> ev_alt_n;              //   number of allowed rows of event e (its whole stage-2 set unless restricted)
+  array[n_ev_alt] int<lower=1> ev_alt_loc;     //   block-local positions (r - cs_start + 1), strictly increasing within an event
+  int<lower=0, upper=1> joint;                 // must be 1
+  int<lower=0, upper=1> sampled;               // must be 0
+  int<lower=0, upper=1> prior_only;
+  int<lower=1, upper=3> D_mode;                // must be 3
+  vector[P] x_ref;
+  real<lower=0> prior_beta_sd;
+  real<lower=0> prior_mu0_sd;                  // sd of the normal prior on mu0 AND on delta[g]
+  int<lower=1> grainsize;
+}
+transformed data {
+  array[N1] int sy_idx;
+  array[N1] int ev_count = rep_array(0, N1);
+  array[N1] int ev_first;
+  array[E] int ev_sorted;
+  array[N1, G] int has_g = rep_array(0, N1, G);   // has_g[n, g + 1] = 1 when state-year n holds an event of group g
+  if (D_mode != 3) reject("m1_context_offset: D_mode must be 3 (both axes), got ", D_mode);
+  if (joint != 1) reject("m1_context_offset: joint must be 1, got ", joint);
+  if (sampled != 0) reject("m1_context_offset: sampled alternatives are not supported (sampled must be 0)");
+  for (n in 1:N1) sy_idx[n] = n;
+  for (e in 1:E) {
+    ev_count[ev_sy[e]] += 1;
+    has_g[ev_sy[e], ev_grp[e] + 1] = 1;
+  }
+  {
+    int pos = 1;
+    for (n in 1:N1) { ev_first[n] = pos; pos += ev_count[n]; }
+    array[N1] int fill = ev_first;
+    for (e in 1:E) { ev_sorted[fill[ev_sy[e]]] = e; fill[ev_sy[e]] += 1; }
+  }
+  array[N1] int cs_mixed = rep_array(0, N1);
+  array[N1] int iv_count = rep_array(0, N1);
+  array[N1] int s2_count = rep_array(0, N1);
+  array[N1] int iv_first;
+  array[N1] int s2_first;
+  for (n in 1:N1) {
+    if (cs_end[n] < cs_start[n]) reject("empty choice set for state-year ", n);
+    for (r in cs_start[n]:cs_end[n]) {
+      if (in_iv[r] == 0 && in_s2[r] == 0) reject("row ", r, " of state-year ", n, " is in neither choice set");
+      iv_count[n] += in_iv[r];
+      s2_count[n] += in_s2[r];
+    }
+    if (iv_count[n] == 0) reject("state-year ", n, " has an EMPTY stage-1 IV set (no row with in_iv = 1)");
+    if (iv_count[n] < cs_end[n] - cs_start[n] + 1 || s2_count[n] < cs_end[n] - cs_start[n] + 1) cs_mixed[n] = 1;
+  }
+  int n_iv_rows = sum(iv_count);
+  int n_s2_rows = sum(s2_count);
+  array[n_iv_rows] int iv_loc;
+  array[n_s2_rows] int s2_loc;
+  {
+    int p_iv = 1;
+    int p_s2 = 1;
+    for (n in 1:N1) {
+      iv_first[n] = p_iv;
+      s2_first[n] = p_s2;
+      for (r in cs_start[n]:cs_end[n]) {
+        if (in_iv[r] == 1) { iv_loc[p_iv] = r - cs_start[n] + 1; p_iv += 1; }
+        if (in_s2[r] == 1) { s2_loc[p_s2] = r - cs_start[n] + 1; p_s2 += 1; }
+      }
+    }
+    if (p_iv != n_iv_rows + 1 || p_s2 != n_s2_rows + 1) reject("choice-set flag bookkeeping failed");
+  }
+  for (e in 1:E) {
+    if (ev_row[e] < ev_start[e] || ev_row[e] > ev_end[e]) reject("event ", e, " chosen row outside its own choice set");
+    if (in_s2[ev_row[e]] != 1) reject("event ", e, ": chosen row is not in the stage-2 set (in_s2 = 0)");
+    if (y1[ev_sy[e]] != 1) reject("event ", e, " belongs to a state-year with y1 == 0");
+    if (ev_start[e] != cs_start[ev_sy[e]] || ev_end[e] != cs_end[ev_sy[e]]) reject("event ", e, ": with full choice sets the event set must be the state-year set");
+    if (s2_count[ev_sy[e]] < 2) reject("event ", e, ": its state-year's stage-2 set is empty or holds only the chosen row");
+  }
+  // event-level allowed sets (2026-11-04): within the state-year's stage-2 set, strictly increasing, holding the chosen row; restricted when smaller
+  array[E] int ev_restr = rep_array(0, E);
+  for (e in 1:E) {
+    int n = ev_sy[e];
+    int L = cs_end[n] - cs_start[n] + 1;
+    int found = 0;
+    if (ev_alt_first[e] + ev_alt_n[e] - 1 > n_ev_alt) reject("event ", e, ": its allowed-row index runs past ev_alt_loc");
+    if (ev_alt_n[e] > s2_count[n]) reject("event ", e, ": more allowed rows than its state-year's stage-2 set");
+    for (k in 1:ev_alt_n[e]) {
+      int l = ev_alt_loc[ev_alt_first[e] + k - 1];
+      if (l < 1 || l > L) reject("event ", e, ": allowed row outside its state-year's block");
+      if (in_s2[cs_start[n] + l - 1] != 1) reject("event ", e, ": allowed row not in the stage-2 set");
+      if (k > 1 && l <= ev_alt_loc[ev_alt_first[e] + k - 2]) reject("event ", e, ": allowed rows must be strictly increasing");
+      if (cs_start[n] + l - 1 == ev_row[e]) found = 1;
+    }
+    if (found == 0) reject("event ", e, ": the chosen row is not among its allowed rows");
+    if (ev_alt_n[e] < s2_count[n]) ev_restr[e] = 1;
+  }
+}
+parameters {
+  real alpha0;
+  vector[P1] alpha;
+  real tau;
+  row_vector[2] mu0;                           // bilateral (reference) population ideal gap
+  array[G - 1] row_vector[2] delta;            // shift of the ideal gap of group g = 1..G-1 vs the reference (material, relational)
+  matrix[P, 2] beta;
+  array[G] vector<lower=0>[2] sigma_g;         // tolerance scales per group: sigma_g[g + 1] for group g (1 = the reference)
+  real<lower=-1, upper=1> rho_x;               // the shared correlation of Sigma_g
+  vector<lower=0>[3] sd_re;
+  cholesky_factor_corr[3] L_Om;
+  matrix[3, S] z_re;
+  real<lower=0> sigma_b;
+  vector[S] z_b;
+  vector[Pz] gamma;
+}
+transformed parameters {
+  matrix[S, 3] re = (diag_pre_multiply(sd_re, L_Om) * z_re)';
+  vector[S] c_i = col(re, 1);
+  matrix[S, 2] a_i = re[, 2:3];
+  vector[S] b_j = sigma_b * (z_b - mean(z_b));
+}
+model {
+  profile("priors") {
+    alpha0 ~ normal(0, 2.5);
+    alpha ~ normal(0, 1);
+    tau ~ normal(0, 1);
+    mu0 ~ normal(0, prior_mu0_sd);
+    for (g in 1:(G - 1)) delta[g] ~ normal(0, prior_mu0_sd);
+    to_vector(beta) ~ normal(0, prior_beta_sd);
+    for (g in 1:G) sigma_g[g] ~ lognormal(0, 1);
+    sd_re ~ normal(0, 1);
+    L_Om ~ lkj_corr_cholesky(2);
+    target += beta_lpdf((rho_x + 1) / 2 | 2.5, 2.5);
+    to_vector(z_re) ~ std_normal();
+    sigma_b ~ normal(0, 1);
+    z_b ~ std_normal();
+    gamma ~ normal(0, 1);
+  }
+  if (prior_only == 0) {
+    target += reduce_sum_static(sy_partial_sum_c, sy_idx, grainsize,
+                                y1, sy_state, W, X, cs_start, cs_end,
+                                cs_mixed, iv_first, iv_count, iv_loc, s2_first, s2_count, s2_loc,
+                                x, alt_target, Z, Pz, opp_off,
+                                ev_first, ev_count, ev_sorted, ev_row, ev_grp, ev_w, G, has_g,
+                                ev_restr, ev_alt_first, ev_alt_n, ev_alt_loc,
+                                alpha0, alpha, tau, mu0, delta, beta, a_i, c_i, sigma_g, rho_x, b_j, gamma);
+  }
+}
+generated quantities {
+  vector[E] log_lik_stage2;
+  vector[N1] log_lik_stage1;
+  matrix[S, 2] mu_state;                       // reference-group ideal point at x_ref
+  matrix[E, 2] mu_event;                       // the event's ideal point at its own X, with its group shift
+  matrix[2, 2] Sigma;                          // reference-group Sigma_g[1]
+  array[G] matrix[2, 2] Sigma_g;
+  array[G] row_vector[2] mu0_g;                // group population ideal points: mu0_g[1] = mu0, mu0_g[g + 1] = mu0 + delta[g]
+  matrix[3, 3] Omega;
+  corr_matrix[3] R_Om;
+  {
+    matrix[N1, 2] Mu = rep_matrix(mu0, N1) + X * beta + a_i[sy_state];
+    vector[N2] util;
+    vector[N1] lse;
+    vector[N1] lse_s2;
+    for (n in 1:N1) {
+      int s = cs_start[n];
+      int e = cs_end[n];
+      util[s:e] = util_block_c(s, e, x, Mu[n], sigma_g[1], rho_x, b_j, alt_target, zg_block(Z, gamma, s, e, Pz) + segment(opp_off, s, e - s + 1));
+      if (cs_mixed[n] == 0) {
+        lse[n] = log_sum_exp(util[s:e]);
+        lse_s2[n] = lse[n];
+      } else {
+        vector[e - s + 1] u = util[s:e];
+        lse[n] = log_sum_exp(u[segment(iv_loc, iv_first[n], iv_count[n])]);
+        lse_s2[n] = (s2_count[n] > 0) ? log_sum_exp(u[segment(s2_loc, s2_first[n], s2_count[n])]) : not_a_number();
+      }
+    }
+    vector[N1] eta1 = alpha0 + W * alpha + c_i[sy_state] + tau * lse;
+    for (n in 1:N1) log_lik_stage1[n] = bernoulli_logit_lpmf(y1[n] | eta1[n]);
+    for (ev in 1:E) {
+      int n = ev_sy[ev];
+      int s = cs_start[n];
+      int e = cs_end[n];
+      if (ev_grp[ev] == 0) {
+        if (ev_restr[ev] == 0) {
+          log_lik_stage2[ev] = util[ev_row[ev]] - lse_s2[n];
+        } else {
+          vector[e - s + 1] u0 = util[s:e];
+          log_lik_stage2[ev] = util[ev_row[ev]] - log_sum_exp(u0[segment(ev_alt_loc, ev_alt_first[ev], ev_alt_n[ev])]);
+        }
+        mu_event[ev] = Mu[n];
+      } else {
+        row_vector[2] mu_e = Mu[n] + delta[ev_grp[ev]];
+        vector[e - s + 1] u_g = util_block_c(s, e, x, mu_e, sigma_g[ev_grp[ev] + 1], rho_x, b_j, alt_target, zg_block(Z, gamma, s, e, Pz) + segment(opp_off, s, e - s + 1));
+        real lse_g = (ev_restr[ev] == 1) ? log_sum_exp(u_g[segment(ev_alt_loc, ev_alt_first[ev], ev_alt_n[ev])])
+                     : ((cs_mixed[n] == 0) ? log_sum_exp(u_g) : log_sum_exp(u_g[segment(s2_loc, s2_first[n], s2_count[n])]));
+        log_lik_stage2[ev] = u_g[ev_row[ev] - s + 1] - lse_g;
+        mu_event[ev] = mu_e;
+      }
+    }
+    for (s in 1:S) mu_state[s] = mu0 + x_ref' * beta + a_i[s];
+    mu0_g[1] = mu0;
+    for (g in 2:G) mu0_g[g] = mu0 + delta[g - 1];
+    for (g in 1:G) Sigma_g[g] = [[sigma_g[g][1]^2, rho_x * sigma_g[g][1] * sigma_g[g][2]],
+                                 [rho_x * sigma_g[g][1] * sigma_g[g][2], sigma_g[g][2]^2]];
+    Sigma = Sigma_g[1];
+    R_Om = multiply_lower_tri_self_transpose(L_Om);
+    Omega = quad_form_diag(R_Om, sd_re);
+  }
+}
