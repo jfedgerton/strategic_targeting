@@ -57,7 +57,10 @@ SPEC_CHOICES <- list(
   variant   = c("all", "polrel", "mid3"),            # choice set (un-archived 2026-11-04 for the role / AME models only): all (main) | polrel = the politically relevant alternatives (contiguous, conttype 1..5, or either state a major power; alts_lag<h>_polrel.rds of the build, data or data_entry); no suffix: it takes the "all" slot of the cell name
                                                     # mid3 (2026-11-10): the lag-3 MID-history choice set, built at assembly from alts_lag<h>_all.rds and events.rds (below)
   reach     = c("none", "capdist"),                 # run 0a (2026-11-10): none (main) | capdist = the directed Z plus log_capdist^2 and log_capdist x the initiator's M_lvl (Z_REACH); needs --comparison=directed, model M1c; suffix _reach
-  subsample = c("none", "prtarget", "bilateral", "majinit", "mininit")   # run 0b-0d (2026-11-10): none (main) | prtarget = stage-2 events whose chosen target is politically relevant (full choice set; stage 1 unchanged) | bilateral = stage-2 events of bcj role bilateral (M1b; stage 1 unchanged) | majinit / mininit = BOTH stages restricted to the state-years of initiators that are / are not COW major powers at t-1; needs --comparison=directed
+  subsample = c("none", "prtarget", "bilateral", "majinit", "mininit"),  # run 0b-0d (2026-11-10): none (main) | prtarget = stage-2 events whose chosen target is politically relevant (full choice set; stage 1 unchanged) | bilateral = stage-2 events of bcj role bilateral (M1b; stage 1 unchanged) | majinit / mininit = BOTH stages restricted to the state-years of initiators that are / are not COW major powers at t-1; needs --comparison=directed
+  opp_weight = c("none", "0", "0.5", "1"),          # run 1 (2026-11-10): none (main) | lambda = 0 | 0.5 | 1: the fixed offset lambda x ln q_ij of the MID-propensity opportunity weight in the stage-2 utility AND inside the stage-1 IV (M1c, stan/m1_context_offset.stan); suffixes _opw0 / _opw05 / _opw1
+  opp_outcome = c("mid", "host3"),                  # run 1: the auxiliary outcome behind q: mid = any Dyadic MID onset (main) | host3 = onsets with dyadic hostility >= 3; suffix _oh3; needs an opp_weight
+  opp_draw  = c("0", "1", "2", "3", "4", "5")       # run 1: 0 = q at the auxiliary MLE (main) | d = the d-th coherent full-vector draw of the auxiliary coefficients; suffix _d<d>; needs --opp_weight=1
 )
 ## ---- the conventional comparison specification (PI-approved 2026-10-31; switch `comparison`, suffix _conv) --------------------------
 ## One switch fixes the three design matrices at once; it is NOT a combination of the other switches, although it carries the distance
@@ -134,6 +137,22 @@ MU_SHIFT_MODELS <- c(DIRECTED_MODELS, RHOREG_MODELS)
 ## OR dy_mid_tm1 == 1. Year t is never used. Built at assembly from alts_lag<h>_all.rds (no file of its own). Only with comparison = directed, models
 ## MID3_MODELS, pairs = all, context = all, ww2 = include, joiner_set = all, subsample = none. REFUSED since the audit of 2026-11-10 (MID3_REFUSAL below).
 REACH_MODELS      <- c("M1c")
+## ---- run 1 (2026-11-10; README section 14): the MID-propensity opportunity-weight SENSITIVITY ------------------------------------------------------
+## opp_weight = 0 | 0.5 | 1 (lambda): U_ij = spatial + b_j + Z_ij' gamma + lambda x ln q_ij, the same term inside the stage-1 IV (reference-group utility as
+## before); q_ij = the opportunity weight of 08_opportunity_weights.R (output/oppw_<foundation>_<opp_outcome>_lag3.rds). Fixed data-side offset, no new
+## parameter. Model M1c only (OPP_MODELS), through the copy stan/m1_context_offset.stan (m1_context.stan and every existing fit are untouched); lambda = 0
+## is the offset program with a zero offset: the Stan data of the cell without the switch plus opp_off = 0, and the same log density.
+## Only with comparison = directed, roles = bcj, variant = all, and pairs / context / ww2 / joiner_set / mu_shift / reach / subsample at their defaults
+## (WWII stays in). opp_draw = 1..5 needs opp_weight = 1; opp_outcome = host3 needs an opp_weight. Suffixes _opw0 / _opw05 / _opw1, then _oh3, then _d<d>,
+## after the data-variant suffixes (_ent / _dy) and before the prior switches and the tag, e.g. fmid_lag3_all_pr_M1c_cdir_bcj_dy_opw1_d3_tlong.
+OPP_MODELS        <- c("M1c")
+OPP_LAMBDA        <- c("0" = 0, "0.5" = 0.5, "1" = 1)
+## spec_opp_weight(spec) / spec_opp_outcome(spec) / spec_opp_draw(spec): the values of the three run-1 switches ("none" / "mid" / "0" for a spec saved
+## before 2026-11-10, which has none of the fields); spec_opp_on(spec): TRUE when an offset is requested (lambda = 0 included)
+spec_opp_weight  <- function(spec) if (is.null(spec$opp_weight)) "none" else spec$opp_weight
+spec_opp_outcome <- function(spec) if (is.null(spec$opp_outcome)) "mid" else spec$opp_outcome
+spec_opp_draw    <- function(spec) if (is.null(spec$opp_draw)) "0" else spec$opp_draw
+spec_opp_on      <- function(spec) !identical(spec_opp_weight(spec), "none")
 SUBSAMPLE_MODELS  <- list(prtarget = "M1c", bilateral = "M1b", majinit = "M1c", mininit = "M1c")
 INIT_SUBSAMPLES   <- c("majinit", "mininit")          # the subsamples that restrict the stage-1 population as well
 EVENT_SUBSAMPLES  <- c("prtarget", "bilateral")       # the subsamples that filter stage-2 events only (stage 1 unchanged)
@@ -197,6 +216,10 @@ SPEC_SUFFIX <- list(
   direction = c(sideA = "_sideA"),
   entry     = c(later = "_ent"),                     # joiner entry direction (2026-11-04), a data variant like direction
   events    = c(dymid = "_dy"),                      # event foundation (2026-11-04), a data variant like entry: e.g. fmid_lag3_all_pr_M2c_K2_cdir_bcj_jset_dy
+  ## run 1 (2026-11-10) follows the data variants: the offset weight, then the auxiliary outcome, then the auxiliary draw, e.g. fmid_lag3_all_pr_M1c_cdir_bcj_dy_opw1_d3
+  opp_weight = c("0" = "_opw0", "0.5" = "_opw05", "1" = "_opw1"),
+  opp_outcome = c(host3 = "_oh3"),
+  opp_draw  = c("1" = "_d1", "2" = "_d2", "3" = "_d3", "4" = "_d4", "5" = "_d5"),
   ## the prior switches (2026-10-30) come AFTER every data switch: they change the program's prior, not the cell's data, so every existing
   ## name is unchanged and a prior-sensitivity fit never collides with a main or preset fit (_rhoflat, _sigln05, both: _rhoflat_sigln05)
   rho_prior = c(flat = "_rhoflat"),
@@ -243,11 +266,12 @@ stan_program <- function(model, spec = NULL) {
   if (model %in% RHOREG_MODELS) return("m1_latent_rhoreg")      # M1bz (2026-11-02): the rho-regression program, no prior-switch copy
   if (model %in% AME_CONTEXT_MODELS) return("m2_context")        # M2c (2026-11-04): AME with initiation types
   if (model == "M1cr") return("m1_context_rho")
+  if (model %in% OPP_MODELS && !is.null(spec) && spec_opp_on(spec)) return("m1_context_offset")   # run 1 (2026-11-10): M1c with the opportunity-weight offset (lambda = 0 included)
   if (model %in% CONTEXT_MODELS) return("m1_context")
   if (substr(model, 1, 2) == "M2") return("m2_ame")
   if (spec_prior_is_main(spec)) "m1_latent_additive" else "m1_latent_prior"
 }
-STAN_PROGRAMS  <- c("m1_latent_additive", "m2_ame", "m1_context", "m1_latent_prior", "m1_context_rho", "m1_latent_rhoreg", "m2_context")
+STAN_PROGRAMS  <- c("m1_latent_additive", "m2_ame", "m1_context", "m1_latent_prior", "m1_context_rho", "m1_latent_rhoreg", "m2_context", "m1_context_offset")   # m1_context_offset: run 1 (2026-11-10)
 ## spec_prior_is_main(spec): TRUE when both prior switches are at their default (a NULL spec, or one saved before 2026-10-30 without the
 ## fields, counts as the main priors: every fit before that date sampled the main program)
 spec_prior_is_main <- function(spec) {
@@ -435,6 +459,17 @@ parse_spec <- function(args = character(0)) {
     }
   }
   if (spec$variant == "mid3") stop(MID3_REFUSAL)        # audit P1-1 (2026-11-10): refused on every command line
+  ## run 1 (2026-11-10): the opportunity-weight offset is specified for the directed bcj cells on the full choice set only; WWII stays in
+  if (spec$opp_weight != SPEC_DEFAULTS$opp_weight) {
+    if (spec$comparison != "directed") stop(sprintf("--opp_weight=%s needs --comparison=directed (run 1 is defined on the directed specification; got comparison=%s)", spec$opp_weight, spec$comparison))
+    if (spec$roles != "bcj") stop(sprintf("--opp_weight=%s needs --roles=bcj (run 1 is the directed bcj M1c cell; got roles=%s)", spec$opp_weight, spec$roles))
+    if (spec$variant != "all") stop(sprintf("--opp_weight=%s is defined on the full choice set (got --variant=%s)", spec$opp_weight, spec$variant))
+    if (spec$direction != SPEC_DEFAULTS$direction) stop(sprintf("--opp_weight=%s is not specified with --direction=%s", spec$opp_weight, spec$direction))
+    for (nm in c("pairs", "context", "ww2", "joiner_set", "mu_shift", "reach", "subsample", "weights")) if (spec[[nm]] != SPEC_DEFAULTS[[nm]])
+      stop(sprintf("--opp_weight=%s with --%s=%s is not specified (run 1 changes the offset only; the Second World War stays in)", spec$opp_weight, nm, spec[[nm]]))
+  }
+  if (spec$opp_outcome != SPEC_DEFAULTS$opp_outcome && spec$opp_weight == SPEC_DEFAULTS$opp_weight) stop(sprintf("--opp_outcome=%s needs --opp_weight=0 | 0.5 | 1 (it names the auxiliary outcome behind the offset)", spec$opp_outcome))
+  if (spec$opp_draw != SPEC_DEFAULTS$opp_draw && spec$opp_weight != "1") stop(sprintf("--opp_draw=%s needs --opp_weight=1 (the auxiliary draws are run at lambda = 1 only; got opp_weight=%s)", spec$opp_draw, spec$opp_weight))
   ## run tag (2026-10-30): letters and digits only, so the suffix _t<tag> is one unambiguous token of the file name; "" = no tag
   spec$tag <- get_arg(args, "tag", SPEC_DEFAULTS$tag)
   if (!is.character(spec$tag) || length(spec$tag) != 1 || is.na(spec$tag)) stop("--tag must be one string")
@@ -472,7 +507,7 @@ spec_string <- function(spec) {
   if (!is.null(spec$entry) && identical(spec$entry, SPEC_DEFAULTS$entry)) spec <- spec[setdiff(names(spec), "entry")]
   if (!is.null(spec$events) && identical(spec$events, SPEC_DEFAULTS$events)) spec <- spec[setdiff(names(spec), "events")]
   if (!is.null(spec$variant) && identical(spec$variant, SPEC_DEFAULTS$variant)) spec <- spec[setdiff(names(spec), "variant")]
-  for (nm in c("reach", "subsample")) if (!is.null(spec[[nm]]) && identical(spec[[nm]], SPEC_DEFAULTS[[nm]])) spec <- spec[setdiff(names(spec), nm)]   # 2026-11-10: left out at their defaults
+  for (nm in c("reach", "subsample", "opp_weight", "opp_outcome", "opp_draw")) if (!is.null(spec[[nm]]) && identical(spec[[nm]], SPEC_DEFAULTS[[nm]])) spec <- spec[setdiff(names(spec), nm)]   # 2026-11-10: left out at their defaults
   paste(sprintf("%s=%s", names(spec), unlist(spec)), collapse = " ")
 }
 ## spec_is_conventional(spec): TRUE under --comparison=conventional (a spec saved before 2026-10-31 has no field: not conventional)
@@ -490,7 +525,8 @@ perm_part_spec_string <- function(spec) {
             if (is.null(spec$entry) || identical(spec$entry, SPEC_DEFAULTS$entry)) "entry",
             if (is.null(spec$events) || identical(spec$events, SPEC_DEFAULTS$events)) "events",
             if (is.null(spec$variant) || identical(spec$variant, SPEC_DEFAULTS$variant)) "variant",
-            if (is.null(spec$reach) || identical(spec$reach, SPEC_DEFAULTS$reach)) "reach", if (is.null(spec$subsample) || identical(spec$subsample, SPEC_DEFAULTS$subsample)) "subsample")   # joiner_set (2026-11-04): likewise   # mu_shift (2026-11-02): dropped at its default, kept when on
+            if (is.null(spec$reach) || identical(spec$reach, SPEC_DEFAULTS$reach)) "reach", if (is.null(spec$subsample) || identical(spec$subsample, SPEC_DEFAULTS$subsample)) "subsample",
+            unlist(lapply(c("opp_weight", "opp_outcome", "opp_draw"), function(nm) if (is.null(spec[[nm]]) || identical(spec[[nm]], SPEC_DEFAULTS[[nm]])) nm)))   # joiner_set (2026-11-04): likewise   # mu_shift (2026-11-02): dropped at its default, kept when on
   spec_string(spec[setdiff(names(spec), drop)])
 }
 ## spec_coal_col(spec): the events.rds column the context switch filters on ("coal_incl" / "coal_strict")
@@ -546,6 +582,8 @@ cell_name <- function(sample, lag, model, spec) {
   if (spec_subsample(spec) != "none" && !identical(model, SUBSAMPLE_MODELS[[spec_subsample(spec)]]))
     stop(sprintf("cell_name: --subsample=%s with the model %s (specified for %s only%s)", spec_subsample(spec), model, SUBSAMPLE_MODELS[[spec_subsample(spec)]],
                  if (spec_subsample(spec) == "bilateral") ": one role, so the pooled model; M1c stops on an empty group" else ""))
+  if (spec_opp_on(spec) && !model %in% OPP_MODELS)
+    stop(sprintf("cell_name: --opp_weight=%s with the model %s (run 1 is specified for %s only; no AME model takes the offset)", spec_opp_weight(spec), model, paste(OPP_MODELS, collapse = ", ")))
   if (identical(spec_variant(spec), "polrel") && !model %in% POLREL_MODELS)
     stop(sprintf("cell_name: --variant=%s with the model %s (the politically relevant choice set is specified for %s only)", spec_variant(spec), model, paste(POLREL_MODELS, collapse = ", ")))
   sprintf("%s_lag%d_%s_%s_%s%s%s", sample, as.integer(lag), spec_variant(spec), CENTRALITY, model,
