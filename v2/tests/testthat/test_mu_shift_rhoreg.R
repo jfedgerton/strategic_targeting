@@ -135,7 +135,7 @@ test_that("existing cells are unchanged: default, M1c, M2b, _dist_major, convent
   for (cs in cases) {
     sn <- parse_spec(cs[[1]]); so <- old$parse_spec(cs[[1]])
     An <- quiet(assemble_cell_spec("mid", 3L, cell_spec(cs[[2]], sn), data_dir = td, model = cs[[2]])); Ao <- quiet(old$assemble_cell_spec("mid", 3L, old$cell_spec(cs[[2]], so), data_dir = td, model = cs[[2]]))
-    expect_identical(names(An), c(names(Ao), "joiner_set", "ev_sets", "jset_stats", "ev_joiner"), info = paste(cs[[2]], paste(cs[[1]], collapse = " ")))   # joiner sets 2026-11-04
+    expect_identical(names(An), c(names(Ao), "joiner_set", "ev_sets", "jset_stats", "ev_joiner", "variant", "mid3_stats", "reach", "reach_stats", "subsample", "subsample_stats", "init_sub_stats"), info = paste(cs[[2]], paste(cs[[1]], collapse = " ")))   # joiner sets 2026-11-04; run 0 / mid3 2026-11-10
     expect_equal(An$joiner_set, "all"); expect_null(An$ev_sets)
     for (nm in names(Ao)) expect_identical(An[[nm]], Ao[[nm]], info = paste(nm, cs[[2]], paste(cs[[1]], collapse = " ")))
     K <- if (cs[[2]] == "M2b") sn$ame_K else NULL

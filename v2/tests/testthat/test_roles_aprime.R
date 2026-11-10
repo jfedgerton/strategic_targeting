@@ -66,7 +66,7 @@ test_that("aprime_roles(): side switchers are counted, inconsistent sides and no
 
 test_that("spec: roles = stageb | aprime, suffix _aprime after _conv, context models only, refused by every preset path, dropped from the perm string at its default", {
   expect_equal(SPEC_CHOICES$roles, c("stageb", "aprime", "bc", "bcj")); expect_equal(SPEC_SUFFIX$roles, c(aprime = "_aprime", bc = "_bc", bcj = "_bcj"))   # bc / bcj 2026-11-04
-  expect_equal(which(names(SPEC_SUFFIX) == "roles"), which(names(SPEC_SUFFIX) == "comparison") + 2L)   # mu_shift (2026-11-02, directed only) sits between
+  expect_equal(which(names(SPEC_SUFFIX) == "roles"), which(names(SPEC_SUFFIX) == "comparison") + 3L)   # mu_shift (2026-11-02, directed only) and reach (2026-11-10, directed only) sit between
   ap <- parse_spec(c("--comparison=conventional", "--roles=aprime"))
   expect_equal(cell_name("fmid", 3L, "M1c", ap), "fmid_lag3_all_pr_M1c_conv_aprime"); expect_equal(cell_name("mid", 3L, "M1cr", ap), "mid_lag3_all_pr_M1cr_conv_aprime")
   expect_equal(cell_name("mid", 3L, "M1c", parse_spec("--roles=aprime")), "mid_lag3_all_pr_M1c_aprime")
