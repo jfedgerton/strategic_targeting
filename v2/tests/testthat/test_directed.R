@@ -133,7 +133,7 @@ test_that("existing cells are unchanged: default, M1c, _dist_major, conventional
     for (cs in cases) {
       sn <- parse_spec(cs[[1]]); so <- old$parse_spec(cs[[1]])
       An <- quiet(assemble_cell_spec("mid", 3L, sn, data_dir = td, model = cs[[2]])); Ao <- quiet(old$assemble_cell_spec("mid", 3L, so, data_dir = td, model = cs[[2]]))
-      expect_identical(setdiff(names(An), names(Ao)), c("directed", "directed_stats", "joiner_set", "ev_sets", "jset_stats", "ev_joiner"))   # joiner sets 2026-11-04
+      expect_identical(setdiff(names(An), names(Ao)), c("directed", "directed_stats", "joiner_set", "ev_sets", "jset_stats", "ev_joiner", "variant", "mid3_stats", "reach", "reach_stats", "subsample", "subsample_stats", "init_sub_stats"))   # joiner sets 2026-11-04; run 0 / mid3 2026-11-10 (all NULL / none / the variant name here)
       expect_equal(An$joiner_set, "all"); expect_null(An$ev_sets); expect_null(An$jset_stats)
       for (nm in names(Ao)) expect_identical(An[[nm]], Ao[[nm]], info = paste(nm, cs[[2]], paste(cs[[1]], collapse = " ")))
       expect_false(An$directed); expect_null(An$directed_stats)
