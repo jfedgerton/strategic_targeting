@@ -697,6 +697,26 @@ stage2_group_labels <- function(roles = "stageb") {
   switch(roles, stageb = STAGE2_GROUPS, aprime = APRIME_GROUPS, bc = BC_GROUPS, bcj = BCJ_GROUPS)
 }
 
+## ---- the lag-3 MID-history choice set (2026-11-10; variant = mid3, README section 13) --------------------------------------------------------------
+## mid3_history(events, window): the (ccode1, ccode2, year) keys, in BOTH directions, of every state-year pair (i, j, t) with a MID onset between i and j
+## (either direction) in a year y with t - window <= y <= t - 1. `events` is the build's events.rds: one row per (initiator, target, onset year) after the
+## collapse, every hostility level, escalations INCLUDED (an escalation row is a new MID onset of a pair already fighting in another dispute), whatever the
+## sample flags. Under events = pairs these are the COW Side A x Side B pairs (so two states of the same dispute that never interacted count as a MID
+## pair, as everywhere in that foundation); under events = dymid the interacting dyads' onsets. The onset year itself is NEVER a history year of t = y
+## (leakage: the row of year t would carry the outcome); asserted on the result.
+mid3_history <- function(events, window = 3L) {
+  stopifnot(is.data.frame(events), all(c("initiator", "target", "year") %in% names(events)), !anyNA(events$initiator), !anyNA(events$target), !anyNA(events$year),
+            length(window) == 1L, is.finite(window), window >= 1L, all(events$initiator != events$target))
+  window <- as.integer(window)
+  on <- distinct(tibble(a = pmin(events$initiator, events$target), b = pmax(events$initiator, events$target), onset = as.integer(events$year)))
+  out <- bind_rows(lapply(seq_len(window), function(k) on |> mutate(year = onset + k)))          # k = 1..window: t = onset + k, never onset + 0
+  stopifnot(all(out$year > out$onset), all(out$year - out$onset <= window), all(out$onset >= out$year - window), all(out$onset <= out$year - 1L))
+  out <- distinct(out, a, b, year)
+  res <- distinct(bind_rows(transmute(out, ccode1 = a, ccode2 = b, year), transmute(out, ccode1 = b, ccode2 = a, year)))
+  stopifnot(!anyDuplicated(res), nrow(res) == 2L * nrow(out))
+  res
+}
+
 ## ---- initiator direction for war-level disputes (PI decision 2026-10-25; README "Initiator direction") -------------
 ## COW-MID Side A is the side that took the FIRST codable action, not the aggressor. In dispute 258 (the Second World War)
 ## Side A is Poland and the Allies, so the Side A rule gives Poland -> Germany and never Germany -> Poland. For disputes at

@@ -153,8 +153,9 @@ if (!is.na(slurm_task_id) && slurm_task_id == "") slurm_task_id <- NA_character_
 logf("provenance at load: git commit %s (uncommitted changes under v2/R or v2/stan: %s); manifest built %s with %d files; SLURM_JOB_ID %s; SLURM_ARRAY_TASK_ID %s",
      git_commit_at_load, git_dirty_at_load, if ("built" %in% names(manifest_at_load)) manifest_at_load$built[1] else "NA", nrow(manifest_at_load), slurm_job_id, slurm_task_id)
 VARIANT_SPEC <- spec_variant(spec)                       # 2026-11-04: all | polrel (the variant switch, role / AME models only)
-cell_files <- c(sprintf("stage1_panel_lag%d.rds", LAG), sprintf("alts_lag%d_%s.rds", LAG, VARIANT_SPEC), "events.rds",
-                if (spec$roles %in% JOINER_ROLES) "roles_aprime.rds",   # bc / bcj (2026-11-04) are derived from the same file   # roles = aprime (2026-10-31) reads the build's role file as well
+REACH <- spec_reach(spec); SUBSAMPLE <- spec_subsample(spec)   # run 0 (2026-11-10): none unless the switch is on
+cell_files <- c(sprintf("stage1_panel_lag%d.rds", LAG), sprintf("alts_lag%d_%s.rds", LAG, spec_alts_variant(spec)), "events.rds",   # mid3 (2026-11-10) reads the all-states file
+                if (spec$roles %in% JOINER_ROLES || SUBSAMPLE == "bilateral") "roles_aprime.rds",   # bc / bcj (2026-11-04) are derived from the same file   # roles = aprime (2026-10-31) reads the build's role file as well
                 if (JOINER_SET == "opposing") "joiner_sets_aprime.rds")   # joiner_set = opposing (2026-11-04) reads the joiner sets as well
 stopifnot(all(cell_files %in% manifest_at_load$file))
 manifest_cell <- manifest_at_load[manifest_at_load$file %in% cell_files, ]
@@ -184,7 +185,7 @@ if (CONTEXT_MODEL) {
        paste(sprintf("%d %s %d (%.1f, %d; %d)", gt$grp, gt$group, gt$n_usable, gt$w_usable, gt$n_states, gt$n_sample), collapse = "; "))
   ## event-level allowed stage-2 rows (2026-11-04): the whole stage-2 set of the state-year for every event under joiner_set = all (the programs then
   ## compute exactly what they computed before), the joiner events' opposing-side rows under joiner_set = opposing
-  stopifnot(identical(A$joiner_set, JOINER_SET), is.null(A$ev_sets) == (JOINER_SET == "all"))
+  stopifnot(identical(A$joiner_set, JOINER_SET), identical(A$variant, VARIANT_SPEC), is.null(A$ev_sets) == (JOINER_SET == "all" && VARIANT_SPEC != "mid3"))
   dat <- event_alt_sets(dat, A$ev_sets)
   s2_n <- tabulate(findInterval(which(dat$in_s2 == 1L), dat$cs_start), nbins = dat$N1)      # stage-2 set size per state-year (cs_start increasing)
   stopifnot(identical(dat$cs_start, sort(dat$cs_start)), all(dat$ev_alt_n <= s2_n[dat$ev_sy]))
@@ -194,6 +195,12 @@ if (CONTEXT_MODEL) {
     stopifnot(!is.null(js), length(A$ev_joiner) == dat$E, all(A$ev_joiner[is_restr]), n_restr == js$n_joiner_events - js$n_unrestricted)
     logf("joiner_set = opposing (2026-11-04): %d joiner events (initiator a joiner; roles %s); restricted set size min %d / median %.1f / max %d; size 1: %d (log-prob 0 in stage 2, kept; weights %.1f); %d events actually restricted in Stan (ev_restr = 1); alternatives removed %d; n_ev_alt = %d",
          js$n_joiner_events, spec$roles, js$size_min, js$size_median, js$size_max, js$n_singleton, js$w_singleton, n_restr, js$n_removed, dat$n_ev_alt)
+  } else if (VARIANT_SPEC == "mid3") {
+    ## the lag-3 MID-history choice set (2026-11-10): EVERY event has its own set (the history rows of its state-year + its chosen target), size >= 2
+    ms <- A$mid3_stats
+    stopifnot(!is.null(ms), ms$n_usable == dat$E, ms$n_ev_alt == dat$n_ev_alt, all(dat$ev_alt_n >= 2L), identical(as.integer(dat$ev_alt_n), as.integer(ms$ev$set_n[ms$ev$set_n > 1L])))
+    logf("variant = mid3 (2026-11-10): %d events scored against their MID-history set (history rows of the state-year + the chosen target); set size min %d / median %.0f / max %d; %d events restricted in Stan (ev_restr = 1); n_ev_alt = %d; %d state-years (%d initiations) left stage 1 without a history IV alternative; %d chosen-only events dropped from stage 2",
+         dat$E, min(dat$ev_alt_n), stats::median(dat$ev_alt_n), max(dat$ev_alt_n), n_restr, dat$n_ev_alt, ms$n_sy_dropped, ms$y1_dropped, ms$n_set1)
   } else {
     stopifnot(n_restr == 0L)
     logf("joiner_set = all: every event is scored against its state-year's whole stage-2 set (n_ev_alt = %d)", dat$n_ev_alt)
@@ -224,9 +231,12 @@ if (CONVENTIONAL) {
   stopifnot(MU_SHIFT %in% c("none", "traits"), MU_SHIFT == "none" || MODEL %in% MU_SHIFT_MODELS)
   if (MU_SHIFT == "traits") stopifnot(identical(X_cols, c("M_lvl", "R_lvl", "cowmaj_tm1", "dem_tm1")), dat$P == 4L, ncol(dat$X) == 4L, length(dat$x_ref) == 4L, all(is.finite(dat$x_ref)),
                                       identical(unname(dat$X), unname(dat$W[, match(X_MU_TRAITS, W_cols), drop = FALSE])))
-  stopifnot(isTRUE(A$directed), !isTRUE(A$conventional), A$distance == "capital", A$major == "joint", identical(W_cols, W_CONVENTIONAL), identical(Z_cols, Z_DIRECTED), identical(X_cols, X_EXPECTED),
-            dat$P == length(X_EXPECTED), ncol(dat$X) == length(X_EXPECTED), nrow(dat$X) == dat$N1, length(dat$x_ref) == length(X_EXPECTED), dat$P1 == length(W_CONVENTIONAL), dat$Pz == length(Z_DIRECTED), dat$Pz == 9L,
-            identical(colnames(dat$Z), Z_DIRECTED) || is.null(colnames(dat$Z)),
+  ## run 0 (2026-11-10): the expected directed lists under the two switches (W_CONVENTIONAL / Z_DIRECTED, Pz = 9, with both at none)
+  W_EXPECTED <- directed_w_cols(SUBSAMPLE); Z_EXPECTED <- directed_z_cols(REACH, SUBSAMPLE)
+  stopifnot(identical(A$reach, REACH), identical(A$subsample, SUBSAMPLE), (REACH != "none" || SUBSAMPLE %in% INIT_SUBSAMPLES) || (identical(W_EXPECTED, W_CONVENTIONAL) && identical(Z_EXPECTED, Z_DIRECTED) && length(Z_EXPECTED) == 9L))
+  stopifnot(isTRUE(A$directed), !isTRUE(A$conventional), A$distance == "capital", A$major == "joint", identical(W_cols, W_EXPECTED), identical(Z_cols, Z_EXPECTED), identical(X_cols, X_EXPECTED),
+            dat$P == length(X_EXPECTED), ncol(dat$X) == length(X_EXPECTED), nrow(dat$X) == dat$N1, length(dat$x_ref) == length(X_EXPECTED), dat$P1 == length(W_EXPECTED), dat$Pz == length(Z_EXPECTED),
+            identical(colnames(dat$Z), Z_EXPECTED) || is.null(colnames(dat$Z)),
             !any(CHANGE_COLUMNS %in% c(W_cols, X_cols, Z_cols)), !any(PEACE_COLUMNS %in% c(W_cols, Z_cols)), !any(c("joint_dem", Z_MAJOR) %in% Z_cols), !anyNA(dat$W), !anyNA(dat$Z),
             "multi_mid_jan" %in% W_cols, MODEL %in% c(DIRECTED_MODELS, RHOREG_MODELS, AME_CONTEXT_MODELS))
   logf("directed comparison (2026-11-01, suffix _cdir): W = %s (P1 = %d); X = %s (P = %d, mu = mu0 + %sa_i%s); Z = %s (Pz = %d); distance = capital and major = joint are part of the spec (not of the switches)",
@@ -262,14 +272,23 @@ if (A$major == "joint") logf("major = joint (2026-10-27%s): cowmaj_tm1 in W; one
 if (A$distance == "capital") logf("distance = capital (2026-10-28%s): log_capdist in Z (centred over the IV rows); %d alternative rows without a capital distance dropped from both sets (%d IV, %d stage 2; %d state-years), %d expected events lost with them (counted and reconciled); IV-row mean %.4f, SD %.4f, cor with contig_land %.3f; mean uncentred log_capdist chosen %.4f vs all stage-2 alternatives %.4f",
                                      if (CONVENTIONAL) ", part of the conventional comparison" else if (DIRECTED) ", part of the directed comparison" else "", A$distance_stats$n_rows_dropped, A$distance_stats$n_rows_dropped_iv, A$distance_stats$n_rows_dropped_s2, A$distance_stats$n_sy_affected, A$distance_stats$n_events_dropped,
                                      A$distance_stats$mean_iv, A$distance_stats$sd_iv, A$distance_stats$cor_contig_iv, A$distance_stats$mean_chosen, A$distance_stats$mean_s2)
+if (REACH != "none") logf("reach = %s (run 0a, 2026-11-10, suffix _reach): Z carries %s (centred log_capdist squared, and x the initiator's M_lvl; both centred over the IV rows); IV-row SDs %.4f / %.4f; correlation of the linear term with the square %.3f, with the product %.3f",
+                          REACH, paste(Z_REACH, collapse = ","), A$reach_stats$sd_sq, A$reach_stats$sd_x, A$reach_stats$cor_lin_sq, A$reach_stats$cor_lin_x)
+if (SUBSAMPLE != "none") logf("subsample = %s (run 0, 2026-11-10): events dropped by role %s; %d events kept in the sample, %d rescaled in %d split D8 groups (weights %.1f -> %.1f); stage 1 %s; %d state-years with y1 = 1 and no stage-2 event",
+                              SUBSAMPLE, paste(sprintf("%s %d of %d", A$subsample_stats$labels, A$subsample_stats$n_dropped, A$subsample_stats$n_before), collapse = ", "), A$subsample_stats$n_kept, A$subsample_stats$n_events_rescaled,
+                              A$subsample_stats$n_groups_split, A$subsample_stats$w_kept_before, A$subsample_stats$w_kept_after,
+                              if (SUBSAMPLE %in% INIT_SUBSAMPLES) sprintf("restricted to %d of %d state-years", A$init_sub_stats$n_kept, A$init_sub_stats$n_panel) else "unchanged", A$n_orphan)
 if (spec$contiguity == "none") logf("contiguity = none (2026-10-28): contig_land is NOT in Z; the distance replaces it (Z = the --distance=capital Z without its contig_land column; same rows, same events)")
 if (spec$interact == "prefixed") logf("interact = prefixed (2026-10-27): Z carries %s (products of the uncentred %s changes, centred over the IV rows)", paste(Z_INTERACT, collapse = ","), spec$changes)
+## run 0 / mid3 (2026-11-10): the statistics of the new switches, saved with the Stan data and the fit ONLY when a switch is on (an empty list
+## otherwise, so the saved objects of every existing cell keep exactly their fields)
+RUN0_STATS <- Filter(Negate(is.null), list(mid3_stats = A$mid3_stats, reach_stats = A$reach_stats, subsample_stats = A$subsample_stats, init_sub_stats = A$init_sub_stats))
 if (DRY_RUN) {
-  saveRDS(list(dat = dat, cell = cell, state_codes = state_codes, W_cols = W_cols, X_cols = X_cols, Z_cols = Z_cols,
+  saveRDS(c(list(dat = dat, cell = cell, state_codes = state_codes, W_cols = W_cols, X_cols = X_cols, Z_cols = Z_cols,
                manifest = manifest_cell, git_commit = git_commit_at_load, spec = spec, winsor = A$winsor, model = MODEL,
                full_controls = spec$controls == "full", event_weights = spec$weights, direction = spec$direction, group_table = A$group_table,
                stan_program = family, prior = c(spec[PRIOR_SWITCHES], prior), tag = spec_tag(spec), conventional = CONVENTIONAL, directed = DIRECTED,
-               mu_shift = MU_SHIFT, Zr_cols = if (RHOREG) X_MU_TRAITS else NULL, joiner_set = JOINER_SET, jset_stats = A$jset_stats),
+               mu_shift = MU_SHIFT, Zr_cols = if (RHOREG) X_MU_TRAITS else NULL, joiner_set = JOINER_SET, jset_stats = A$jset_stats), RUN0_STATS),
           file.path(out_dir, paste0("standata_", cell, ".rds")))
   logf("DRY RUN: Stan data assembled and saved; no sampling"); quit(save = "no", status = 0)
 }
@@ -437,6 +456,7 @@ obj <- list(fit = fit, dat = dat, cell = cell, state_codes = state_codes, W_cols
 ## atomic save (C2): write to a temporary name, then rename, so a killed job never leaves a truncated fit_<cell>.rds
 fit_name <- paste0("fit_", cell, if (!is.null(stale)) "_STALE" else "", ".rds")
 fit_path <- file.path(out_dir, fit_name); tmp_path <- paste0(fit_path, ".tmp")
+if (length(RUN0_STATS)) obj <- c(obj, RUN0_STATS)      # run 0 / mid3 (2026-11-10): only when a switch is on
 saveRDS(obj, tmp_path)
 chk <- tryCatch(readRDS(tmp_path), error = function(e) NULL)
 if (is.null(chk) || !identical(chk$cell, cell)) stop("the saved fit could not be read back from ", tmp_path, "; not renamed")
