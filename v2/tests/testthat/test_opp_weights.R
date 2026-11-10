@@ -15,6 +15,14 @@ suppressPackageStartupMessages({ library(testthat); library(dplyr) })
 root <- Sys.getenv("V2_ROOT"); if (root == "") root <- normalizePath(file.path(getwd(), "v2"), mustWork = FALSE)
 source(file.path(root, "R", "assemble_cell.R")); source(file.path(root, "R", "opp_weights.R"))
 spec_o <- function(...) parse_spec(c("--comparison=directed", "--roles=bcj", ...))
+## need_builds(...): the compiled Stan programs a test needs. Audit P2-8 (2026-11-10): a missing build is an ERROR, not a skip (a green run without the
+## compiled programs would prove nothing about the offset entering the IV), unless V2_SKIP_STAN_TESTS=TRUE says explicitly to skip.
+need_builds <- function(...) {
+  p <- file.path(root, "stan", "build", paste0(c(...), ".rds")); miss <- p[!file.exists(p)]
+  if (length(miss) == 0L) return(invisible(TRUE))
+  if (identical(toupper(Sys.getenv("V2_SKIP_STAN_TESTS")), "TRUE")) skip(paste("V2_SKIP_STAN_TESTS=TRUE and compiled model missing:", paste(basename(miss), collapse = ", ")))
+  stop("compiled Stan program missing: ", paste(miss, collapse = ", "), " (run v2/R/compile_models.R; set V2_SKIP_STAN_TESTS=TRUE only to skip the Stan tests knowingly)")
+}
 
 ## ---- (A) the switches ----------------------------------------------------------------------------------------------------------------------------------
 test_that("spec: opp_weight, opp_outcome, opp_draw: choices, suffixes, names, the offset program; existing names and strings unchanged", {
@@ -80,7 +88,7 @@ toy_frame <- function(seed = 1L, years = 1850:1875) {
   fr$in_iv <- 1L; fr$in_s2 <- 1L; fr$in_iv[sample(n, 15L)] <- 0L
   fr$contig_land <- as.integer(cl[dy]); fr$contig_sea <- as.integer((1L - fr$contig_land) * rbinom(n, 1, 0.3)); fr$log_capdist <- as.numeric(ld[dy])
   fr$M_lvl_i <- as.numeric(lvl[paste(fr$ccode1, fr$year)]); fr$dymid_hist3 <- rbinom(n, 1, 0.15); fr$a4_joinable <- rbinom(n, 1, 0.2); fr$decade <- 10L * (fr$year %/% 10L)
-  eta <- -2.2 + 0.9 * fr$contig_land + 0.4 * fr$contig_sea - 0.5 * (fr$log_capdist - 6) + 0.2 * (fr$log_capdist - 6) * fr$M_lvl_i + 0.8 * fr$dymid_hist3 + 0.5 * fr$a4_joinable
+  eta <- -2.2 + 0.9 * fr$contig_land + 0.4 * fr$contig_sea - 0.5 * (fr$log_capdist - 6) + 0.5 * fr$M_lvl_i + 0.2 * (fr$log_capdist - 6) * fr$M_lvl_i + 0.8 * fr$dymid_hist3 + 0.5 * fr$a4_joinable
   fr$y_mid <- rbinom(n, 1, stats::plogis(eta)); fr$y_host3 <- fr$y_mid * rbinom(n, 1, 0.8)
   fr
 }
@@ -123,7 +131,8 @@ test_that("oppw_frame: undirected outcomes, hostility >= 3, history in [t - 3, t
   p2 <- panel; p2$cowmaj_tm1 <- 0L; expect_identical(oppw_frame(alts, p2, ev, jp), fr)
   expect_false(any(OPPW_TARGET_STRENGTH %in% c(OPPW_A_COLS, OPPW_A_BASELINE, OPPW_ALTS_COLS, OPPW_PANEL_COLS)))
   expect_true(all(c("M_j", "Rpr_j", "major2", "tgt_major", "tgt_major_x_init_major", "dM", "dR_pr", "polrel") %in% OPPW_TARGET_STRENGTH))
-  expect_equal(OPPW_A_COLS, c("contig_land", "contig_sea", "log_capdist", "log_capdist_x_init_M", "dymid_hist3", "a4_joinable"))
+  expect_equal(OPPW_A_COLS, c("contig_land", "contig_sea", "log_capdist", "M_lvl_i", "log_capdist_x_init_M", "dymid_hist3", "a4_joinable"))   # M_lvl_i: the INITIATOR's level, a main effect since the audit (P1-1)
+  expect_true("M_lvl_i" %in% OPPW_A_COLS); expect_false("M_lvl_i" %in% OPPW_A_BASELINE); expect_false(any(c("M_lvl_i", "M_i") %in% OPPW_TARGET_STRENGTH))
   dl <- oppw_decade_levels(fr$year, fr$y_mid)
   for (bad in c("M_j", "major2", "tgt_major", "dM")) expect_error(oppw_design(cbind(fr, M_j = 1, major2 = 1, tgt_major = 1, dM = 1), c("contig_land", bad), dl), info = bad)
   ## a row without a capital distance is dropped and counted; an initiator state-year outside the panel stops
@@ -205,8 +214,8 @@ test_that("the window fit is the logit MLE of stats::glm on the standardised des
   expect_equal(f$coef, unname(stats::coef(g)), tolerance = 1e-7); expect_equal(unname(f$V), unname(stats::vcov(g)), tolerance = 1e-5)
   fg <- oppw_fit_glm(dz$X, tr$y_mid); expect_equal(fg$coef, f$coef, tolerance = 1e-8); expect_equal(fg$V, f$V, tolerance = 1e-6)
   ## the design: training means / SDs, the product centred on the TRAINING mean of log distance, decade columns after the first level
-  expect_equal(colnames(dz$X), c("(Intercept)", OPPW_A_COLS, "decade_1860")); expect_equal(unname(colMeans(dz$X[, OPPW_A_COLS])), rep(0, 6), tolerance = 1e-12)
-  expect_equal(unname(apply(dz$X[, OPPW_A_COLS], 2, sd)), rep(1, 6), tolerance = 1e-12); expect_equal(dz$centre$ld_mean, mean(tr$log_capdist))
+  expect_equal(colnames(dz$X), c("(Intercept)", OPPW_A_COLS, "decade_1860")); expect_equal(unname(colMeans(dz$X[, OPPW_A_COLS])), rep(0, 7), tolerance = 1e-12)
+  expect_equal(unname(apply(dz$X[, OPPW_A_COLS], 2, sd)), rep(1, 7), tolerance = 1e-12); expect_equal(dz$centre$ld_mean, mean(tr$log_capdist))
   prod_raw <- (tr$log_capdist - mean(tr$log_capdist)) * tr$M_lvl_i; expect_equal(unname(dz$X[, "log_capdist_x_init_M"]), (prod_raw - mean(prod_raw)) / sd(prod_raw))
   pr <- fr[fr$year == 1867L, ]; Xp <- oppw_design(pr, OPPW_A_COLS, dl, centre = dz$centre)$X
   expect_equal(unname(Xp[, "log_capdist"]), (pr$log_capdist - mean(tr$log_capdist)) / sd(tr$log_capdist))        # the prediction rows are scaled with the TRAINING constants
@@ -214,7 +223,7 @@ test_that("the window fit is the logit MLE of stats::glm on the standardised des
   expect_equal(r$lq[fr$year == 1867L, "d0"], as.numeric(stats::plogis(Xp %*% f$coef, log.p = TRUE)), tolerance = 1e-8)
   expect_equal(r$coefs$coef[r$coefs$train_max == 1866L], f$coef, tolerance = 1e-8)
   ## the fitted probabilities do not depend on the centring and scaling (the logit MLE is invariant): raw columns give the same q
-  raw <- cbind(1, as.matrix(tr[, c("contig_land", "contig_sea", "log_capdist")]), prod_raw, as.matrix(tr[, c("dymid_hist3", "a4_joinable")]), dz$X[, "decade_1860"])
+  raw <- cbind(1, as.matrix(tr[, c("contig_land", "contig_sea", "log_capdist", "M_lvl_i")]), prod_raw, as.matrix(tr[, c("dymid_hist3", "a4_joinable")]), dz$X[, "decade_1860"])
   expect_equal(as.numeric(raw %*% stats::coef(stats::glm(tr$y_mid ~ raw - 1, family = stats::binomial()))), as.numeric(dz$X %*% f$coef), tolerance = 1e-6)
   expect_error(oppw_fit(dz$X, rep(0L, nrow(tr)))); tr0 <- tr; tr0$a4_joinable <- 0L; expect_error(oppw_design(tr0, OPPW_A_COLS, dl), "constant predictor")
   ## separation stops loudly
@@ -234,20 +243,40 @@ test_that("the draws are draws of the FULL coefficient vector with common random
   for (wi in c(1L, 4L, nrow(r$windows))) {
     w <- r$windows[wi, ]; tr <- fr[fr$year <= w$train_max & fr$in_iv == 1L, ]; pr <- fr$year >= w$pred_from & fr$year <= w$pred_to
     dl <- oppw_decade_levels(tr$year, tr$y_mid); dz <- oppw_design(tr, OPPW_A_COLS, dl); f <- oppw_fit(dz$X, tr$y_mid); Xp <- oppw_design(fr[pr, ], OPPW_A_COLS, dl, centre = dz$centre)$X
-    L <- t(chol(f$V)); p <- length(f$coef)
+    Vcl <- oppw_vcov_cluster(dz$X, tr$y_mid, f$coef, oppw_dyad_id(tr$ccode1, tr$ccode2)); L <- t(chol(Vcl)); p <- length(f$coef)   # the draws use the DYAD-CLUSTERED covariance (audit P1-2)
+    expect_equal(r$coefs$se_cluster[r$coefs$window == wi], sqrt(diag(Vcl)), tolerance = 1e-8); expect_equal(r$coefs$se[r$coefs$window == wi], sqrt(diag(f$V)), tolerance = 1e-8)
+    expect_false(isTRUE(all.equal(r$lq[pr, 2L], as.numeric(stats::plogis(Xp %*% (f$coef + drop(t(chol(f$V)) %*% r$z[1, seq_len(p)])), log.p = TRUE)), tolerance = 1e-6)))   # NOT the model-based covariance
     for (d in 1:5) {
       b_d <- f$coef + drop(L %*% r$z[d, seq_len(p)])                                                          # ONE coefficient vector per draw and window, from the draw's own z
       expect_equal(r$lq[pr, d + 1L], as.numeric(stats::plogis(Xp %*% b_d, log.p = TRUE)), tolerance = 1e-8, info = paste("window", wi, "draw", d))
       ## coherence: the shift of the linear predictor against the MLE is exactly linear in the design (a per-row draw would leave a residual)
       shift <- lgt(r$lq[pr, d + 1L]) - lgt(r$lq[pr, 1L]); expect_lt(max(abs(stats::lm.fit(Xp, shift)$residuals)), 1e-6)
     }
-    ## the draws scatter around the MLE with the asymptotic covariance: the implied z is the stored one
+    ## the draws scatter around the MLE with the clustered covariance: the implied z is the stored one
     expect_equal(drop(solve(L, (f$coef + drop(L %*% r$z[2, seq_len(p)])) - f$coef)), r$z[2, seq_len(p)], tolerance = 1e-8)
   }
   ## a per-row marginal draw (what the procedure must never be) fails the coherence check, so the check has teeth
   pr <- fr$year == 1870L; set.seed(1); bad <- lgt(r$lq[pr, 1L]) + rnorm(sum(pr), 0, 0.3)
   tr <- fr[fr$year <= 1869L & fr$in_iv == 1L, ]; dl <- oppw_decade_levels(tr$year, tr$y_mid); dz <- oppw_design(tr, OPPW_A_COLS, dl)
   expect_gt(max(abs(stats::lm.fit(oppw_design(fr[pr, ], OPPW_A_COLS, dl, centre = dz$centre)$X, bad - lgt(r$lq[pr, 1L]))$residuals)), 0.05)
+})
+test_that("oppw_vcov_cluster is the dyad-clustered sandwich (CR1) of sandwich::vcovCL(type = HC1) on a toy fit; one cluster per undirected dyad", {
+  if (!requireNamespace("sandwich", quietly = TRUE)) stop("the package sandwich is needed for this test (the reference implementation of the clustered covariance)")
+  fr <- toy_frame(6L); tr <- fr[fr$year <= 1870L & fr$in_iv == 1L, ]
+  dl <- oppw_decade_levels(tr$year, tr$y_mid); dz <- oppw_design(tr, OPPW_A_COLS, dl); f <- oppw_fit(dz$X, tr$y_mid)
+  id <- oppw_dyad_id(tr$ccode1, tr$ccode2)
+  expect_equal(length(unique(id)), 21L); expect_identical(oppw_dyad_id(10L, 20L), oppw_dyad_id(20L, 10L)); expect_false(oppw_dyad_id(10L, 20L) == oppw_dyad_id(10L, 30L))   # 7 states: 21 undirected dyads
+  d <- data.frame(y = tr$y_mid, dz$X[, -1], id = id, check.names = FALSE); g <- stats::glm(y ~ . - id, data = d, family = stats::binomial())
+  expect_equal(unname(stats::coef(g)), f$coef, tolerance = 1e-7)
+  ref <- sandwich::vcovCL(g, cluster = d$id, type = "HC1"); V <- oppw_vcov_cluster(dz$X, tr$y_mid, f$coef, id)
+  expect_equal(unname(V[, ]), unname(ref[, ]), tolerance = 1e-6, check.attributes = FALSE); expect_equal(attr(V, "n_clusters"), 21L)
+  ## by hand: c x bread x meat x bread with the cluster score sums
+  mu <- stats::plogis(drop(dz$X %*% f$coef)); S <- rowsum(dz$X * (tr$y_mid - mu), id); G <- 21L; N <- nrow(tr); K <- ncol(dz$X)
+  expect_equal(unname(V[, ]), unname((G / (G - 1)) * ((N - 1) / (N - K)) * f$V %*% crossprod(S) %*% f$V), tolerance = 1e-8, check.attributes = FALSE)
+  ## it is not the model covariance, and not the covariance clustered on the directed dyad or on the dyad-year
+  expect_false(isTRUE(all.equal(unname(V[, ]), unname(f$V), tolerance = 1e-3, check.attributes = FALSE)))
+  expect_false(isTRUE(all.equal(unname(V[, ]), unname(oppw_vcov_cluster(dz$X, tr$y_mid, f$coef, tr$ccode1 * 1000 + tr$ccode2)[, ]), tolerance = 1e-3, check.attributes = FALSE)))
+  expect_error(oppw_vcov_cluster(dz$X, tr$y_mid, f$coef, rep(1:3, length.out = nrow(tr))))            # fewer clusters than coefficients
 })
 test_that("auxiliary diagnostics: log loss, precision-recall, calibration by hand", {
   y <- c(1L, 0L, 0L, 1L, 0L); q <- c(0.8, 0.1, 0.4, 0.3, 0.2)
@@ -287,7 +316,7 @@ test_that("m1_context_offset with a zero offset IS m1_context: identical log den
   back <- gsub("m1_context_offset:", "m1_context:", back, fixed = TRUE); back <- sub("[[:space:]]*// (run 1|zg_local = Z gamma).*$", "", back)
   code <- function(x) { x <- x[!grepl("^//", x)]; x[nzchar(trimws(x))] }
   expect_identical(code(back), code(src_c)); expect_false(any(grepl("opp_off", src_c)))
-  if (!file.exists(p_c) || !file.exists(p_o)) skip("compiled m1_context / m1_context_offset missing")
+  need_builds("m1_context", "m1_context_offset")
   smc <- readRDS(p_c); smo <- readRDS(p_o); rstan_options(threads_per_chain = 1)
   dat <- toy_ctx_o(); dat0 <- c(dat, list(opp_off = numeric(dat$N2)))
   expect_identical(dat0[names(dat)], dat)                                                                   # the offset program's data = the current data + a zero vector
@@ -304,7 +333,7 @@ test_that("m1_context_offset with a zero offset IS m1_context: identical log den
 test_that("a non-zero offset enters the stage-2 utility and the stage-1 IV identically: it is exactly a Z column with coefficient 1 (and lambda scales it)", {
   suppressPackageStartupMessages(library(rstan))
   p_c <- file.path(root, "stan", "build", "m1_context.rds"); p_o <- file.path(root, "stan", "build", "m1_context_offset.rds")
-  if (!file.exists(p_c) || !file.exists(p_o)) skip("compiled m1_context / m1_context_offset missing")
+  need_builds("m1_context", "m1_context_offset")
   smc <- readRDS(p_c); smo <- readRDS(p_o); rstan_options(threads_per_chain = 1)
   dat <- toy_ctx_o(); set.seed(11); lq <- -rexp(dat$N2, 0.5)                                                  # ln q of every alternative row
   for (lambda in c(0.5, 1)) {
@@ -335,7 +364,9 @@ toy_weights <- function(v2, foundation = "data_entry", outcome = "mid") {
   a <- readRDS(file.path(v2, foundation, "alts_lag3_all.rds")); man <- read.csv(file.path(v2, foundation, "manifest.csv"), stringsAsFactors = FALSE)
   keys <- as.data.frame(a[, c("ccode1", "ccode2", "year")]); lq <- vapply(0:5, function(d) toy_lq(keys$ccode1, keys$ccode2, d), numeric(nrow(keys))); colnames(lq) <- paste0("d", 0:5)
   f <- c("alts_lag3_all.rds", "stage1_panel_lag3.rds")
-  list(keys = keys, in_iv = a$in_iv, lq = lq, input = data.frame(file = f, sha256 = man$sha256[match(f, man$file)], role = "foundation"), a_cols = OPPW_A_COLS, outcome = outcome, foundation = foundation,
+  man_dy <- read.csv(file.path(v2, "data_dymid", "manifest.csv"), stringsAsFactors = FALSE)
+  list(keys = keys, in_iv = a$in_iv, lq = lq, input = rbind(data.frame(file = f, sha256 = man$sha256[match(f, man$file)], role = "foundation"),
+                                                            data.frame(file = "events.rds", sha256 = man_dy$sha256[man_dy$file == "events.rds"], role = "dymid_outcome")), a_cols = OPPW_A_COLS, outcome = outcome, foundation = foundation,
        lag = 3L, burn_in = OPPW_BURN_IN, n_draws = 5L, seed = 123L, git_commit = "toy", built = "toy")
 }
 test_that("02_fit_model.R on the toy cell: lambda = 0 = the current Stan data + a zero offset; lambda / draw pick the column; weights unchanged; stale weights stop; fits and the mixture", {
@@ -351,6 +382,8 @@ test_that("02_fit_model.R on the toy cell: lambda = 0 = the current Stan data + 
   expect_false("opp" %in% names(base)); expect_false("opp_off" %in% names(base$dat)); expect_equal(base$stan_program, "m1_context")
   ## without the weights file the run stops and says how to build it
   r <- dry("--opp_weight=1"); expect_true(r$status != 0L); expect_true(any(grepl("08_opportunity_weights.R --entry=later --opp_outcome=mid", r$out, fixed = TRUE)))
+  ## the Dyadic MID build the weights' outcome comes from (audit P2-6): its manifest must exist and carry the events file the weights were fitted on
+  write_toy_cell(file.path(v2, "data_dymid"), alts_edit = toy_dir_o, roles = toy_roles_o)
   W <- toy_weights(v2); saveRDS(W, file.path(out_dir, "oppw_data_entry_mid_lag3.rds"))
   A <- suppressWarnings(quiet(assemble_cell_spec("mid", 3L, spec_o("--entry=later"), data_dir = file.path(v2, "data_entry"), model = "M1c"))); c1 <- A$alts$ccode1; c2 <- A$alts$ccode2
   ## lambda = 0: the Stan data of the current cell, field by field, plus opp_off = 0
@@ -379,10 +412,16 @@ test_that("02_fit_model.R on the toy cell: lambda = 0 = the current Stan data + 
   r <- dry("--opp_weight=1"); expect_true(r$status != 0L); expect_true(any(grepl("built from other data files", r$out, fixed = TRUE)))
   W3 <- W; W3$keys <- W$keys[-1, ]; W3$lq <- W$lq[-1, ]; saveRDS(W3, file.path(out_dir, "oppw_data_entry_mid_lag3.rds"))
   r <- dry("--opp_weight=1"); expect_true(r$status != 0L); expect_true(any(grepl("have no opportunity weight", r$out, fixed = TRUE)))
+  W5 <- W; W5$input$sha256[W5$input$role == "dymid_outcome"] <- paste(rep("1", 64), collapse = ""); saveRDS(W5, file.path(out_dir, "oppw_data_entry_mid_lag3.rds"))
+  r <- dry("--opp_weight=1"); expect_true(r$status != 0L); expect_true(any(grepl("another data_dymid/events.rds", r$out, fixed = TRUE)))      # stale Dyadic MID events (audit P2-6)
+  W6 <- W; W6$input <- W$input[W$input$role == "foundation", ]; saveRDS(W6, file.path(out_dir, "oppw_data_entry_mid_lag3.rds")); expect_true(dry("--opp_weight=1")$status != 0L)   # weights without the stored hash
+  saveRDS(W, file.path(out_dir, "oppw_data_entry_mid_lag3.rds")); file.rename(file.path(v2, "data_dymid", "manifest.csv"), file.path(v2, "data_dymid", "manifest.off"))
+  r <- dry("--opp_weight=1"); expect_true(r$status != 0L); expect_true(any(grepl("needs v2/data_dymid/manifest.csv", r$out, fixed = TRUE)))
+  file.rename(file.path(v2, "data_dymid", "manifest.off"), file.path(v2, "data_dymid", "manifest.csv"))
   W4 <- W; W4$outcome <- "host3"; saveRDS(W4, file.path(out_dir, "oppw_data_entry_mid_lag3.rds")); expect_true(dry("--opp_weight=1")$status != 0L)
   saveRDS(W, file.path(out_dir, "oppw_data_entry_mid_lag3.rds"))
   ## short fits: the point fit and the five draws at lambda = 1, then the mixture script; 03_extract.R accepts an offset fit
-  if (!file.exists(file.path(root, "stan", "build", "m1_context_offset.rds"))) { unlink(tmp, recursive = TRUE); skip("compiled m1_context_offset missing") }
+  need_builds("m1_context_offset")
   fit <- function(...) run("02_fit_model.R", base_args, "--chains=2", "--iter=80", "--warmup=40", "--max_treedepth=6", ...)
   r <- fit("--opp_weight=1"); expect_equal(r$status, 0L, info = paste(tail(r$out, 25), collapse = "\n"))
   o <- readRDS(file.path(out_dir, "fit_mid_lag3_all_pr_M1c_cdir_bcj_ent_opw1.rds"))
@@ -411,11 +450,21 @@ test_that("oppw_neff and oppw_cell_stats by hand; oppw_offset; oppw_mixture", {
   expect_equal(unname(oppw_neff(c(0.5, 0.25, 0.25))), c(1, 1 / (0.25 + 0.0625 + 0.0625))); expect_error(oppw_neff(c(0.5, 0)))
   ## two state-years: n = 1 (rows 1-4; row 4 stage-2 only) initiates twice (roles a and b), n = 2 (rows 5-7) does not
   dat <- list(N1 = 2L, N2 = 7L, E = 2L, G = 2L, cs_start = c(1L, 5L), cs_end = c(4L, 7L), in_iv = c(1L, 1L, 1L, 0L, 1L, 1L, 1L), in_s2 = rep(1L, 7L), y1 = c(1L, 0L),
-              ev_sy = c(1L, 1L), ev_row = c(2L, 4L), ev_grp = c(0L, 1L), ev_w = c(1, 0.5))
+              ev_sy = c(1L, 1L), ev_row = c(2L, 4L), ev_grp = c(0L, 1L), ev_w = c(1, 0.5),
+              ev_alt_first = c(1L, 5L), ev_alt_n = c(4L, 4L), ev_alt_loc = c(1:4, 1:4))
   q <- c(0.4, 0.004, 0.2, 0.1, 0.3, 0.3, 0.3); s <- oppw_cell_stats(dat, log(q), c("a", "b"), low_prob = 0.1)
   expect_equal(s$threshold, unname(quantile(q, 0.1))); expect_equal(s$threshold, 0.004 + 0.6 * 0.096); b <- s$by_role; expect_equal(b$role, c("a", "b", "all_events", "non_initiators", "all_state_years"))
-  expect_equal(b$n_events, c(1L, 1L, 2L, NA, NA)); expect_equal(b$w_events, c(1, 0.5, 1.5, NA, NA)); expect_equal(b$n_low, c(1L, 0L, 1L, NA, NA))        # the chosen 0.004 is low; 0.1 is not
-  expect_equal(b$share_low_n, c(1, 0, 0.5, NA, NA)); expect_equal(b$w_low, c(1, 0, 1, NA, NA)); expect_equal(b$share_low_w, c(1, 0, 1 / 1.5, NA, NA)); expect_equal(b$q_chosen_median[1:2], c(0.004, 0.1))
+  expect_equal(b$n_events, c(1L, 1L, 2L, NA, NA)); expect_equal(b$w_events, c(1, 0.5, 1.5, NA, NA)); expect_equal(b$n_low_pooled, c(1L, 0L, 1L, NA, NA))        # the chosen 0.004 is low; 0.1 is not
+  expect_equal(b$share_low_pooled_n, c(1, 0, 0.5, NA, NA)); expect_equal(b$w_low_pooled, c(1, 0, 1, NA, NA)); expect_equal(b$share_low_pooled_w, c(1, 0, 1 / 1.5, NA, NA))
+  ## PRIMARY: the within-set rank. The set of both events is rows 1-4 (q 0.4, 0.004, 0.2, 0.1): the chosen 0.004 has rank 0 (nothing smaller), the chosen 0.1
+  ## has rank 1 / 4 (one row smaller), which is not below 0.25
+  expect_equal(s$set_rank, c(0, 0.25)); expect_equal(oppw_set_rank(dat, log(q)), c(0, 0.25)); expect_equal(b$rank_median, c(0, 0.25, 0.125, NA, NA)); expect_equal(s$rank_cuts, c(0.05, 0.25))
+  expect_equal(b$n_bot05, c(1L, 0L, 1L, NA, NA)); expect_equal(b$share_bot05_n, c(1, 0, 0.5, NA, NA)); expect_equal(b$w_bot05, c(1, 0, 1, NA, NA)); expect_equal(b$share_bot05_w, c(1, 0, 1 / 1.5, NA, NA))
+  expect_equal(b$n_bot25, c(1L, 0L, 1L, NA, NA)); expect_equal(b$share_bot25_w, c(1, 0, 1 / 1.5, NA, NA))
+  d2 <- dat; d2$ev_row <- c(2L, 3L); b2 <- oppw_cell_stats(d2, log(q), c("a", "b"), low_prob = 0.1)$by_role; expect_equal(b2$rank_median[2], 0.5); expect_equal(b2$n_bot25, c(1L, 0L, 1L, NA, NA))
+  d3 <- dat; d3$ev_alt_first <- c(1L, 5L); d3$ev_alt_n <- c(4L, 2L); d3$ev_alt_loc <- c(1:4, 2L, 4L)       # a restricted set (rows 2 and 4): the chosen 0.1 has rank 1 / 2 in ITS set
+  expect_equal(oppw_set_rank(d3, log(q)), c(0, 0.5)); expect_true(which(names(b) == "n_bot05") < which(names(b) == "n_low_pooled"))   # the within-set columns come first
+ expect_equal(b$q_chosen_median[1:2], c(0.004, 0.1))
   sq1 <- 0.4 + 0.004 + 0.2; ne1 <- sq1^2 / (0.4^2 + 0.004^2 + 0.2^2)                                                 # IV rows only (row 4 is stage-2 only)
   expect_equal(b$sum_q_median, c(sq1, sq1, sq1, 0.9, mean(c(sq1, 0.9)))); expect_equal(b$n_eff_median, c(ne1, ne1, ne1, 3, mean(c(ne1, 3)))); expect_equal(b$n_sy, c(1L, 1L, 1L, 1L, 2L))
   expect_equal(b$n_iv_median, c(3, 3, 3, 3, 3))
@@ -466,7 +515,7 @@ test_that("slurm: 13_opp_weights.sbatch issues the auxiliary runs, the 32 valid 
                c("fmid_lag3_all_pr_M1c_cdir_bcj_ent_opw1_tlong", "mid_lag3_all_pr_M1c_cdir_bcj_ent_opw1_tlong", "fmid_lag3_all_pr_M1c_cdir_bcj_dy_opw1_tlong", "mid_lag3_all_pr_M1c_cdir_bcj_dy_opw1_tlong"))
   expect_true(task(0L, "STEP=other")$status != 0L)
   hdr <- readLines(file.path(root, "slurm", "13_opp_weights.sbatch")); hdr0 <- readLines(file.path(root, "slurm", "12_run0.sbatch"))
-  expect_true(all(c("#SBATCH --account=open", "#SBATCH --requeue", "#SBATCH --time=48:00:00", "#SBATCH --array=0-31", "#SBATCH --mem=128G") %in% hdr))
+  expect_true(all(c("#SBATCH --account=open", "#SBATCH --requeue", "#SBATCH --time=48:00:00", "#SBATCH --array=1-7,9-15,17-23,25-31", "#SBATCH --mem=128G") %in% hdr))
   expect_true(any(grepl("^#SBATCH --partition=basic", hdr))); expect_false(any(grepl("partition=open", hdr)))                    # the convention of 3ee000e: open account on the basic partition
   for (k in c("--account", "--partition", "--requeue", "--time", "--mem", "--nodes")) expect_identical(grep(paste0("^#SBATCH ", k), hdr, value = TRUE), grep(paste0("^#SBATCH ", k), hdr0, value = TRUE), info = k)   # the M1 resources of run 0
   ## the submit helper: aux, then the array afterok on it, then the mixture afterok on the array; nothing else
@@ -474,8 +523,12 @@ test_that("slurm: 13_opp_weights.sbatch issues the auxiliary runs, the 32 valid 
   out <- suppressWarnings(system2("bash", "v2/slurm/submit_opp_weights.sh", stdout = TRUE, stderr = TRUE, env = env0)); expect_null(attr(out, "status"), info = paste(out, collapse = "\n"))
   calls <- readLines(rec); expect_length(calls, 3L)
   expect_match(calls[1], "^sbatch job=1001 args: --parsable --job-name=v2_oppw_aux --array=0 --export=ALL,STEP=aux --time=06:00:00 --mem=32G --cpus-per-task=1 v2/slurm/13_opp_weights.sbatch$")
-  expect_match(calls[2], "^sbatch job=1002 args: --parsable --array=0-31 --export=ALL,STEP=fit --dependency=afterok:1001 --kill-on-invalid-dep=yes v2/slurm/13_opp_weights.sbatch$")
+  expect_match(calls[2], "^sbatch job=1002 args: --parsable --array=1-7,9-15,17-23,25-31 --export=ALL,STEP=fit --dependency=afterok:1001 --kill-on-invalid-dep=yes v2/slurm/13_opp_weights.sbatch$")
   expect_match(calls[3], "^sbatch job=1003 args: --parsable --job-name=v2_oppw_mix --array=0 --export=ALL,STEP=combine --time=06:00:00 --mem=64G --cpus-per-task=1 --dependency=afterok:1002 --kill-on-invalid-dep=yes v2/slurm/13_opp_weights.sbatch$")
+  ## the default array leaves out the four lambda = 0 cells (bit-identical to the existing _tlong fits; audit P2-7); they stay valid tasks (the loop above) and FIT_IDX brings them back
+  def <- unlist(lapply(strsplit(strsplit("1-7,9-15,17-23,25-31", ",")[[1]], "-"), function(v) seq(as.integer(v[1]), as.integer(v[2])))); expect_equal(setdiff(0:31, def), c(0L, 8L, 16L, 24L)); expect_true(all(grepl("opw0_tlong$", want[c(1, 9, 17, 25)])))
+  expect_false(any(grepl("opw0_", want[def + 1L])))
+  unlink(rec); out <- suppressWarnings(system2("bash", "v2/slurm/submit_opp_weights.sh", stdout = TRUE, stderr = TRUE, env = c(env0, "FIT_IDX=0-31", "A_JOB=5", "COMBINE=FALSE"))); expect_match(readLines(rec)[1], "--array=0-31 ", fixed = TRUE)
   expect_false(any(grepl("jfe4_cr_default", calls)))                                                         # everything on the open account unless FIT_OPTS says otherwise
   unlink(rec); out <- suppressWarnings(system2("bash", "v2/slurm/submit_opp_weights.sh", stdout = TRUE, stderr = TRUE, env = c(env0, "A_JOB=777", "FIT_IDX=16-23", "COMBINE=FALSE")))
   calls <- readLines(rec); expect_length(calls, 1L); expect_match(calls[1], "--array=16-23 --export=ALL,STEP=fit --dependency=afterok:777", fixed = TRUE)
