@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name=v2_run0
 #SBATCH --account=open
-#SBATCH --partition=open
+#SBATCH --partition=basic   # the open partition no longer exists; --account=open bills the free READ credits
 #SBATCH --requeue
 #SBATCH --time=48:00:00
 #SBATCH --nodes=1 --ntasks=1 --cpus-per-task=32   # = chains (4) x threads_per_chain (8)
@@ -19,7 +19,7 @@
 #   12-15  0d    --subsample=majinit    M1c    (same order)                                     fmid_lag3_all_pr_M1c_cdir_bcj_smaj_ent_tlong
 #   16-19  0d    --subsample=mininit    M1c    (same order)                                     fmid_lag3_all_pr_M1c_cdir_bcj_smin_ent_tlong
 # What each isolates: 0a the distance functional form (squared log distance, distance x initiator CINC level); 0b the events the polrel set drops, with
-# the set itself left full; 0c bilateral events alone (pooled M1b: one role); 0d major-power and minor-power initiators separately (BOTH stages).
+# the set itself left full (same events, roles and D8 weights as the polrel cell); 0c bilateral events alone (pooled M1b: one role); 0d major-power and minor-power initiators separately (BOTH stages).
 # No dependencies (M1 only). Free open account; a preempted task is requeued and starts again from the beginning (log appended).
 # DRY RUN: sbatch --export=ALL,DRY_RUN=TRUE --time=00:30:00 --mem=16G --cpus-per-task=1 v2/slurm/12_run0.sbatch
 # Needs both builds (01_build_data.R --entry=later and --events=dymid) and the compiled m1_context / m1_latent_additive programs. Nothing is submitted by this file.
