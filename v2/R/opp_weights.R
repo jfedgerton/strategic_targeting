@@ -10,7 +10,8 @@
 ## PI DEFAULTS TAKEN HERE (flagged for sign-off in the README): estimand = target selection (Choice A), so NO target-strength variable enters the
 ## auxiliary predictors A; outcome = Dyadic MID onsets (hostility >= 3 as a second version); the history predictor is an INDICATOR of an onset in
 ## [t - 3, t - 1]; A4 uses the disputes that are multilateral at 1 January of t (>= 3 participants present, at least one on each side); expanding
-## window with the burn-in through 1865 fitted in sample; decade effects with the rule of oppw_decade_levels(); five full-vector draws.
+## window with the burn-in through 1865 fitted in sample; decade effects with the rule of oppw_decade_levels(); five full-vector draws from the
+## dyad-clustered covariance (audit P1-2).
 ## ============================================================================
 OPPW_LAG              <- 3L       # the lag of the cells the weights are built for (the directed comparison is lag 3 only)
 OPPW_BURN_IN          <- 1865L    # years <= OPPW_BURN_IN are fitted IN SAMPLE (one fit on all of them); every later year t is predicted from years < t
@@ -20,7 +21,9 @@ OPPW_DECADE_MIN_YEARS <- 3L       # a decade gets its own effect once the traini
 OPPW_LOW_Q            <- 0.05     # "low q": below this quantile of q over ALL alternative rows of the cell (pooled)
 OPPW_OUTCOMES         <- c(mid = "y_mid", host3 = "y_host3")
 ## the auxiliary predictors A (Choice A: opportunity only). All dated t - 1 or 1 January of t.
-OPPW_A_COLS      <- c("contig_land", "contig_sea", "log_capdist", "log_capdist_x_init_M", "dymid_hist3", "a4_joinable")
+## M_lvl_i (audit P1-1, PI-approved 2026-11-10): the INITIATOR's log CINC level at t - 1 as a main effect. Without it the product below proxied for the
+## level and took the wrong sign (strong initiators looked confined to their neighbourhood). It is an initiator attribute, not a target-strength variable.
+OPPW_A_COLS      <- c("contig_land", "contig_sea", "log_capdist", "M_lvl_i", "log_capdist_x_init_M", "dymid_hist3", "a4_joinable")
 OPPW_A_BASELINE  <- c("contig_land", "contig_sea", "log_capdist")          # the contiguity + distance baseline of the diagnostics
 ## columns of the alternatives / panel files that measure the TARGET's strength (or a gap built from it): never read by oppw_frame(), asserted absent from A
 OPPW_TARGET_STRENGTH <- c("M_j", "Rpr_j", "Reig_j", "major2", "major_count", "polrel", "dM", "dR", "dR_pr", "dR_eig", "dM_logratio", "dR_pr_logratio", "dM_j_h", "dRpr_j_h",
@@ -99,7 +102,7 @@ oppw_a4 <- function(keys, jp) {
 ##   jp            oppw_jan_presence()
 ## Outcomes (undirected): y_mid = a DYMID onset between i and j in year t; y_host3 = one whose dyadic hostility max(hostlev1, hostlev2) is >= 3.
 ## Predictors: contig_land (conttype 1), contig_sea (conttype 2..5 = contig_any - contig_land; the build keeps no finer conttype), log_capdist (log1p km
-## at t - 1), M_lvl_i, dymid_hist3 (INDICATOR of a DYMID onset between i and j in [t - 3, t - 1], mid3_history(); all hostility levels in both versions),
+## at t - 1), M_lvl_i (the initiator's level, a main effect in A since the audit of 2026-11-10), dymid_hist3 (INDICATOR of a DYMID onset between i and j in [t - 3, t - 1], mid3_history(); all hostility levels in both versions),
 ## a4_joinable. The product log_capdist x M_lvl_i is formed per training window (oppw_design()). Rows without a capital distance are dropped and counted
 ## (the directed assembly drops them too). in_iv marks the rows the model is FITTED on (the January stage-1 IV set, already-fighting at January removed).
 oppw_frame <- function(alts, panel, events_dymid, jp, hist_window = OPPW_HIST_WINDOW) {
@@ -199,6 +202,25 @@ oppw_fit <- function(X, y, start = NULL, maxit = 100L, tol = 1e-10) {
   stopifnot(all(is.finite(V)), all(diag(V) > 0))
   list(coef = unname(b), V = V, n = length(y), n_y = sum(y), iter = it, loglik = ll)
 }
+## oppw_vcov_cluster(X, y, coef, cluster): the cluster-robust (sandwich, CR1) covariance of the logit coefficients, clustered on `cluster` (the UNDIRECTED
+## dyad: the two directed copies of a dyad-year and every year of the dyad are one cluster; audit P1-2, PI-approved 2026-11-10).
+##   V = c x A^-1 (sum_g s_g s_g') A^-1,  A = X' W X (the information),  s_g = the sum over cluster g of the scores x_i (y_i - mu_i),
+##   c = G / (G - 1) x (N - 1) / (N - K)   (G clusters, N rows, K coefficients)
+## which is sandwich::vcovCL(fit, cluster = ~ cluster, type = "HC1") of the same glm (tested against it on a toy fit). Hard-coded; no package needed.
+oppw_vcov_cluster <- function(X, y, coef, cluster) {
+  stopifnot(is.matrix(X), nrow(X) == length(y), length(coef) == ncol(X), length(cluster) == length(y), !anyNA(cluster))
+  mu <- stats::plogis(drop(X %*% coef)); bread <- chol2inv(chol(crossprod(X * sqrt(mu * (1 - mu)))))
+  S <- rowsum(X * (y - mu), cluster, reorder = FALSE)              # G x K cluster score sums
+  G <- nrow(S); N <- nrow(X); K <- ncol(X)
+  if (G <= K) stop("oppw_vcov_cluster: ", G, " clusters for ", K, " coefficients")
+  V <- (G / (G - 1)) * ((N - 1) / (N - K)) * bread %*% crossprod(S) %*% bread
+  V <- (V + t(V)) / 2
+  stopifnot(all(is.finite(V)), all(diag(V) > 0))
+  attr(V, "n_clusters") <- G
+  V
+}
+## oppw_dyad_id(ccode1, ccode2): the undirected dyad of a directed row (one number per unordered pair)
+oppw_dyad_id <- function(ccode1, ccode2) pmin(ccode1, ccode2) * 1000 + pmax(ccode1, ccode2)
 ## oppw_fit_glm(X, y): the same fit by stats::glm.fit (the reference implementation; coefficients and covariance)
 oppw_fit_glm <- function(X, y) {
   f <- suppressWarnings(stats::glm.fit(X, y, family = stats::binomial(), control = stats::glm.control(epsilon = 1e-12, maxit = 100L)))
@@ -224,13 +246,15 @@ oppw_windows <- function(years, burn_in = OPPW_BURN_IN) {
 ## from it: the centring constants, the decade levels and the coefficients see no row of a later year), then every row (IV or stage-2 only) of the
 ## window's prediction years gets ln q = log inv_logit(x' b), computed on the log scale (never -Inf).
 ## Uncertainty: n_draws standard-normal vectors z_d (one per draw, length = the largest coefficient count, set.seed(seed)) are drawn ONCE; in every window
-## the d-th coefficient vector is b + L z_d[1:p] with L the lower Cholesky factor of that window's asymptotic covariance. Each draw is therefore a draw of the
+## the d-th coefficient vector is b + L z_d[1:p] with L the lower Cholesky factor of that window's DYAD-CLUSTERED covariance (oppw_vcov_cluster(), clusters =
+## undirected dyads over the whole training window; the model-based (X'WX)^-1 used before the audit of 2026-11-10 was too small by a factor of 2.4 to 4 on
+## the structural coefficients). Each draw is therefore a draw of the
 ## FULL coefficient vector of every window, with common random numbers across windows, and gives one coherent ln q column for all rows (never per-row draws).
 ## Returns list(lq = matrix nrow(fr) x (1 + n_draws), columns d0 (MLE), d1..; windows = the window table with fit statistics; coefs = long table of the
 ## MLE coefficients per window; held_out = logical per row (year > burn_in); z = the draw vectors). glm_check = TRUE refits the first and the last window
 ## with stats::glm.fit and stops unless coefficients and covariance agree.
 oppw_expanding <- function(fr, outcome = "y_mid", a_cols = OPPW_A_COLS, burn_in = OPPW_BURN_IN, n_draws = OPPW_N_DRAWS, seed = V2_SEED, verbose = FALSE, glm_check = TRUE) {
-  stopifnot(outcome %in% OPPW_OUTCOMES, all(c(outcome, "year", "in_iv", "decade", "log_capdist", "M_lvl_i", setdiff(a_cols, "log_capdist_x_init_M")) %in% names(fr)),
+  stopifnot(outcome %in% OPPW_OUTCOMES, all(c(outcome, "year", "ccode1", "ccode2", "in_iv", "decade", "log_capdist", "M_lvl_i", setdiff(a_cols, "log_capdist_x_init_M")) %in% names(fr)),
             !is.unsorted(fr$year), n_draws >= 0L, !any(OPPW_TARGET_STRENGTH %in% a_cols))
   w <- oppw_windows(fr$year, burn_in)
   p_max <- 1L + length(a_cols) + length(unique(fr$decade))
@@ -256,11 +280,12 @@ oppw_expanding <- function(fr, outcome = "y_mid", a_cols = OPPW_A_COLS, burn_in 
     pr <- which(fr$year >= w$pred_from[i] & fr$year <= w$pred_to[i])
     Xp <- oppw_design(fr[pr, , drop = FALSE], a_cols, dl, centre = dz$centre)$X
     stopifnot(identical(colnames(Xp), colnames(dz$X)), all(is.na(lq[pr, 1L])))
-    p <- length(f$coef); L <- t(chol(f$V))
+    Vcl <- oppw_vcov_cluster(dz$X, tr[[outcome]], f$coef, oppw_dyad_id(tr$ccode1, tr$ccode2))      # the covariance of the draws (audit P1-2)
+    p <- length(f$coef); L <- t(chol(Vcl))
     B <- cbind(f$coef, if (n_draws > 0L) f$coef + L %*% t(z[, seq_len(p), drop = FALSE]))          # p x (1 + n_draws): MLE, then the full-vector draws
     lq[pr, ] <- stats::plogis(Xp %*% B, log.p = TRUE)
     w$n_train[i] <- nrow(tr); w$n_y[i] <- f$n_y; w$p[i] <- p; w$n_decades[i] <- length(dl$levels); w$train_year_max[i] <- max(tr$year); w$iter[i] <- f$iter
-    coefs[[i]] <- data.frame(window = i, train_max = w$train_max[i], term = colnames(dz$X), coef = f$coef, se = sqrt(diag(f$V)))
+    coefs[[i]] <- data.frame(window = i, train_max = w$train_max[i], term = colnames(dz$X), coef = f$coef, se = sqrt(diag(f$V)), se_cluster = sqrt(diag(Vcl)), n_dyads = attr(Vcl, "n_clusters"))   # se: model-based; se_cluster: dyad-clustered (the draws)
     if (verbose && (i %% 20L == 1L || i == nrow(w))) logf("  window %d / %d: years <= %d (%d IV rows, %.0f onsets, %d coefficients) -> predicts %d..%d", i, nrow(w), w$train_max[i], nrow(tr), f$n_y, p, w$pred_from[i], w$pred_to[i])
     rm(tr, dz, Xp)
   }
@@ -298,14 +323,22 @@ oppw_path <- function(spec, out_dir) file.path(out_dir, sprintf("oppw_%s_%s_lag%
 ##   W        the weights object of 08_opportunity_weights.R: keys (ccode1, ccode2, year), lq (rows x d0..d5), input (file, sha256 of the foundation files)
 ##   lambda   0 | 0.5 | 1;  draw 0 (the auxiliary MLE) | 1..5 (a full-vector draw; lambda = 1 only)
 ##   manifest the cell's data manifest: the weights must have been built from the SAME alternatives and panel files (sha256), or the run stops
+##   manifest_dymid  the manifest of v2/data_dymid: the outcome / history events file the weights were fitted on must be its events.rds (sha256)
 ## lambda = 0 returns an exact zero vector (the Stan data and the log density of the cell without the switch).
-oppw_offset <- function(alts, W, lambda, draw = 0L, manifest = NULL) {
+oppw_offset <- function(alts, W, lambda, draw = 0L, manifest = NULL, manifest_dymid = NULL) {
   stopifnot(length(lambda) == 1L, lambda %in% c(0, 0.5, 1), length(draw) == 1L, draw %in% 0:OPPW_N_DRAWS, draw == 0L || lambda == 1,
             all(c("ccode1", "ccode2", "year") %in% names(alts)), all(c("keys", "lq", "input") %in% names(W)), nrow(W$keys) == nrow(W$lq), paste0("d", draw) %in% colnames(W$lq))
   if (!is.null(manifest)) {
     mm <- merge(W$input[W$input$role == "foundation", c("file", "sha256")], manifest[, c("file", "sha256")], by = "file", suffixes = c("_w", "_now"))
     if (nrow(mm) != sum(W$input$role == "foundation") || any(mm$sha256_w != mm$sha256_now))
       stop("oppw_offset: the opportunity weights were built from other data files than this cell's (sha256 of ", paste(W$input$file[W$input$role == "foundation"], collapse = ", "), "); rerun 08_opportunity_weights.R")
+  }
+  ## audit P2-6 (2026-11-10): the Dyadic MID events behind the outcome and the history must be the CURRENT data_dymid build as well (under --entry=later a
+  ## rebuilt data_dymid would otherwise leave stale weights undetected)
+  if (!is.null(manifest_dymid)) {
+    wd <- W$input[W$input$role == "dymid_outcome", , drop = FALSE]; now <- manifest_dymid$sha256[match(wd$file, manifest_dymid$file)]
+    if (nrow(wd) != 1L || anyNA(now) || !identical(wd$sha256, now))
+      stop("oppw_offset: the opportunity weights were fitted on another data_dymid/events.rds than the current build (sha256); rerun 08_opportunity_weights.R")
   }
   m <- match(oppw_key(alts$ccode1, alts$ccode2, alts$year), oppw_key(W$keys$ccode1, W$keys$ccode2, W$keys$year))
   if (anyNA(m)) stop(sprintf("oppw_offset: %d alternative rows of the cell have no opportunity weight", sum(is.na(m))))
@@ -315,12 +348,26 @@ oppw_offset <- function(alts, W, lambda, draw = 0L, manifest = NULL) {
 }
 ## oppw_neff(q): c(sum_q, n_eff) with n_eff = (sum q)^2 / sum q^2 (the effective number of alternatives under the weights; between 1 and length(q))
 oppw_neff <- function(q) { stopifnot(length(q) >= 1L, all(is.finite(q)), all(q > 0)); c(sum_q = sum(q), n_eff = sum(q)^2 / sum(q^2)) }
+## oppw_set_rank(dat, lq): for every event, the WITHIN-SET rank of its chosen target = the share of the event's own stage-2 set (its allowed rows:
+## ev_alt_first / ev_alt_n / ev_alt_loc, the state-year's whole stage-2 set unless restricted) whose q is strictly smaller than the chosen target's.
+## 0 = the chosen target has the lowest q of its set, near 1 = the highest.
+oppw_set_rank <- function(dat, lq) {
+  stopifnot(length(lq) == dat$N2, all(c("ev_alt_first", "ev_alt_n", "ev_alt_loc") %in% names(dat)))
+  vapply(seq_len(dat$E), function(e) { rows <- dat$cs_start[dat$ev_sy[e]] - 1L + dat$ev_alt_loc[dat$ev_alt_first[e] + seq_len(dat$ev_alt_n[e]) - 1L]
+    stopifnot(dat$ev_row[e] %in% rows); mean(lq[rows] < lq[dat$ev_row[e]]) }, numeric(1))
+}
 ## oppw_cell_stats(dat, lq, group_labels, low_prob): the per-cell diagnostics, from the Stan data and ln q of its rows.
-##   threshold  the low_prob quantile of q over ALL alternative rows of the cell (pooled over state-years; "low q" = strictly below it)
-##   by_role    one row per stage-2 role, then "all_events": usable events (count, composite-weight sum), the events whose CHOSEN target has low q (count and
-##              share of events; weight sum and share of the composite weight), the median q of the chosen targets; and the medians over the role's distinct
-##              initiating state-years of sum q, N_eff and the set size, all over the state-year's IV rows (the rows the IV sums over). A state-year with
-##              events of two roles counts in both. "non_initiators" (y1 = 0) and "all_state_years" carry the state-year columns only.
+##   by_role    one row per stage-2 role, then "all_events": usable events (count, composite-weight sum), then
+##     PRIMARY (audit P2-1, 2026-11-10), within the event's own choice set (oppw_set_rank()): rank_median, and the chosen targets in the bottom 5% (rank < 0.05)
+##       and the bottom 25% (rank < 0.25) of their own set, as counts, shares of events, composite-weight sums and shares of the composite weight
+##       (n_bot05, share_bot05_n, w_bot05, share_bot05_w; the same with 25);
+##     SECONDARY, pooled and ERA-CONFOUNDED: the chosen targets with q strictly below `threshold` = the low_prob quantile of q over ALL alternative rows of
+##       the cell (n_low_pooled, share_low_pooled_n, w_low_pooled, share_low_pooled_w). q falls with system size, so almost every row below the pooled
+##       threshold is after 1990 and the measure cannot flag an early event; kept for continuity only;
+##     the median q of the chosen targets; and the medians over the role's distinct initiating state-years of sum q, N_eff and the set size, all over the
+##     state-year's IV rows (the rows the IV sums over). A state-year with events of two roles counts in both. "non_initiators" (y1 = 0) and
+##     "all_state_years" carry the state-year columns only.
+OPPW_RANK_CUTS <- c(0.05, 0.25)
 oppw_cell_stats <- function(dat, lq, group_labels, low_prob = OPPW_LOW_Q) {
   stopifnot(length(lq) == dat$N2, all(is.finite(lq)), all(lq <= 0), length(group_labels) == dat$G, length(dat$ev_grp) == dat$E)
   q <- exp(lq); thr <- unname(stats::quantile(q, low_prob, names = FALSE))
@@ -330,16 +377,21 @@ oppw_cell_stats <- function(dat, lq, group_labels, low_prob = OPPW_LOW_Q) {
   sq <- as.numeric(tapply(q[iv], factor(sy_of_row[iv], levels = seq_len(dat$N1)), sum)); sq2 <- as.numeric(tapply(q[iv]^2, factor(sy_of_row[iv], levels = seq_len(dat$N1)), sum))
   n_iv <- tabulate(sy_of_row[iv], nbins = dat$N1); neff <- sq^2 / sq2
   stopifnot(!anyNA(sq), all(n_iv >= 1L), all(neff >= 1 - 1e-9), all(neff <= n_iv + 1e-9))
-  q_ch <- q[dat$ev_row]; low <- q_ch < thr
+  q_ch <- q[dat$ev_row]; low <- q_ch < thr; rk <- oppw_set_rank(dat, lq)
+  stopifnot(all(rk >= 0), all(rk < 1))
   sy_row <- function(label, idx) data.frame(role = label, n_sy = length(idx), sum_q_median = stats::median(sq[idx]), n_eff_median = stats::median(neff[idx]), n_iv_median = stats::median(n_iv[idx]))
-  ev_row <- function(label, e) data.frame(role = label, n_events = length(e), w_events = sum(dat$ev_w[e]), n_low = sum(low[e]), share_low_n = mean(low[e]),
-                                          w_low = sum(dat$ev_w[e][low[e]]), share_low_w = sum(dat$ev_w[e][low[e]]) / sum(dat$ev_w[e]), q_chosen_median = stats::median(q_ch[e]))
+  ev_row <- function(label, e) { w <- dat$ev_w[e]; b5 <- rk[e] < OPPW_RANK_CUTS[1]; b25 <- rk[e] < OPPW_RANK_CUTS[2]
+    data.frame(role = label, n_events = length(e), w_events = sum(w), rank_median = stats::median(rk[e]),
+               n_bot05 = sum(b5), share_bot05_n = mean(b5), w_bot05 = sum(w[b5]), share_bot05_w = sum(w[b5]) / sum(w),
+               n_bot25 = sum(b25), share_bot25_n = mean(b25), w_bot25 = sum(w[b25]), share_bot25_w = sum(w[b25]) / sum(w),
+               n_low_pooled = sum(low[e]), share_low_pooled_n = mean(low[e]), w_low_pooled = sum(w[low[e]]), share_low_pooled_w = sum(w[low[e]]) / sum(w), q_chosen_median = stats::median(q_ch[e])) }
   rows <- lapply(seq_len(dat$G), function(g) { e <- which(dat$ev_grp == g - 1L); cbind(ev_row(group_labels[g], e), sy_row(group_labels[g], sort(unique(dat$ev_sy[e])))[, -1]) })
   rows[[length(rows) + 1L]] <- cbind(ev_row("all_events", seq_len(dat$E)), sy_row("all_events", sort(unique(dat$ev_sy)))[, -1])
-  blank <- rows[[1]][1, 2:8]; blank[] <- NA
+  n_ev_cols <- ncol(ev_row("x", 1L)) - 1L
+  blank <- rows[[1]][1, 1L + seq_len(n_ev_cols)]; blank[] <- NA
   for (r in list(sy_row("non_initiators", which(dat$y1 == 0L)), sy_row("all_state_years", seq_len(dat$N1)))) rows[[length(rows) + 1L]] <- cbind(role = r$role, blank, r[, -1])
   by_role <- do.call(rbind, rows); rownames(by_role) <- NULL
-  list(low_prob = low_prob, threshold = thr, by_role = by_role, q_summary = stats::quantile(q, c(0, 0.01, 0.05, 0.25, 0.5, 0.75, 0.95, 0.99, 1)))
+  list(low_prob = low_prob, threshold = thr, rank_cuts = OPPW_RANK_CUTS, by_role = by_role, set_rank = rk, q_summary = stats::quantile(q, c(0, 0.01, 0.05, 0.25, 0.5, 0.75, 0.95, 0.99, 1)))
 }
 
 ## ---- the mixture over the auxiliary draws (lambda = 1) -------------------------------------------------------------------------------------------------

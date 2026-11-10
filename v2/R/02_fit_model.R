@@ -304,7 +304,9 @@ if (spec_opp_on(spec)) {
   OW <- readRDS(w_path)
   stopifnot(identical(OW$outcome, spec_opp_outcome(spec)), identical(OW$foundation, basename(data_dir)), OW$lag == LAG, OW$n_draws == OPPW_N_DRAWS, identical(OW$a_cols, OPPW_A_COLS),
             !any(OPPW_TARGET_STRENGTH %in% OW$a_cols))
-  oo <- oppw_offset(alts, OW, LAMBDA, OPP_DRAW, manifest = manifest_at_load)     # stops when the weights were built from other data files or a row has no weight
+  dymid_manifest_path <- file.path(v2_root(), "data_dymid", "manifest.csv")       # audit P2-6: the Dyadic MID events the weights were fitted on must be the current build's
+  if (!file.exists(dymid_manifest_path)) stop("--opp_weight needs v2/data_dymid/manifest.csv (the weights' outcome and history come from the Dyadic MID build, whatever the cell's foundation)")
+  oo <- oppw_offset(alts, OW, LAMBDA, OPP_DRAW, manifest = manifest_at_load, manifest_dymid = read.csv(dymid_manifest_path, stringsAsFactors = FALSE))   # stops when the weights were built from other data files or a row has no weight
   dat_before <- dat
   dat$opp_off <- oo$off
   stopifnot(identical(dat[names(dat_before)], dat_before), identical(setdiff(names(dat), names(dat_before)), "opp_off"), length(dat$opp_off) == dat$N2, all(is.finite(dat$opp_off)),
@@ -314,14 +316,18 @@ if (spec_opp_on(spec)) {
   write.csv(cbind(cell = cell, lambda = LAMBDA, draw = OPP_DRAW, outcome = spec_opp_outcome(spec), low_q_threshold = os$threshold, os$by_role), file.path(out_dir, paste0("oppw_cell_", cell, ".csv")), row.names = FALSE)
   logf("opp_weight (run 1, 2026-11-10): lambda = %s, auxiliary outcome %s, draw %d (%s); weights %s (built %s, commit %s); offset = lambda x ln q on all %d rows (ln q min %.2f / median %.2f / max %.2f); SENSITIVITY specification, q is an opportunity weight",
        spec_opp_weight(spec), spec_opp_outcome(spec), OPP_DRAW, if (OPP_DRAW == 0L) "auxiliary MLE" else "full-vector draw", basename(w_path), OW$built, OW$git_commit, dat$N2, min(oo$lq), stats::median(oo$lq), max(oo$lq))
-  logf("opp_weight diagnostics: low q = below the %.0fth percentile of q over all alternative rows (%.3g). Per role: events (weight sum); chosen target with low q: n (share), weight (share); state-years: median sum q / N_eff / IV set size",
+  logf("opp_weight diagnostics, PRIMARY: the within-set rank of the chosen target (share of the event's own stage-2 set with a smaller q). Per role: events (weight sum); median rank; chosen in the bottom 5%% / bottom 25%% of its own set: n (share of events), weight (share of weight)")
+  for (r in which(!is.na(os$by_role$n_events))) { b <- os$by_role[r, ]
+    logf("  %-20s events %4d (%.1f); median rank %.3f; bottom 5%%: %3d (%.3f), weight %.1f (%.3f); bottom 25%%: %3d (%.3f), weight %.1f (%.3f)", b$role, b$n_events, b$w_events, b$rank_median,
+         b$n_bot05, b$share_bot05_n, b$w_bot05, b$share_bot05_w, b$n_bot25, b$share_bot25_n, b$w_bot25, b$share_bot25_w) }
+  logf("opp_weight diagnostics, secondary (pooled, ERA-CONFOUNDED: q falls with system size, so the pooled threshold flags almost only post-1990 rows): chosen target below the %.0fth percentile of q over all alternative rows (%.3g); and state-years: median sum q / N_eff / IV set size",
        100 * os$low_prob, os$threshold)
   for (r in seq_len(nrow(os$by_role))) { b <- os$by_role[r, ]
     logf("  %-20s %s state-years %5d: sum q %.4f, N_eff %.1f, IV rows %.0f", b$role,
-         if (is.na(b$n_events)) "" else sprintf("events %4d (%.1f); low-q chosen %3d (%.3f), weight %.1f (%.3f); median q chosen %.4f;", b$n_events, b$w_events, b$n_low, b$share_low_n, b$w_low, b$share_low_w, b$q_chosen_median),
+         if (is.na(b$n_events)) "" else sprintf("pooled low-q chosen %3d (%.3f), weight %.1f (%.3f); median q chosen %.4f;", b$n_low_pooled, b$share_low_pooled_n, b$w_low_pooled, b$share_low_pooled_w, b$q_chosen_median),
          b$n_sy, b$sum_q_median, b$n_eff_median, b$n_iv_median) }
   OPP_STATS <- list(opp = list(lambda = LAMBDA, draw = OPP_DRAW, outcome = spec_opp_outcome(spec), weights_file = basename(w_path), weights_sha256 = file_digest(w_path), weights_built = OW$built,
-                               weights_git_commit = OW$git_commit, weights_input = OW$input, a_cols = OW$a_cols, burn_in = OW$burn_in, low_prob = os$low_prob, threshold = os$threshold,
+                               weights_git_commit = OW$git_commit, weights_input = OW$input, a_cols = OW$a_cols, burn_in = OW$burn_in, low_prob = os$low_prob, threshold = os$threshold, rank_cuts = os$rank_cuts, set_rank = os$set_rank,
                                by_role = os$by_role, q_summary = os$q_summary))
   rm(OW)
 }

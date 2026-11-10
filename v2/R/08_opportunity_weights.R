@@ -12,10 +12,11 @@
 ## Rows: every directed dyad-year (i, j, t) of alts_lag3_all.rds. The model is FITTED on the January stage-1 IV rows (in_iv = 1: already-fighting at January
 ## removed; the rows the IV sums over) and predicts every row, the stage-2-only rows included (they need an offset in stage 2).
 ## Predictors A (opp_weights.R, OPPW_A_COLS; all dated t - 1 or 1 January of t): land contiguity, sea contiguity (conttype 2..5), log capital distance,
-## log distance x the initiator's log CINC level (M_lvl; no main effect of the level), an indicator of a Dyadic MID onset in [t - 3, t - 1], the joinable-
+## the initiator's log CINC level (M_lvl, main effect; audit P1-1), log distance x that level, an indicator of a Dyadic MID onset in [t - 3, t - 1], the joinable-
 ## dispute indicator A4 at 1 January of t, decade effects; centred and scaled per training window. NO target-strength variable (Choice A: target selection).
 ## Fit: logit, EXPANDING WINDOW: year t is predicted from a fit on the years < t; the years <= 1865 (burn-in) are fitted in sample by one fit, which also
-## predicts 1866. Saved: ln q at the auxiliary MLE (d0) and for five coherent draws of the FULL coefficient vector (d1..d5; seed 123; oppw_expanding()).
+## predicts 1866. Saved: ln q at the auxiliary MLE (d0) and for five coherent draws of the FULL coefficient vector (d1..d5; seed 123; oppw_expanding()), drawn
+## from the covariance clustered on the undirected dyad (audit P1-2).
 ##
 ## Output (v2/output, gitignored):
 ##   oppw_<foundation>_<outcome>_lag3.rds         keys (ccode1, ccode2, year), in_iv, y, lq (rows x d0..d5), windows, coefs, z, input hashes, provenance
@@ -115,7 +116,11 @@ cal <- rbind(oppw_calibration(y[iv], lq0[iv], era[iv], "era"),
 last <- fit$coefs[fit$coefs$window == max(fit$coefs$window), ]
 for (r in seq_len(nrow(ll))) logf("log loss, %s: model %.6f, baseline %.6f (ratio %.4f), constant rate %.6f; n = %d, onsets %d", ll$rows[r], ll$logloss_model[r], ll$logloss_baseline[r], ll$model_over_baseline[r], ll$logloss_constant[r], ll$n[r], ll$n_y[r])
 logf("precision-recall (held out): prevalence %.5f; average precision model %.4f, baseline %.4f; precision at recall 0.25 / 0.5 / 0.75: model %.4f / %.4f / %.4f", pr$prevalence[1], pr$avg_precision[1], pr$avg_precision[2], pr$prec_at_rec25[1], pr$prec_at_rec50[1], pr$prec_at_rec75[1])
-logf("last window (years <= %d), standardised coefficients: %s", last$train_max[1], paste(sprintf("%s %.3f (%.3f)", last$term[1:(1 + length(OPPW_A_COLS))], last$coef[1:(1 + length(OPPW_A_COLS))], last$se[1:(1 + length(OPPW_A_COLS))]), collapse = "; "))
+logf("last window (years <= %d), standardised coefficients: %s", last$train_max[1], paste(sprintf("%s %.3f (%.3f; dyad-clustered %.3f)", last$term[1:(1 + length(OPPW_A_COLS))], last$coef[1:(1 + length(OPPW_A_COLS))], last$se[1:(1 + length(OPPW_A_COLS))], last$se_cluster[1:(1 + length(OPPW_A_COLS))]), collapse = "; "))
+ix <- fit$coefs[fit$coefs$term == "log_capdist_x_init_M", ]; mn <- fit$coefs[fit$coefs$term == "M_lvl_i", ]
+logf("log distance x initiator level over the %d windows: positive in %d, negative in %d (min %.3f, median %.3f, max %.3f); initiator level main effect: positive in %d (min %.3f, median %.3f, max %.3f)",
+     nrow(ix), sum(ix$coef > 0), sum(ix$coef < 0), min(ix$coef), stats::median(ix$coef), max(ix$coef), sum(mn$coef > 0), min(mn$coef), stats::median(mn$coef), max(mn$coef))
+logf("dyad-clustered / model-based SE in the last window (%d undirected dyads): %s", last$n_dyads[1], paste(sprintf("%s %.2f", last$term[1:(1 + length(OPPW_A_COLS))], (last$se_cluster / last$se)[1:(1 + length(OPPW_A_COLS))]), collapse = "; "))
 if (ll$logloss_model[1] >= ll$logloss_baseline[1]) logf("WARNING: the held-out log loss of the model is NOT below the contiguity + distance baseline")
 
 ## ---- save --------------------------------------------------------------------------------------------------------------------------------------------
@@ -136,9 +141,9 @@ write.csv(do.call(rbind, lapply(names(tabs), function(nm) { t <- long(tabs[[nm]]
 md_table <- function(tab) { f <- function(v) if (is.numeric(v)) ifelse(abs(v) >= 1000 | v == round(v), format(v, big.mark = ",", scientific = FALSE, trim = TRUE), formatC(v, digits = 4, format = "g")) else as.character(v)
   c(paste0("| ", paste(names(tab), collapse = " | "), " |"), paste0("|", paste(rep("---", ncol(tab)), collapse = "|"), "|"), apply(as.data.frame(lapply(tab, f)), 1, function(r) paste0("| ", paste(r, collapse = " | "), " |"))) }
 writeLines(c(sprintf("# Opportunity weights, auxiliary model diagnostics (%s)", tagname), "",
-             sprintf("Built %s, commit %s. Foundation %s, outcome %s, lag %d, burn-in through %d (in sample), expanding window after it, %d full-vector draws, seed %d. Rows are the January IV rows. No AUC (positive rate %.3f%%).",
+             sprintf("Built %s, commit %s. Foundation %s, outcome %s, lag %d, burn-in through %d (in sample), expanding window after it, %d full-vector draws (dyad-clustered covariance), seed %d. Rows are the January IV rows. No AUC (positive rate %.3f%%).",
                      obj$built, git_commit, FOUNDATION, OUTCOME, OPPW_LAG, BURN_IN, OPPW_N_DRAWS, V2_SEED, 100 * mean(y[iv])), "",
              "## Log loss", "", md_table(ll), "", "## Log loss of the draws (held out)", "", md_table(ll_draws), "", "## Precision-recall (held out)", "", md_table(pr), "",
-             "## Calibration", "", md_table(cal), "", sprintf("## Coefficients of the last window (years <= %d, standardised predictors)", last$train_max[1]), "", md_table(last[, c("term", "coef", "se")])),
+             "## Calibration", "", md_table(cal), "", sprintf("## Coefficients of the last window (years <= %d, standardised predictors)", last$train_max[1]), "", md_table(last[, c("term", "coef", "se", "se_cluster")])),
            file.path(out_dir, paste0("oppw_diag_", tagname, ".md")))
 logf("saved %s (%d rows x %d ln q columns), oppw_diag_%s.csv / .md, oppw_coefs_%s.csv", out_path, nrow(obj$lq), ncol(obj$lq), tagname, tagname)
