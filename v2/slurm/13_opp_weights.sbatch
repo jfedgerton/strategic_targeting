@@ -6,7 +6,7 @@
 #SBATCH --time=48:00:00
 #SBATCH --nodes=1 --ntasks=1 --cpus-per-task=32   # = chains (4) x threads_per_chain (8)
 #SBATCH --mem=128G
-#SBATCH --array=0-31
+#SBATCH --array=1-7,9-15,17-23,25-31
 #SBATCH --output=%x_%A_%a.out
 #SBATCH --open-mode=append
 # RUN 1 (built 2026-11-10; README section 14): the MID-propensity OPPORTUNITY-WEIGHT SENSITIVITY (not a consideration-set model). Three steps, chosen by STEP;
@@ -16,9 +16,11 @@
 #   STEP=fit      (default) the M1c cells: --comparison=directed --roles=bcj, lag 3, full choice set, tag $TAG (default long -> _tlong) with the long role-fit
 #                 sampler settings of run 7 / run 0. Index = 8 x (2 x events + sample) + v:
 #                   events 0 pairs (--entry=later, _ent; fmid = all-fatal), 1 dymid (--events=dymid, _dy; fmid = jointly fatal); sample 0 fmid, 1 mid
-#                   v = 0 lambda 0 (_opw0; the current model, zero offset)   1 lambda 0.5 (_opw05)   2 lambda 1 at the auxiliary MLE (_opw1)
+#                   v = 0 lambda 0 (_opw0; the current model, zero offset; NOT in the default array, see below)   1 lambda 0.5 (_opw05)   2 lambda 1 at the auxiliary MLE (_opw1)
 #                       3..7 lambda 1 at the auxiliary draws 1..5 (_opw1_d1 .. _opw1_d5)
 #                   e.g. 0 fmid_lag3_all_pr_M1c_cdir_bcj_ent_opw0_tlong, 13 mid_lag3_all_pr_M1c_cdir_bcj_ent_opw1_d3_tlong, 18 fmid_lag3_all_pr_M1c_cdir_bcj_dy_opw1_tlong
+#                 The default array (1-7,9-15,17-23,25-31, 28 cells) leaves out the four lambda = 0 cells (0, 8, 16, 24): their density is bit-identical to the existing
+#                 _tlong M1c fits of run 7 (audit P2-7, 2026-11-10). They stay valid tasks: sbatch --array=0,8,16,24 ... (or FIT_IDX=0-31) runs them.
 #                 OPP_OUTCOME=host3 runs the same grid on the hostility >= 3 weights (suffix _oh3 after the weight); default mid.
 #   STEP=combine  one job (submit with --array=0): 09_opp_combine.R for the four lambda = 1 cells (the equally weighted mixture over the five draws).
 # The fit cells use the open account like run 0 (same data size and sampler settings as its full-set M1c cells); a preempted task is requeued and starts

@@ -1,7 +1,8 @@
 #!/bin/bash
 # Submit run 1 (13_opp_weights.sbatch; README section 14) as three chained jobs, from the repo root. Nothing is submitted unless this script is run.
 #   (a) the auxiliary model (STEP=aux; open account, one task, AUX_OPTS)                                                          -> job A
-#   (b) the M1c cells (STEP=fit; array FIT_IDX, default 0-31; open account / basic partition / requeue, 48 h, the M1 resources of 12_run0.sbatch, as the
+#   (b) the M1c cells (STEP=fit; array FIT_IDX, default 1-7,9-15,17-23,25-31 = the 28 cells with lambda 0.5 or 1; the four lambda = 0 cells 0, 8, 16, 24 are
+#       bit-identical to the existing _tlong fits and are left out unless FIT_IDX names them, e.g. FIT_IDX=0-31; open account / basic partition / requeue, 48 h, the M1 resources of 12_run0.sbatch, as the
 #       sbatch header says), --dependency=afterok:A --kill-on-invalid-dep=yes                                                      -> job B
 #   (c) the mixture over the five auxiliary draws at lambda = 1 (STEP=combine; open account, one task, MIX_OPTS), --dependency=afterok:B (the whole array)
 # Environment passed through: TAG, LONG_ITER, LONG_WARMUP, LONG_ADAPT_DELTA, THREADS_PER_CHAIN, OPP_OUTCOME (fit / combine; default mid), OPP_OUTCOMES (aux).
@@ -11,7 +12,7 @@
 set -euo pipefail
 [ -f v2/slurm/13_opp_weights.sbatch ] || { echo "run from the repo root" >&2; exit 1; }
 for a in "$@"; do case $a in --array*|--dependency*) echo "ERROR: $a is set by this script" >&2; exit 1 ;; esac; done
-FIT_IDX=${FIT_IDX:-0-31}
+FIT_IDX=${FIT_IDX:-1-7,9-15,17-23,25-31}
 AUX_OPTS=${AUX_OPTS:---time=06:00:00 --mem=32G --cpus-per-task=1}
 MIX_OPTS=${MIX_OPTS:---time=06:00:00 --mem=64G --cpus-per-task=1}
 if [ -z "${A_JOB:-}" ]; then
