@@ -54,7 +54,10 @@ SPEC_CHOICES <- list(
   joiner_set = c("all", "opposing"),                 # joiner choice set (PI-approved 2026-11-04): all (main; every stage-2 alternative) | opposing = a joiner event (aprime group 2) is scored only against the states on the OTHER side of the dispute it joins in the onset year, intersected with the state-year's stage-2 set (joiner_sets_aprime.rds); needs --roles=aprime
   entry     = c("keep", "later"),                    # joiner entry direction (PI decision 2026-11-04): keep (main; v2/data) | later = a joiner initiates against the side it joins, two joiners: the later entrant (v2/data_entry, built by 01_build_data.R --entry=later); suffix _ent
   events    = c("pairs", "dymid"),                   # event foundation (PI-approved 2026-11-04): pairs (main; every Side A x Side B pair of a MID, v2/data) | dymid = the interacting dyads of Maoz's Dyadic MID 4.03 + Directed Dyadic War data, with the entry rule built in (v2/data_dymid, built by 01_build_data.R --events=dymid; README section 6.9); suffix _dy
-  variant   = c("all", "polrel")                    # choice set (un-archived 2026-11-04 for the role / AME models only): all (main) | polrel = the politically relevant alternatives (contiguous, conttype 1..5, or either state a major power; alts_lag<h>_polrel.rds of the build, data or data_entry); no suffix: it takes the "all" slot of the cell name
+  variant   = c("all", "polrel", "mid3"),            # choice set (un-archived 2026-11-04 for the role / AME models only): all (main) | polrel = the politically relevant alternatives (contiguous, conttype 1..5, or either state a major power; alts_lag<h>_polrel.rds of the build, data or data_entry); no suffix: it takes the "all" slot of the cell name
+                                                    # mid3 (2026-11-10): the lag-3 MID-history choice set, built at assembly from alts_lag<h>_all.rds and events.rds (below)
+  reach     = c("none", "capdist"),                 # run 0a (2026-11-10): none (main) | capdist = the directed Z plus log_capdist^2 and log_capdist x the initiator's M_lvl (Z_REACH); needs --comparison=directed, model M1c; suffix _reach
+  subsample = c("none", "prtarget", "bilateral", "majinit", "mininit")   # run 0b-0d (2026-11-10): none (main) | prtarget = stage-2 events whose chosen target is politically relevant (full choice set; stage 1 unchanged) | bilateral = stage-2 events of bcj role bilateral (M1b; stage 1 unchanged) | majinit / mininit = BOTH stages restricted to the state-years of initiators that are / are not COW major powers at t-1; needs --comparison=directed
 )
 ## ---- the conventional comparison specification (PI-approved 2026-10-31; switch `comparison`, suffix _conv) --------------------------
 ## One switch fixes the three design matrices at once; it is NOT a combination of the other switches, although it carries the distance
@@ -108,6 +111,36 @@ ENTRY_ROLES  <- c("bc", "bcj")
 ## stage-2 set; every other event keeps the full stage-2 set; stage 1 / IV and the weights are unchanged. Needs roles = aprime (parse_spec() refuses it
 ## otherwise), so only the role models (ROLE_MODELS) can take it.
 MU_SHIFT_MODELS <- c(DIRECTED_MODELS, RHOREG_MODELS)
+## ---- run 0 and the lag-3 MID-history choice set (2026-11-10; README section 13) -------------------------------------------------------------------
+## reach = capdist (run 0a, suffix _reach right after _cdir / _mst): Z = Z_DIRECTED + Z_REACH (assemble_cell.R): log_capdist_sq = (centred log_capdist)^2 and
+## log_capdist_x_init_M = (centred log_capdist) x the initiator's M_lvl (the stage-1 level, as in W), both then centred over the IV rows. Contiguity stays.
+## Only with comparison = directed, model M1c (REACH_MODELS), variant all, no mu_shift, no subsample.
+## subsample (runs 0b-0d, suffixes _sprt / _sbil / _smaj / _smin right after the role / joiner-set suffixes): only with comparison = directed, variant all,
+## pairs = all, context = all, ww2 = include, joiner_set = all, reach = none.
+##   prtarget  (0b): the stage-2 events whose chosen target is NOT politically relevant (the alternatives' polrel column: contiguous 1..5 or a major in the
+##                   dyad) are removed; the choice set stays the FULL set; stage 1 is unchanged (y1 not recomputed). Model M1c.
+##   bilateral (0c): the stage-2 events of bcj role bilateral (aprime alone originator, roles_aprime.rds) only; stage 1 unchanged. One role, so the pooled
+##                   model M1b (M1c stops on an empty group); needs --entry=later or --events=dymid (the bcj coding's data) and no --roles.
+##   majinit / mininit (0d): BOTH stages restricted to the state-years whose initiator is / is not a COW major power at t-1 (the panel's cowmaj_tm1, the
+##                   stage-1 W column). cowmaj_tm1 (constant in the subset) leaves W and tgt_major_x_init_major (= tgt_major among majors, = 0 among
+##                   minors) leaves Z. Model M1c.
+## After an event filter (prtarget, bilateral) the D8 weights are rescaled within the (initiator, dispute, year) groups the filter split, exactly as under
+## pairs = originators | joiners (d8_rescale_split_groups()).
+## variant = mid3 (the lag-3 MID-history choice set; takes the variant slot of the cell name like polrel): alternatives j of initiator i in year t with a
+## MID onset between i and j (either direction; every row of the build's events.rds, all hostility levels, escalations included) in [t - MID3_WINDOW, t - 1],
+## OR dy_mid_tm1 == 1. Year t is never used. Built at assembly from alts_lag<h>_all.rds (no file of its own). Only with comparison = directed, models
+## MID3_MODELS, pairs = all, context = all, ww2 = include, joiner_set = all, subsample = none.
+REACH_MODELS      <- c("M1c")
+SUBSAMPLE_MODELS  <- list(prtarget = "M1c", bilateral = "M1b", majinit = "M1c", mininit = "M1c")
+INIT_SUBSAMPLES   <- c("majinit", "mininit")          # the subsamples that restrict the stage-1 population as well
+EVENT_SUBSAMPLES  <- c("prtarget", "bilateral")       # the subsamples that filter stage-2 events only (stage 1 unchanged)
+MID3_MODELS       <- c("M1c", "M2c")
+MID3_WINDOW       <- 3L                               # years of MID history before t: onsets in [t - 3, t - 1]
+## spec_reach(spec) / spec_subsample(spec): the values of the two run-0 switches ("none" for a spec saved before 2026-11-10, which has neither field)
+spec_reach     <- function(spec) if (is.null(spec$reach)) "none" else spec$reach
+spec_subsample <- function(spec) if (is.null(spec$subsample)) "none" else spec$subsample
+## spec_alts_variant(spec): the variant of the alternatives FILE a spec reads (alts_lag<h>_<this>.rds): mid3 is cut from the all-states file at assembly
+spec_alts_variant <- function(spec) { v <- spec_variant(spec); if (identical(v, "mid3")) "all" else v }
 SPEC_DEFAULTS <- lapply(SPEC_CHOICES, function(v) v[1])
 SPEC_DEFAULTS$ame_K <- 2L                            # latent dimensions of the M2 (AME) family; "_K<K>" is always in an M2 cell name
 SPEC_DEFAULTS$tag   <- ""                            # run tag (2026-10-30): "" = no tag (names unchanged); "<alnum>" appends _t<alnum> last
@@ -141,10 +174,14 @@ SPEC_SUFFIX <- list(
   comparison = c(conventional = "_conv", directed = "_cdir"),   # directed (2026-11-01): same position, exclusive with _conv
   ## the ideal-point shifters (2026-11-02) follow the comparison switch they need: e.g. fmid_lag3_all_pr_M1b_cdir_mst, mid_lag3_all_pr_M1c_cdir_mst_aprime
   mu_shift  = c(traits = "_mst"),
+  ## run 0a (2026-11-10) follows the comparison / mu_shift suffixes: e.g. fmid_lag3_all_pr_M1c_cdir_reach_bcj_ent
+  reach     = c(capdist = "_reach"),
   ## the role coding (2026-10-31) follows the comparison switch: e.g. fmid_lag3_all_pr_M1c_conv_aprime
   roles     = c(aprime = "_aprime", bc = "_bc", bcj = "_bcj"),   # bc / bcj (2026-11-04): need entry = later
   ## the joiner choice-set restriction (2026-11-04) follows the role coding it needs: e.g. fmid_lag3_all_pr_M1c_cdir_aprime_jset
   joiner_set = c(opposing = "_jset"),
+  ## runs 0b-0d (2026-11-10) follow the role / joiner-set suffixes: e.g. fmid_lag3_all_pr_M1c_cdir_bcj_sprt_ent, fmid_lag3_all_pr_M1b_cdir_sbil_dy
+  subsample = c(prtarget = "_sprt", bilateral = "_sbil", majinit = "_smaj", mininit = "_smin"),
   weights   = c(none = "_w1"),
   changes   = c(winsor = "_winsor"),
   direction = c(sideA = "_sideA"),
@@ -368,6 +405,28 @@ parse_spec <- function(args = character(0)) {
     stop(sprintf("--mu_shift=%s needs --comparison=directed (the shifters are the directed comparison's W columns M_lvl, R_lvl, cowmaj_tm1, dem_tm1; got comparison=%s)", spec$mu_shift, spec$comparison))
   ## contiguity = none is only meaningful when the distance replaces it (PI request 2026-10-28): a Z without contiguity AND without distance is refused
   if (spec$contiguity != "land" && spec$distance != "capital") stop(sprintf("--contiguity=%s needs --distance=capital (distance replaces contiguity; got distance=%s)", spec$contiguity, spec$distance))
+  ## run 0 and the mid3 choice set (2026-11-10): invalid combinations are refused, never ignored
+  if (spec$reach != SPEC_DEFAULTS$reach) {
+    if (spec$comparison != "directed") stop(sprintf("--reach=%s needs --comparison=directed (the terms extend the directed Z; got comparison=%s)", spec$reach, spec$comparison))
+    if (spec$mu_shift != SPEC_DEFAULTS$mu_shift) stop(sprintf("--reach=%s with --mu_shift=%s is not specified (run 0a is the directed M1c cell without ideal-point shifters)", spec$reach, spec$mu_shift))
+    if (spec$variant != "all") stop(sprintf("--reach=%s is defined on the full choice set (got --variant=%s)", spec$reach, spec$variant))
+    if (spec$subsample != SPEC_DEFAULTS$subsample) stop(sprintf("--reach=%s with --subsample=%s is not specified (the run-0 cells flip one switch each)", spec$reach, spec$subsample))
+  }
+  if (spec$subsample != SPEC_DEFAULTS$subsample) {
+    if (spec$comparison != "directed") stop(sprintf("--subsample=%s needs --comparison=directed (run 0 is defined on the directed specification; got comparison=%s)", spec$subsample, spec$comparison))
+    if (spec$variant != "all") stop(sprintf("--subsample=%s is defined on the full choice set (got --variant=%s)", spec$subsample, spec$variant))
+    for (nm in c("pairs", "context", "ww2", "joiner_set", "mu_shift")) if (spec[[nm]] != SPEC_DEFAULTS[[nm]])
+      stop(sprintf("--subsample=%s with --%s=%s is not specified (one event / sample filter at a time)", spec$subsample, nm, spec[[nm]]))
+    if (spec$subsample == "bilateral") {
+      if (spec$roles != SPEC_DEFAULTS$roles) stop(sprintf("--subsample=bilateral keeps one role (bcj bilateral), so it takes the pooled model M1b and no --roles (got roles=%s)", spec$roles))
+      if (spec$entry != "later" && spec$events != "dymid") stop("--subsample=bilateral needs --entry=later or --events=dymid (the bcj role coding is defined on those events only)")
+    }
+  }
+  if (spec$variant == "mid3") {
+    if (spec$comparison != "directed") stop(sprintf("--variant=mid3 needs --comparison=directed (the MID-history choice set is specified for the directed role / AME cells; got comparison=%s)", spec$comparison))
+    for (nm in c("pairs", "context", "ww2", "joiner_set", "mu_shift")) if (spec[[nm]] != SPEC_DEFAULTS[[nm]])
+      stop(sprintf("--variant=mid3 with --%s=%s is not specified (the MID-history sets are built from every event of the sample; joiner sets are not intersected)", nm, spec[[nm]]))
+  }
   ## run tag (2026-10-30): letters and digits only, so the suffix _t<tag> is one unambiguous token of the file name; "" = no tag
   spec$tag <- get_arg(args, "tag", SPEC_DEFAULTS$tag)
   if (!is.character(spec$tag) || length(spec$tag) != 1 || is.na(spec$tag)) stop("--tag must be one string")
@@ -405,6 +464,7 @@ spec_string <- function(spec) {
   if (!is.null(spec$entry) && identical(spec$entry, SPEC_DEFAULTS$entry)) spec <- spec[setdiff(names(spec), "entry")]
   if (!is.null(spec$events) && identical(spec$events, SPEC_DEFAULTS$events)) spec <- spec[setdiff(names(spec), "events")]
   if (!is.null(spec$variant) && identical(spec$variant, SPEC_DEFAULTS$variant)) spec <- spec[setdiff(names(spec), "variant")]
+  for (nm in c("reach", "subsample")) if (!is.null(spec[[nm]]) && identical(spec[[nm]], SPEC_DEFAULTS[[nm]])) spec <- spec[setdiff(names(spec), nm)]   # 2026-11-10: left out at their defaults
   paste(sprintf("%s=%s", names(spec), unlist(spec)), collapse = " ")
 }
 ## spec_is_conventional(spec): TRUE under --comparison=conventional (a spec saved before 2026-10-31 has no field: not conventional)
@@ -421,7 +481,8 @@ perm_part_spec_string <- function(spec) {
             if (is.null(spec$joiner_set) || identical(spec$joiner_set, SPEC_DEFAULTS$joiner_set)) "joiner_set",
             if (is.null(spec$entry) || identical(spec$entry, SPEC_DEFAULTS$entry)) "entry",
             if (is.null(spec$events) || identical(spec$events, SPEC_DEFAULTS$events)) "events",
-            if (is.null(spec$variant) || identical(spec$variant, SPEC_DEFAULTS$variant)) "variant")   # joiner_set (2026-11-04): likewise   # mu_shift (2026-11-02): dropped at its default, kept when on
+            if (is.null(spec$variant) || identical(spec$variant, SPEC_DEFAULTS$variant)) "variant",
+            if (is.null(spec$reach) || identical(spec$reach, SPEC_DEFAULTS$reach)) "reach", if (is.null(spec$subsample) || identical(spec$subsample, SPEC_DEFAULTS$subsample)) "subsample")   # joiner_set (2026-11-04): likewise   # mu_shift (2026-11-02): dropped at its default, kept when on
   spec_string(spec[setdiff(names(spec), drop)])
 }
 ## spec_coal_col(spec): the events.rds column the context switch filters on ("coal_incl" / "coal_strict")
@@ -470,7 +531,17 @@ cell_name <- function(sample, lag, model, spec) {
       stop(sprintf("cell_name: --rho_prior=%s with the model %s, which has no Sigma correlation rho (the rho prior applies to the joint model M1b only)", spec$rho_prior, model))
   }
   ## the politically relevant choice set (2026-11-04): the role / AME models only; its name takes the variant slot (<sample>_lag<h>_polrel_pr_...)
-  if (!identical(spec_variant(spec), "all") && !model %in% POLREL_MODELS)
+  ## run 0 and mid3 (2026-11-10): the models each switch is specified for
+  if (spec_reach(spec) != "none" && !model %in% REACH_MODELS)
+    stop(sprintf("cell_name: --reach=%s with the model %s (run 0a is specified for %s only)", spec_reach(spec), model, paste(REACH_MODELS, collapse = ", ")))
+  if (spec_subsample(spec) != "none" && !identical(model, SUBSAMPLE_MODELS[[spec_subsample(spec)]]))
+    stop(sprintf("cell_name: --subsample=%s with the model %s (specified for %s only%s)", spec_subsample(spec), model, SUBSAMPLE_MODELS[[spec_subsample(spec)]],
+                 if (spec_subsample(spec) == "bilateral") ": one role, so the pooled model; M1c stops on an empty group" else ""))
+  if (identical(spec_variant(spec), "mid3") && !model %in% MID3_MODELS)
+    stop(sprintf("cell_name: --variant=mid3 with the model %s (the MID-history choice set is specified for %s only)", model, paste(MID3_MODELS, collapse = ", ")))
+  if (identical(spec_variant(spec), "mid3") && !isTRUE(spec$roles %in% JOINER_ROLES))
+    stop(sprintf("cell_name: --variant=mid3 needs --roles=aprime, bc or bcj (got roles=%s)", if (is.null(spec$roles)) "stageb" else spec$roles))
+  if (identical(spec_variant(spec), "polrel") && !model %in% POLREL_MODELS)
     stop(sprintf("cell_name: --variant=%s with the model %s (the politically relevant choice set is specified for %s only)", spec_variant(spec), model, paste(POLREL_MODELS, collapse = ", ")))
   sprintf("%s_lag%d_%s_%s_%s%s%s", sample, as.integer(lag), spec_variant(spec), CENTRALITY, model,
           if (grepl("^M2", model)) sprintf("_K%d", spec$ame_K) else "", spec_suffix(spec))
