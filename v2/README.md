@@ -539,14 +539,14 @@ An auxiliary logit of militarized contact, fitted outside the Stan program (`R/0
 |---|---|
 | rows | every directed dyad-year (i, j, t) of the cell foundation's `alts_lag3_all.rds`. The model is fitted on the January stage-1 IV rows (`in_iv = 1`, already-fighting at January removed, the rows the IV sums over) and predicts every row, the 284 (pairs) / 318 (dymid) stage-2-only rows included, since stage 2 needs their offset |
 | outcome | a directly interacting Dyadic MID onset between i and j in year t, undirected, from `v2/data_dymid/events.rds` under BOTH foundations (every row of that file, escalation rows included). `--opp_outcome=host3` is the second version, onsets whose dyadic hostility max(`hostlev1`, `hostlev2`) is 3 or more |
-| predictors A | `contig_land` (conttype 1), `contig_sea` (conttype 2 to 5, `contig_any − contig_land`; the build keeps no finer conttype), `log_capdist` (log1p km at t − 1), `log_capdist_x_init_M` (log distance, centred on the training mean, times the initiator's `M_lvl`, the within-year centred log CINC level at t − 1 as in W; no main effect of the level), `dymid_hist3` (an INDICATOR of a Dyadic MID onset between i and j in [t − 3, t − 1], `mid3_history()`, all hostility levels in both versions), `a4_joinable`, decade effects. Each column is centred and scaled with the training window's constants |
+| predictors A | `contig_land` (conttype 1), `contig_sea` (conttype 2 to 5, `contig_any − contig_land`; the build keeps no finer conttype), `log_capdist` (log1p km at t − 1), `M_lvl_i` (the INITIATOR's within-year centred log CINC level at t − 1 as in W, a main effect since the audit of 2026-11-10), `log_capdist_x_init_M` (log distance, centred on the training mean, times that level), `dymid_hist3` (an INDICATOR of a Dyadic MID onset between i and j in [t − 3, t − 1], `mid3_history()`, all hostility levels in both versions), `a4_joinable`, decade effects. Each column is centred and scaled with the training window's constants |
 | A4 | `a4_joinable` = 1 when j is present, on either side, at 1 January of t in a dispute with three or more present participants to which i is not a party. Disputes, spells and the presence rule are those of `multilateral_jan_flags()` (the source of `multi_mid_jan`, COW participants under both foundations). "Active with three or more present participants and both sides present" is the same set of dispute-years as that helper's multilateral disputes (233 dispute-years). A former participant counts as a party. The script recomputes the presence and stops unless it reproduces the panel's `multi_mid_jan` on every state-year |
 | no target strength | No target CINC, PageRank, major status or gap enters A (Choice A, target selection). `oppw_frame()` reads only `OPPW_ALTS_COLS` and `OPPW_PANEL_COLS`, and `OPPW_TARGET_STRENGTH` lists the excluded columns (asserted, tested by scrambling them) |
-| fit | logit MLE, expanding window. Year t is predicted from a fit on the years before t. The burn-in (years up to 1865) is one fit, in sample, which also predicts 1866. 149 fits, 11 to 26 coefficients. `oppw_fit()` iterates the normal equations and is checked against `stats::glm.fit` on the first and the last window at every run (difference below 1e-12 here) |
+| fit | logit MLE, expanding window. Year t is predicted from a fit on the years before t. The burn-in (years up to 1865) is one fit, in sample, which also predicts 1866. 149 fits, 12 to 27 coefficients. `oppw_fit()` iterates the normal equations and is checked against `stats::glm.fit` on the first and the last window at every run (difference below 1e-12 here) |
 | decade effects | a decade gets its own effect once the training window holds three of its years and an onset in it. Until then it shares the latest earlier decade's effect, which is also the effect used for a prediction year at the start of a new decade (`oppw_decade_levels()`) |
-| saved | ln q for every row at the MLE (`d0`) and for five draws (`d1` to `d5`), computed on the log scale. `output/oppw_<foundation>_<outcome>_lag3.rds` with the sha256 of the input files; `02_fit_model.R` stops when they differ from the cell's manifest |
+| saved | ln q for every row at the MLE (`d0`) and for five draws (`d1` to `d5`), computed on the log scale. `output/oppw_<foundation>_<outcome>_lag3.rds` with the sha256 of the input files; `02_fit_model.R` stops when the alternatives or panel file differs from the cell's manifest or the Dyadic MID `events.rds` differs from the current `data_dymid` manifest |
 
-**The five draws.** Five standard-normal vectors z_d are drawn once (seed 123). In every window the d-th coefficient vector is b̂ + L z_d with L the Cholesky factor of that window's asymptotic covariance. A draw is therefore a draw of the FULL coefficient vector of every window, with common random numbers across windows, and gives one coherent ln q column for all rows. Nothing is drawn per row.
+**The five draws.** Five standard-normal vectors z_d are drawn once (seed 123). In every window the d-th coefficient vector is b̂ + L z_d with L the Cholesky factor of that window's covariance **clustered on the undirected dyad** (`oppw_vcov_cluster()`, the CR1 sandwich, equal to `sandwich::vcovCL(type = "HC1")` on a toy fit; the two directed copies of a dyad-year and all years of a dyad are one cluster, 20,570 clusters in the last window). The model-based covariance used before the audit was too small. In the last window the clustered SEs are 2.2 to 3.1 times the model-based ones on the structural coefficients (1.3 on A4, 1.4 on the intercept). A draw is a draw of the FULL coefficient vector of every window, with common random numbers across windows, and gives one coherent ln q column for all rows. Nothing is drawn per row.
 
 ### 14.2 The offset and why it is a sensitivity
 
@@ -562,17 +562,19 @@ Reading. P(fatal_ij) = P(MID contact_ij) × P(fatal | contact_ij). The auxiliary
 
 Uncertainty of q̂. At λ = 1 the five draw-conditional fits are combined by `R/09_opp_combine.R` into the equally weighted mixture of the conditional posteriors (same number of posterior draws per fit, stacked). The table `oppw_mixture_<cell>.csv` reports, for μ (`mu0_g`), σ (`sigma_g`) and ρ (`rho_x`), the point fit's SD, the mixture SD, the SD of the conditional means across the draws and whether mixture SD / point SD exceeds 1.10.
 
-Diagnostics per cell (`oppw_cell_<cell>.csv`, the log, and `obj$opp` of the saved Stan data and fit). The share of chosen targets with low q̂ by role, in event counts and in composite (D8) weights, where low means below the 5th percentile of q̂ over all alternative rows of the cell, pooled. The medians by role, and for the non-initiating state-years, of Σq and N_eff = (Σq)² / Σq² over the state-year's IV rows.
+Diagnostics per cell (`oppw_cell_<cell>.csv`, the log, and `obj$opp` of the saved Stan data and fit). PRIMARY, the within-set rank of each chosen target, the share of the event's own stage-2 set with a smaller q̂. Reported by role as the median rank and the chosen targets in the bottom 5% and the bottom 25% of their own set, in event counts and in composite (D8) weights. Secondary, the chosen targets below the 5th percentile of q̂ pooled over all alternative rows of the cell. That pooled measure is era-confounded (q̂ falls with system size, so nearly every row under the threshold is after 1990 and no early event can be flagged) and is kept for continuity only. Also the medians by role, and for the non-initiating state-years, of Σq and N_eff = (Σq)² / Σq² over the state-year's IV rows.
+
+**Two limits of the stage-1 side (documented, no code).** (a) Year-level noise. The decade rule gives a year the effect of the latest decade with three training years and an onset, so war decades are carried forward (1946–49 were predicted at about 3.6 times the observed onsets under the first build) and the observed / predicted ratio by year is noisy. A year-level shift of ln q̂ cancels in the stage-2 softmax and does not cancel in the IV, and stage 1 has no year effects. (b) τ is not comparable across λ. At λ = 0 the IV varies almost only between years. At λ = 1 it is a MID-propensity mass that carries the history and A4 terms, correlates with `ongoing_tm1`, `log_prior_mids` and `multi_mid_jan`, and now with the initiator's level through `M_lvl_i`. τ at λ = 1 reads "initiation rises with MID-propensity mass", and α on those W columns shifts with it. Compare μ, Σ and ρ across λ, not τ or α.
 
 ### 14.3 Grid, commands, defaults for sign-off
 
-Cells. M1c, `--comparison=directed --roles=bcj`, lag 3, `--tag=long`, samples `fmid` and `mid`, events pairs (`--entry=later`, fmid all-fatal) and dymid (`--events=dymid`, fmid jointly fatal), λ ∈ {0, 0.5, 1} at the MLE weights plus λ = 1 with the five draws. 32 cells, no AME. `slurm/13_opp_weights.sbatch` holds the three steps and `slurm/submit_opp_weights.sh` chains them (auxiliary job, then the array `afterok`, then the mixture `afterok`). The array uses `--account=open --partition=basic --requeue` with the M1 resources of `12_run0.sbatch`. Whether a long M1c fit ends inside 48 h there has not been measured. Nothing is submitted by the repository.
+Cells. M1c, `--comparison=directed --roles=bcj`, lag 3, `--tag=long`, samples `fmid` and `mid`, events pairs (`--entry=later`, fmid all-fatal) and dymid (`--events=dymid`, fmid jointly fatal), λ ∈ {0, 0.5, 1} at the MLE weights plus λ = 1 with the five draws. 32 cells, no AME. The default array runs 28 of them. The four λ = 0 cells are left out because their density is bit-identical to the existing `_tlong` M1c fits (`FIT_IDX=0-31` runs them). `slurm/13_opp_weights.sbatch` holds the three steps and `slurm/submit_opp_weights.sh` chains them (auxiliary job, then the array `afterok`, then the mixture `afterok`). The array uses `--account=open --partition=basic --requeue` with the M1 resources of `12_run0.sbatch`. Whether a long M1c fit ends inside 48 h there has not been measured. Nothing is submitted by the repository.
 
 ```
 Rscript v2/R/compile_models.R                                                        # compiles m1_context_offset (the eighth program)
 Rscript v2/R/08_opportunity_weights.R --events=dymid                                 # weights, about 9 min; --entry=later for the pairs cells; --opp_outcome=host3 for the second version
 Rscript v2/R/02_fit_model.R --sample=fmid --lag=3 --model=M1c --comparison=directed --events=dymid --roles=bcj --opp_weight=1 --tag=long --dry_run=TRUE
-bash v2/slurm/submit_opp_weights.sh                                                  # on Roar, from the repo root: aux -> 32 cells -> mixture
+bash v2/slurm/submit_opp_weights.sh                                                  # on Roar, from the repo root: aux -> 28 cells (lambda 0.5 and 1) -> mixture
 ```
 
 Refusals. `--opp_weight` needs `--comparison=directed --roles=bcj`, the full choice set and model M1c, and is refused with `pairs`, `context`, `ww2 = drop`, `weights = none`, `joiner_set = opposing`, `mu_shift`, `reach`, `subsample`, `direction = sideA`. The Second World War stays in everywhere. `--opp_draw` needs `--opp_weight=1`, `--opp_outcome=host3` needs an `--opp_weight`.
@@ -583,48 +585,69 @@ Deferred, not built. Disjoint A / Z, dropping `tgt_major`, free λ, the structur
 
 Environment. R 4.3.3, rstan 2.32.5 (Stan 2.32.2), StanHeaders 2.32.5, dplyr 1.1.4, tidyr 1.3.1, peacesciencer 1.2.0, digest 0.6.34, testthat 3.2.1 (`env/versions.md`, unchanged). The auxiliary model uses base R only.
 
-### 14.4 Dry runs on the real lag-3 builds (2026-11-10)
+### 14.4 Dry runs on the real lag-3 builds (2026-11-10, rebuilt after the audit fixes)
 
-Auxiliary model, held-out rows (years after 1865, IV rows). No AUC is reported (positive rate 0.3%).
+Auxiliary model, held-out rows (years after 1865, IV rows). No AUC is reported (positive rate 0.3%). "Before" is the first build without the initiator's level.
 
-| foundation, outcome | rows | onsets | log loss, model | log loss, contiguity + distance baseline | ratio | average precision, model / baseline |
+| foundation, outcome | rows | onsets | log loss, model (before) | log loss, contiguity + distance baseline | ratio (before) | average precision, model (before) / baseline |
 |---|---|---|---|---|---|---|
-| pairs (`data_entry`), mid | 1,669,809 | 5,400 | 0.01566 | 0.01770 | 0.885 | 0.122 / 0.040 |
-| dymid, mid | 1,670,154 | 5,435 | 0.01576 | 0.01782 | 0.884 | 0.121 / 0.040 |
-| pairs, host3 | 1,669,809 | 5,190 | 0.01506 | 0.01703 | 0.885 | 0.120 / 0.040 |
-| dymid, host3 | 1,670,154 | 5,223 | 0.01515 | 0.01714 | 0.884 | 0.119 / 0.040 |
+| pairs (`data_entry`), mid | 1,669,809 | 5,400 | 0.01506 (0.01566) | 0.01770 | 0.851 (0.885) | 0.133 (0.122) / 0.040 |
+| dymid, mid | 1,670,154 | 5,435 | 0.01515 (0.01576) | 0.01782 | 0.850 (0.884) | 0.132 (0.121) / 0.040 |
 
-Calibration of the dymid mid weights (observed rate / mean q̂; the pairs rows differ in the third digit). The directed rows count each undirected onset twice.
+The hostility ≥ 3 weights were not rebuilt after the audit. The files of the first build are refused by `02_fit_model.R` (other predictor list). Run `08_opportunity_weights.R --opp_outcome=host3` before any `_oh3` cell.
 
-| by | group | rows | onsets | observed | mean q̂ | observed / predicted |
+Coefficients (dymid mid, standardised predictors, dyad-clustered SE). The product is positive in all 149 windows of both foundations (0.14 to 0.23, median 0.18) and the initiator's level in all 149 (0.49 to 0.92). Before, the product was positive in 57 early windows and negative after about 1930.
+
+| training years | log distance | initiator level | log distance × initiator level | product before |
+|---|---|---|---|---|
+| ≤ 1865 | 0.325 (0.128) | 0.571 (0.093) | 0.151 (0.055) | 0.165 |
+| ≤ 1900 | −0.102 (0.103) | 0.565 (0.064) | 0.202 (0.039) | 0.094 |
+| ≤ 1945 | −0.306 (0.070) | 0.664 (0.045) | 0.144 (0.027) | −0.049 |
+| ≤ 1980 | −0.351 (0.045) | 0.744 (0.040) | 0.160 (0.021) | −0.062 |
+| ≤ 2013 | −0.381 (0.039) | 0.922 (0.047) | 0.138 (0.023) | −0.129 |
+
+Calibration of the dymid mid weights (observed rate / mean q̂). The directed rows count each undirected onset twice.
+
+| by | group | rows | onsets | observed | mean q̂ | observed / predicted (before) |
 |---|---|---|---|---|---|---|
-| era | ≤ 1865 (in sample) | 50,028 | 347 | 0.00694 | 0.00694 | 1.00 |
-| era | 1866–1913 | 68,673 | 639 | 0.00931 | 0.00915 | 1.02 |
-| era | 1914–1945 | 102,080 | 1,023 | 0.01002 | 0.00938 | 1.07 |
-| era | 1946–1989 | 643,240 | 2,028 | 0.00315 | 0.00381 | 0.83 |
-| era | 1990– | 856,161 | 1,745 | 0.00204 | 0.00217 | 0.94 |
-| initiator role | bilateral | 192,909 | 2,946 | 0.01527 | 0.00531 | 2.87 |
-| initiator role | coalition originator | 23,374 | 366 | 0.01566 | 0.00498 | 3.14 |
-| initiator role | joiner | 59,276 | 1,155 | 0.01949 | 0.00544 | 3.58 |
-| initiator role | non-initiator | 1,414,249 | 1,662 | 0.00118 | 0.00324 | 0.36 |
-| initiator region | Americas | 367,622 | 957 | 0.00260 | 0.00373 | 0.70 |
-| initiator region | Europe | 413,047 | 1,825 | 0.00442 | 0.00445 | 0.99 |
-| initiator region | Africa | 371,551 | 530 | 0.00143 | 0.00237 | 0.60 |
-| initiator region | Middle East | 192,627 | 956 | 0.00496 | 0.00430 | 1.15 |
-| initiator region | Asia and Oceania | 325,307 | 1,167 | 0.00359 | 0.00300 | 1.20 |
-| initiator capability tercile | low | 531,359 | 725 | 0.00136 | 0.00301 | 0.45 |
-| initiator capability tercile | middle | 556,913 | 1,252 | 0.00225 | 0.00342 | 0.66 |
-| initiator capability tercile | high | 581,882 | 3,458 | 0.00594 | 0.00411 | 1.45 |
+| era | ≤ 1865 (in sample) | 50,028 | 347 | 0.00694 | 0.00694 | 1.00 (1.00) |
+| era | 1866–1913 | 68,673 | 639 | 0.00931 | 0.00911 | 1.02 (1.02) |
+| era | 1914–1945 | 102,080 | 1,023 | 0.01002 | 0.00940 | 1.07 (1.07) |
+| era | 1946–1989 | 643,240 | 2,028 | 0.00315 | 0.00382 | 0.83 (0.83) |
+| era | 1990– | 856,161 | 1,745 | 0.00204 | 0.00219 | 0.93 (0.94) |
+| initiator role | bilateral | 192,909 | 2,946 | 0.01527 | 0.00741 | 2.06 (2.87) |
+| initiator role | coalition originator | 23,374 | 366 | 0.01566 | 0.00866 | 1.81 (3.14) |
+| initiator role | joiner | 59,276 | 1,155 | 0.01949 | 0.00857 | 2.27 (3.58) |
+| initiator role | non-initiator | 1,414,249 | 1,662 | 0.00118 | 0.00288 | 0.41 (0.36) |
+| initiator region | Americas | 367,622 | 957 | 0.00260 | 0.00310 | 0.84 (0.70) |
+| initiator region | Europe | 413,047 | 1,825 | 0.00442 | 0.00532 | 0.83 (0.99) |
+| initiator region | Africa | 371,551 | 530 | 0.00143 | 0.00161 | 0.89 (0.60) |
+| initiator region | Middle East | 192,627 | 956 | 0.00496 | 0.00400 | 1.24 (1.15) |
+| initiator region | Asia and Oceania | 325,307 | 1,167 | 0.00359 | 0.00370 | 0.97 (1.20) |
+| initiator capability tercile | low | 531,359 | 725 | 0.00136 | 0.00131 | 1.04 (0.45) |
+| initiator capability tercile | middle | 556,913 | 1,252 | 0.00225 | 0.00273 | 0.82 (0.66) |
+| initiator capability tercile | high | 581,882 | 3,458 | 0.00594 | 0.00635 | 0.94 (1.45) |
 
-What is fragile. A has no initiator-level term apart from the distance product, so q̂ is too low for the state-years that initiate (ratio about 3) and too high for the others, and too low for strong initiators. In stage 2 an initiator-level miss cancels within the choice set. In the IV it does not. The initiator-role rows condition on the stage-1 outcome and are descriptive. The asymptotic covariance behind the draws treats the two directed copies of a dyad-year as independent, so the five draws understate the auxiliary uncertainty.
+What the audit corrected, and what stays fragile. The first build had no initiator-level term apart from the distance product. The earlier text here said that miss mattered for the IV only. That was wrong. The product proxied for the missing level and took the wrong sign, so the weights made strong initiators look confined to their neighbourhood. That distortion is a function of initiator strength times distance, it does NOT cancel within a choice set, and it is correlated with the material gap, so it reached μ, Σ and ρ at λ = 0.5 and 1 as well as the IV. With `M_lvl_i` in A the product is positive in every window and the capability terciles are calibrated. Still fragile. The initiator-role rows condition on the stage-1 outcome (ratio about 2 for initiating state-years) and are descriptive. The year-level noise of the decade rule and the meaning of τ are in 14.2.
 
-Per cell, at the auxiliary MLE (identical for λ = 0, 0.5 and 1, which share q̂). Events and composite-weight sums by role (bilateral / coalition originator / joiner), the chosen targets with q̂ below the pooled 5th percentile (0.00078 pairs, 0.00079 dymid), and the medians of Σq and N_eff over the IV rows of the role's state-years and of the non-initiating state-years. The last column gives the range of the low-q̂ share over the five draws.
+Per cell, at the auxiliary MLE (λ = 0.5 and 1 share q̂). PRIMARY diagnostic, the within-set rank of the chosen target. Roles are bilateral / coalition originator / joiner.
 
-| cell | usable events (weights) by role | low-q̂ chosen, n (share of events; share of weight) by role | median Σq by role; non-initiators | median N_eff by role; non-initiators | low-q̂ share, all events, draws 1–5 |
+| cell | usable events (weights) by role | median rank by role | bottom 5% of own set, n (share of events; share of weight) by role | bottom 25% of own set, n (share of events; share of weight) by role | bottom 5% / 25%, all events, range over draws 1–5 |
 |---|---|---|---|---|---|
-| pairs fmid | 503 / 36 / 541 (490.1 / 36.0 / 343.8) | 1 (0.002; 0.002) / 0 / 1 (0.002; 0.003) | 0.58 / 0.54 / 0.50; 0.32 | 7.9 / 12.0 / 19.1; 31.9 | 0.001–0.004 |
-| pairs mid | 2198 / 232 / 846 (2070.2 / 220.5 / 616.3) | 7 (0.003; 0.003) / 1 (0.004; 0.005) / 5 (0.006; 0.008) | 0.53 / 0.46 / 0.48; 0.31 | 8.9 / 13.9 / 19.3; 34.1 | 0.003–0.006 |
-| dymid fmid | 260 / 21 / 214 (259.0 / 21.0 / 154.5) | 0 / 0 / 0 | 0.53 / 0.47 / 0.55; 0.33 | 8.9 / 9.9 / 18.7; 31.3 | 0 |
-| dymid mid | 2097 / 243 / 734 (1994.4 / 233.0 / 599.7) | 7 (0.003; 0.004) / 1 (0.004; 0.004) / 5 (0.007; 0.008) | 0.54 / 0.46 / 0.49; 0.31 | 9.0 / 13.5 / 19.0; 34.2 | 0.004–0.007 |
+| pairs fmid | 503 / 36 / 541 (490.1 / 36.0 / 343.8) | 0.981 / 0.789 / 0.849 | 6 (0.012; 0.012) / 2 (0.056; 0.056) / 13 (0.024; 0.024) | 12 (0.024; 0.024) / 5 (0.139; 0.139) / 60 (0.111; 0.105) | 0.010–0.028 / 0.035–0.095 |
+| pairs mid | 2198 / 232 / 846 (2070.2 / 220.5 / 616.3) | 0.973 / 0.895 / 0.860 | 37 (0.017; 0.017) / 6 (0.026; 0.027) / 16 (0.019; 0.017) | 123 (0.056; 0.056) / 27 (0.116; 0.113) / 90 (0.106; 0.103) | 0.012–0.023 / 0.053–0.088 |
+| dymid fmid | 260 / 21 / 214 (259.0 / 21.0 / 154.5) | 0.982 / 0.900 / 0.879 | 3 (0.012; 0.012) / 1 (0.048; 0.048) / 9 (0.042; 0.031) | 7 (0.027; 0.027) / 2 (0.095; 0.095) / 31 (0.145; 0.112) | 0.010–0.036 / 0.036–0.103 |
+| dymid mid | 2097 / 243 / 734 (1994.4 / 233.0 / 599.7) | 0.974 / 0.916 / 0.887 | 33 (0.016; 0.017) / 6 (0.025; 0.026) / 17 (0.023; 0.020) | 111 (0.053; 0.054) / 29 (0.119; 0.116) / 81 (0.110; 0.104) | 0.011–0.024 / 0.051–0.087 |
 
-All 32 cells and the four cells without the switch assemble (`--dry_run=TRUE`, exit 0). In every one of the 32 the Stan data without `opp_off` are identical() to the cell without the switch, and to the Stan data the run-0 branch (d60da78) saved for it; at λ = 0 the offset is all zeros. ln q̂ ranges from −7.9 to −0.3 (median −6.65). State-years 14,597, alternative rows 1,720,119 (pairs) and 1,720,500 (dymid). Almost no chosen target has a low q̂ (the offset down-weights unchosen alternatives, it does not penalise the observed choices), and the weights concentrate an initiating state-year's mass on 8 to 19 effective alternatives against about 32 for a non-initiating one.
+Over all events 1.8 to 2.6% of chosen targets sit in the bottom 5% of their own set and 7 to 8% in the bottom quarter. Bilateral choices rank near the top of their set (median 0.97 to 0.98). Coalition and joiner choices rank lower (0.79 to 0.92), and 10 to 14% of them are in the bottom quarter, so the offset penalises a visible share of the joiner and coalition choices. The pooled measure flags no chosen target in any cell (0 of 495 to 3,276) and is not informative.
+
+Σq and N_eff over the IV rows (medians).
+
+| cell | Σq by role; non-initiators | N_eff by role; non-initiators |
+|---|---|---|
+| pairs fmid | 0.63 / 1.01 / 0.64; 0.26 | 12.3 / 18.1 / 21.3; 24.6 |
+| pairs mid | 0.63 / 0.73 / 0.62; 0.24 | 14.2 / 19.4 / 22.5; 25.4 |
+| dymid fmid | 0.57 / 0.86 / 0.69; 0.27 | 13.2 / 14.9 / 18.9; 24.4 |
+| dymid mid | 0.63 / 0.73 / 0.64; 0.24 | 14.0 / 18.9 / 22.0; 25.4 |
+
+All 32 cells and the four cells without the switch assemble (`--dry_run=TRUE`, exit 0). In every one of the 32 the Stan data without `opp_off` are identical() to the cell without the switch, and at λ = 0 the offset is all zeros. ln q̂ now ranges from −12.0 to −0.2 (median −6.7). State-years 14,597, alternative rows 1,720,119 (pairs) and 1,720,500 (dymid).

@@ -16,6 +16,7 @@ Full `sessionInfo()` is in `sessionInfo.txt`.
 | igraph | 1.6.0 |
 | testthat | 3.2.1 |
 | digest | 0.6.34 |
+| sandwich | 3.1.0 (tests only: the reference for the dyad-clustered covariance in `test_opp_weights.R`) |
 | BH | 1.90.0.1 (installed from CRAN; the Ubuntu `r-cran-bh` package strips the headers and rstan then fails with "Boost not found") |
 | RcppEigen | 0.3.4.0.0 |
 | RcppParallel | 5.1.7 |
