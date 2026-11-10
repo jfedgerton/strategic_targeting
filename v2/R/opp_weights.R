@@ -288,7 +288,7 @@ oppw_calibration <- function(y, lq, group, what) {
 }
 
 ## ---- the weights file and the stage-2 offset ----------------------------------------------------------------------------------------------------------
-## spec_opp_*(spec): the three run-1 switches ("none" / "0" / "mid" for a spec saved before 2026-11-10, which has none of the fields)
+## (the switches themselves, spec_opp_weight() / spec_opp_outcome() / spec_opp_draw() and OPP_LAMBDA, are in spec.R)
 ## oppw_foundation(spec): the name of the cell foundation's data directory (data_entry | data_dymid | data), the key of the weights file
 oppw_foundation <- function(spec) basename(spec_data_dir(spec, "."))
 ## oppw_path(spec, out_dir): the weights file of a spec, output/oppw_<foundation>_<outcome>_lag3.rds (written by 08_opportunity_weights.R)

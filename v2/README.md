@@ -2,7 +2,7 @@
 
 Two-stage spatial choice model of MID initiation and target selection, estimated jointly in Stan. Branch `v2-rebuild`; the old code is reference only. A 24-cell real-data run of dd48506 is on the cluster; the changes of 2026-10-25 are for the next run.
 
-Contents. 1 Question and design. 2 Quick start. 3 The main specification. 4 Switches. 5 Robustness presets. 6 Data decisions. 7 Model. 8 Outputs. 9 Archived options. 10 Context split (dual typology stage a). 11 Dual typology stage (b): the M1c model. 12 Changelog. 13 Run 0 and the choice-set grid.
+Contents. 1 Question and design. 2 Quick start. 3 The main specification. 4 Switches. 5 Robustness presets. 6 Data decisions. 7 Model. 8 Outputs. 9 Archived options. 10 Context split (dual typology stage a). 11 Dual typology stage (b): the M1c model. 12 Changelog. 13 Run 0 and the choice-set grid. 14 Run 1, the opportunity-weight sensitivity.
 
 ## 1. Question and design
 
@@ -42,11 +42,12 @@ M1 (`stan/m1_latent_additive.stan`) has state random effects (c_i, a_i) and targ
 | `R/06_context_compare.R`, `R/context_compare.R` | the bilateral vs coalition comparison of one cell's context fits (section 10); CLI and function file |
 | `R/typology.R`, `R/measurement_tests.R` | sourced function files (classification; LOO, holdout, permutation, error inflation) |
 | `R/context_model.R` | sourced function file of the M1c model (section 11): brute-force likelihood for the tests, the stage-b summary table, the typology per group |
-| `R/compile_models.R` | compiles the seven Stan programs (`STAN_PROGRAMS` in `spec.R`; `m1_latent_rhoreg` for M1bz since 2026-11-02, `m2_context` for M2c since 2026-11-04) into `stan/build/` with source-hash sidecars |
-| `slurm/` | `00_env.sh`, `01_build.sbatch`, `02_main_grid.sbatch` (+ `submit_main_grid.sh`, the two dependent arrays), `03_post.sbatch`, `04_robustness.sbatch` (+ `submit_robustness.sh`, a preset's M1 cells then its M2 cells), `05_simulations.sbatch`, `09_joiner_m2c.sbatch` (+ `submit_joiner_m2c.sh`: the joiner choice-set M1c fits and the M2c cells of 2026-11-04, section 11), `11_cset_grid.sbatch` (+ `submit_cset_grid.sh`: the choice-set grid of 2026-11-10, M1c on the open account then M2c afterok on the allocation) and `12_run0.sbatch` (the run-0 cells, open account; section 13), `08_perm_refit.sbatch` (+ `submit_perm_refit.sh`: the permutation test of one cell (`_dist` or `_dist_major`), the refit mode as an array of one permutation per task with 8 reduce_sum threads per chain, plus a combine job; section 5) |
+| `R/opp_weights.R`, `R/08_opportunity_weights.R`, `R/09_opp_combine.R` | run 1 (2026-11-10, section 14): the function file of the MID-propensity opportunity weights (auxiliary frame, A4, expanding-window logit, the five full-vector draws, diagnostics, the offset, N_eff, the mixture); the auxiliary model (one foundation and outcome per call, writes `output/oppw_<foundation>_<outcome>_lag3.rds`); the equally weighted mixture of the five draw-conditional fits at λ = 1 |
+| `R/compile_models.R` | compiles the eight Stan programs (`STAN_PROGRAMS` in `spec.R`; `m1_context_offset` for M1c with `--opp_weight` since 2026-11-10; `m1_latent_rhoreg` for M1bz since 2026-11-02, `m2_context` for M2c since 2026-11-04) into `stan/build/` with source-hash sidecars |
+| `slurm/` | `00_env.sh`, `01_build.sbatch`, `02_main_grid.sbatch` (+ `submit_main_grid.sh`, the two dependent arrays), `03_post.sbatch`, `04_robustness.sbatch` (+ `submit_robustness.sh`, a preset's M1 cells then its M2 cells), `05_simulations.sbatch`, `09_joiner_m2c.sbatch` (+ `submit_joiner_m2c.sh`: the joiner choice-set M1c fits and the M2c cells of 2026-11-04, section 11), `11_cset_grid.sbatch` (+ `submit_cset_grid.sh`: the choice-set grid of 2026-11-10, M1c on the open account then M2c afterok on the allocation) and `12_run0.sbatch` (the run-0 cells, open account; section 13), `13_opp_weights.sbatch` (+ `submit_opp_weights.sh`: run 1, the auxiliary job, the 32 M1c cells afterok on the open account, the mixture afterok; section 14), `08_perm_refit.sbatch` (+ `submit_perm_refit.sh`: the permutation test of one cell (`_dist` or `_dist_major`), the refit mode as an array of one permutation per task with 8 reduce_sum threads per chain, plus a combine job; section 5) |
 | `sim/` | `simulate.R` (functions), `run_sim.R` (one driver, `--task=`), `write_sim_report.R`, `SIM_REPORT.md` (superseded until the rerun); `sim_context_b.R` (one replicate of the M1c recovery on the observed fmid lag-3 design, `--rep=r`), `summarise_context_b.R` (the coverage table over the replicates), `slurm/06_sim_context_b.sbatch` (20 replicates on Roar; section 11) |
 | `tests/` | `Rscript v2/tests/run_tests.R` runs `tests/testthat/*.R` |
-| `stan/` | `m1_latent_additive.stan`, `m2_ame.stan` (the main grid), `m1_context.stan` (M1c, section 11), `m1_latent_prior.stan` (the M1 program with the two prior hyperparameters as data, used only by `--rho_prior` / `--sigma_prior` off their defaults; section 4), `m1_context_rho.stan` (M1cr), `m1_latent_rhoreg.stan` (M1bz, the rho regression under the directed comparison, 2026-11-02; section 4), `m2_context.stan` (M2c, the AME model with initiation types, 2026-11-04; section 11); `stan/build/` holds the compiled programs and their `.sha256` sidecars |
+| `stan/` | `m1_latent_additive.stan`, `m2_ame.stan` (the main grid), `m1_context.stan` (M1c, section 11), `m1_latent_prior.stan` (the M1 program with the two prior hyperparameters as data, used only by `--rho_prior` / `--sigma_prior` off their defaults; section 4), `m1_context_rho.stan` (M1cr), `m1_latent_rhoreg.stan` (M1bz, the rho regression under the directed comparison, 2026-11-02; section 4), `m2_context.stan` (M2c, the AME model with initiation types, 2026-11-04; section 11), `m1_context_offset.stan` (M1c with the fixed opportunity-weight offset, 2026-11-10; section 14; a copy, `m1_context.stan` is untouched); `stan/build/` holds the compiled programs and their `.sha256` sidecars |
 | `archive/` | everything replaced on 2026-10-25, each file with a one-line header saying what replaced it (section 9) |
 
 ## 2. Quick start
@@ -156,6 +157,9 @@ Every switch is an option of `02_fit_model.R`, `04_compare.R` and `05_robustness
 | `variant` (cont.) | `mid3` | **REFUSED since the audit of 2026-11-10 (P1-1, PI decision; section 13.2)**. `parse_spec()` and `cell_name()` stop on the value with the reason, so no script runs it and no mid3 cell name exists. The construction below stays in the code for reference and is exercised by unit tests only. Built 2026-11-10 (PI decision 2026-11-08). The **lag-3 MID-history choice set**. An alternative j of initiator i in year t is kept when i and j had a MID onset (either direction) in [t − 3, t − 1], or `dy_mid_tm1` = 1. Year t is never used. Cut at assembly from `alts_lag<h>_all.rds` and every row of the build's `events.rds` (`mid3_history()`), so there is no file of its own and no rebuild. Stage-1 IV set = the January `in_iv` rows with history, as polrel cuts its IV set. Each event is scored against the history rows of its state-year plus its own chosen target (event-level sets through `ev_sets`). Events whose set is the chosen target alone leave stage 2. State-years without a history row in their IV set leave stage 1. Models M1c, M2c; needs `--comparison=directed` and `--roles=aprime|bc|bcj`; refused with `pairs`, `context`, `ww2 = drop`, `joiner_set = opposing`, `mu_shift`, `subsample`. Fills the variant slot, `fmid_lag3_mid3_pr_M1c_cdir_bcj_ent`. | none (the `all` slot) | assembly |
 | `reach` | `none` / `capdist` | Built 2026-11-10 (run 0a, section 13). Z = the directed Z plus `log_capdist_sq` and `log_capdist_x_init_M` (`Z_REACH`, appended last, Pz = 11). Both are formed from `log_capdist` centred over the IV rows, the second with the initiator's `M_lvl` (the stage-1 CINC level as it enters W), and both are then centred over the IV rows. Contiguity stays. `--comparison=directed`, model M1c, full choice set only; refused with `mu_shift` and `subsample`. | `_reach` (right after `_cdir`) | assembly |
 | `subsample` | `none` / `prtarget` / `bilateral` / `majinit` / `mininit` | Built 2026-11-10 (runs 0b to 0d, section 13). `prtarget` removes the stage-2 events whose chosen target is not politically relevant and keeps the full choice set (M1c; stage 1 unchanged). `bilateral` keeps the stage-2 events of bcj role bilateral (M1b, no `--roles`; needs `--entry=later` or `--events=dymid`; stage 1 unchanged). `majinit` / `mininit` restrict BOTH stages to the state-years whose initiator is / is not a COW major power at t − 1 (M1c; `cowmaj_tm1` leaves W, `tgt_major_x_init_major` leaves Z). The D8 weights are NOT rescaled after the filter (PI decision 2026-11-10 after the audit), as in the polrel cell, so 0b carries that cell's events, roles and weights. `--comparison=directed`, full choice set; refused with `pairs`, `context`, `ww2 = drop`, `joiner_set = opposing`, `mu_shift`, `reach`. `05_robustness.R` refuses both run-0 switches. | `_sprt` / `_sbil` / `_smaj` / `_smin` (after the role suffixes) | assembly |
+| `opp_weight` | `none` / `0` / `0.5` / `1` | Built 2026-11-10 (run 1, section 14). λ of the fixed offset λ ln q̂_ij, the MID-propensity opportunity weight of `08_opportunity_weights.R`, in the stage-2 utility and inside the stage-1 IV. M1c through `stan/m1_context_offset.stan`; `0` is the current model with a zero offset (same Stan data plus `opp_off`, same log density). A sensitivity specification. `--comparison=directed --roles=bcj`, full choice set; refused with `pairs`, `context`, `ww2 = drop`, `weights = none`, `joiner_set = opposing`, `mu_shift`, `reach`, `subsample`, `direction = sideA` and with every model but M1c. | `_opw0` / `_opw05` / `_opw1` (after `_ent` / `_dy`) | Stan data (offset) |
+| `opp_outcome` | `mid` / `host3` | Run 1. The auxiliary outcome behind q̂: any Dyadic MID onset, or onsets with dyadic hostility 3 or more. Needs an `opp_weight`. | `_oh3` | weights file |
+| `opp_draw` | `0` / `1` … `5` | Run 1. q̂ at the auxiliary MLE, or at the d-th coherent draw of the full auxiliary coefficient vector. Needs `--opp_weight=1`. | `_d1` … `_d5` | weights column |
 
 The two prior suffixes come after every data switch (they change the program's prior, not the cell's data), so `fmid_lag3_all_pr_M1b_dist_rhoflat` is the `_dist` cell under the flat ρ prior.
 
@@ -522,3 +526,105 @@ Lag-3 dry runs of 2026-11-10 (usable stage-2 events by bcj role; median set size
 | 0d minors dymid fmid / mid | 359 (201 / 4 / 154), 2030 (1478 / 95 / 457) | 106, 150 | 0 | 0.410, 0.416 | 13,444 (313), 13,444 (1633) |
 
 Events dropped by role (bilateral / coalition originator / joiner). 0b: pairs fmid 21 / 2 / 185, pairs mid 244 / 44 / 261, dymid fmid 10 / 0 / 64, dymid mid 171 / 45 / 202. mid3 pairs fmid: 101 / 1 / 183 leave with their state-years, 77 / 2 / 11 are chosen-only sets. mid3 dymid fmid: 56 / 2 / 74 and 56 / 2 / 5. The mid3 "chosen with history" share is over the events of the kept state-years before the chosen-only sets are dropped (0.404 and 0.467 over the usable events). The fatal coalition-originator group of the minor-initiator cells is very thin (6 and 4 events).
+
+## 14. Run 1, the opportunity-weight sensitivity (built 2026-11-10)
+
+A sensitivity specification on the run-7 cell (M1c, bcj roles, directed Z, lag 3, full choice set). It is NOT a consideration-set model. The quantity q_ij is called an **opportunity weight** throughout and never a consideration probability (design synthesis of 2026-11-08, S1 and S2). Every switch defaults to the existing behaviour, `m1_context.stan` is untouched, and with the switches off every cell name, spec string and Stan data list is unchanged (`test_opp_weights.R`, and the existing pins).
+
+### 14.1 What the weights are
+
+An auxiliary logit of militarized contact, fitted outside the Stan program (`R/08_opportunity_weights.R`, functions in `R/opp_weights.R`).
+
+| element | choice |
+|---|---|
+| rows | every directed dyad-year (i, j, t) of the cell foundation's `alts_lag3_all.rds`. The model is fitted on the January stage-1 IV rows (`in_iv = 1`, already-fighting at January removed, the rows the IV sums over) and predicts every row, the 284 (pairs) / 318 (dymid) stage-2-only rows included, since stage 2 needs their offset |
+| outcome | a directly interacting Dyadic MID onset between i and j in year t, undirected, from `v2/data_dymid/events.rds` under BOTH foundations (every row of that file, escalation rows included). `--opp_outcome=host3` is the second version, onsets whose dyadic hostility max(`hostlev1`, `hostlev2`) is 3 or more |
+| predictors A | `contig_land` (conttype 1), `contig_sea` (conttype 2 to 5, `contig_any − contig_land`; the build keeps no finer conttype), `log_capdist` (log1p km at t − 1), `log_capdist_x_init_M` (log distance, centred on the training mean, times the initiator's `M_lvl`, the within-year centred log CINC level at t − 1 as in W; no main effect of the level), `dymid_hist3` (an INDICATOR of a Dyadic MID onset between i and j in [t − 3, t − 1], `mid3_history()`, all hostility levels in both versions), `a4_joinable`, decade effects. Each column is centred and scaled with the training window's constants |
+| A4 | `a4_joinable` = 1 when j is present, on either side, at 1 January of t in a dispute with three or more present participants to which i is not a party. Disputes, spells and the presence rule are those of `multilateral_jan_flags()` (the source of `multi_mid_jan`, COW participants under both foundations). "Active with three or more present participants and both sides present" is the same set of dispute-years as that helper's multilateral disputes (233 dispute-years). A former participant counts as a party. The script recomputes the presence and stops unless it reproduces the panel's `multi_mid_jan` on every state-year |
+| no target strength | No target CINC, PageRank, major status or gap enters A (Choice A, target selection). `oppw_frame()` reads only `OPPW_ALTS_COLS` and `OPPW_PANEL_COLS`, and `OPPW_TARGET_STRENGTH` lists the excluded columns (asserted, tested by scrambling them) |
+| fit | logit MLE, expanding window. Year t is predicted from a fit on the years before t. The burn-in (years up to 1865) is one fit, in sample, which also predicts 1866. 149 fits, 11 to 26 coefficients. `oppw_fit()` iterates the normal equations and is checked against `stats::glm.fit` on the first and the last window at every run (difference below 1e-12 here) |
+| decade effects | a decade gets its own effect once the training window holds three of its years and an onset in it. Until then it shares the latest earlier decade's effect, which is also the effect used for a prediction year at the start of a new decade (`oppw_decade_levels()`) |
+| saved | ln q for every row at the MLE (`d0`) and for five draws (`d1` to `d5`), computed on the log scale. `output/oppw_<foundation>_<outcome>_lag3.rds` with the sha256 of the input files; `02_fit_model.R` stops when they differ from the cell's manifest |
+
+**The five draws.** Five standard-normal vectors z_d are drawn once (seed 123). In every window the d-th coefficient vector is b̂ + L z_d with L the Cholesky factor of that window's asymptotic covariance. A draw is therefore a draw of the FULL coefficient vector of every window, with common random numbers across windows, and gives one coherent ln q column for all rows. Nothing is drawn per row.
+
+### 14.2 The offset and why it is a sensitivity
+
+Stage 2 becomes U_ij = spatial + b_j + Z_ij'γ + λ ln q̂_ij with Z the directed Z unchanged (`tgt_major` and its product stay in Z). The stage-1 IV carries the same term inside its log-sum, IV = log Σ q̂^λ exp(V) over the IV rows of the reference-group utility, the convention of `m1_context.stan`. The offset is a data vector (`opp_off` = λ ln q̂, formed in `02_fit_model.R`) of the copy `stan/m1_context_offset.stan`, which adds it where Z γ is formed. No parameter is added and ln q̂ is not centred.
+
+| `--opp_weight` | suffix | what it is |
+|---|---|---|
+| `0` | `_opw0` | the current model. The Stan data are those of the cell without the switch plus a zero vector, and the log density, gradient and generated quantities are identical to `m1_context.stan` to the last bit (tested) |
+| `0.5` | `_opw05` | half the offset |
+| `1` | `_opw1` | the full offset. `--opp_draw=1..5` (`_d1` to `_d5`) conditions on one auxiliary draw instead of the MLE |
+
+Reading. P(fatal_ij) = P(MID contact_ij) × P(fatal | contact_ij). The auxiliary outcome is itself a realisation of targeting, so the offset subtracts part of the target preference along with opportunity. At λ = 1 the spatial parameters μ, Σ and ρ describe **escalation given contact propensity**, not target selection over the full opportunity structure. A smaller ρ at λ = 1 is "residual jointness given MID propensity", not "debiased jointness". The paper's estimand stays target selection (λ = 0), and λ ∈ {0.5, 1} is reported as "robust to conditioning on militarized contact propensity". The λ values are fixed settings, not estimates.
+
+Uncertainty of q̂. At λ = 1 the five draw-conditional fits are combined by `R/09_opp_combine.R` into the equally weighted mixture of the conditional posteriors (same number of posterior draws per fit, stacked). The table `oppw_mixture_<cell>.csv` reports, for μ (`mu0_g`), σ (`sigma_g`) and ρ (`rho_x`), the point fit's SD, the mixture SD, the SD of the conditional means across the draws and whether mixture SD / point SD exceeds 1.10.
+
+Diagnostics per cell (`oppw_cell_<cell>.csv`, the log, and `obj$opp` of the saved Stan data and fit). The share of chosen targets with low q̂ by role, in event counts and in composite (D8) weights, where low means below the 5th percentile of q̂ over all alternative rows of the cell, pooled. The medians by role, and for the non-initiating state-years, of Σq and N_eff = (Σq)² / Σq² over the state-year's IV rows.
+
+### 14.3 Grid, commands, defaults for sign-off
+
+Cells. M1c, `--comparison=directed --roles=bcj`, lag 3, `--tag=long`, samples `fmid` and `mid`, events pairs (`--entry=later`, fmid all-fatal) and dymid (`--events=dymid`, fmid jointly fatal), λ ∈ {0, 0.5, 1} at the MLE weights plus λ = 1 with the five draws. 32 cells, no AME. `slurm/13_opp_weights.sbatch` holds the three steps and `slurm/submit_opp_weights.sh` chains them (auxiliary job, then the array `afterok`, then the mixture `afterok`). The array uses the open account with the M1 resources of `12_run0.sbatch`. Whether a long M1c fit ends inside 48 h there has not been measured. Nothing is submitted by the repository.
+
+```
+Rscript v2/R/compile_models.R                                                        # compiles m1_context_offset (the eighth program)
+Rscript v2/R/08_opportunity_weights.R --events=dymid                                 # weights, about 9 min; --entry=later for the pairs cells; --opp_outcome=host3 for the second version
+Rscript v2/R/02_fit_model.R --sample=fmid --lag=3 --model=M1c --comparison=directed --events=dymid --roles=bcj --opp_weight=1 --tag=long --dry_run=TRUE
+bash v2/slurm/submit_opp_weights.sh                                                  # on Roar, from the repo root: aux -> 32 cells -> mixture
+```
+
+Refusals. `--opp_weight` needs `--comparison=directed --roles=bcj`, the full choice set and model M1c, and is refused with `pairs`, `context`, `ww2 = drop`, `weights = none`, `joiner_set = opposing`, `mu_shift`, `reach`, `subsample`, `direction = sideA`. The Second World War stays in everywhere. `--opp_draw` needs `--opp_weight=1`, `--opp_outcome=host3` needs an `--opp_weight`.
+
+PI defaults taken, to be signed off. (1) Estimand target selection, the offset reported as a sensitivity. (2) Outcome Dyadic MID onsets, hostility ≥ 3 as a version (built and wired, not in the 32-cell grid; `OPP_OUTCOME=host3` reruns the grid on it). (3) Z unchanged, `tgt_major` kept in Z. (4) λ grid {0, 0.5, 1}. (5) Five full-vector draws at λ = 1. (6) A4 as above. (7) Burn-in through 1865 with decade effects. (8) M1c only. Implementation choices that also need a decision are listed in the CHANGELOG entry of 2026-11-10.
+
+Deferred, not built. Disjoint A / Z, dropping `tgt_major`, free λ, the structural reach π, M2 with offsets, the simulation study.
+
+Environment. R 4.3.3, rstan 2.32.5 (Stan 2.32.2), StanHeaders 2.32.5, dplyr 1.1.4, tidyr 1.3.1, peacesciencer 1.2.0, digest 0.6.34, testthat 3.2.1 (`env/versions.md`, unchanged). The auxiliary model uses base R only.
+
+### 14.4 Dry runs on the real lag-3 builds (2026-11-10)
+
+Auxiliary model, held-out rows (years after 1865, IV rows). No AUC is reported (positive rate 0.3%).
+
+| foundation, outcome | rows | onsets | log loss, model | log loss, contiguity + distance baseline | ratio | average precision, model / baseline |
+|---|---|---|---|---|---|---|
+| pairs (`data_entry`), mid | 1,669,809 | 5,400 | 0.01566 | 0.01770 | 0.885 | 0.122 / 0.040 |
+| dymid, mid | 1,670,154 | 5,435 | 0.01576 | 0.01782 | 0.884 | 0.121 / 0.040 |
+| pairs, host3 | 1,669,809 | 5,190 | 0.01506 | 0.01703 | 0.885 | 0.120 / 0.040 |
+| dymid, host3 | 1,670,154 | 5,223 | 0.01515 | 0.01714 | 0.884 | 0.119 / 0.040 |
+
+Calibration of the dymid mid weights (observed rate / mean q̂; the pairs rows differ in the third digit). The directed rows count each undirected onset twice.
+
+| by | group | rows | onsets | observed | mean q̂ | observed / predicted |
+|---|---|---|---|---|---|---|
+| era | ≤ 1865 (in sample) | 50,028 | 347 | 0.00694 | 0.00694 | 1.00 |
+| era | 1866–1913 | 68,673 | 639 | 0.00931 | 0.00915 | 1.02 |
+| era | 1914–1945 | 102,080 | 1,023 | 0.01002 | 0.00938 | 1.07 |
+| era | 1946–1989 | 643,240 | 2,028 | 0.00315 | 0.00381 | 0.83 |
+| era | 1990– | 856,161 | 1,745 | 0.00204 | 0.00217 | 0.94 |
+| initiator role | bilateral | 192,909 | 2,946 | 0.01527 | 0.00531 | 2.87 |
+| initiator role | coalition originator | 23,374 | 366 | 0.01566 | 0.00498 | 3.14 |
+| initiator role | joiner | 59,276 | 1,155 | 0.01949 | 0.00544 | 3.58 |
+| initiator role | non-initiator | 1,414,249 | 1,662 | 0.00118 | 0.00324 | 0.36 |
+| initiator region | Americas | 367,622 | 957 | 0.00260 | 0.00373 | 0.70 |
+| initiator region | Europe | 413,047 | 1,825 | 0.00442 | 0.00445 | 0.99 |
+| initiator region | Africa | 371,551 | 530 | 0.00143 | 0.00237 | 0.60 |
+| initiator region | Middle East | 192,627 | 956 | 0.00496 | 0.00430 | 1.15 |
+| initiator region | Asia and Oceania | 325,307 | 1,167 | 0.00359 | 0.00300 | 1.20 |
+| initiator capability tercile | low | 531,359 | 725 | 0.00136 | 0.00301 | 0.45 |
+| initiator capability tercile | middle | 556,913 | 1,252 | 0.00225 | 0.00342 | 0.66 |
+| initiator capability tercile | high | 581,882 | 3,458 | 0.00594 | 0.00411 | 1.45 |
+
+What is fragile. A has no initiator-level term apart from the distance product, so q̂ is too low for the state-years that initiate (ratio about 3) and too high for the others, and too low for strong initiators. In stage 2 an initiator-level miss cancels within the choice set. In the IV it does not. The initiator-role rows condition on the stage-1 outcome and are descriptive. The asymptotic covariance behind the draws treats the two directed copies of a dyad-year as independent, so the five draws understate the auxiliary uncertainty.
+
+Per cell, at the auxiliary MLE (identical for λ = 0, 0.5 and 1, which share q̂). Events and composite-weight sums by role (bilateral / coalition originator / joiner), the chosen targets with q̂ below the pooled 5th percentile (0.00078 pairs, 0.00079 dymid), and the medians of Σq and N_eff over the IV rows of the role's state-years and of the non-initiating state-years. The last column gives the range of the low-q̂ share over the five draws.
+
+| cell | usable events (weights) by role | low-q̂ chosen, n (share of events; share of weight) by role | median Σq by role; non-initiators | median N_eff by role; non-initiators | low-q̂ share, all events, draws 1–5 |
+|---|---|---|---|---|---|
+| pairs fmid | 503 / 36 / 541 (490.1 / 36.0 / 343.8) | 1 (0.002; 0.002) / 0 / 1 (0.002; 0.003) | 0.58 / 0.54 / 0.50; 0.32 | 7.9 / 12.0 / 19.1; 31.9 | 0.001–0.004 |
+| pairs mid | 2198 / 232 / 846 (2070.2 / 220.5 / 616.3) | 7 (0.003; 0.003) / 1 (0.004; 0.005) / 5 (0.006; 0.008) | 0.53 / 0.46 / 0.48; 0.31 | 8.9 / 13.9 / 19.3; 34.1 | 0.003–0.006 |
+| dymid fmid | 260 / 21 / 214 (259.0 / 21.0 / 154.5) | 0 / 0 / 0 | 0.53 / 0.47 / 0.55; 0.33 | 8.9 / 9.9 / 18.7; 31.3 | 0 |
+| dymid mid | 2097 / 243 / 734 (1994.4 / 233.0 / 599.7) | 7 (0.003; 0.004) / 1 (0.004; 0.004) / 5 (0.007; 0.008) | 0.54 / 0.46 / 0.49; 0.31 | 9.0 / 13.5 / 19.0; 34.2 | 0.004–0.007 |
+
+All 32 cells and the four cells without the switch assemble (`--dry_run=TRUE`, exit 0). In every one of the 32 the Stan data without `opp_off` are identical() to the cell without the switch, and to the Stan data the run-0 branch (d60da78) saved for it; at λ = 0 the offset is all zeros. ln q̂ ranges from −7.9 to −0.3 (median −6.65). State-years 14,597, alternative rows 1,720,119 (pairs) and 1,720,500 (dymid). Almost no chosen target has a low q̂ (the offset down-weights unchosen alternatives, it does not penalise the observed choices), and the weights concentrate an initiating state-year's mass on 8 to 19 effective alternatives against about 32 for a non-initiating one.
