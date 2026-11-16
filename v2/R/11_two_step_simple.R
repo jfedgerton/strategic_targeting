@@ -62,7 +62,8 @@ stopifnot(!anyNA(keys), all(alts$ccode1[ev$alt_row] == keys$initiator), all(alts
 events <- readRDS(file.path(data_dir, "events.rds"))
 need <- c("initiator", "target", "year", "escalation", "in_mid", "in_fmid", "in_fmidany", "in_fmidub")
 stopifnot(all(need %in% names(events)))
-ne <- events |> filter(!escalation) |> select(all_of(need[-4]))
+stopifnot("dispnum" %in% names(events))
+ne <- events |> filter(!escalation) |> select(all_of(c(need[-4], "dispnum")))
 stopifnot(!anyDuplicated(ne[, c("initiator", "target", "year")]))
 j <- keys |> left_join(ne, by = c("initiator", "target", "year"))
 if (anyNA(j$in_mid)) stop(sprintf("%d events have no non-escalation row in events.rds", sum(is.na(j$in_mid))))
@@ -71,7 +72,9 @@ y_all <- as.integer(j[[paste0("in_", OUTCOME)]])
 stopifnot(all(y_all %in% 0:1))
 
 ## ---- 4. event frame: the chosen row's gaps and Z, type, weight, cluster -----------------------------------------
-D <- data.frame(e = which(keep), y = y_all[keep], type = t_ev[keep], w = dat$ev_w[keep], init = keys$initiator[keep])
+stopifnot(!anyNA(j$dispnum))
+D <- data.frame(e = which(keep), y = y_all[keep], type = t_ev[keep], w = dat$ev_w[keep], init = keys$initiator[keep],
+                disp = j$dispnum[keep], tgtyr = paste(keys$target[keep], keys$year[keep], sep = "_"))
 D$dM <- dat$x[dat$ev_row[D$e], 1]; D$dR <- dat$x[dat$ev_row[D$e], 2]
 Zm <- dat$Z[dat$ev_row[D$e], , drop = FALSE]; colnames(Zm) <- Z_cols; D <- cbind(D, Zm)
 stopifnot(!anyNA(D))
@@ -89,16 +92,34 @@ FORM <- as.formula(paste("y ~", paste(c(INT, GAP_G, Z_cols), collapse = " + ")))
 fitB <- function(d) glm(FORM, data = d, weights = w, family = quasibinomial())
 m <- fitB(D)
 stopifnot(m$converged, all(is.finite(coef(m))))
-V <- vcovCL(m, cluster = D$init, type = "HC0")
-wald <- function(R) { b <- coef(m); d <- R %*% b; s <- as.numeric(t(d) %*% solve(R %*% V %*% t(R)) %*% d); c(chi2 = s, df = nrow(R), p = pchisq(s, nrow(R), lower.tail = FALSE)) }
+## cluster-robust variances, CR0 (no small-sample factor, matching step A's coxph robust variance; GPT review P3):
+## by initiator (main), two-way initiator x dispute (sandwich multiway), and by target-year (sensitivity)
+V <- vcovCL(m, cluster = D$init, type = "HC0", cadjust = FALSE)
+V2w_raw <- vcovCL(m, cluster = D[, c("init", "disp")], type = "HC0", cadjust = FALSE, multi0 = FALSE)
+neg_eig <- sum(eigen(V2w_raw, symmetric = TRUE, only.values = TRUE)$values <= 0)
+## Cameron, Gelbach and Miller (2011): a two-way variance need not be positive definite; replace its negative eigenvalues with zero (sandwich fix = TRUE)
+V2w <- vcovCL(m, cluster = D[, c("init", "disp")], type = "HC0", cadjust = FALSE, multi0 = FALSE, fix = TRUE)
+Vty <- vcovCL(m, cluster = D$tgtyr, type = "HC0", cadjust = FALSE)
+psd2w <- TRUE
+logf("two-way (initiator x dispute) variance: %d non-positive eigenvalues of %d before the CGM fix%s", neg_eig, ncol(V2w_raw), if (neg_eig > 0) " (fixed: set to zero)" else "")
+wald <- function(R, VV = V) { b <- coef(m); d <- R %*% b; s <- as.numeric(t(d) %*% solve(R %*% VV %*% t(R)) %*% d); c(chi2 = s, df = nrow(R), p = pchisq(s, nrow(R), lower.tail = FALSE)) }
+wald3 <- function(R) { a <- wald(R); data.frame(chi2 = a[["chi2"]], df = a[["df"]], p = a[["p"]], p_twoway_init_x_dispute = if (psd2w) wald(R, V2w)[["p"]] else NA_real_,
+                                                p_target_year = wald(R, Vty)[["p"]]) }
 nmb <- names(coef(m))
 Rsel <- function(pos, neg = NULL) { R <- matrix(0, length(pos), length(nmb), dimnames = list(NULL, nmb)); for (i in seq_along(pos)) { R[i, pos[i]] <- 1; if (!is.null(neg)) R[i, neg[i]] <- -1 }; R }
+## GPT review 2026-11-16 P1: an axis effect is b_k + 2 b_kk x_k + b_MR x_other, so "no effect along an axis" restricts linear, squared AND cross (3 df).
+## Failing to reject is not evidence of no effect (no equivalence test here).
+AX <- list(material = c("dM", "dM2", "dMR"), relational = c("dR", "dR2", "dMR"))
 tests <- NULL
-if (G > 1) { pp <- unlist(lapply(ROLES[-1], function(o) paste0(GAP, "_", o))); nn <- unlist(lapply(ROLES[-1], function(o) paste0(GAP, "_", ROLES[1])))
-  w0 <- wald(Rsel(pp, nn)); tests <- rbind(tests, data.frame(test = sprintf("gap terms differ by type (%d df)", w0[["df"]]), chi2 = w0[1], df = w0[2], p = w0[3])) }
-for (g in ROLES) for (ax in list(material = c("dM", "dM2"), relational = c("dR", "dR2"))) {
-  w1 <- wald(Rsel(paste0(ax, "_", g)))
-  tests <- rbind(tests, data.frame(test = sprintf("%s: %s gap has no effect on fatality (linear + squared = 0, 2 df)", g, if (ax[1] == "dM") "material" else "relational"), chi2 = w1[1], df = w1[2], p = w1[3]))
+if (G > 1) {
+  for (blk in c(list(all = GAP), AX)) for (o in ROLES[-1]) {
+    lab <- if (identical(blk, GAP)) sprintf("%s - %s: gap terms differ (%d df)", o, ROLES[1], length(blk)) else
+           sprintf("%s - %s: %s axis effect differs anywhere (linear, squared, cross; %d df)", o, ROLES[1], if (blk[1] == "dM") "material" else "relational", length(blk))
+    tests <- rbind(tests, cbind(test = lab, wald3(Rsel(paste0(blk, "_", o), paste0(blk, "_", ROLES[1]))))) }
+}
+for (g in ROLES) for (ax in names(AX)) {
+  tests <- rbind(tests, cbind(test = sprintf("%s: %s gap has no effect on fatality anywhere (linear, squared, cross = 0; 3 df)", g, ax),
+                              wald3(Rsel(paste0(AX[[ax]], "_", g)))))
 }
 logf("tests:\n%s", paste(capture.output(print(tests, row.names = FALSE)), collapse = "\n"))
 
@@ -122,31 +143,46 @@ dP <- function(mod, d) {
 pt <- dP(m, D)
 set.seed(123)
 inits <- unique(D$init); by_init <- split(seq_len(nrow(D)), D$init)
-bs <- NULL; n_fail <- 0L
+bs <- NULL; bs_coef <- NULL; n_fail <- 0L
+fail_log <- data.frame(draw = integer(0), reason = character(0))   # GPT review P2-6: replicate IDs and failure reasons
 for (bb in seq_len(B)) {
   rows <- unlist(by_init[as.character(sample(inits, length(inits), replace = TRUE))], use.names = FALSE)
   Db <- D[rows, ]
-  if (any(tapply(Db$y, factor(Db$type, levels = 0:(G - 1L)), function(z) length(z) == 0L || sum(z) == 0L || sum(z) == length(z)), na.rm = TRUE) ||
-      any(table(factor(Db$type, levels = 0:(G - 1L))) == 0L)) { n_fail <- n_fail + 1L; next }
+  tt <- table(factor(Db$type, levels = 0:(G - 1L))); ft <- tapply(Db$y, factor(Db$type, levels = 0:(G - 1L)), sum)
+  if (any(tt == 0L) || any(ft == 0L, na.rm = TRUE) || any(ft == tt, na.rm = TRUE)) {
+    n_fail <- n_fail + 1L; fail_log <- rbind(fail_log, data.frame(draw = bb, reason = "a type lacks events or lacks fatal / non-fatal events")); next }
   warned <- FALSE
   mb <- tryCatch(withCallingHandlers(fitB(Db), warning = function(w) { warned <<- TRUE; invokeRestart("muffleWarning") }), error = function(e) NULL)
-  if (is.null(mb) || warned || !mb$converged || any(!is.finite(coef(mb)))) { n_fail <- n_fail + 1L; next }
-  bs <- rbind(bs, dP(mb, Db))
+  if (is.null(mb) || warned || !mb$converged || any(!is.finite(coef(mb)))) {
+    n_fail <- n_fail + 1L; fail_log <- rbind(fail_log, data.frame(draw = bb, reason = if (is.null(mb)) "error" else if (warned) "warning (e.g. separation)" else "non-convergence or non-finite")); next }
+  bs <- rbind(bs, dP(mb, Db)); bs_coef <- rbind(bs_coef, c(draw = bb, coef(mb)))
   if (bb %% 100 == 0) logf("bootstrap %d / %d", bb, B)
 }
-logf("bootstrap: %d draws, %d failed, warned or lacked a type's fatal / non-fatal events (dropped)", B, n_fail)
+MIN_OK <- 0.90
+n_ok <- if (is.null(bs)) 0L else nrow(bs)
+boot_ok <- B > 0 && n_ok / B >= MIN_OK
+logf("bootstrap: %d draws, %d successful, %d dropped; intervals %s", B, n_ok, n_fail, if (boot_ok) "reported" else sprintf("NOT reported (fewer than %.0f%% succeeded)", 100 * MIN_OK))
+if (!boot_ok) bs <- NULL
 
 ## ---- 7. tables -------------------------------------------------------------------------------------------------
 fmt <- function(est, d) { if (is.null(d)) return(sprintf("%.3f", est)); q <- quantile(d, c(0.025, 0.975), na.rm = TRUE)
   sprintf("%.3f [%.3f, %.3f]%s", est, q[1], q[2], ifelse(q[1] > 0 | q[2] < 0, "*", "")) }
 rd <- data.frame(quantity = names(pt), estimate = vapply(names(pt), function(q) fmt(pt[[q]], if (is.null(bs)) NULL else bs[, q]), ""), row.names = NULL)
 rd$range <- vapply(rd$quantity, function(q) { if (!grepl("^dP_d[MR]_(bil|coal|join)$", q)) return(""); p <- strsplit(q, "_")[[1]]; r <- q1090[[p[3]]][[p[2]]]; sprintf("%.2f to %.2f", r[1], r[2]) }, "")
+## GPT review P1-2 / P2-4: these are NET ENDPOINT CHANGES for each type's own population and range; they cannot show a flat curve (an interior
+## peak or offsetting interactions give zero), and the coal-bil difference mixes ranges, baselines and covariate distributions. The common-scale
+## comparison is in 12_two_step_joint.R.
+rd$note <- ifelse(grepl("^dP_d[MR]_(bil|coal|join)$", rd$quantity), "net endpoint change (10th to 90th percentile of the type's own gap); not a test of flatness",
+           ifelse(grepl("-", rd$quantity), "difference of own-population endpoint changes (different ranges and populations); not a type comparison on a common scale", ""))
+rd <- rbind(data.frame(quantity = "bootstrap_successful_draws", estimate = sprintf("%d of %d", n_ok, B), range = "",
+                       note = if (boot_ok) "intervals reported" else sprintf("fewer than %.0f%% succeeded: no intervals", 100 * MIN_OK)), rd)
 se <- sqrt(diag(V)); coefs <- data.frame(term = nmb, coef = coef(m), robust_se = se, p = 2 * pnorm(-abs(coef(m) / se)), row.names = NULL)
 od <- file.path(v2_root(), "output"); dir.create(od, showWarnings = FALSE)
 write.csv(rd, file.path(od, paste0(cell, "_readings.csv")), row.names = FALSE)
 write.csv(coefs, file.path(od, paste0(cell, "_coefs.csv")), row.names = FALSE)
 write.csv(tests, file.path(od, paste0(cell, "_tests.csv")), row.names = FALSE)
-saveRDS(list(pt = pt, bs = bs, n_fail = n_fail, B = B, spec = spec, types = TYPES, outcome = OUTCOME, q1090 = q1090, counts = cnt, E = nrow(D)),
+saveRDS(list(pt = pt, bs = bs, bs_coef = bs_coef, fail_log = fail_log, n_ok = n_ok, n_fail = n_fail, B = B, spec = spec, types = TYPES, outcome = OUTCOME,
+             q1090 = q1090, counts = cnt, E = nrow(D), V = list(init = V, twoway = V2w, tgtyr = Vty, twoway_psd = psd2w)),
         file.path(od, paste0(cell, "_boot.rds")))
 print(rd, row.names = FALSE); print(tests, row.names = FALSE)
 logf("done: %s_{readings,coefs,tests}.csv and _boot.rds", cell)

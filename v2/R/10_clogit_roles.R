@@ -100,6 +100,25 @@ GAP_G <- as.vector(outer(GAP, ROLES, paste, sep = "_"))           # dM_bil, dM2_
 SUPPORT <- lapply(0:(G - 1L), function(g) { s <- L$type == g; c(dM_lo = min(L$dM[s]), dM_hi = max(L$dM[s]), dR_lo = min(L$dR[s]), dR_hi = max(L$dR[s])) })
 names(SUPPORT) <- ROLES
 logf("long frame: %d rows, %d strata, median set size %.0f", nrow(L), length(unique(L$ev_id)), median(table(L$ev_id)))
+## cluster ids for the dependence sensitivity (GPT review 2026-11-16 P2-5): the event's dispute (events.rds dispnum of its non-escalation row,
+## matched on (initiator, chosen target, year)) and its chosen target-year. Two-way = initiator x dispute; target-year is a separate sensitivity.
+ek <- data.frame(ev_id = which(keep), initiator = as.integer(sy$ccode[ev$sy_row[keep]]), target = as.integer(alts$ccode2[ev$alt_row[keep]]),
+                 year = as.integer(sy$year[ev$sy_row[keep]]))
+stopifnot(!anyNA(ek), all(alts$ccode1[ev$alt_row[keep]] == ek$initiator), !anyDuplicated(ek[, c("initiator", "target", "year")]),
+          all(ek$initiator == init_cc[dat$ev_sy[ek$ev_id]]))
+ev_rds <- readRDS(file.path(data_dir, "events.rds"))
+stopifnot(all(c("initiator", "target", "year", "escalation", "dispnum") %in% names(ev_rds)))
+ne <- ev_rds[!ev_rds$escalation, c("initiator", "target", "year", "dispnum")]
+stopifnot(!anyDuplicated(ne[, c("initiator", "target", "year")]))
+ek <- merge(ek, ne, by = c("initiator", "target", "year"), all.x = TRUE, sort = FALSE)
+if (anyNA(ek$dispnum)) stop(sprintf("%d events have no non-escalation row with a dispnum in events.rds", sum(is.na(ek$dispnum))))
+ek <- ek[match(unique(L$ev_id), ek$ev_id), ]
+stopifnot(nrow(ek) == length(unique(L$ev_id)))
+ek$disp <- ek$dispnum; ek$tgtyr <- paste(ek$target, ek$year, sep = "_"); ek$init_disp <- paste(ek$initiator, ek$dispnum, sep = "_")
+L$disp <- ek$disp[match(L$ev_id, ek$ev_id)]; L$tgtyr <- ek$tgtyr[match(L$ev_id, ek$ev_id)]; L$init_disp <- ek$init_disp[match(L$ev_id, ek$ev_id)]
+stopifnot(!anyNA(L[, c("disp", "tgtyr", "init_disp")]))
+logf("clusters: %d initiators, %d disputes, %d initiator-disputes, %d target-years", length(unique(ek$initiator)), length(unique(ek$disp)),
+     length(unique(ek$init_disp)), length(unique(ek$tgtyr)))
 
 ## ---- 4. fits -----------------------------------------------------------------------------------------------
 fit_cl <- function(d, terms, robust = TRUE) {
@@ -113,8 +132,20 @@ M1 <- fit_cl(L, GAP_G)
 M1s <- fit_cl(L, TERMS_M1S)
 for (m in list(M0, M1, M1s)) stopifnot(all(is.finite(coef(m))), !anyNA(coef(m)))
 
-wald <- function(m, R, r = rep(0, nrow(R))) {            # robust Wald test of R beta = r
-  b <- coef(m); V <- vcov(m); d <- R %*% b - r
+## cluster-robust variances from the per-row dfbeta residuals summed within clusters (CR0; coxph's own robust variance is the initiator case)
+## two-way (initiator x dispute) = V(initiator) + V(dispute) - V(initiator-dispute) (Cameron, Gelbach and Miller 2011)
+vc_cl <- function(m, g) { D <- rowsum(residuals(m, type = "dfbeta"), g, reorder = FALSE); crossprod(D) }
+## Cameron, Gelbach and Miller (2011): the two-way variance need not be positive definite; negative eigenvalues are set to zero (as sandwich fix = TRUE)
+vc_set <- function(m) {
+  V_init <- vc_cl(m, L$init); V_disp <- vc_cl(m, L$disp); V_id <- vc_cl(m, L$init_disp)
+  V_2w <- V_init + V_disp - V_id
+  e <- eigen(V_2w, symmetric = TRUE); n_neg <- sum(e$values <= 0)
+  if (n_neg > 0) V_2w <- e$vectors %*% diag(pmax(e$values, 0)) %*% t(e$vectors)
+  dimnames(V_2w) <- dimnames(V_init)
+  list(init = V_init, twoway = V_2w, tgtyr = vc_cl(m, L$tgtyr), twoway_psd = TRUE, twoway_n_neg_fixed = n_neg)
+}
+wald <- function(m, R, r = rep(0, nrow(R)), V = vcov(m)) {            # Wald test of R beta = r with variance V (default: coxph robust, initiator)
+  b <- coef(m); d <- R %*% b - r
   s <- as.numeric(t(d) %*% solve(R %*% V %*% t(R)) %*% d); c(chi2 = s, df = nrow(R), p = pchisq(s, nrow(R), lower.tail = FALSE))
 }
 nm1 <- names(coef(M1))
@@ -122,25 +153,36 @@ Rm <- function(pairs) { R <- matrix(0, length(pairs), length(nm1), dimnames = li
 REF <- ROLES[1]; OTHERS <- ROLES[-1]
 PAIRS_REF <- unlist(lapply(GAP, function(v) lapply(OTHERS, function(o) c(paste0(v, "_", o), paste0(v, "_", REF)))), recursive = FALSE)
 stopifnot(length(PAIRS_REF) == 5L * (G - 1L))
-W_roles <- wald(M1, Rm(PAIRS_REF))
-W_cross <- wald(M1, Rm(lapply(OTHERS, function(o) c(paste0("dMR_", o), paste0("dMR_", REF)))))
-logf("Wald (robust, cluster = initiator): utility surfaces differ by type (M1 vs M0) chi2 %.2f df %d p %.4g; utility interaction (cross coefficient) differs by type chi2 %.2f df %d p %.4g (NOT a test of equal rho)",
-     W_roles[1], W_roles[2], W_roles[3], W_cross[1], W_cross[2], W_cross[3])
-## pairwise contrasts, term by term: difference of the type coefficients, robust SE, 95% interval, p; plus per-axis 2-df and whole-surface 5-df tests
+VS <- vc_set(M1)
+stopifnot(isTRUE(all.equal(unname(VS$init), unname(vcov(M1)), tolerance = 1e-6)))   # the dfbeta construction reproduces coxph's initiator-robust variance
+logf("two-way (initiator x dispute) variance: %d non-positive eigenvalues set to zero (CGM fix)", VS$twoway_n_neg_fixed)
+R_roles <- Rm(PAIRS_REF); R_cross <- Rm(lapply(OTHERS, function(o) c(paste0("dMR_", o), paste0("dMR_", REF))))
+wald3 <- function(R) { a <- wald(M1, R, V = VS$init); b <- if (VS$twoway_psd) wald(M1, R, V = VS$twoway) else c(chi2 = NA, df = nrow(R), p = NA)
+  t <- wald(M1, R, V = VS$tgtyr); c(chi2 = a[["chi2"]], df = a[["df"]], p = a[["p"]], p_twoway = b[["p"]], p_tgtyr = t[["p"]]) }
+W_roles <- wald3(R_roles); W_cross <- wald3(R_cross)
+logf("Wald (CR0; cluster initiator / initiator x dispute / target-year): utility surfaces differ by type (M1 vs M0) chi2 %.2f df %d p %.4g / %.4g / %.4g; cross coefficient differs by type chi2 %.2f df %d p %.4g / %.4g / %.4g (NOT a test of equal rho)",
+     W_roles[["chi2"]], W_roles[["df"]], W_roles[["p"]], W_roles[["p_twoway"]], W_roles[["p_tgtyr"]], W_cross[["chi2"]], W_cross[["df"]], W_cross[["p"]], W_cross[["p_twoway"]], W_cross[["p_tgtyr"]])
+## pairwise contrasts, term by term: difference of the type coefficients, robust SE (initiator), 95% interval, p; plus per-axis 3-df and
+## whole-surface 5-df tests. GPT review 2026-11-16 P1: an axis test must include the cross term (the axis effect is b_k + 2 b_kk x_k + b_MR x_other);
+## the per-axis test below restricts linear, squared AND cross, i.e. "the two types' utility does not differ along this axis anywhere".
 V1 <- vcov(M1); b1 <- coef(M1)
 PAIRS_R <- combn(ROLES, 2, simplify = FALSE); PAIRS_R <- lapply(PAIRS_R, rev)          # (later type, earlier type), e.g. coal - bil
 pw <- NULL
 for (pr in PAIRS_R) {
   for (v in GAP) {
     a <- paste0(v, "_", pr[1]); z <- paste0(v, "_", pr[2]); d <- b1[[a]] - b1[[z]]; se <- sqrt(V1[a, a] + V1[z, z] - 2 * V1[a, z])
-    pw <- rbind(pw, data.frame(pair = paste(pr, collapse = "-"), term = v, diff = d, se = se, lo = d - 1.96 * se, hi = d + 1.96 * se, p = 2 * pnorm(-abs(d / se)), df = 1))
+    pw <- rbind(pw, data.frame(pair = paste(pr, collapse = "-"), term = v, diff = d, se = se, lo = d - 1.96 * se, hi = d + 1.96 * se, p = 2 * pnorm(-abs(d / se)), df = 1,
+                               p_twoway = NA_real_, p_tgtyr = NA_real_))
   }
-  for (blk in list(c("dM", "dM2"), c("dR", "dR2"), GAP)) {
-    w2 <- wald(M1, Rm(lapply(blk, function(v) c(paste0(v, "_", pr[1]), paste0(v, "_", pr[2])))))
-    pw <- rbind(pw, data.frame(pair = paste(pr, collapse = "-"), term = paste0("joint:", paste(blk, collapse = "+")), diff = NA, se = NA, lo = NA, hi = NA, p = w2[["p"]], df = w2[["df"]]))
+  for (blk in list(c("dM", "dM2", "dMR"), c("dR", "dR2", "dMR"), GAP)) {
+    w2 <- wald3(Rm(lapply(blk, function(v) c(paste0(v, "_", pr[1]), paste0(v, "_", pr[2])))))
+    pw <- rbind(pw, data.frame(pair = paste(pr, collapse = "-"), term = paste0("joint:", paste(blk, collapse = "+")), diff = NA, se = NA, lo = NA, hi = NA,
+                               p = w2[["p"]], df = w2[["df"]], p_twoway = w2[["p_twoway"]], p_tgtyr = w2[["p_tgtyr"]]))
   }
 }
-pw$note <- ifelse(pw$term == "dMR", "utility interaction P12, not rho", ifelse(grepl("^joint:dM\\+dM2$|^joint:dR\\+dR2$", pw$term), "tests (P mu)_k and P_kk jointly, not mu or sigma", ""))
+pw$note <- ifelse(pw$term == "dMR", "utility interaction P12, not rho",
+           ifelse(pw$term == "dM", "difference at dM = dR = 0 only (squared and cross terms can change its sign elsewhere)",
+           ifelse(grepl("^joint:dM\\+dM2\\+dMR$|^joint:dR\\+dR2\\+dMR$", pw$term), "axis effect differs anywhere (linear, squared, cross); not mu or sigma", "")))
 
 ## ---- 5. derived quantities ------------------------------------------------------------------------------------
 QN <- c("muM", "muR", "sdM", "sdR", "rho")
@@ -171,18 +213,28 @@ fit_or_null <- function(d, terms) {
 set.seed(123)
 ev_init <- unique(L[, c("ev_id", "init")]); inits <- unique(ev_init$init); ev_by_init <- split(ev_init$ev_id, ev_init$init)
 Lsplit <- split(L, L$ev_id)
-bs <- list(M1 = NULL, M1s = NULL); n_fail <- c(M1 = 0L, M1s = 0L, no_type = 0L)
+bs <- list(M1 = NULL, M1s = NULL); bs_coef <- NULL; n_fail <- c(M1 = 0L, M1s = 0L, no_type = 0L)
+fail_log <- data.frame(draw = integer(0), model = character(0), reason = character(0))   # GPT review P2-6: replicate IDs and failure reasons
 for (bb in seq_len(B)) {
   draw <- sample(inits, length(inits), replace = TRUE)
   evs <- unlist(ev_by_init[as.character(draw)], use.names = FALSE)
   Lb <- bind_rows(lapply(seq_along(evs), function(i) { x <- Lsplit[[as.character(evs[i])]]; x$ev_id <- i; x }))
-  if (any(tabulate(Lb$type[Lb$chosen == 1L] + 1L, nbins = G) == 0L)) { n_fail["no_type"] <- n_fail["no_type"] + 1L; next }   # a type with no events in this draw
+  if (any(tabulate(Lb$type[Lb$chosen == 1L] + 1L, nbins = G) == 0L)) {     # a type with no events in this draw
+    n_fail["no_type"] <- n_fail["no_type"] + 1L; fail_log <- rbind(fail_log, data.frame(draw = bb, model = "both", reason = "a type has no events")); next }
   c1 <- fit_or_null(Lb, GAP_G); c2 <- fit_or_null(Lb, TERMS_M1S)
-  if (is.null(c1)) n_fail["M1"] <- n_fail["M1"] + 1L else bs$M1 <- rbind(bs$M1, derive(c1))
-  if (is.null(c2)) n_fail["M1s"] <- n_fail["M1s"] + 1L else bs$M1s <- rbind(bs$M1s, derive(c2))
+  if (is.null(c1)) { n_fail["M1"] <- n_fail["M1"] + 1L; fail_log <- rbind(fail_log, data.frame(draw = bb, model = "M1", reason = "error, warning or non-finite fit"))
+  } else { bs$M1 <- rbind(bs$M1, derive(c1)); bs_coef <- rbind(bs_coef, c(draw = bb, c1)) }
+  if (is.null(c2)) { n_fail["M1s"] <- n_fail["M1s"] + 1L; fail_log <- rbind(fail_log, data.frame(draw = bb, model = "M1s", reason = "error, warning or non-finite fit"))
+  } else bs$M1s <- rbind(bs$M1s, derive(c2))
   if (bb %% 100 == 0) logf("bootstrap %d / %d", bb, B)
 }
 logf("bootstrap: %d draws; failed or warned M1 %d, M1s %d; draws with a type missing %d (dropped)", B, n_fail["M1"], n_fail["M1s"], n_fail["no_type"])
+## GPT review P2-6: intervals only when at least MIN_OK of the draws succeeded for that model
+MIN_OK <- 0.90
+n_ok <- c(M1 = if (is.null(bs$M1)) 0L else nrow(bs$M1), M1s = if (is.null(bs$M1s)) 0L else nrow(bs$M1s))
+boot_ok <- if (B > 0) n_ok / B >= MIN_OK else c(M1 = FALSE, M1s = FALSE)
+logf("bootstrap successful draws: M1 %d, M1s %d of %d; intervals reported for %s", n_ok[["M1"]], n_ok[["M1s"]], B,
+     paste(names(boot_ok)[boot_ok], collapse = ", "))
 
 ## ---- 7. tables (reporting rule F1) ------------------------------------------------------------------------
 in_support <- function(p, g) { s <- SUPPORT[[g]]; !is.na(p[[paste0("muM_", g)]]) && p[[paste0("muM_", g)]] >= s[["dM_lo"]] && p[[paste0("muM_", g)]] <= s[["dM_hi"]] &&
@@ -193,7 +245,9 @@ fmt_iv <- function(est, d, star = TRUE) {
 }
 tab <- NULL
 for (mm in c("M1", "M1s")) {
-  p <- pt[[mm]]; D <- bs[[mm]]
+  p <- pt[[mm]]; D <- if (boot_ok[[mm]]) bs[[mm]] else NULL        # too few successful draws: no intervals, no peak shares
+  tab <- rbind(tab, data.frame(model = mm, quantity = "bootstrap_successful_draws", estimate = sprintf("%d of %d", n_ok[[mm]], B),
+                               status = if (boot_ok[[mm]]) "intervals reported" else sprintf("fewer than %.0f%% succeeded: no intervals", 100 * MIN_OK), stringsAsFactors = FALSE))
   share <- setNames(vapply(ROLES, function(g) if (is.null(D)) NA_real_ else mean(D[, paste0("peak_", g)]), 0), ROLES)
   ok <- setNames(vapply(ROLES, function(g) p[[paste0("peak_", g)]] == 1 && !is.na(share[[g]]) && share[[g]] >= 0.95 && in_support(p, g), TRUE), ROLES)
   for (g in ROLES) {
@@ -215,13 +269,16 @@ coefs <- bind_rows(lapply(c("M0", "M1", "M1s"), function(mm) { m <- get(mm); s <
   data.frame(model = mm, term = rownames(s), coef = s[, "coef"], robust_se = s[, "robust se"], p = s[, ncol(s)], row.names = NULL) }))
 tests <- data.frame(test = c(sprintf("utility surfaces differ by type (M1 vs M0, %d df)", W_roles[["df"]]),
                              sprintf("utility interaction (cross coefficient) differs by type (%d df; NOT equal rho)", W_cross[["df"]])),
-                    chi2 = c(W_roles[1], W_cross[1]), df = c(W_roles[2], W_cross[2]), p = c(W_roles[3], W_cross[3]))
+                    chi2 = c(W_roles[["chi2"]], W_cross[["chi2"]]), df = c(W_roles[["df"]], W_cross[["df"]]),
+                    p = c(W_roles[["p"]], W_cross[["p"]]), p_twoway_init_x_dispute = c(W_roles[["p_twoway"]], W_cross[["p_twoway"]]),
+                    p_target_year = c(W_roles[["p_tgtyr"]], W_cross[["p_tgtyr"]]))
 od <- file.path(v2_root(), "output"); dir.create(od, showWarnings = FALSE)
 write.csv(tab, file.path(od, paste0(cell, "_derived.csv")), row.names = FALSE)
 write.csv(coefs, file.path(od, paste0(cell, "_coefs.csv")), row.names = FALSE)
 write.csv(tests, file.path(od, paste0(cell, "_tests.csv")), row.names = FALSE)
 write.csv(pw, file.path(od, paste0(cell, "_pairwise.csv")), row.names = FALSE)
-saveRDS(list(pt = pt, bs = bs, n_fail = n_fail, B = B, spec = spec, types = TYPES, roles = ROLES, support = SUPPORT, n_rows = nrow(L), E = sum(keep)),
+saveRDS(list(pt = pt, bs = bs, bs_coef = bs_coef, fail_log = fail_log, n_ok = n_ok, n_fail = n_fail, B = B, spec = spec, types = TYPES, roles = ROLES,
+             support = SUPPORT, n_rows = nrow(L), E = sum(keep), V = VS),
         file.path(od, paste0(cell, "_boot.rds")))
 print(tab, right = FALSE, row.names = FALSE); print(tests, row.names = FALSE)
 logf("done: %s_{derived,coefs,tests,pairwise}.csv and _boot.rds", cell)
