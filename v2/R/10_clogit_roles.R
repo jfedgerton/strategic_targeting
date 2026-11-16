@@ -85,6 +85,22 @@ W_roles <- wald(M1, Rm(unlist(lapply(GAP, function(v) list(c(paste0(v, "_coal"),
 W_cross <- wald(M1, Rm(list(c("dMR_coal", "dMR_bil"), c("dMR_join", "dMR_bil"))))
 logf("Wald (robust, cluster = initiator): role-specific gap terms vs pooled chi2 %.2f df %d p %.4f; equal cross terms chi2 %.2f df %d p %.4f",
      W_roles[1], W_roles[2], W_roles[3], W_cross[1], W_cross[2], W_cross[3])
+## pairwise contrasts, term by term (PI request 2026-11-16): difference of the role coefficients, robust SE, 95% interval, p
+## plus a 2-df test per role pair on each axis (linear + squared) and a 5-df test of the whole surface
+V1 <- vcov(M1); b1 <- coef(M1)
+PAIRS_R <- list(c("coal", "bil"), c("join", "bil"), c("join", "coal"))
+pw <- NULL
+for (pr in PAIRS_R) {
+  for (v in GAP) {
+    a <- paste0(v, "_", pr[1]); z <- paste0(v, "_", pr[2]); d <- b1[[a]] - b1[[z]]; se <- sqrt(V1[a, a] + V1[z, z] - 2 * V1[a, z])
+    pw <- rbind(pw, data.frame(pair = paste(pr, collapse = "-"), term = v, diff = d, se = se, lo = d - 1.96 * se, hi = d + 1.96 * se, p = 2 * pnorm(-abs(d / se)), df = 1))
+  }
+  for (blk in list(material = c("dM", "dM2"), relational = c("dR", "dR2"), surface = GAP)) {
+    w <- wald(M1, Rm(lapply(blk, function(v) c(paste0(v, "_", pr[1]), paste0(v, "_", pr[2])))))
+    pw <- rbind(pw, data.frame(pair = paste(pr, collapse = "-"), term = paste0("joint:", paste(blk, collapse = "+")), diff = NA, se = NA, lo = NA, hi = NA, p = w[["p"]], df = w[["df"]]))
+  }
+}
+write.csv(pw, file.path(file.path(v2_root(), "output"), paste0(cell, "_pairwise.csv")), row.names = FALSE)
 
 ## ---- 4. derived quantities ------------------------------------------------------------------------------------
 derive <- function(b) {                                   # b: named coefficient vector; returns mu, sigma, rho per role (NA if no peak)
