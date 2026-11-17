@@ -42,7 +42,7 @@
 ## Usage (same flags as the grid cell; --roles=bcj is required because the types are recoded from it):
 ##   Rscript v2/R/10_clogit_roles.R --sample=fmid --lag=3 --model=M1c --comparison=directed --entry=later --variant=all --roles=bcj --joiner_set=all --types=bc
 ##   --events=dymid (instead of --entry=later) for jointly fatal, --reach=capdist for the reach terms, --boot=1000, --boot_unit=pigeonhole|dispute|initiator,
-##   --loo=TRUE, --coorig_window=30|90|120 or --entry_mod=TRUE (entry-timing robustness, section 1b). Unknown, retired or duplicated options are refused (joint audit B2).
+##   --loo=TRUE, --coorig_months=1|2|3 or --entry_mod=TRUE (entry-timing robustness, section 1b). Unknown, retired or duplicated options are refused (joint audit B2).
 suppressPackageStartupMessages({ library(dplyr); library(survival) })
 this_file <- sub("^--file=", "", grep("^--file=", commandArgs(FALSE), value = TRUE))
 R_DIR <- dirname(normalizePath(this_file))
@@ -53,7 +53,7 @@ Sys.setenv(V2_ROOT = normalizePath(file.path(R_DIR, "..")))   # audit F5 (A1 P2-
 args <- commandArgs(trailingOnly = TRUE)
 ## joint audit B2: refuse retired options, unknown flags, bare flags and duplicated flags (get_arg would silently take the first)
 refuse_archived_options(args, "10_clogit_roles.R")
-SCRIPT_FLAGS <- c("sample", "lag", "model", "boot", "types", "boot_unit", "loo", "rel_scale", "era", "coorig_window", "entry_mod")
+SCRIPT_FLAGS <- c("sample", "lag", "model", "boot", "types", "boot_unit", "loo", "rel_scale", "era", "coorig_months", "entry_mod")
 KNOWN_FLAGS <- c(names(SPEC_CHOICES), "ame_K", "tag", SCRIPT_FLAGS)
 bad <- args[!grepl("^--[A-Za-z_0-9]+=.+$", args)]
 if (length(bad)) stop(sprintf("arguments must be --name=value; refused: %s", paste(bad, collapse = " ")))
@@ -64,8 +64,8 @@ SAMPLE <- get_arg(args, "sample", "fmid"); LAG <- as.integer(get_arg(args, "lag"
 B <- as.integer(get_arg(args, "boot", 1000))
 TYPES <- get_arg(args, "types", "bc"); BOOT_UNIT <- get_arg(args, "boot_unit", "pigeonhole"); LOO <- get_arg(args, "loo", FALSE)
 REL_SCALE <- get_arg(args, "rel_scale", "pooled"); ERA <- get_arg(args, "era", "all")
-COORIG_W <- as.integer(get_arg(args, "coorig_window", 0)); ENTRY_MOD <- get_arg(args, "entry_mod", FALSE)   # PI request 2026-11-17 (robustness; see section 1b)
-stopifnot(COORIG_W %in% c(0L, 30L, 90L, 120L), is.logical(ENTRY_MOD), !(ENTRY_MOD && COORIG_W > 0L))
+COORIG_W <- as.integer(get_arg(args, "coorig_months", 0)); ENTRY_MOD <- get_arg(args, "entry_mod", FALSE)   # PI request 2026-11-17 (robustness; see section 1b)
+stopifnot(COORIG_W %in% c(0L, 1L, 2L, 3L), is.logical(ENTRY_MOD), !(ENTRY_MOD && COORIG_W > 0L))
 stopifnot(REL_SCALE %in% c("pooled", "year"), ERA %in% c("all", "pre1946", "from1946"))
 stopifnot(SAMPLE %in% ALL_SAMPLES, LAG == 3L, MODEL == "M1c", B >= 0, TYPES %in% c("bc", "bc_nocoorig", "bcj"), BOOT_UNIT %in% c("pigeonhole", "dispute", "initiator"), is.logical(LOO))
 spec <- parse_spec(args)
@@ -73,7 +73,7 @@ spec <- parse_spec(args)
 stopifnot(spec_is_directed(spec), spec$roles == "bcj", spec_variant(spec) == "all", (if (is.null(spec$joiner_set)) "all" else spec$joiner_set) == "all",
           spec$controls == "minimal", spec$context == "all", (if (is.null(spec$mu_shift)) "none" else spec$mu_shift) == "none")
 cell <- paste0("clogit_", cell_name(SAMPLE, LAG, MODEL, spec), "_", TYPES, if (REL_SCALE == "year") "_relyear" else "", if (ERA != "all") paste0("_", ERA) else "",
-              if (COORIG_W > 0L) paste0("_cow", COORIG_W) else "", if (ENTRY_MOD) "_entrymod" else "",
+              if (COORIG_W > 0L) paste0("_com", COORIG_W) else "", if (ENTRY_MOD) "_entrymod" else "",
               "_b", c(pigeonhole = "pig", dispute = "disp", initiator = "init")[[BOOT_UNIT]])   # GPT recheck P2: bootstrap unit is part of the run identity
 log_open(paste0("10_", cell))
 logf("cell %s; spec %s; types %s; bootstrap B = %d, unit %s, seed 123; leave-one-out %s; relational scale %s; era %s", cell, spec_string(spec), TYPES, B, BOOT_UNIT, LOO, REL_SCALE, ERA)
@@ -95,14 +95,15 @@ logf("bcj events %d (bilateral %d, coalition originator %d, joiner %d); weight s
 
 ## ---- 1b. entry timing (PI request 2026-11-17; robustness for early vs late coordination) ---------------------------------
 ## The default coding makes every state that enters a dispute after its onset a joiner, however soon after. Two robustness options:
-##   --coorig_window=30|90|120 : a joiner whose ENTRY into the dispute is within W days of the dispute's onset is recoded coalition originator, and
-##       an alone originator becomes a coalition originator when some participant on its own side (sidea1) enters within W days. W = 0 is the default.
+##   --coorig_months=1|2|3 : a joiner whose ENTRY into the dispute is at most W calendar months after the dispute's onset month is recoded coalition
+##       originator, and an alone originator becomes a coalition originator when another participant on its own side enters within W months.
+##       W = 0 is the default coding (PI, 2026-11-17: months rather than 30/90/120 days, because the dates are recorded at month resolution).
 ##   --entry_mod=TRUE (types bcj only): the joiners' five gap terms are interacted with m = log(1 + entry lag in months), centred at the joiners'
 ##       weighted median lag, so the joiner coefficients are read at the median joiner and the five *_jlag terms show how targeting changes with lag.
 ## Dates come from events.rds (every row, escalations included, all samples): the dispute onset is the earliest pair start (ev_start_lo) among rows
 ## listing the dispute in dispnums; a participant's entry is its earliest pair start in the dispute as initiator or target. ev_start_lo / _hi are
-## MONTH indices bounding each pair start, so lags are in MONTHS and a W-day window is applied as a lag of at most round(W / 30) months
-## (30 -> 1, 90 -> 3, 120 -> 4); at month resolution a lag of k months spans roughly 30(k - 1) to 30(k + 1) days. The lag uses the lower bounds;
+## MONTH indices bounding each pair start, so lags are calendar-month differences (0 = entered in the onset month; a lag of k months spans
+## roughly 30(k - 1) to 30(k + 1) days). The lag uses the lower bounds;
 ## events whose class would change under the bounds (entry_hi - onset_lo vs entry_lo - onset_hi) are counted in the log. Originators have lag
 ## at most 1 month (asserted). The moderator uses log(1 + lag in months).
 ev_rds <- readRDS(file.path(data_dir, "events.rds"))
@@ -138,14 +139,14 @@ if (COORIG_W > 0L || ENTRY_MOD) {
   if (length(late_o) > 10L) stop("entry timing: more than 10 originator events start more than 1 month after their dispute's onset; check the dates")
   lag_ev[ev$grp != 2L] <- 0
   jl <- lag_ev[ev$grp == 2L]
-  logf("entry timing: joiner entry lag (MONTHS after dispute onset) quantiles 10/25/50/75/90%% = %s; joiners within 1 / 3 / 4 months (the 30 / 90 / 120-day windows): %d / %d / %d of %d",
-       paste(round(quantile(jl, c(.1, .25, .5, .75, .9))), collapse = " / "), sum(jl <= 1), sum(jl <= 3), sum(jl <= 4), length(jl))
+  logf("entry timing: joiner entry lag (MONTHS after dispute onset) quantiles 10/25/50/75/90%% = %s; joiners in the onset month / within 1 / 2 / 3 months: %d / %d / %d / %d of %d",
+       paste(round(quantile(jl, c(.1, .25, .5, .75, .9))), collapse = " / "), sum(jl == 0), sum(jl <= 1), sum(jl <= 2), sum(jl <= 3), length(jl))
   if (COORIG_W > 0L) {
-    W <- round(COORIG_W / 30)                                      # months (month-resolution dates)
+    W <- COORIG_W                                                  # calendar months
     amb_ev <- ev$grp == 2L & (pmax(as.numeric(lag_lo2), 0) <= W) != (as.numeric(lag_hi) <= W)
     early_j <- ev$grp == 2L & lag_ev <= W
     ## early partners per (dispute, side): ANY other participant of the dispute (rows whose weight-group dispute is d, all samples, escalations
-    ## included) entering within W days. Its side: sidea1 when it is a row's initiator, 1 - sidea1 when it is the target. An alone originator has
+    ## included) entering within W months. Its side: sidea1 when it is a row's initiator, 1 - sidea1 when it is the target. An alone originator has
     ## no other originator on its side by definition, so counting every same-side participant within W adds only early non-originators.
     sd_ <- rbind(data.frame(d = ev_rds$dispnum, cc = ev_rds$initiator, side = ev_rds$sidea1), data.frame(d = ev_rds$dispnum, cc = ev_rds$target, side = 1L - ev_rds$sidea1))
     sd_ <- unique(sd_); sd_$lag <- pmax(as.numeric(ent_lo[paste(sd_$d, sd_$cc)] - onset_lo[as.character(sd_$d)]), 0)
@@ -153,8 +154,8 @@ if (COORIG_W > 0L || ENTRY_MOD) {
     early_side <- sd_[sd_$lag <= W, c("d", "cc", "side")]
     alone_up <- ev$grp == 0L & vapply(seq_len(dat$E), function(e) any(early_side$d == k_all$dispnum[e] & early_side$side == k_all$sidea1[e] & early_side$cc != k_all$initiator[e]), TRUE)
     grp_old <- ev$grp; ev$grp[early_j | alone_up] <- 1L
-    logf("coorig window %d days (= %d months at month resolution): joiners recoded coalition originator %d; alone originators recoded coalition originator %d; events whose class depends on the date bounds %d; bcj now %d / %d / %d (was %d / %d / %d)",
-         COORIG_W, W, sum(early_j), sum(alone_up), sum(amb_ev), sum(ev$grp == 0L), sum(ev$grp == 1L), sum(ev$grp == 2L), sum(grp_old == 0L), sum(grp_old == 1L), sum(grp_old == 2L))
+    logf("coorig window %d months: joiners recoded coalition originator %d; alone originators recoded coalition originator %d; events whose class depends on the date bounds %d; bcj now %d / %d / %d (was %d / %d / %d)",
+         W, sum(early_j), sum(alone_up), sum(amb_ev), sum(ev$grp == 0L), sum(ev$grp == 1L), sum(ev$grp == 2L), sum(grp_old == 0L), sum(grp_old == 1L), sum(grp_old == 2L))
     ## constant within every D8 group (initiator, dispute, year), as the default roles are
     g8 <- tapply(ev$grp, paste(k_all$initiator, k_all$dispnum, k_all$year), function(x) length(unique(x)))
     if (any(g8 > 1L)) stop(sprintf("coorig window: roles not constant within %d (initiator, dispute, year) groups", sum(g8 > 1L)))
@@ -476,7 +477,7 @@ write.csv(pw, file.path(od, paste0(cell, "_pairwise.csv")), row.names = FALSE)
 if (!is.null(loo)) write.csv(loo, file.path(od, paste0(cell, "_loo.csv")), row.names = FALSE)
 if (!is.null(emod)) write.csv(emod, file.path(od, paste0(cell, "_entrymod.csv")), row.names = FALSE)
 saveRDS(list(pt = pt, bs = bs, bs_coef = bs_coef, fail_log = fail_log, n_ok = n_ok, n_fail = n_fail, B = B, spec = spec, types = TYPES, roles = ROLES,
-             support = SUPPORT, n_rows = nrow(L), E = sum(keep), V = VS, boot_unit = BOOT_UNIT, loo = loo, coorig_window = COORIG_W, entry_mod = ENTRY_MOD,
+             support = SUPPORT, n_rows = nrow(L), E = sum(keep), V = VS, boot_unit = BOOT_UNIT, loo = loo, coorig_months = COORIG_W, entry_mod = ENTRY_MOD,
              lag_ev = lag_ev, amb_ev = amb_ev, m_ctr = if (ENTRY_MOD) M_CTR else NA_real_),
         file.path(od, paste0(cell, "_boot.rds")))
 ## GPT recheck P2: a manifest names exactly the artifacts written by THIS run (an older optional file, e.g. _loo.csv, is not part of it)
