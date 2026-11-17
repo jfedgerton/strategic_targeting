@@ -96,14 +96,20 @@ logf("bcj events %d (bilateral %d, coalition originator %d, joiner %d); weight s
 
 ## ---- 1a. opportunity-weight offset (run 1 weights of 08_opportunity_weights.R; PI request 2026-11-17: the clogit version of --opp_weight) -----------
 ## Stage-2 utility gains the FIXED term lambda x ln q_ij (q = the auxiliary MID-propensity opportunity weight of the alternative row; no new parameter).
-## A sensitivity, as in README section 14.2: at lambda = 1 the gap terms describe target choice given militarized-contact propensity, not selection over the
+## A sensitivity (GPT review 2026-11-17): the residual target-choice surface conditional on a FIXED fitted MID-propensity offset, not a fatality model and not a
+## causal correction; bootstrap and LOO hold the q column fixed, and the five --opp_draw fits are sensitivity scenarios (report their range separately, never as
+## a confidence interval). At lambda = 1 the gap terms describe target choice given militarized-contact propensity, not selection over the
 ## full opportunity structure. The clogit has no stage 1, so only the stage-2 side of the Stan offset applies. lambda = 0 drops the offset term from the formula, so the fit IS the
 ## cell without the switch (verified bit for bit in the smoke test and the audit). --opp_draw=1..5 (lambda = 1) conditions on one coherent full-vector draw of the auxiliary coefficients.
 OPP_ON <- spec_opp_on(spec); opp_off <- rep(0, dat$N2); LAMBDA <- 0; OPP_DRAW <- 0L
 if (OPP_ON) {
   LAMBDA <- OPP_LAMBDA[[spec_opp_weight(spec)]]; OPP_DRAW <- as.integer(spec_opp_draw(spec))
   stopifnot(identical(Z_cols, Z_DIRECTED), LAG == OPPW_LAG, OPP_DRAW == 0L || LAMBDA == 1, nrow(alts) == dat$N2)
-  stopifnot(isTRUE(all.equal(unname(dat$Z[, 1]), as.numeric(alts[[Z_cols[1]]]))))   # audit P3-5: dat rows are the alts rows, in order (sampled = 0)
+  ## audit P3-5 / GPT P3: dat rows are the alts rows, in order (sampled = 0); every Z column must match row for row, and the initiator of each
+  ## state-year's rows must be the alts ccode1 (a within-column permutation cannot pass both)
+  stopifnot(all(vapply(seq_along(Z_cols), function(k) isTRUE(all.equal(unname(dat$Z[, k]), as.numeric(alts[[Z_cols[k]]]), tolerance = 0)), TRUE)),
+            identical(as.integer(alts$ccode1), as.integer(rep(sy$ccode, times = dat$cs_end - dat$cs_start + 1L))),
+            identical(as.integer(alts$year), as.integer(rep(sy$year, times = dat$cs_end - dat$cs_start + 1L))))
   w_path <- oppw_path(spec, file.path(v2_root(), "output"))
   if (!file.exists(w_path)) stop(sprintf("--opp_weight needs %s; run `Rscript v2/R/08_opportunity_weights.R %s --opp_outcome=%s` first", w_path,
                                          if (spec_events(spec) == "dymid") "--events=dymid" else "--entry=later", spec_opp_outcome(spec)))
@@ -262,9 +268,9 @@ if (OPP_ON) {   # README 14 primary diagnostic on the clogit's own strata: share
   rk <- vapply(split(L, L$ev_id), function(d) mean(d$lq < d$lq[d$chosen == 1L]), 0)
   ek_r <- data.frame(ev_id = as.integer(names(rk)), rank = rk); ek_r$type <- t_ev[ek_r$ev_id]; ek_r$w <- dat$ev_w[ek_r$ev_id]
   opp_diag <- do.call(rbind, lapply(c(sort(unique(ek_r$type)), NA), function(g) { d <- if (is.na(g)) ek_r else ek_r[ek_r$type == g, ]
-    data.frame(type = if (is.na(g)) "all" else ROLES[g + 1], events = nrow(d), weight = sum(d$w), median_rank = median(d$rank),
+    data.frame(type = if (is.na(g)) "all" else ROLES[g + 1], events = nrow(d), weight = sum(d$w), median_rank_unweighted = median(d$rank),
                bottom5_events = sum(d$rank < OPPW_RANK_CUTS[1]), bottom25_events = sum(d$rank < OPPW_RANK_CUTS[2]), bottom5_weight = sum(d$w[d$rank < OPPW_RANK_CUTS[1]]), bottom25_weight = sum(d$w[d$rank < OPPW_RANK_CUTS[2]])) }))
-  logf("opp_weight diagnostic (within-set rank of the chosen target's q, by type): %s", paste(sprintf("%s median %.2f, bottom 5%% %d, bottom 25%% %d of %d", opp_diag$type, opp_diag$median_rank,
+  logf("opp_weight diagnostic (within-set rank of the chosen target's q, by type; a low-weight flag, not a calibration test): %s", paste(sprintf("%s unweighted median %.2f, bottom 5%% %d, bottom 25%% %d of %d", opp_diag$type, opp_diag$median_rank_unweighted,
        opp_diag$bottom5_events, opp_diag$bottom25_events, opp_diag$events), collapse = "; "))
 }
 stopifnot(!anyNA(L[, c("dM", "dR", Z_cols)]))
