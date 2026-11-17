@@ -123,7 +123,7 @@ if (COORIG_W > 0L || ENTRY_MOD) {
   if (!file.exists(pt_path)) stop("entry timing: ", pt_path, " is missing; rebuild the data with the 2026-11-17 build (01_build_data.R)")
   P <- readRDS(pt_path)
   stopifnot(all(c("dispnum", "ccode", "spell", "spell_first", "spell_last", "orig", "side_entry", "side_conflict", "entry_src", "entry_lo", "entry_hi", "onset_lo", "onset_hi") %in% names(P)))
-  stopifnot("entry_clamped" %in% names(P), !anyNA(P$entry_lo))   # January-clamped entries carry their known (earlier) GML start month (build 2026-11-17)
+  stopifnot(c("entry_clamped", "gml_floored") %in% names(P), !anyNA(P$entry_lo))   # January-clamped entries carry their known (earlier) GML start month (build 2026-11-17)
   ## Reference date (--timing_ref; paired sensitivities, GPT recheck 2026-11-17). originator (default): the dispute's EARLIEST ORIGINATOR ENTRY on
   ## the participant-date scale (bounds = minimum over originator spells; COW start where no originator spell exists), because COW starts and GML
   ## participant dates disagree in many disputes (1039: COW June 1970, every originator September 1970). cow: time since the COW dispute start.
@@ -538,7 +538,7 @@ timing_audit <- NULL
 if (COORIG_W > 0L || ENTRY_MOD) {   # GPT recheck: event-level timing provenance (both references), fitted events only
   timing_audit <- data.frame(initiator = k_all$initiator, target = k_all$target, year = k_all$year, dispnum = k_all$dispnum, grp_default = ev_grp_default, grp_used = ev$grp,
                              entry_src = P$entry_src[prow], entry_lo = P$entry_lo[prow], entry_hi = P$entry_hi[prow], ref_cow_lo = P$cow_lo[prow], ref_cow_hi = P$cow_hi[prow],
-                             ref_orig_lo = P$orig_lo[prow], ref_orig_hi = P$orig_hi[prow], side_entry = P$side_entry[prow], side_switch = P$side_switch[prow],
+                             ref_orig_lo = P$orig_lo[prow], ref_orig_hi = P$orig_hi[prow], side_entry = P$side_entry[prow], side_switch = P$side_switch[prow], entry_clamped = P$entry_clamped[prow], gml_floored = P$gml_floored[prow], gml_start_mkey = P$gml_start_mkey[prow], spell_first = P$spell_first[prow], spell_last = P$spell_last[prow],
                              lag_lo = lag_lo_ev, lag_hi = lag_hi_ev, lag_mid = lag_ev, w = dat$ev_w)[keep, ]
   write.csv(timing_audit, file.path(od, paste0(cell, "_timing.csv")), row.names = FALSE)
 }

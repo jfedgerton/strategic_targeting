@@ -1233,7 +1233,8 @@ psd_tt <- participant_spell_dates(dd_evt, db_tt, part = if (EVENTS == "dymid" ||
 stopifnot(all(c("dispnum", "ccode1", "year", "sidea1") %in% names(dd_evt)))
 side_yr <- dd_evt |> distinct(dispnum, ccode = as.integer(ccode1), year, side = as.integer(sidea1)) |> group_by(dispnum, ccode, year) |>
   summarise(n_side = n_distinct(side), side = min(side), .groups = "drop")
-side_any <- side_yr |> group_by(dispnum, ccode) |> summarise(n_side_disp = n_distinct(side), .groups = "drop")
+## GPT recheck 3 (P3): switch / ever-two-sided flag from the unreduced (dispute, participant, side) records, not the per-year minimum
+side_any <- dd_evt |> distinct(dispnum, ccode = as.integer(ccode1), side = as.integer(sidea1)) |> group_by(dispnum, ccode) |> summarise(n_side_disp = n_distinct(side), .groups = "drop")
 parts_tt <- psd_tt |> as.data.frame() |>
   left_join(side_yr |> rename(spell_first = year, side_entry = side, n_side_first = n_side), by = c("dispnum", "ccode", "spell_first")) |>
   left_join(side_any, by = c("dispnum", "ccode")) |>
@@ -1244,13 +1245,15 @@ parts_tt <- psd_tt |> as.data.frame() |>
          side_conflict = n_side_first > 1L, side_switch = n_side_disp > 1L) |>
   ## audit P3-1: a GML spell spanning a COW gap must not date a later spell before the previous spell ended; floor at January after the previous spell's last year
   group_by(dispnum, ccode) |> arrange(spell, .by_group = TRUE) |>
+  ## GPT recheck 3 (P2): a floored record has no observed re-entry date, so it takes the later spell's first-year interval (COW participation defines re-entry); flag kept
   mutate(gml_floor = ifelse(is.na(lag(spell_last)), -Inf, ym_index(lag(spell_last) + 1L, 1L)), gml_floored = entry_clamped & gml_start_mkey < gml_floor,
-         entry_lo = ifelse(entry_clamped, pmax(gml_start_mkey, gml_floor), entry_lo), entry_hi = ifelse(entry_clamped, pmax(gml_start_mkey, gml_floor), entry_hi)) |>
+         entry_lo = ifelse(gml_floored, ym_index(spell_first, 1L), ifelse(entry_clamped, gml_start_mkey, entry_lo)),
+         entry_hi = ifelse(gml_floored, ym_index(spell_first, 12L), ifelse(entry_clamped, gml_start_mkey, entry_hi))) |>
   ungroup() |>
   select(dispnum, ccode, spell, spell_first, spell_last, orig, side_entry, side_conflict, side_switch, entry_src, entry_res, entry_clamped, gml_start_mkey, gml_floored, entry_lo, entry_hi, onset_lo, onset_hi)
-stopifnot(!anyNA(parts_tt$side_entry), !anyNA(parts_tt$onset_lo), !anyNA(parts_tt$entry_lo), all(!parts_tt$entry_clamped | parts_tt$entry_lo < ym_index(parts_tt$spell_first, 1L)), all(parts_tt$entry_lo <= parts_tt$entry_hi), all(parts_tt$onset_lo <= parts_tt$onset_hi))
+stopifnot(!anyNA(parts_tt$side_entry), !anyNA(parts_tt$onset_lo), !anyNA(parts_tt$entry_lo), all(!parts_tt$entry_clamped | parts_tt$gml_floored | parts_tt$entry_lo < ym_index(parts_tt$spell_first, 1L)), all(!parts_tt$gml_floored | (parts_tt$entry_lo == ym_index(parts_tt$spell_first, 1L) & parts_tt$entry_hi == ym_index(parts_tt$spell_first, 12L))), all(parts_tt$entry_lo <= parts_tt$entry_hi), all(parts_tt$onset_lo <= parts_tt$onset_hi))
 assert_no_dup_keys(parts_tt, c("dispnum", "ccode", "spell"), "entry-timing participant table")
-blog("entry-timing table: clamped GML starts floored at January after the previous spell's last year %d", sum(parts_tt$gml_floored))
+blog("entry-timing table: clamped GML starts that predate the previous spell's end (dated by the later spell's first year, flagged gml_floored) %d: %s", sum(parts_tt$gml_floored), paste(with(parts_tt[parts_tt$gml_floored, ], sprintf("%d/%d spell %d", dispnum, ccode, spell)), collapse = ", "))
 blog("entry-timing table: %d participant spells in %d disputes; entry at day / month / year resolution %d / %d / %d; side conflict in the entry year %d; side switch within the dispute %d; entry before the dispute onset (lower bounds) %d",
      nrow(parts_tt), n_distinct(parts_tt$dispnum), sum(parts_tt$entry_res == 1L), sum(parts_tt$entry_res == 2L), sum(parts_tt$entry_res == 3L),
      sum(parts_tt$side_conflict), sum(parts_tt$side_switch), sum(parts_tt$entry_hi < parts_tt$onset_lo))
