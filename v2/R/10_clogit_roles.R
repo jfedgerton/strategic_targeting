@@ -33,6 +33,11 @@
 ##   dispute is the dependence that changed step B). --boot_unit=initiator resamples initiating states. Intervals are reported only when B >= 200
 ##   and >= 90% of the draws succeed (joint audit B3); a draw whose fit errors or warns is dropped for that model and logged with its reason.
 ## --loo=TRUE adds leave-one-dispute-out and leave-one-initiator-out refits of M1 (joint audit M3), written to <cell>_loo.csv.
+## Relational-measure diagnostics (PI request 2026-11-16, measurement check of log IGO PageRank):
+##   --rel_scale=year rescales the relational gap by the WITHIN-YEAR spread of log PageRank instead of the pooled spread (the measure compresses
+##   over time: within-year SD 0.85 in 1880, 0.25 in 2000), i.e. dR_year = dR_pooled * GAP_SCALE_R / gap_scale(R_pr in the event's year);
+##   --era=pre1946|from1946 keeps only events before 1946 or from 1946 on. Both are diagnostics, not the main specification.
+## Per-type axis tests (3 df: linear, squared, cross = 0) are also reported: "does this axis matter for this type at all".
 ##
 ## Usage (same flags as the grid cell; --roles=bcj is required because the types are recoded from it):
 ##   Rscript v2/R/10_clogit_roles.R --sample=fmid --lag=3 --model=M1c --comparison=directed --entry=later --variant=all --roles=bcj --joiner_set=all --types=bc
@@ -48,7 +53,7 @@ Sys.setenv(V2_ROOT = normalizePath(file.path(R_DIR, "..")))   # audit F5 (A1 P2-
 args <- commandArgs(trailingOnly = TRUE)
 ## joint audit B2: refuse retired options, unknown flags, bare flags and duplicated flags (get_arg would silently take the first)
 refuse_archived_options(args, "10_clogit_roles.R")
-SCRIPT_FLAGS <- c("sample", "lag", "model", "boot", "types", "boot_unit", "loo")
+SCRIPT_FLAGS <- c("sample", "lag", "model", "boot", "types", "boot_unit", "loo", "rel_scale", "era")
 KNOWN_FLAGS <- c(names(SPEC_CHOICES), "ame_K", "tag", SCRIPT_FLAGS)
 bad <- args[!grepl("^--[A-Za-z_0-9]+=.+$", args)]
 if (length(bad)) stop(sprintf("arguments must be --name=value; refused: %s", paste(bad, collapse = " ")))
@@ -58,14 +63,16 @@ if (anyDuplicated(flag_names)) stop(sprintf("option(s) given more than once: %s"
 SAMPLE <- get_arg(args, "sample", "fmid"); LAG <- as.integer(get_arg(args, "lag", 3)); MODEL <- get_arg(args, "model", "M1c")
 B <- as.integer(get_arg(args, "boot", 1000))
 TYPES <- get_arg(args, "types", "bc"); BOOT_UNIT <- get_arg(args, "boot_unit", "dispute"); LOO <- get_arg(args, "loo", FALSE)
+REL_SCALE <- get_arg(args, "rel_scale", "pooled"); ERA <- get_arg(args, "era", "all")
+stopifnot(REL_SCALE %in% c("pooled", "year"), ERA %in% c("all", "pre1946", "from1946"))
 stopifnot(SAMPLE %in% ALL_SAMPLES, LAG == 3L, MODEL == "M1c", B >= 0, TYPES %in% c("bc", "bc_nocoorig", "bcj"), BOOT_UNIT %in% c("dispute", "initiator"), is.logical(LOO))
 spec <- parse_spec(args)
 ## audit F5 (A1 P2-1): the cells M1c is defined on, and nothing else (02_fit_model.R refuses the same)
 stopifnot(spec_is_directed(spec), spec$roles == "bcj", spec_variant(spec) == "all", (if (is.null(spec$joiner_set)) "all" else spec$joiner_set) == "all",
           spec$controls == "minimal", spec$context == "all", (if (is.null(spec$mu_shift)) "none" else spec$mu_shift) == "none")
-cell <- paste0("clogit_", cell_name(SAMPLE, LAG, MODEL, spec), "_", TYPES)
+cell <- paste0("clogit_", cell_name(SAMPLE, LAG, MODEL, spec), "_", TYPES, if (REL_SCALE == "year") "_relyear" else "", if (ERA != "all") paste0("_", ERA) else "")
 log_open(paste0("10_", cell))
-logf("cell %s; spec %s; types %s; bootstrap B = %d over %ss, seed 123; leave-one-out %s", cell, spec_string(spec), TYPES, B, BOOT_UNIT, LOO)
+logf("cell %s; spec %s; types %s; bootstrap B = %d over %ss, seed 123; leave-one-out %s; relational scale %s; era %s", cell, spec_string(spec), TYPES, B, BOOT_UNIT, LOO, REL_SCALE, ERA)
 
 ## ---- 1. assemble exactly as 02_fit_model.R does for M1c ----------------------------------------------------
 data_dir <- spec_data_dir(spec, v2_root())
@@ -91,6 +98,9 @@ if (TYPES == "bcj") {
   ROLES <- c("bil", "coal"); t_ev <- as.integer(ev$grp > 0L); keep <- ev$grp != 1L
 }
 G <- length(ROLES)
+ev_year <- as.integer(sy$year[ev$sy_row])
+if (ERA == "pre1946") keep <- keep & ev_year < 1946L
+if (ERA == "from1946") keep <- keep & ev_year >= 1946L
 stopifnot(length(t_ev) == dat$E, all(t_ev %in% 0:(G - 1L)), all(tabulate(t_ev[keep] + 1L, nbins = G) > 0L))   # every type has events
 logf("types %s: %s; events kept %d of %d (dropped %d)", TYPES,
      paste(sprintf("%s %d (weights %.1f)", ROLES, tabulate(t_ev[keep] + 1L, nbins = G), vapply(0:(G - 1L), function(g) sum(dat$ev_w[keep & t_ev == g]), 0)), collapse = "; "),
@@ -105,6 +115,17 @@ rows <- lapply(which(keep), function(e) {
 L <- bind_rows(rows)
 stopifnot(all(tapply(L$chosen, L$ev_id, sum) == 1L), all(tapply(L$row, L$ev_id, length) >= 2L), length(unique(L$ev_id)) == sum(keep))
 L$dM <- dat$x[L$row, 1]; L$dR <- dat$x[L$row, 2]
+if (REL_SCALE == "year") {
+  ## the build divides every relational log-ratio by ONE pooled scale (gap_scale over all years); here it is replaced by that year's own scale
+  posy <- readRDS(file.path(data_dir, "sy_positions.rds"))
+  stopifnot(all(c("year", "R_pr") %in% names(posy)))
+  GSR <- gap_scale(posy$R_pr, posy$year)
+  ys <- vapply(split(posy$R_pr, posy$year), function(v) gap_scale(v, rep(1L, length(v))), 0)
+  yr_row <- as.character(sy$year[dat$ev_sy[L$ev_id]])
+  stopifnot(all(yr_row %in% names(ys)), all(is.finite(ys)), all(ys > 0))
+  L$dR <- L$dR * GSR / ys[yr_row]
+  logf("relational gap rescaled within year: pooled scale %.3f; year scales %.3f to %.3f (median %.3f)", GSR, min(ys), max(ys), median(ys))
+}
 Zm <- dat$Z[L$row, , drop = FALSE]; colnames(Zm) <- Z_cols; L <- cbind(L, Zm)
 stopifnot(!anyNA(L[, c("dM", "dR", Z_cols)]))
 L$dM2 <- L$dM^2; L$dR2 <- L$dR^2; L$dMR <- L$dM * L$dR
@@ -317,11 +338,20 @@ tab <- rbind(tab, data.frame(model = "M0", quantity = c(paste0(QN, "_pooled"), "
                              status = "point estimate only", stringsAsFactors = FALSE))
 coefs <- bind_rows(lapply(c("M0", "M1", "M1s"), function(mm) { m <- get(mm); s <- summary(m)$coefficients
   data.frame(model = mm, term = rownames(s), coef = s[, "coef"], robust_se = s[, "robust se"], p = s[, ncol(s)], row.names = NULL) }))
+## per-type axis tests: does this axis matter for this type at all (3 df: linear, squared, cross = 0)
+Rz <- function(terms) { R <- matrix(0, length(terms), length(nm1), dimnames = list(NULL, nm1)); for (i in seq_along(terms)) R[i, terms[i]] <- 1; R }
+axis_rows <- NULL
+for (g in ROLES) for (ax in list(material = c("dM", "dM2", "dMR"), relational = c("dR", "dR2", "dMR"))) {
+  w0 <- wald3(Rz(paste0(ax, "_", g)))
+  axis_rows <- rbind(axis_rows, data.frame(test = sprintf("%s: %s axis has no effect on target choice (3 df)", g, if (ax[1] == "dM") "material" else "relational"),
+                                           chi2 = w0[["chi2"]], df = w0[["df"]], p_init_x_dispute = w0[["p"]], p_initiator = w0[["p_initiator"]], p_target_year = w0[["p_tgtyr"]]))
+}
 tests <- data.frame(test = c(sprintf("utility surfaces differ by type (M1 vs M0, %d df)", W_roles[["df"]]),
                              sprintf("utility interaction (cross coefficient) differs by type (%d df; NOT equal rho)", W_cross[["df"]])),
                     chi2 = c(W_roles[["chi2"]], W_cross[["chi2"]]), df = c(W_roles[["df"]], W_cross[["df"]]),
                     p_init_x_dispute = c(W_roles[["p"]], W_cross[["p"]]), p_initiator = c(W_roles[["p_initiator"]], W_cross[["p_initiator"]]),
                     p_target_year = c(W_roles[["p_tgtyr"]], W_cross[["p_tgtyr"]]))
+tests <- rbind(tests, axis_rows)
 od <- file.path(v2_root(), "output"); dir.create(od, showWarnings = FALSE)
 write.csv(tab, file.path(od, paste0(cell, "_derived.csv")), row.names = FALSE)
 write.csv(coefs, file.path(od, paste0(cell, "_coefs.csv")), row.names = FALSE)
