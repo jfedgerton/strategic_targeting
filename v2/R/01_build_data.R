@@ -1241,11 +1241,16 @@ parts_tt <- psd_tt |> as.data.frame() |>
   mutate(entry_lo = ifelse(entry_res <= 2L, entry_mkey, ym_index(entry_y, 1L)), entry_hi = ifelse(entry_res <= 2L, entry_mkey, ym_index(entry_y, 12L)),
          ## a GML start before the spell's first COW year is clamped to January by participant_spell_dates(); the timing table keeps the known GML month
          entry_clamped = entry_src == "participant (entry clamped to January)",
-         entry_lo = ifelse(entry_clamped, gml_start_mkey, entry_lo), entry_hi = ifelse(entry_clamped, gml_start_mkey, entry_hi),
          side_conflict = n_side_first > 1L, side_switch = n_side_disp > 1L) |>
-  select(dispnum, ccode, spell, spell_first, spell_last, orig, side_entry, side_conflict, side_switch, entry_src, entry_res, entry_clamped, gml_start_mkey, entry_lo, entry_hi, onset_lo, onset_hi)
+  ## audit P3-1: a GML spell spanning a COW gap must not date a later spell before the previous spell ended; floor at January after the previous spell's last year
+  group_by(dispnum, ccode) |> arrange(spell, .by_group = TRUE) |>
+  mutate(gml_floor = ifelse(is.na(lag(spell_last)), -Inf, ym_index(lag(spell_last) + 1L, 1L)), gml_floored = entry_clamped & gml_start_mkey < gml_floor,
+         entry_lo = ifelse(entry_clamped, pmax(gml_start_mkey, gml_floor), entry_lo), entry_hi = ifelse(entry_clamped, pmax(gml_start_mkey, gml_floor), entry_hi)) |>
+  ungroup() |>
+  select(dispnum, ccode, spell, spell_first, spell_last, orig, side_entry, side_conflict, side_switch, entry_src, entry_res, entry_clamped, gml_start_mkey, gml_floored, entry_lo, entry_hi, onset_lo, onset_hi)
 stopifnot(!anyNA(parts_tt$side_entry), !anyNA(parts_tt$onset_lo), !anyNA(parts_tt$entry_lo), all(!parts_tt$entry_clamped | parts_tt$entry_lo < ym_index(parts_tt$spell_first, 1L)), all(parts_tt$entry_lo <= parts_tt$entry_hi), all(parts_tt$onset_lo <= parts_tt$onset_hi))
 assert_no_dup_keys(parts_tt, c("dispnum", "ccode", "spell"), "entry-timing participant table")
+blog("entry-timing table: clamped GML starts floored at January after the previous spell's last year %d", sum(parts_tt$gml_floored))
 blog("entry-timing table: %d participant spells in %d disputes; entry at day / month / year resolution %d / %d / %d; side conflict in the entry year %d; side switch within the dispute %d; entry before the dispute onset (lower bounds) %d",
      nrow(parts_tt), n_distinct(parts_tt$dispnum), sum(parts_tt$entry_res == 1L), sum(parts_tt$entry_res == 2L), sum(parts_tt$entry_res == 3L),
      sum(parts_tt$side_conflict), sum(parts_tt$side_switch), sum(parts_tt$entry_hi < parts_tt$onset_lo))

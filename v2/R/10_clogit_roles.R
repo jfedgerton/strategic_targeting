@@ -115,6 +115,7 @@ ev_rds <- readRDS(file.path(data_dir, "events.rds"))
 lag_ev <- rep(NA_real_, dat$E); lag_lo_ev <- lag_hi_ev <- rep(NA_real_, dat$E); role_alt <- NULL; grp_alt <- NULL
 COORIG_BOUND <- get_arg(args, "coorig_bound", "definite"); stopifnot(COORIG_BOUND %in% c("definite", "possible"))
 if (any(grepl("^--coorig_bound=", args)) && COORIG_W == 0L) stop("--coorig_bound only applies with --coorig_months")
+if (any(grepl("^--timing_ref=", args)) && COORIG_W == 0L && !ENTRY_MOD) stop("--timing_ref only applies with --coorig_months or --entry_mod")
 ev_grp_default <- ev$grp
 if (COORIG_W > 0L || ENTRY_MOD) {
   stopifnot(TYPES %in% c("bc", "bcj"))
@@ -134,6 +135,9 @@ if (COORIG_W > 0L || ENTRY_MOD) {
   P$orig_lo <- ifelse(is.na(P$r_lo), P$cow_lo, P$r_lo); P$orig_hi <- ifelse(is.na(P$r_hi), P$cow_hi, P$r_hi)
   if (TIMING_REF == "originator") { P$onset_lo <- P$orig_lo; P$onset_hi <- P$orig_hi }
   P <- P[order(P$dispnum, P$ccode, P$spell), ]
+  far <- unique(P[!is.na(P$r_lo) & P$cow_lo - P$r_hi > 12, c("dispnum", "r_lo", "cow_lo")])   # audit P2-2: COW/GML disagreements, flagged not resolved
+  if (nrow(far)) logf("entry timing: %d disputes whose earliest-originator reference precedes the COW start by more than 12 months (run --timing_ref=cow as the paired check): %s",
+                      nrow(far), paste(sprintf("%d (%d mo)", far$dispnum, far$cow_lo - far$r_lo), collapse = ", "))
   logf("entry timing: reference = %s; spells without an originator spell (COW start used) %d; originator reference differs from the COW start for %d spells; January-clamped entries dated by their GML start %d",
        if (TIMING_REF == "originator") "earliest originator entry (participant dates)" else "COW dispute start", sum(is.na(P$r_lo)), sum(P$orig_lo != P$cow_lo), sum(P$entry_clamped))
   ne_t <- ev_rds[!ev_rds$escalation, c("initiator", "target", "year", "dispnum", "dispnums")]
@@ -152,7 +156,7 @@ if (COORIG_W > 0L || ENTRY_MOD) {
   lag_hi_ev <- pmax(P$entry_hi[prow] - P$onset_lo[prow], 0)                      # latest possible lag
   lag_ev <- (lag_lo_ev + lag_hi_ev) / 2                                           # midpoint (moderator)
   o_late <- ev$grp != 2L & lag_lo_ev > 1
-  if (any(o_late)) logf("entry timing: %d originator events enter more than 1 month after their dispute's earliest originator (co-originators acting later; kept as originators, lag set to 0)", sum(o_late))
+  if (any(o_late)) logf("entry timing: %d originator events enter more than 1 month after the reference (%s; kept as originators, lag set to 0)", sum(o_late), if (TIMING_REF == "originator") "the dispute's earliest originator" else "the COW dispute start")
   lag_ev[ev$grp != 2L] <- 0; lag_lo_ev[ev$grp != 2L] <- 0; lag_hi_ev[ev$grp != 2L] <- 0   # originators enter at onset by definition
   jl <- lag_ev[ev$grp == 2L]
   logf("entry timing: joiner entry lag (months, midpoint) quantiles 10/25/50/75/90%% = %s; joiners whose lag bounds differ %d of %d; definitely / possibly within 1, 2, 3 months: %s",
@@ -174,8 +178,8 @@ if (COORIG_W > 0L || ENTRY_MOD) {
     }
     rc <- recode(COORIG_BOUND); rc_alt <- recode(setdiff(c("definite", "possible"), COORIG_BOUND))
     grp_old <- ev$grp; ev$grp <- rc$grp
-    grp_alt <- rc_alt$grp; diff_e <- which(rc$grp != grp_alt)                  # role_alt (fitted sample only) is built at output time
-    logf("coorig window %d months, %s bound: joiners recoded coalition originator %d; alone originators recoded %d; bcj now %d / %d / %d (was %d / %d / %d); events whose role differs under the %s bound %d (weight %.1f)",
+    grp_alt <- rc_alt$grp; diff_e <- which((if (TYPES == "bc") rc$grp > 0L else rc$grp) != (if (TYPES == "bc") grp_alt > 0L else grp_alt))   # fitted type; all events before any era filter (audit P3-4)                  # role_alt (fitted sample only) is built at output time
+    logf("coorig window %d months, %s bound: joiners recoded coalition originator %d; alone originators recoded %d; bcj now %d / %d / %d (was %d / %d / %d); events whose fitted type differs under the %s bound %d (weight %.1f; before any era filter)",
          W, COORIG_BOUND, sum(rc$early_j), sum(rc$alone_up), sum(ev$grp == 0L), sum(ev$grp == 1L), sum(ev$grp == 2L), sum(grp_old == 0L), sum(grp_old == 1L), sum(grp_old == 2L),
          setdiff(c("definite", "possible"), COORIG_BOUND), length(diff_e), sum(dat$ev_w[diff_e]))
     g8 <- tapply(ev$grp, paste(k_all$initiator, k_all$dispnum, k_all$year), function(x) length(unique(x)))
@@ -524,7 +528,8 @@ write.csv(pw, file.path(od, paste0(cell, "_pairwise.csv")), row.names = FALSE)
 if (!is.null(loo)) write.csv(loo, file.path(od, paste0(cell, "_loo.csv")), row.names = FALSE)
 if (!is.null(emod)) write.csv(emod, file.path(od, paste0(cell, "_entrymod.csv")), row.names = FALSE)
 if (!is.null(grp_alt)) {
-  de <- which(ev$grp != grp_alt & keep)
+  fit_type <- function(g) if (TYPES == "bc") as.integer(g > 0L) else g   # audit P2-1: compare the fitted type (bc pools originators and joiners)
+  de <- which(fit_type(ev$grp) != fit_type(grp_alt) & keep)
   role_alt <- data.frame(initiator = k_all$initiator[de], target = k_all$target[de], year = k_all$year[de], dispnum = k_all$dispnum[de],
                          grp_this = ev$grp[de], grp_other_bound = grp_alt[de], w = dat$ev_w[de])
 }
