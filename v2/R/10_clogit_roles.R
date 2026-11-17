@@ -112,12 +112,25 @@ logf("bcj events %d (bilateral %d, coalition originator %d, joiner %d); weight s
 ev_rds <- readRDS(file.path(data_dir, "events.rds"))
 lag_ev <- rep(NA_real_, dat$E); lag_lo_ev <- lag_hi_ev <- rep(NA_real_, dat$E); role_alt <- NULL
 COORIG_BOUND <- get_arg(args, "coorig_bound", "definite"); stopifnot(COORIG_BOUND %in% c("definite", "possible"))
+if (any(grepl("^--coorig_bound=", args)) && COORIG_W == 0L) stop("--coorig_bound only applies with --coorig_months")
 if (COORIG_W > 0L || ENTRY_MOD) {
   stopifnot(TYPES %in% c("bc", "bcj"))
   pt_path <- file.path(data_dir, "participants_timing.rds")
   if (!file.exists(pt_path)) stop("entry timing: ", pt_path, " is missing; rebuild the data with the 2026-11-17 build (01_build_data.R)")
   P <- readRDS(pt_path)
-  stopifnot(all(c("dispnum", "ccode", "spell", "spell_first", "spell_last", "orig", "side_entry", "side_conflict", "entry_lo", "entry_hi", "onset_lo", "onset_hi") %in% names(P)))
+  stopifnot(all(c("dispnum", "ccode", "spell", "spell_first", "spell_last", "orig", "side_entry", "side_conflict", "entry_src", "entry_lo", "entry_hi", "onset_lo", "onset_hi") %in% names(P)))
+  ## independent re-audit 2026-11-17 P1: the COW dispute start and the GML participant dates disagree in many disputes (1039: COW June 1970, every
+  ## originator dated September 1970 by GML), so lags are measured from the dispute's EARLIEST ORIGINATOR ENTRY on the same (participant-date)
+  ## scale; the COW start is the fallback only where no originator spell exists. Reference bounds = minimum over the dispute's originator spells.
+  ref <- aggregate(cbind(r_lo = entry_lo, r_hi = entry_hi) ~ dispnum, data = P[P$orig == 1L, ], FUN = min)
+  P <- merge(P, ref, by = "dispnum", all.x = TRUE, sort = FALSE)
+  n_cow <- sum(is.na(P$r_lo)); n_shift <- sum(!is.na(P$r_lo) & P$r_lo != P$onset_lo)
+  P$onset_lo <- ifelse(is.na(P$r_lo), P$onset_lo, P$r_lo); P$onset_hi <- ifelse(is.na(P$r_hi), P$onset_hi, P$r_hi)
+  ## P2: an entry clamped to January (GML start in an earlier year than COW's first year) is at or before that January: lower bound open
+  cl <- P$entry_src == "participant (entry clamped to January)"; P$entry_lo[cl] <- pmin(P$entry_lo[cl], P$onset_lo[cl])
+  P <- P[order(P$dispnum, P$ccode, P$spell), ]
+  logf("entry timing: reference = earliest originator entry (participant dates); COW start used for %d spells without an originator spell; reference differs from the COW start for %d spells; entries clamped to January given an open lower bound %d",
+       n_cow, n_shift, sum(cl))
   ne_t <- ev_rds[!ev_rds$escalation, c("initiator", "target", "year", "dispnum", "dispnums")]
   stopifnot(!anyDuplicated(ne_t[, c("initiator", "target", "year")]))
   k_all <- data.frame(e = seq_len(dat$E), initiator = as.integer(sy$ccode[ev$sy_row]), target = as.integer(alts$ccode2[ev$alt_row]), year = as.integer(sy$year[ev$sy_row]))
@@ -133,6 +146,8 @@ if (COORIG_W > 0L || ENTRY_MOD) {
   lag_lo_ev <- pmax(P$entry_lo[prow] - P$onset_hi[prow], 0)                      # earliest possible lag
   lag_hi_ev <- pmax(P$entry_hi[prow] - P$onset_lo[prow], 0)                      # latest possible lag
   lag_ev <- (lag_lo_ev + lag_hi_ev) / 2                                           # midpoint (moderator)
+  o_late <- ev$grp != 2L & lag_lo_ev > 1
+  if (any(o_late)) logf("entry timing: %d originator events enter more than 1 month after their dispute's earliest originator (co-originators acting later; kept as originators, lag set to 0)", sum(o_late))
   lag_ev[ev$grp != 2L] <- 0; lag_lo_ev[ev$grp != 2L] <- 0; lag_hi_ev[ev$grp != 2L] <- 0   # originators enter at onset by definition
   jl <- lag_ev[ev$grp == 2L]
   logf("entry timing: joiner entry lag (months, midpoint) quantiles 10/25/50/75/90%% = %s; joiners whose lag bounds differ %d of %d; definitely / possibly within 1, 2, 3 months: %s",
@@ -239,7 +254,7 @@ stopifnot(all(c("initiator", "target", "year", "escalation", "dispnum") %in% nam
 ne <- ev_rds[!ev_rds$escalation, c("initiator", "target", "year", "dispnum")]
 stopifnot(!anyDuplicated(ne[, c("initiator", "target", "year")]))
 ek <- merge(ek, ne, by = c("initiator", "target", "year"), all.x = TRUE, sort = FALSE)
-if (anyNA(ek$dispnum)) stop(sprintf("%d events have no non-escalation row with a dispnum in events.rds", sum(is.na(ek$dispnum))))
+TERMS_M1S <- c(setdiff(GAP_G, c(paste0("dMR_", ROLES), "dMR_jlag")), "dMR")   # re-audit P2: M1s has ONE shared cross term, so the joiner cross-term moderator is dropped too
 ek <- ek[match(unique(L$ev_id), ek$ev_id), ]
 stopifnot(nrow(ek) == length(unique(L$ev_id)))
 ek$disp <- ek$dispnum; ek$tgtyr <- paste(ek$target, ek$year, sep = "_"); ek$init_disp <- paste(ek$initiator, ek$dispnum, sep = "_")
@@ -317,7 +332,7 @@ for (pr in PAIRS_R) {
 }
 pw$note <- ifelse(pw$term == "dMR", "utility interaction P12, not rho",
            ifelse(pw$term %in% c("dM", "dR"), "difference at dM = dR = 0 only (squared and cross terms can change its sign elsewhere)",
-           ifelse(grepl("^joint:dM\\+dM2\\+dMR$|^joint:dR\\+dR2\\+dMR$", pw$term), "axis effect differs anywhere (linear, squared, cross); not mu or sigma", "")))
+           ifelse(grepl("^joint:dM\\+dM2\\+dMR$|^joint:dR\\+dR2\\+dMR$", pw$term), "axis effect differs anywhere in the gaps (linear, squared, cross); not mu or sigma", "")))
 if (ENTRY_MOD) pw$note <- ifelse(grepl("join", pw$pair), paste0(pw$note, ifelse(nchar(pw$note), "; ", ""), "joiner side evaluated at the median joiner entry lag"), pw$note)
 
 if (ENTRY_MOD) {                                                  # section 1b: do joiners' gap effects change with entry lag? (5 df, primary two-way)
