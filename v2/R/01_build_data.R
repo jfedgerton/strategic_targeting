@@ -1220,6 +1220,36 @@ add_manifest(events, "events.rds", if (EVENTS == "dymid") "directed events of th
                                            DIRECTION, if (INCLUDE_JOINERS) "included" else "excluded"))
 add_manifest(roles_ap, "roles_aprime.rds", "stage-2 role groups aprime per non-escalation event (PI decision 2026-10-31; switch roles = aprime): grp_aprime 0 alone originator / 1 co-originator / 2 joiner / 3 target joined late, from the weight-group dispute (smallest dispnum) of a collapsed key; aprime_roles()")
 add_manifest(jset_ap, "joiner_sets_aprime.rds", "joiner choice sets (PI-approved 2026-11-04; switch joiner_set = opposing): per aprime joiner event (initiator, target, year, dispnum = its weight-group dispute) the states opp_ccode on the opposite side of that dispute in the onset year (opp_two_sides: a within-year switcher); joiner_opposing_sets()")
+## ---- entry-timing table (PI request 2026-11-17; GPT + independent review of the first draft): one row per (dispute, participant, spell) of the
+## EVENT participation table, taken BEFORE any collapse of same-year keys, with the participant's COW originator flag, its side in the spell's
+## first year (side_entry; side_conflict = both sides recorded for it in that year; side_switch = a different side later in the dispute), its entry
+## month bounds (entry_lo / entry_hi: the participant date of D5 at day or month resolution, else the whole first year) and the dispute's onset
+## month bounds (onset_lo / onset_hi from the dispute start: exact month when known, else the first year). 10_clogit_roles.R reads it for the
+## --coorig_months / --entry_mod robustness options; nothing in the main pipeline uses it.
+db_tt <- dispute_date_bounds(if (EVENTS == "dymid") disp_evt else cow_mid_disps |> mutate(dispnum = as.integer(dispnum)), dd_evt)
+psd_tt <- participant_spell_dates(dd_evt, db_tt, part = if (EVENTS == "dymid" || PART_DATES) gml_part else NULL)   # the same call as psd_entry / psd_evt above
+stopifnot(all(c("dispnum", "ccode1", "year", "sidea1") %in% names(dd_evt)))
+side_yr <- dd_evt |> distinct(dispnum, ccode = as.integer(ccode1), year, side = as.integer(sidea1)) |> group_by(dispnum, ccode, year) |>
+  summarise(n_side = n_distinct(side), side = min(side), .groups = "drop")
+side_any <- side_yr |> group_by(dispnum, ccode) |> summarise(n_side_disp = n_distinct(side), .groups = "drop")
+parts_tt <- psd_tt |> as.data.frame() |>
+  left_join(side_yr |> rename(spell_first = year, side_entry = side, n_side_first = n_side), by = c("dispnum", "ccode", "spell_first")) |>
+  left_join(side_any, by = c("dispnum", "ccode")) |>
+  left_join(db_tt |> select(dispnum, onset_lo = start_lo, onset_hi = start_hi), by = "dispnum") |>
+  mutate(entry_lo = ifelse(entry_res <= 2L, entry_mkey, ym_index(entry_y, 1L)), entry_hi = ifelse(entry_res <= 2L, entry_mkey, ym_index(entry_y, 12L)),
+         side_conflict = n_side_first > 1L, side_switch = n_side_disp > 1L) |>
+  select(dispnum, ccode, spell, spell_first, spell_last, orig, side_entry, side_conflict, side_switch, entry_src, entry_res, entry_lo, entry_hi, onset_lo, onset_hi)
+stopifnot(!anyNA(parts_tt$side_entry), !anyNA(parts_tt$onset_lo), !anyNA(parts_tt$entry_lo), all(parts_tt$entry_lo <= parts_tt$entry_hi), all(parts_tt$onset_lo <= parts_tt$onset_hi))
+assert_no_dup_keys(parts_tt, c("dispnum", "ccode", "spell"), "entry-timing participant table")
+blog("entry-timing table: %d participant spells in %d disputes; entry at day / month / year resolution %d / %d / %d; side conflict in the entry year %d; side switch within the dispute %d; entry before the dispute onset (lower bounds) %d",
+     nrow(parts_tt), n_distinct(parts_tt$dispnum), sum(parts_tt$entry_res == 1L), sum(parts_tt$entry_res == 2L), sum(parts_tt$entry_res == 3L),
+     sum(parts_tt$side_conflict), sum(parts_tt$side_switch), sum(parts_tt$entry_hi < parts_tt$onset_lo))
+if (EVENTS == "pairs" && DIRECTION == "cowwar") {
+  ## regression checks (independent review 2026-11-17): dispute 1039 starts June 1970 (COW); in WWII (258) France and Germany are on opposite sides at entry
+  stopifnot(all(parts_tt$onset_lo[parts_tt$dispnum == 1039L] == ym_index(1970L, 6L)),
+            parts_tt$side_entry[parts_tt$dispnum == 258L & parts_tt$ccode == 220L & parts_tt$spell == 1L] != parts_tt$side_entry[parts_tt$dispnum == 258L & parts_tt$ccode == 255L & parts_tt$spell == 1L])
+}
+add_manifest(parts_tt, "participants_timing.rds", "entry-timing table (PI request 2026-11-17): one row per (dispnum, ccode, spell) of the event participation table, before any key collapse: COW originator flag, side at entry (side_conflict, side_switch), entry month bounds (participant dates, else the first year) and dispute onset month bounds; read only by 10_clogit_roles.R --coorig_months / --entry_mod")
 ## number of system states per year, for the system-growth diagnostic on the change variables (item 4 of the
 ## 2026-10-23 decision): g3 at t-1 = log n_system(t-1) - log n_system(t-4), constant within a year
 nsys_year <- states |> distinct(year, n_system) |> arrange(year)
