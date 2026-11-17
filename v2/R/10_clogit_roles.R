@@ -112,7 +112,7 @@ if (OPP_ON) {
   oo <- oppw_offset(alts, OW, LAMBDA, OPP_DRAW, manifest = manifest, manifest_dymid = man_dy)   # stops on other data files or a row without a weight
   stopifnot(length(oo$off) == dat$N2, all(is.finite(oo$off)), LAMBDA != 0 || all(oo$off == 0), LAMBDA == 0 || isTRUE(all.equal(oo$off, LAMBDA * oo$lq, tolerance = 0)))
   opp_off <- oo$off
-  os <- oppw_cell_stats(dat, oo$lq, gt$group)
+  opp_lq <- oo$lq                                                # ln q per row, for the within-set rank diagnostic (section 3)
   logf("opp_weight: lambda = %s, outcome %s, draw %d (%s); weights %s (built %s, commit %s); ln q min %.2f / median %.2f / max %.2f; SENSITIVITY, q is an opportunity weight",
        spec_opp_weight(spec), spec_opp_outcome(spec), OPP_DRAW, if (OPP_DRAW == 0L) "auxiliary MLE" else "full-vector draw", basename(w_path), OW$built, OW$git_commit,
        min(oo$lq), stats::median(oo$lq), max(oo$lq))
@@ -255,6 +255,17 @@ if (REL_SCALE == "year") {
 }
 Zm <- dat$Z[L$row, , drop = FALSE]; colnames(Zm) <- Z_cols; L <- cbind(L, Zm)
 L$off <- opp_off[L$row]                                          # section 1a; exactly 0 without --opp_weight or at lambda = 0
+opp_diag <- NULL
+if (OPP_ON) {   # README 14 primary diagnostic on the clogit's own strata: share of the event's set with a smaller q than the chosen target, by fitted type
+  L$lq <- opp_lq[L$row]
+  rk <- vapply(split(L, L$ev_id), function(d) mean(d$lq < d$lq[d$chosen == 1L]), 0)
+  ek_r <- data.frame(ev_id = as.integer(names(rk)), rank = rk); ek_r$type <- t_ev[ek_r$ev_id]; ek_r$w <- dat$ev_w[ek_r$ev_id]
+  opp_diag <- do.call(rbind, lapply(c(sort(unique(ek_r$type)), NA), function(g) { d <- if (is.na(g)) ek_r else ek_r[ek_r$type == g, ]
+    data.frame(type = if (is.na(g)) "all" else ROLES[g + 1], events = nrow(d), weight = sum(d$w), median_rank = median(d$rank),
+               bottom5_events = sum(d$rank < 0.05), bottom25_events = sum(d$rank < 0.25), bottom5_weight = sum(d$w[d$rank < 0.05]), bottom25_weight = sum(d$w[d$rank < 0.25])) }))
+  logf("opp_weight diagnostic (within-set rank of the chosen target's q, by type): %s", paste(sprintf("%s median %.2f, bottom 5%% %d, bottom 25%% %d of %d", opp_diag$type, opp_diag$median_rank,
+       opp_diag$bottom5_events, opp_diag$bottom25_events, opp_diag$events), collapse = "; "))
+}
 stopifnot(!anyNA(L[, c("dM", "dR", Z_cols)]))
 L$dM2 <- L$dM^2; L$dR2 <- L$dR^2; L$dMR <- L$dM * L$dR
 GAP <- c("dM", "dM2", "dR", "dR2", "dMR")
@@ -548,7 +559,7 @@ if (ENTRY_MOD) {
 od <- file.path(v2_root(), "output"); dir.create(od, showWarnings = FALSE)
 write.csv(tab, file.path(od, paste0(cell, "_derived.csv")), row.names = FALSE)
 write.csv(coefs, file.path(od, paste0(cell, "_coefs.csv")), row.names = FALSE)
-if (OPP_ON) write.csv(cbind(cell = cell, lambda = LAMBDA, draw = OPP_DRAW, outcome = spec_opp_outcome(spec), low_q_threshold = os$threshold, os$by_role), file.path(od, paste0(cell, "_oppw.csv")), row.names = FALSE)   # section 1a diagnostics (low-q chosen targets by type label of the build)
+if (OPP_ON) write.csv(cbind(cell = cell, lambda = LAMBDA, draw = OPP_DRAW, outcome = spec_opp_outcome(spec), opp_diag), file.path(od, paste0(cell, "_oppw.csv")), row.names = FALSE)   # section 1a/3 diagnostics
 write.csv(tests, file.path(od, paste0(cell, "_tests.csv")), row.names = FALSE)
 write.csv(pw, file.path(od, paste0(cell, "_pairwise.csv")), row.names = FALSE)
 if (!is.null(loo)) write.csv(loo, file.path(od, paste0(cell, "_loo.csv")), row.names = FALSE)
