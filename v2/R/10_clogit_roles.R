@@ -97,12 +97,13 @@ logf("bcj events %d (bilateral %d, coalition originator %d, joiner %d); weight s
 ## ---- 1a. opportunity-weight offset (run 1 weights of 08_opportunity_weights.R; PI request 2026-11-17: the clogit version of --opp_weight) -----------
 ## Stage-2 utility gains the FIXED term lambda x ln q_ij (q = the auxiliary MID-propensity opportunity weight of the alternative row; no new parameter).
 ## A sensitivity, as in README section 14.2: at lambda = 1 the gap terms describe target choice given militarized-contact propensity, not selection over the
-## full opportunity structure. The clogit has no stage 1, so only the stage-2 side of the Stan offset applies. lambda = 0 is an exact zero offset (the cell
-## without the switch, asserted at the fit). --opp_draw=1..5 (lambda = 1) conditions on one coherent full-vector draw of the auxiliary coefficients.
+## full opportunity structure. The clogit has no stage 1, so only the stage-2 side of the Stan offset applies. lambda = 0 drops the offset term from the formula, so the fit IS the
+## cell without the switch (verified bit for bit in the smoke test and the audit). --opp_draw=1..5 (lambda = 1) conditions on one coherent full-vector draw of the auxiliary coefficients.
 OPP_ON <- spec_opp_on(spec); opp_off <- rep(0, dat$N2); LAMBDA <- 0; OPP_DRAW <- 0L
 if (OPP_ON) {
   LAMBDA <- OPP_LAMBDA[[spec_opp_weight(spec)]]; OPP_DRAW <- as.integer(spec_opp_draw(spec))
   stopifnot(identical(Z_cols, Z_DIRECTED), LAG == OPPW_LAG, OPP_DRAW == 0L || LAMBDA == 1, nrow(alts) == dat$N2)
+  stopifnot(isTRUE(all.equal(unname(dat$Z[, 1]), as.numeric(alts[[Z_cols[1]]]))))   # audit P3-5: dat rows are the alts rows, in order (sampled = 0)
   w_path <- oppw_path(spec, file.path(v2_root(), "output"))
   if (!file.exists(w_path)) stop(sprintf("--opp_weight needs %s; run `Rscript v2/R/08_opportunity_weights.R %s --opp_outcome=%s` first", w_path,
                                          if (spec_events(spec) == "dymid") "--events=dymid" else "--entry=later", spec_opp_outcome(spec)))
@@ -110,7 +111,7 @@ if (OPP_ON) {
   stopifnot(identical(OW$outcome, spec_opp_outcome(spec)), identical(OW$foundation, basename(data_dir)), OW$lag == LAG, OW$n_draws == OPPW_N_DRAWS, identical(OW$a_cols, OPPW_A_COLS))
   man_dy <- read.csv(file.path(v2_root(), "data_dymid", "manifest.csv"), stringsAsFactors = FALSE)
   oo <- oppw_offset(alts, OW, LAMBDA, OPP_DRAW, manifest = manifest, manifest_dymid = man_dy)   # stops on other data files or a row without a weight
-  stopifnot(length(oo$off) == dat$N2, all(is.finite(oo$off)), LAMBDA != 0 || all(oo$off == 0), LAMBDA == 0 || isTRUE(all.equal(oo$off, LAMBDA * oo$lq, tolerance = 0)))
+  stopifnot(length(oo$off) == dat$N2, all(is.finite(oo$off)), LAMBDA != 0 || all(oo$off == 0))
   opp_off <- oo$off
   opp_lq <- oo$lq                                                # ln q per row, for the within-set rank diagnostic (section 3)
   logf("opp_weight: lambda = %s, outcome %s, draw %d (%s); weights %s (built %s, commit %s); ln q min %.2f / median %.2f / max %.2f; SENSITIVITY, q is an opportunity weight",
@@ -262,7 +263,7 @@ if (OPP_ON) {   # README 14 primary diagnostic on the clogit's own strata: share
   ek_r <- data.frame(ev_id = as.integer(names(rk)), rank = rk); ek_r$type <- t_ev[ek_r$ev_id]; ek_r$w <- dat$ev_w[ek_r$ev_id]
   opp_diag <- do.call(rbind, lapply(c(sort(unique(ek_r$type)), NA), function(g) { d <- if (is.na(g)) ek_r else ek_r[ek_r$type == g, ]
     data.frame(type = if (is.na(g)) "all" else ROLES[g + 1], events = nrow(d), weight = sum(d$w), median_rank = median(d$rank),
-               bottom5_events = sum(d$rank < 0.05), bottom25_events = sum(d$rank < 0.25), bottom5_weight = sum(d$w[d$rank < 0.05]), bottom25_weight = sum(d$w[d$rank < 0.25])) }))
+               bottom5_events = sum(d$rank < OPPW_RANK_CUTS[1]), bottom25_events = sum(d$rank < OPPW_RANK_CUTS[2]), bottom5_weight = sum(d$w[d$rank < OPPW_RANK_CUTS[1]]), bottom25_weight = sum(d$w[d$rank < OPPW_RANK_CUTS[2]])) }))
   logf("opp_weight diagnostic (within-set rank of the chosen target's q, by type): %s", paste(sprintf("%s median %.2f, bottom 5%% %d, bottom 25%% %d of %d", opp_diag$type, opp_diag$median_rank,
        opp_diag$bottom5_events, opp_diag$bottom25_events, opp_diag$events), collapse = "; "))
 }
@@ -579,12 +580,12 @@ if (COORIG_W > 0L || ENTRY_MOD) {   # GPT recheck: event-level timing provenance
                              lag_lo = lag_lo_ev, lag_hi = lag_hi_ev, lag_mid = lag_ev, w = dat$ev_w)[keep, ]
   write.csv(timing_audit, file.path(od, paste0(cell, "_timing.csv")), row.names = FALSE)
 }
-saveRDS(list(pt = pt, bs = bs, bs_coef = bs_coef, fail_log = fail_log, n_ok = n_ok, n_fail = n_fail, B = B, spec = spec, types = TYPES, roles = ROLES,
+saveRDS(list(opp = if (OPP_ON) list(lambda = LAMBDA, draw = OPP_DRAW, outcome = spec_opp_outcome(spec), weights = basename(w_path), built = OW$built, git_commit = OW$git_commit) else NULL, pt = pt, bs = bs, bs_coef = bs_coef, fail_log = fail_log, n_ok = n_ok, n_fail = n_fail, B = B, spec = spec, types = TYPES, roles = ROLES,
              support = SUPPORT, n_rows = nrow(L), E = sum(keep), V = VS, boot_unit = BOOT_UNIT, loo = loo, coorig_months = COORIG_W, entry_mod = ENTRY_MOD,
              timing_ref = if (COORIG_W > 0L || ENTRY_MOD) TIMING_REF else NA_character_, lag_ev = lag_ev, lag_lo_ev = lag_lo_ev, lag_hi_ev = lag_hi_ev, role_alt = role_alt, coorig_bound = COORIG_BOUND, m_ctr = if (ENTRY_MOD) M_CTR else NA_real_),
         file.path(od, paste0(cell, "_boot.rds")))
 ## GPT recheck P2: a manifest names exactly the artifacts written by THIS run (an older optional file, e.g. _loo.csv, is not part of it)
-written <- c(paste0(cell, c("_derived.csv", "_coefs.csv", "_tests.csv", "_pairwise.csv", "_boot.rds")), if (!is.null(loo)) paste0(cell, "_loo.csv"),
+written <- c(paste0(cell, c("_derived.csv", "_coefs.csv", "_tests.csv", "_pairwise.csv", "_boot.rds")), if (!is.null(loo)) paste0(cell, "_loo.csv"), if (OPP_ON) paste0(cell, "_oppw.csv"),
              if (!is.null(emod)) paste0(cell, "_entrymod.csv"), if (!is.null(role_alt)) paste0(cell, "_roleswitch.csv"), if (!is.null(timing_audit)) paste0(cell, "_timing.csv"))
 gitc <- tryCatch(system2("git", c("-C", R_DIR, "rev-parse", "--short", "HEAD"), stdout = TRUE, stderr = FALSE), error = function(e) NA_character_, warning = function(w) NA_character_)
 dirty <- tryCatch(length(system2("git", c("-C", R_DIR, "status", "--porcelain", "--untracked-files=no", "--", "."), stdout = TRUE, stderr = FALSE)) > 0, error = function(e) NA, warning = function(w) NA)

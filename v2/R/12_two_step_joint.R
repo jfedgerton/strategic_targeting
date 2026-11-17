@@ -68,6 +68,7 @@ BOOT_UNIT <- get_arg(args, "boot_unit", "pigeonhole"); SIM <- get_arg(args, "sim
 stopifnot(SAMPLE == "mid", LAG == 3L, MODEL == "M1c", B >= 0, TYPES %in% c("bc", "bc_nocoorig", "bcj"), OUTCOME %in% c("fmid", "fmidany", "fmidub"),
           BOOT_UNIT %in% c("pigeonhole", "dispute", "initiator"), is.logical(SIM), !is.na(SIM_SEED))
 spec <- parse_spec(args)
+if (spec_opp_on(spec)) stop("--opp_weight / --opp_outcome / --opp_draw are not implemented in this script (the opportunity-weight offset is in 10_clogit_roles.R only)")   # audit 2026-11-17 P2-1
 stopifnot(spec_is_directed(spec), spec$roles == "bcj", spec_variant(spec) == "all", (if (is.null(spec$joiner_set)) "all" else spec$joiner_set) == "all",
           spec$controls == "minimal", spec$context == "all", (if (is.null(spec$mu_shift)) "none" else spec$mu_shift) == "none",
           spec_events(spec) == "dymid", spec$ww2 == "include")
