@@ -134,7 +134,7 @@ test_that("defaults: names, strings and the toy assembly of the existing cells a
   for (cb in combos) {
     sn <- parse_spec(cb); so <- e$parse_spec(cb)
     expect_identical(sn[names(so)], so, info = paste(cb, collapse = " "))                                   # the spec itself: the old fields unchanged, two new ones at none
-    expect_identical(setdiff(names(sn), names(so)), c("reach", "subsample")); expect_identical(unlist(sn[c("reach", "subsample")], use.names = FALSE), c("none", "none"))
+    expect_identical(setdiff(names(sn), names(so)), c("reach", "subsample", "opp_weight", "opp_outcome", "opp_draw")); expect_identical(unlist(sn[c("reach", "subsample", "opp_weight", "opp_outcome", "opp_draw")], use.names = FALSE), c("none", "none", "none", "mid", "0"))   # opp_* (run 1, 2026-11-10) at their defaults
     expect_identical(spec_string(sn), e$spec_string(so), info = paste(cb, collapse = " ")); expect_identical(perm_part_spec_string(sn), e$perm_part_spec_string(so), info = paste(cb, collapse = " "))
     expect_identical(spec_suffix(sn), e$spec_suffix(so)); expect_identical(basename(spec_data_dir(sn, "x")), basename(e$spec_data_dir(so, "x")))
     for (m in ALL_MODELS) for (s in c("fmid", "mid")) {

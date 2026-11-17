@@ -4,7 +4,8 @@
 ## Output: v2/stan/build/{m1_latent_additive,m2_ame,m1_context,m1_latent_prior,m1_context_rho,m1_latent_rhoreg}.rds (gitignored; STAN_PROGRAMS in spec.R;
 ##         m1_latent_rhoreg is the M1bz rho-regression program, 2026-11-02; m1_context is the
 ##         M1c program of dual typology stage b, 2026-10-27; m1_latent_prior the prior-sensitivity copy of the M1 program, 2026-10-30, used only
-##         when --rho_prior / --sigma_prior are off their defaults) plus <model>.sha256, the sha256 of the .stan source
+##         when --rho_prior / --sigma_prior are off their defaults; m1_context_offset the M1c copy with the fixed opportunity-weight offset of run 1,
+##         2026-11-10, used only with --opp_weight) plus <model>.sha256, the sha256 of the .stan source
 ##         compiled into it (provenance, 2026-10-25 C3); 02_fit_model.R refuses a binary whose model_code is not the checked-out source
 ## ============================================================================
 suppressPackageStartupMessages(library(rstan))

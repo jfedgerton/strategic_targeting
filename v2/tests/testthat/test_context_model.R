@@ -12,7 +12,7 @@ toy_joiners <- function(e) e |> mutate(orig1 = ifelse(initiator == 30L & target 
 test_that("spec: M1c is a model code outside the main grid with its own Stan program, cell names that collide with nothing, and the context_b preset", {
   expect_false("M1c" %in% MODELS); expect_true("M1c" %in% ALL_MODELS); expect_equal(CONTEXT_MODELS, c("M1c", "M1cr"))   # M1cr (role-specific rho) added 2026-10-31
   expect_equal(stan_program("M1c"), "m1_context"); expect_equal(stan_program("M1b"), "m1_latent_additive"); expect_equal(stan_program("M2a"), "m2_ame")
-  expect_setequal(STAN_PROGRAMS, c("m1_latent_additive", "m2_ame", "m1_context", "m1_latent_prior", "m1_context_rho", "m1_latent_rhoreg", "m2_context"))   # m1_latent_prior added 2026-10-30 (prior switches), m1_context_rho 2026-10-31, m1_latent_rhoreg (M1bz) 2026-11-02, m2_context (M2c) 2026-11-04
+  expect_setequal(STAN_PROGRAMS, c("m1_latent_additive", "m2_ame", "m1_context", "m1_latent_prior", "m1_context_rho", "m1_latent_rhoreg", "m2_context", "m1_context_offset"))   # m1_context_offset: run 1 (2026-11-10)   # m1_latent_prior added 2026-10-30 (prior switches), m1_context_rho 2026-10-31, m1_latent_rhoreg (M1bz) 2026-11-02, m2_context (M2c) 2026-11-04
   expect_equal(model_family("M1c"), "M1"); expect_equal(model_D_mode("M1c"), 3L); expect_equal(model_joint("M1c"), 1L)
   main <- parse_spec(character(0))
   expect_equal(cell_name("fmid", 3L, "M1c", main), "fmid_lag3_all_pr_M1c"); expect_equal(cell_name("mid", 3L, "M1c", parse_spec("--ww2=drop")), "mid_lag3_all_pr_M1c_noww2")
