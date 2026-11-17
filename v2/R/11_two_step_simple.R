@@ -1,14 +1,16 @@
 ## 11_two_step_simple.R (2026-11-16, PI request): the simple two-step check of "selection versus failed bargaining", step B.
 ## Step A (selection, whom states confront) = 10_clogit_roles.R on the MID onsets of the interacting-dyads build:
 ##   Rscript v2/R/10_clogit_roles.R --sample=mid --events=dymid ... --types=bc
-## Step B (failure, which confrontations turn fatal) = this script, on the SAME events (same assembly, same flags, same types): a weighted logit
+## Step B (the conditional probability that a recorded dyadic dispute is jointly fatal) = this script, on the SAME events (same assembly, same flags, same types): a weighted logit
 ## of the event's fatal flag on the chosen target's gaps, type-specific dM, dM^2, dR, dR^2, dM*dR, a type intercept and the chosen row's directed Z.
 ## Outcome: the event's in_<outcome> flag of events.rds (the dymid build's dyadic fatal coding; fmid = jointly fatal, the default), matched on
 ## (initiator, target, year) exactly as fail_outcomes() of the two-step branch does (every event found once, a mid event, not an escalation).
 ## Weights: the D8 event weights (dat$ev_w), as in step A. Family quasibinomial (same coefficients as binomial; non-integer weights allowed).
 ## Inference (CR0, sandwich::vcovCL with cadjust = FALSE). PRIMARY clustering (PI decision 2026-11-16, joint audit M1): two-way initiator x dispute
-## (sandwich multiway, fix = TRUE sets negative eigenvalues to zero); initiator-only and target-year as sensitivities. Readings from a cluster
-## bootstrap resampling DISPUTES by default (--boot_unit=dispute; or initiator), seed 123, percentile 95% intervals, reported only when B >= 200
+## (sandwich multiway, fix = TRUE sets negative eigenvalues to zero); initiator-only and target-year as sensitivities. Readings from a pigeonhole
+## two-way bootstrap by default (GPT recheck 2026-11-16, PI-approved: initiators and disputes resampled independently, each event's D8 weight
+## times the product of its two multiplicities; --boot_unit=dispute or initiator are one-way sensitivities; the unit is part of the output
+## name), seed 123, percentile 95% intervals, reported only when B >= 200
 ## and >= 90% of draws succeed. --loo=TRUE: leave-one-dispute-out and leave-one-initiator-out refits (M3). --firth=TRUE: a bias-reduced
 ## (Firth-type, brglm2 AS_mean) refit as a small-sample sensitivity (M4; its sandwich variance uses the ML score, an approximation).
 ## Omitted relative to the Stan step B (two-step branch): the initiator random intercept and the joint posterior.
@@ -16,12 +18,12 @@
 ## Readings per type and axis (no labels, no thresholds; PI asked for the evidence, the decision table waits for the GPT review):
 ##   dP_<axis>_<type> = the average, over the type's events (each at its own covariates), of the predicted fatality probability with that
 ##   axis's gap set to the type's 90th percentile minus the same with it set to the 10th percentile (the other gap and Z as observed).
-##   A positive value: confrontations against WEAKER (dM) or less central (dR) targets are more likely to turn fatal (gap = initiator minus target).
+##   A positive value: confrontations against WEAKER (dM) or less central (dR) targets are more likely to be jointly fatal (gap = initiator minus target).
 ## Tests: Wald, between types (5-df surface, 3-df per axis: linear, squared, cross) and per type whether an axis has no effect anywhere (3 df).
 ##
 ## Usage:
 ##   Rscript v2/R/11_two_step_simple.R --sample=mid --lag=3 --model=M1c --comparison=directed --events=dymid --variant=all --roles=bcj --joiner_set=all --types=bc
-##   --outcome=fmid|fmidany|fmidub (default fmid), --reach=capdist, --boot=1000, --boot_unit=dispute|initiator, --loo=TRUE, --firth=TRUE.
+##   --outcome=fmid|fmidany|fmidub (default fmid), --reach=capdist, --boot=1000, --boot_unit=pigeonhole|dispute|initiator, --loo=TRUE, --firth=TRUE.
 ##   Unknown, retired or duplicated options are refused (joint audit B2).
 suppressPackageStartupMessages({ library(dplyr); library(sandwich) })
 this_file <- sub("^--file=", "", grep("^--file=", commandArgs(FALSE), value = TRUE))
@@ -41,14 +43,14 @@ if (any(!flag_names %in% KNOWN_FLAGS)) stop(sprintf("unknown option(s) for 11_tw
 if (anyDuplicated(flag_names)) stop(sprintf("option(s) given more than once: %s", paste(unique(flag_names[duplicated(flag_names)]), collapse = ", ")))
 SAMPLE <- get_arg(args, "sample", "mid"); LAG <- as.integer(get_arg(args, "lag", 3)); MODEL <- get_arg(args, "model", "M1c")
 B <- as.integer(get_arg(args, "boot", 1000)); TYPES <- get_arg(args, "types", "bc"); OUTCOME <- get_arg(args, "outcome", "fmid")
-BOOT_UNIT <- get_arg(args, "boot_unit", "dispute"); LOO <- get_arg(args, "loo", FALSE); FIRTH <- get_arg(args, "firth", FALSE)
+BOOT_UNIT <- get_arg(args, "boot_unit", "pigeonhole"); LOO <- get_arg(args, "loo", FALSE); FIRTH <- get_arg(args, "firth", FALSE)
 stopifnot(SAMPLE == "mid", LAG == 3L, MODEL == "M1c", B >= 0, TYPES %in% c("bc", "bc_nocoorig", "bcj"), OUTCOME %in% c("fmid", "fmidany", "fmidub"),
-          BOOT_UNIT %in% c("dispute", "initiator"), is.logical(LOO), is.logical(FIRTH))
+          BOOT_UNIT %in% c("pigeonhole", "dispute", "initiator"), is.logical(LOO), is.logical(FIRTH))
 spec <- parse_spec(args)
 stopifnot(spec_is_directed(spec), spec$roles == "bcj", spec_variant(spec) == "all", (if (is.null(spec$joiner_set)) "all" else spec$joiner_set) == "all",
           spec$controls == "minimal", spec$context == "all", (if (is.null(spec$mu_shift)) "none" else spec$mu_shift) == "none",
           spec_events(spec) == "dymid", spec$ww2 == "include")
-cell <- paste0("stepB_", cell_name(SAMPLE, LAG, MODEL, spec), "_", TYPES, "_", OUTCOME)
+cell <- paste0("stepB_", cell_name(SAMPLE, LAG, MODEL, spec), "_", TYPES, "_", OUTCOME, "_b", c(pigeonhole = "pig", dispute = "disp", initiator = "init")[[BOOT_UNIT]])   # GPT recheck P2
 log_open(paste0("11_", cell))
 logf("cell %s; spec %s; types %s; outcome in_%s; bootstrap B = %d over %ss, seed 123; leave-one-out %s; Firth %s", cell, spec_string(spec), TYPES, OUTCOME, B, BOOT_UNIT, LOO, FIRTH)
 
@@ -156,14 +158,17 @@ dP <- function(mod, d) {
 }
 pt <- dP(m, D)
 set.seed(123)
-unit_of <- if (BOOT_UNIT == "dispute") D$disp else D$init
-units <- unique(unit_of); by_unit <- split(seq_len(nrow(D)), unit_of)
-logf("bootstrap unit: %s (%d units)", BOOT_UNIT, length(units))
+u_init <- unique(D$init); u_disp <- unique(D$disp); i_idx <- match(D$init, u_init); d_idx <- match(D$disp, u_disp)
+draw_mult <- function() {                                              # GPT recheck P2: pigeonhole two-way (default) or one-way multiplicities
+  mi <- if (BOOT_UNIT == "dispute") rep(1L, length(u_init)) else tabulate(sample.int(length(u_init), length(u_init), replace = TRUE), length(u_init))
+  md <- if (BOOT_UNIT == "initiator") rep(1L, length(u_disp)) else tabulate(sample.int(length(u_disp), length(u_disp), replace = TRUE), length(u_disp))
+  mi[i_idx] * md[d_idx] }
+logf("bootstrap: %s (%d initiators, %d disputes); largest initiator / dispute share of event weight %.3f / %.3f", BOOT_UNIT, length(u_init), length(u_disp),
+     max(tapply(D$w, D$init, sum)) / sum(D$w), max(tapply(D$w, D$disp, sum)) / sum(D$w))
 bs <- NULL; bs_coef <- NULL; n_fail <- 0L
 fail_log <- data.frame(draw = integer(0), reason = character(0))   # GPT review P2-6: replicate IDs and failure reasons
 for (bb in seq_len(B)) {
-  rows <- unlist(by_unit[as.character(sample(units, length(units), replace = TRUE))], use.names = FALSE)
-  Db <- D[rows, ]
+  mult <- draw_mult(); Db <- D[mult > 0L, ]; Db$w <- Db$w * mult[mult > 0L]
   tt <- table(factor(Db$type, levels = 0:(G - 1L))); ft <- tapply(Db$y, factor(Db$type, levels = 0:(G - 1L)), sum)
   if (any(tt == 0L) || any(ft == 0L, na.rm = TRUE) || any(ft == tt, na.rm = TRUE)) {
     n_fail <- n_fail + 1L; fail_log <- rbind(fail_log, data.frame(draw = bb, reason = "a type lacks events or lacks fatal / non-fatal events")); next }
@@ -246,5 +251,10 @@ if (!is.null(firth)) { write.csv(firth$coefs, file.path(od, paste0(cell, "_firth
 saveRDS(list(pt = pt, bs = bs, bs_coef = bs_coef, fail_log = fail_log, n_ok = n_ok, n_fail = n_fail, B = B, spec = spec, types = TYPES, outcome = OUTCOME,
              q1090 = q1090, counts = cnt, E = nrow(D), V = VS, boot_unit = BOOT_UNIT, loo = loo, firth = firth),
         file.path(od, paste0(cell, "_boot.rds")))
+written <- c(paste0(cell, c("_readings.csv", "_coefs.csv", "_tests.csv", "_boot.rds")), if (!is.null(loo)) paste0(cell, "_loo.csv"),
+             if (!is.null(firth)) paste0(cell, c("_firth_coefs.csv", "_firth_tests.csv")))   # GPT recheck P2: manifest of THIS run's artifacts
+gitc <- tryCatch(system2("git", c("-C", R_DIR, "rev-parse", "--short", "HEAD"), stdout = TRUE, stderr = FALSE), error = function(e) NA_character_, warning = function(w) NA_character_)
+write.csv(data.frame(file = written, run_time = format(Sys.time(), "%Y-%m-%d %H:%M:%S %Z"), git = if (length(gitc)) gitc[1] else NA_character_,
+                     args = paste(args, collapse = " ")), file.path(od, paste0(cell, "_manifest.csv")), row.names = FALSE)
 print(rd, row.names = FALSE); print(tests, row.names = FALSE)
 logf("done: %s_{readings,coefs,tests}.csv and _boot.rds", cell)

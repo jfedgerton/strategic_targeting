@@ -28,9 +28,9 @@
 ##   M1 vs M0 (5 (G - 1) df) = "the utility surfaces differ by type"; equal cross coefficients (G - 1 df) = "the utility interaction differs by
 ##   type" (NOT a test of equal rho, audit A3 P1-5); per pair of types, a 3-df test per axis restricting linear, squared AND cross terms
 ##   (GPT review P1: the axis effect is b_k + 2 b_kk x_k + b_MR x_other) and the 5-df surface test. Term-by-term contrasts use the two-way SE.
-## Intervals: cluster bootstrap, seed 123, percentile, resampling DISPUTES by default (--boot_unit=dispute; PI decision M2: initiators and disputes
-##   form one giant connected component, so no unit nests both, and resampling initiator x dispute cells would ignore both dependencies; the
-##   dispute is the dependence that changed step B). --boot_unit=initiator resamples initiating states. Intervals are reported only when B >= 200
+## Intervals: percentile, seed 123. PRIMARY (GPT recheck 2026-11-16, PI-approved): pigeonhole two-way bootstrap, resampling initiators and
+##   disputes independently and multiplying each event's D8 weight by the product of the two multiplicities (--boot_unit=pigeonhole, default).
+##   --boot_unit=dispute or initiator are one-way sensitivities. The unit is part of the output name (_bpig, _bdisp, _binit). Intervals are reported only when B >= 200
 ##   and >= 90% of the draws succeed (joint audit B3); a draw whose fit errors or warns is dropped for that model and logged with its reason.
 ## --loo=TRUE adds leave-one-dispute-out and leave-one-initiator-out refits of M1 (joint audit M3), written to <cell>_loo.csv.
 ## Relational-measure diagnostics (PI request 2026-11-16, measurement check of log IGO PageRank):
@@ -41,7 +41,7 @@
 ##
 ## Usage (same flags as the grid cell; --roles=bcj is required because the types are recoded from it):
 ##   Rscript v2/R/10_clogit_roles.R --sample=fmid --lag=3 --model=M1c --comparison=directed --entry=later --variant=all --roles=bcj --joiner_set=all --types=bc
-##   --events=dymid (instead of --entry=later) for jointly fatal, --reach=capdist for the reach terms, --boot=1000, --boot_unit=dispute|initiator,
+##   --events=dymid (instead of --entry=later) for jointly fatal, --reach=capdist for the reach terms, --boot=1000, --boot_unit=pigeonhole|dispute|initiator,
 ##   --loo=TRUE. Unknown, retired or duplicated options are refused (joint audit B2).
 suppressPackageStartupMessages({ library(dplyr); library(survival) })
 this_file <- sub("^--file=", "", grep("^--file=", commandArgs(FALSE), value = TRUE))
@@ -62,15 +62,16 @@ if (any(!flag_names %in% KNOWN_FLAGS)) stop(sprintf("unknown option(s) for 10_cl
 if (anyDuplicated(flag_names)) stop(sprintf("option(s) given more than once: %s", paste(unique(flag_names[duplicated(flag_names)]), collapse = ", ")))
 SAMPLE <- get_arg(args, "sample", "fmid"); LAG <- as.integer(get_arg(args, "lag", 3)); MODEL <- get_arg(args, "model", "M1c")
 B <- as.integer(get_arg(args, "boot", 1000))
-TYPES <- get_arg(args, "types", "bc"); BOOT_UNIT <- get_arg(args, "boot_unit", "dispute"); LOO <- get_arg(args, "loo", FALSE)
+TYPES <- get_arg(args, "types", "bc"); BOOT_UNIT <- get_arg(args, "boot_unit", "pigeonhole"); LOO <- get_arg(args, "loo", FALSE)
 REL_SCALE <- get_arg(args, "rel_scale", "pooled"); ERA <- get_arg(args, "era", "all")
 stopifnot(REL_SCALE %in% c("pooled", "year"), ERA %in% c("all", "pre1946", "from1946"))
-stopifnot(SAMPLE %in% ALL_SAMPLES, LAG == 3L, MODEL == "M1c", B >= 0, TYPES %in% c("bc", "bc_nocoorig", "bcj"), BOOT_UNIT %in% c("dispute", "initiator"), is.logical(LOO))
+stopifnot(SAMPLE %in% ALL_SAMPLES, LAG == 3L, MODEL == "M1c", B >= 0, TYPES %in% c("bc", "bc_nocoorig", "bcj"), BOOT_UNIT %in% c("pigeonhole", "dispute", "initiator"), is.logical(LOO))
 spec <- parse_spec(args)
 ## audit F5 (A1 P2-1): the cells M1c is defined on, and nothing else (02_fit_model.R refuses the same)
 stopifnot(spec_is_directed(spec), spec$roles == "bcj", spec_variant(spec) == "all", (if (is.null(spec$joiner_set)) "all" else spec$joiner_set) == "all",
           spec$controls == "minimal", spec$context == "all", (if (is.null(spec$mu_shift)) "none" else spec$mu_shift) == "none")
-cell <- paste0("clogit_", cell_name(SAMPLE, LAG, MODEL, spec), "_", TYPES, if (REL_SCALE == "year") "_relyear" else "", if (ERA != "all") paste0("_", ERA) else "")
+cell <- paste0("clogit_", cell_name(SAMPLE, LAG, MODEL, spec), "_", TYPES, if (REL_SCALE == "year") "_relyear" else "", if (ERA != "all") paste0("_", ERA) else "",
+              "_b", c(pigeonhole = "pig", dispute = "disp", initiator = "init")[[BOOT_UNIT]])   # GPT recheck P2: bootstrap unit is part of the run identity
 log_open(paste0("10_", cell))
 logf("cell %s; spec %s; types %s; bootstrap B = %d over %ss, seed 123; leave-one-out %s; relational scale %s; era %s", cell, spec_string(spec), TYPES, B, BOOT_UNIT, LOO, REL_SCALE, ERA)
 
@@ -218,7 +219,7 @@ for (pr in PAIRS_R) {
   }
 }
 pw$note <- ifelse(pw$term == "dMR", "utility interaction P12, not rho",
-           ifelse(pw$term == "dM", "difference at dM = dR = 0 only (squared and cross terms can change its sign elsewhere)",
+           ifelse(pw$term %in% c("dM", "dR"), "difference at dM = dR = 0 only (squared and cross terms can change its sign elsewhere)",
            ifelse(grepl("^joint:dM\\+dM2\\+dMR$|^joint:dR\\+dR2\\+dMR$", pw$term), "axis effect differs anywhere (linear, squared, cross); not mu or sigma", "")))
 
 ## ---- 5. derived quantities ------------------------------------------------------------------------------------
@@ -239,7 +240,7 @@ derive <- function(b, pooled = FALSE) {                   # b: named coefficient
 }
 pt <- list(M0 = derive(coef(M0), pooled = TRUE), M1 = derive(coef(M1)), M1s = derive(coef(M1s)))
 
-## ---- 6. cluster bootstrap (unit: dispute by default, or initiating state) --------------------------------------
+## ---- 6. cluster bootstrap (pigeonhole two-way by default; dispute or initiator one-way sensitivities) --------------------------------------
 ## audit F5 (A2/A3 P2): a fit that errors OR warns (separation, non-convergence) is dropped for that model only; failures counted per model
 fit_or_null <- function(d, terms) {
   warned <- FALSE
@@ -247,18 +248,27 @@ fit_or_null <- function(d, terms) {
                   error = function(e) NULL)
   if (warned || is.null(res) || any(!is.finite(res))) NULL else res
 }
+## GPT recheck 2026-11-16 P2 (PI-approved): PRIMARY = pigeonhole two-way bootstrap (Owen and Eckles 2012; Davezies, D'Haultfoeuille and Guyonvarch
+## 2021): initiators and disputes are resampled INDEPENDENTLY with replacement and each event's fixed D8 weight is multiplied by the product of its
+## initiator's and its dispute's multiplicities (applied to every alternative in its choice set; zero-multiplier events drop out). Dispute-only
+## and initiator-only resampling (multiplier = that unit's multiplicity) are labelled one-way sensitivities. A stratum's weight is constant
+## across its rows, so a multiplier k is identical to duplicating the event k times.
 set.seed(123)
-ev_unit <- unique(L[, c("ev_id", if (BOOT_UNIT == "dispute") "disp" else "init")]); names(ev_unit) <- c("ev_id", "unit")
-stopifnot(!anyDuplicated(ev_unit$ev_id))
-units <- unique(ev_unit$unit); ev_by_unit <- split(ev_unit$ev_id, ev_unit$unit)
-logf("bootstrap unit: %s (%d units)", BOOT_UNIT, length(units))
-Lsplit <- split(L, L$ev_id)
+ev_ui <- unique(L[, c("ev_id", "init", "disp")]); stopifnot(!anyDuplicated(ev_ui$ev_id))
+u_init <- unique(ev_ui$init); u_disp <- unique(ev_ui$disp)
+i_idx <- match(ev_ui$init, u_init); d_idx <- match(ev_ui$disp, u_disp)
+draw_mult <- function() {
+  mi <- if (BOOT_UNIT == "dispute") rep(1L, length(u_init)) else tabulate(sample.int(length(u_init), length(u_init), replace = TRUE), length(u_init))
+  md <- if (BOOT_UNIT == "initiator") rep(1L, length(u_disp)) else tabulate(sample.int(length(u_disp), length(u_disp), replace = TRUE), length(u_disp))
+  setNames(mi[i_idx] * md[d_idx], ev_ui$ev_id)
+}
+logf("bootstrap: %s (%d initiators, %d disputes)", c(pigeonhole = "pigeonhole two-way (initiators x disputes, independent multiplicities)",
+     dispute = "one-way, disputes (sensitivity)", initiator = "one-way, initiators (sensitivity)")[[BOOT_UNIT]], length(u_init), length(u_disp))
 bs <- list(M1 = NULL, M1s = NULL); bs_coef <- NULL; n_fail <- c(M1 = 0L, M1s = 0L, no_type = 0L)
 fail_log <- data.frame(draw = integer(0), model = character(0), reason = character(0))   # GPT review P2-6: replicate IDs and failure reasons
 for (bb in seq_len(B)) {
-  draw <- sample(units, length(units), replace = TRUE)
-  evs <- unlist(ev_by_unit[as.character(draw)], use.names = FALSE)
-  Lb <- bind_rows(lapply(seq_along(evs), function(i) { x <- Lsplit[[as.character(evs[i])]]; x$ev_id <- i; x }))
+  mult <- draw_mult()
+  Lb <- L[mult[as.character(L$ev_id)] > 0L, ]; Lb$w <- Lb$w * mult[as.character(Lb$ev_id)]
   if (any(tabulate(Lb$type[Lb$chosen == 1L] + 1L, nbins = G) == 0L)) {     # a type with no events in this draw
     n_fail["no_type"] <- n_fail["no_type"] + 1L; fail_log <- rbind(fail_log, data.frame(draw = bb, model = "both", reason = "a type has no events")); next }
   c1 <- fit_or_null(Lb, GAP_G); c2 <- fit_or_null(Lb, TERMS_M1S)
@@ -336,8 +346,11 @@ for (mm in c("M1", "M1s")) {
 }
 tab <- rbind(tab, data.frame(model = "M0", quantity = c(paste0(QN, "_pooled"), "peak_pooled"), estimate = sprintf("%.2f", pt$M0[c(paste0(QN, "_pooled"), "peak_pooled")]),
                              status = "point estimate only", stringsAsFactors = FALSE))
-coefs <- bind_rows(lapply(c("M0", "M1", "M1s"), function(mm) { m <- get(mm); s <- summary(m)$coefficients
-  data.frame(model = mm, term = rownames(s), coef = s[, "coef"], robust_se = s[, "robust se"], p = s[, ncol(s)], row.names = NULL) }))
+## GPT recheck P2: the export uses the PRIMARY two-way variance, with initiator-only and target-year columns labelled as sensitivities
+coefs <- bind_rows(lapply(c("M0", "M1", "M1s"), function(mm) { m <- get(mm); b <- coef(m); V3 <- if (mm == "M1") VS else vc_set(m)
+  se2 <- sqrt(diag(V3$twoway)); se1 <- sqrt(diag(V3$init)); se3 <- sqrt(diag(V3$tgtyr))
+  data.frame(model = mm, term = names(b), coef = b, se_init_x_dispute = se2, p_init_x_dispute = 2 * pnorm(-abs(b / se2)),
+             se_initiator = se1, p_initiator = 2 * pnorm(-abs(b / se1)), se_target_year = se3, p_target_year = 2 * pnorm(-abs(b / se3)), row.names = NULL) }))
 ## per-type axis tests: does this axis matter for this type at all (3 df: linear, squared, cross = 0)
 Rz <- function(terms) { R <- matrix(0, length(terms), length(nm1), dimnames = list(NULL, nm1)); for (i in seq_along(terms)) R[i, terms[i]] <- 1; R }
 axis_rows <- NULL
@@ -361,5 +374,10 @@ if (!is.null(loo)) write.csv(loo, file.path(od, paste0(cell, "_loo.csv")), row.n
 saveRDS(list(pt = pt, bs = bs, bs_coef = bs_coef, fail_log = fail_log, n_ok = n_ok, n_fail = n_fail, B = B, spec = spec, types = TYPES, roles = ROLES,
              support = SUPPORT, n_rows = nrow(L), E = sum(keep), V = VS, boot_unit = BOOT_UNIT, loo = loo),
         file.path(od, paste0(cell, "_boot.rds")))
+## GPT recheck P2: a manifest names exactly the artifacts written by THIS run (an older optional file, e.g. _loo.csv, is not part of it)
+written <- c(paste0(cell, c("_derived.csv", "_coefs.csv", "_tests.csv", "_pairwise.csv", "_boot.rds")), if (!is.null(loo)) paste0(cell, "_loo.csv"))
+gitc <- tryCatch(system2("git", c("-C", R_DIR, "rev-parse", "--short", "HEAD"), stdout = TRUE, stderr = FALSE), error = function(e) NA_character_, warning = function(w) NA_character_)
+write.csv(data.frame(file = written, run_time = format(Sys.time(), "%Y-%m-%d %H:%M:%S %Z"), git = if (length(gitc)) gitc[1] else NA_character_,
+                     args = paste(args, collapse = " ")), file.path(od, paste0(cell, "_manifest.csv")), row.names = FALSE)
 print(tab, right = FALSE, row.names = FALSE); print(tests, row.names = FALSE)
 logf("done: %s_{derived,coefs,tests,pairwise}.csv and _boot.rds", cell)

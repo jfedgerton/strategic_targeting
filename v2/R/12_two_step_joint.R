@@ -7,7 +7,8 @@
 ## odds of a FATAL confrontation with j rather than k split additively:
 ##     log P_F(j)/P_F(k) = log P_A(j)/P_A(k)  +  log r_B(j)/r_B(k)
 ##                         [selection]           [fatality: a log RISK ratio, not the step-B logit coefficient]
-## with P_A the step-A choice probability and r_B the step-B probability that the confrontation turns (jointly) fatal.
+## with P_A the step-A choice probability and r_B the step-B conditional probability that the recorded dyadic dispute is jointly fatal
+## (an ever-fatal flag for the dyadic dispute: it does not separate fatality at onset from later escalation and is not a transition hazard).
 ## Here j is a candidate with gaps x = (dM, dR) and k a reference candidate x0; the two candidates share everything else (Z), so in step A the
 ## Z terms cancel and selection_g(x) = u_g(x) - u_g(x0) exactly. Step B's risk depends on the target's Z and the type intercept, so the fatality
 ## component is averaged over a COMMON reference distribution (all events of both types, each at its own chosen-target Z, D8-weighted):
@@ -26,15 +27,22 @@
 ## pooled 5th to 95th percentile of chosen dM, dR = x0's. Relational curve: likewise for dR, dM = x0's. Overlap (joint audit B6): a box of
 ## +-0.25 SD on BOTH axes around each profile point; per type, thin_B = fewer than 20 of the type's CHOSEN targets in the box (step B is fit on
 ## chosen dyads, so a thin_B point is extrapolation for fatality and total) and thin_A = fewer than 20 of the type's ALTERNATIVES in the box.
-## Intervals: pointwise 95% percentile, matched cluster bootstrap resampling DISPUTES by default (--boot_unit=dispute; or initiator), seed 123;
+## Support (GPT recheck P2): every contrast subtracts the prediction at x0, so x0 must be supported too; a profile is thin if the profile OR x0 is
+## thin for any type. Counts are DISTINCT events (alternatives counted once per event), with distinct initiators, disputes and (step B) fatal
+## events reported alongside; unsupported segments are drawn dashed grey, and claims are restricted to common support.
+## Intervals: pointwise 95% percentile, matched PIGEONHOLE two-way bootstrap by default (GPT recheck, PI-approved: initiators and disputes resampled
+## independently, each event's fixed D8 weight times the product of its two multiplicities in BOTH steps; --boot_unit=dispute or initiator
+## are one-way sensitivities; the unit is part of the output name), seed 123;
 ## reported only when B >= 200 and >= 90% of draws succeed for BOTH steps; replicate IDs, failure reasons and both steps' coefficient draws
 ## are saved. No labels (selection / failure / both) are produced: the curves and intervals are the evidence (GPT review).
-## Identification (GPT review): step A is target choice conditional on a militarized confrontation and its type; step B is the probability that
-## a confrontation turns jointly fatal given it occurred (escalation severity, not bargaining failure in general).
+## Identification (GPT review and recheck): step A is target choice conditional on a militarized confrontation and its type; step B is the
+## conditional probability that the recorded dyadic dispute is jointly fatal (not a causal bargaining-failure mechanism). Paper wording (GPT
+## recheck): "We decompose model-implied differences in targeting associated with jointly fatal dyadic disputes into target selection
+## conditional on a militarized confrontation and the conditional probability that the recorded dyadic dispute is jointly fatal."
 ##
 ## Usage:
 ##   Rscript v2/R/12_two_step_joint.R --sample=mid --lag=3 --model=M1c --comparison=directed --events=dymid --variant=all --roles=bcj --joiner_set=all --types=bc
-##   --outcome=fmid|fmidany|fmidub (default fmid), --reach=capdist, --boot=1000, --boot_unit=dispute|initiator,
+##   --outcome=fmid|fmidany|fmidub (default fmid), --reach=capdist, --boot=1000, --boot_unit=pigeonhole|dispute|initiator,
 ##   --sim_check=TRUE --sim_seed=N (simulation check; outputs carry _SIMCHECK_seedN and never overwrite real outputs).
 ##   Unknown, retired or duplicated options are refused (joint audit B2).
 suppressPackageStartupMessages({ library(dplyr); library(survival) })
@@ -55,14 +63,15 @@ if (any(!flag_names %in% KNOWN_FLAGS)) stop(sprintf("unknown option(s) for 12_tw
 if (anyDuplicated(flag_names)) stop(sprintf("option(s) given more than once: %s", paste(unique(flag_names[duplicated(flag_names)]), collapse = ", ")))
 SAMPLE <- get_arg(args, "sample", "mid"); LAG <- as.integer(get_arg(args, "lag", 3)); MODEL <- get_arg(args, "model", "M1c")
 B <- as.integer(get_arg(args, "boot", 1000)); TYPES <- get_arg(args, "types", "bc"); OUTCOME <- get_arg(args, "outcome", "fmid")
-BOOT_UNIT <- get_arg(args, "boot_unit", "dispute"); SIM <- get_arg(args, "sim_check", FALSE); SIM_SEED <- as.integer(get_arg(args, "sim_seed", 123))
+BOOT_UNIT <- get_arg(args, "boot_unit", "pigeonhole"); SIM <- get_arg(args, "sim_check", FALSE); SIM_SEED <- as.integer(get_arg(args, "sim_seed", 123))
 stopifnot(SAMPLE == "mid", LAG == 3L, MODEL == "M1c", B >= 0, TYPES %in% c("bc", "bc_nocoorig", "bcj"), OUTCOME %in% c("fmid", "fmidany", "fmidub"),
-          BOOT_UNIT %in% c("dispute", "initiator"), is.logical(SIM), !is.na(SIM_SEED))
+          BOOT_UNIT %in% c("pigeonhole", "dispute", "initiator"), is.logical(SIM), !is.na(SIM_SEED))
 spec <- parse_spec(args)
 stopifnot(spec_is_directed(spec), spec$roles == "bcj", spec_variant(spec) == "all", (if (is.null(spec$joiner_set)) "all" else spec$joiner_set) == "all",
           spec$controls == "minimal", spec$context == "all", (if (is.null(spec$mu_shift)) "none" else spec$mu_shift) == "none",
           spec_events(spec) == "dymid", spec$ww2 == "include")
-cell <- paste0("joint_", cell_name(SAMPLE, LAG, MODEL, spec), "_", TYPES, "_", OUTCOME, if (SIM) paste0("_SIMCHECK_seed", SIM_SEED) else "")   # joint audit B1
+cell <- paste0("joint_", cell_name(SAMPLE, LAG, MODEL, spec), "_", TYPES, "_", OUTCOME, "_b", c(pigeonhole = "pig", dispute = "disp", initiator = "init")[[BOOT_UNIT]],
+               if (SIM) paste0("_SIMCHECK_seed", SIM_SEED) else "")   # joint audit B1
 log_open(paste0("12_", cell))
 logf("cell %s; spec %s; types %s; outcome in_%s; matched bootstrap B = %d over %ss, seed 123%s", cell, spec_string(spec), TYPES, OUTCOME, B, BOOT_UNIT,
      if (SIM) sprintf("; SIMULATION CHECK seed %d", SIM_SEED) else "")
@@ -128,7 +137,7 @@ logf("events %d (dropped %d); by type (events, fatal): %s; long frame %d rows", 
      paste(sprintf("%s %d / %d", ROLES, cnt[1, ], cnt[2, ]), collapse = "; "), nrow(L))
 
 ## the REAL chosen targets fix the profiles, the grids and the overlap counts (joint audit B7: identical across simulation seeds and in real runs)
-D_real <- D[, c("ev_id", "type", "dM", "dR")]
+D_real <- D[, c("ev_id", "type", "dM", "dR", "init", "disp", "y")]   # captured BEFORE any --sim_check replacement (support uses the real design)
 ## ---- 4b. optional simulation check (--sim_check=TRUE): replace the observed choices and fatal flags with draws from KNOWN coefficients on the
 ## real design (real choice sets, gaps, Z, weights, types); the decomposition must then recover decomp(truth). Types bc and bc_nocoorig only.
 ## Never used for results; its outputs carry _SIMCHECK_seedN. Z effects are nonzero in both steps (B7), so the averaging over Z is tested.
@@ -166,18 +175,33 @@ grid <- list(dM = seq(quantile(D_real$dM, 0.05), quantile(D_real$dM, 0.95), leng
 profiles <- rbind(data.frame(axis = "material", dM = grid$dM, dR = x0[["dR"]]), data.frame(axis = "relational", dM = x0[["dM"]], dR = grid$dR))
 profiles$x <- ifelse(profiles$axis == "material", profiles$dM, profiles$dR)
 hM <- H_SD * sd(D_real$dM); hR <- H_SD * sd(D_real$dR)                     # B6: two-axis box, +-0.25 SD on each axis
-alt_rows <- L[, c("ev_id", "type", "dM", "dR")]                            # every alternative (the real design, also under --sim_check), for thin_A
-for (g in 0:(G - 1L)) {
+alt_rows <- L[, c("ev_id", "type", "dM", "dR", "init")]                    # every alternative (the real design, also under --sim_check), for thin_A
+alt_rows$disp <- D_real$disp[match(alt_rows$ev_id, D_real$ev_id)]; stopifnot(!anyNA(alt_rows$disp))
+pts <- rbind(profiles[, c("dM", "dR")], data.frame(dM = x0[["dM"]], dR = x0[["dR"]]))   # the last row is the reference x0
+ix0 <- nrow(pts)
+for (g in 0:(G - 1L)) { rg <- ROLES[g + 1]
   sB <- D_real$type == g; sA <- alt_rows$type == g
-  profiles[[paste0("nB_", ROLES[g + 1])]] <- vapply(seq_len(nrow(profiles)), function(i)
-    sum(abs(D_real$dM[sB] - profiles$dM[i]) <= hM & abs(D_real$dR[sB] - profiles$dR[i]) <= hR), 0L)
-  profiles[[paste0("nA_", ROLES[g + 1])]] <- vapply(seq_len(nrow(profiles)), function(i)
-    sum(abs(alt_rows$dM[sA] - profiles$dM[i]) <= hM & abs(alt_rows$dR[sA] - profiles$dR[i]) <= hR), 0L)
+  inB <- lapply(seq_len(nrow(pts)), function(i) which(sB & abs(D_real$dM - pts$dM[i]) <= hM & abs(D_real$dR - pts$dR[i]) <= hR))
+  inA <- lapply(seq_len(nrow(pts)), function(i) which(sA & abs(alt_rows$dM - pts$dM[i]) <= hM & abs(alt_rows$dR - pts$dR[i]) <= hR))
+  cB <- t(vapply(inB, function(k) c(ev = length(unique(D_real$ev_id[k])), init = length(unique(D_real$init[k])), disp = length(unique(D_real$disp[k])), fatal = sum(D_real$y[k])), numeric(4)))
+  cA <- t(vapply(inA, function(k) c(ev = length(unique(alt_rows$ev_id[k])), init = length(unique(alt_rows$init[k])), disp = length(unique(alt_rows$disp[k]))), numeric(3)))
+  for (v in colnames(cB)) profiles[[paste0("nB", v, "_", rg)]] <- cB[-ix0, v]
+  for (v in colnames(cA)) profiles[[paste0("nA", v, "_", rg)]] <- cA[-ix0, v]
+  profiles[[paste0("nB_", rg)]] <- cB[-ix0, "ev"]; profiles[[paste0("nA_", rg)]] <- cA[-ix0, "ev"]   # distinct events (GPT recheck: not alternative rows)
+  attr(x0, paste0("nB_", rg)) <- cB[ix0, "ev"]; attr(x0, paste0("nA_", rg)) <- cA[ix0, "ev"]
+  attr(x0, paste0("nBinit_", rg)) <- cB[ix0, "init"]; attr(x0, paste0("nBdisp_", rg)) <- cB[ix0, "disp"]; attr(x0, paste0("nBfatal_", rg)) <- cB[ix0, "fatal"]
 }
-profiles$thin_B <- apply(profiles[, paste0("nB_", ROLES), drop = FALSE] < MIN_OVL, 1, any)
-profiles$thin_A <- apply(profiles[, paste0("nA_", ROLES), drop = FALSE] < MIN_OVL, 1, any)
-logf("reference x0 = (dM %.3f, dR %.3f); material grid %.2f to %.2f, relational grid %.2f to %.2f; overlap box +-%.3f (dM) x +-%.3f (dR); thin for step B (any type < %d chosen): %d of %d; thin for step A (alternatives): %d",
-     x0[["dM"]], x0[["dR"]], min(grid$dM), max(grid$dM), min(grid$dR), max(grid$dR), hM, hR, MIN_OVL, sum(profiles$thin_B), nrow(profiles), sum(profiles$thin_A))
+x0_thin_B <- any(vapply(ROLES, function(rg) attr(x0, paste0("nB_", rg)) < MIN_OVL, TRUE))
+x0_thin_A <- any(vapply(ROLES, function(rg) attr(x0, paste0("nA_", rg)) < MIN_OVL, TRUE))
+profiles$thin_B <- apply(profiles[, paste0("nB_", ROLES), drop = FALSE] < MIN_OVL, 1, any) | x0_thin_B    # GPT recheck P2: both endpoints of every contrast
+profiles$thin_A <- apply(profiles[, paste0("nA_", ROLES), drop = FALSE] < MIN_OVL, 1, any) | x0_thin_A
+logf("reference x0 = (dM %.3f, dR %.3f): chosen events near x0 by type %s; distinct events among alternatives %s; x0 %s",
+     x0[["dM"]], x0[["dR"]], paste(sprintf("%s %d (initiators %d, disputes %d, fatal %d)", ROLES, sapply(ROLES, function(r) attr(x0, paste0("nB_", r))),
+     sapply(ROLES, function(r) attr(x0, paste0("nBinit_", r))), sapply(ROLES, function(r) attr(x0, paste0("nBdisp_", r))), sapply(ROLES, function(r) attr(x0, paste0("nBfatal_", r)))), collapse = "; "),
+     paste(sprintf("%s %d", ROLES, sapply(ROLES, function(r) attr(x0, paste0("nA_", r)))), collapse = "; "),
+     if (x0_thin_A || x0_thin_B) "is THIN: every contrast is an extrapolation and is flagged" else "is supported")
+logf("material grid %.2f to %.2f, relational grid %.2f to %.2f; overlap box +-%.3f (dM) x +-%.3f (dR); thin for step B (any type < %d distinct chosen events, at the profile or x0): %d of %d; thin for step A (distinct events among alternatives): %d",
+     min(grid$dM), max(grid$dM), min(grid$dR), max(grid$dR), hM, hR, MIN_OVL, sum(profiles$thin_B), nrow(profiles), sum(profiles$thin_A))
 gterms <- function(dM, dR) cbind(dM, dM^2, dR, dR^2, dM * dR)            # in GAP order
 ZD_mat <- as.matrix(D[, Z_cols, drop = FALSE]); wD <- D$w / sum(D$w)
 decomp <- function(bA, bB) {
@@ -218,16 +242,19 @@ quiet_fit <- function(f, d) { warned <- FALSE
   res <- tryCatch(withCallingHandlers(f(d), warning = function(w) { warned <<- TRUE; invokeRestart("muffleWarning") }), error = function(e) NULL)
   list(fit = res, warned = warned) }
 set.seed(123)
-unit_of <- if (BOOT_UNIT == "dispute") D$disp else D$init
-units <- unique(unit_of); ev_by_unit <- split(D$ev_id, unit_of)
-logf("bootstrap unit: %s (%d units)", BOOT_UNIT, length(units))
-Lsplit <- split(L, L$ev_id); Drow <- setNames(seq_len(nrow(D)), D$ev_id)
+u_init <- unique(D$init); u_disp <- unique(D$disp); i_idx <- match(D$init, u_init); d_idx <- match(D$disp, u_disp)
+draw_mult <- function() {                                              # GPT recheck P2: matched pigeonhole two-way (default) or one-way multiplicities
+  mi <- if (BOOT_UNIT == "dispute") rep(1L, length(u_init)) else tabulate(sample.int(length(u_init), length(u_init), replace = TRUE), length(u_init))
+  md <- if (BOOT_UNIT == "initiator") rep(1L, length(u_disp)) else tabulate(sample.int(length(u_disp), length(u_disp), replace = TRUE), length(u_disp))
+  setNames(mi[i_idx] * md[d_idx], D$ev_id) }
+logf("bootstrap: %s (%d initiators, %d disputes); largest initiator / dispute share of event weight %.3f / %.3f", BOOT_UNIT, length(u_init), length(u_disp),
+     max(tapply(D$w, D$init, sum)) / sum(D$w), max(tapply(D$w, D$disp, sum)) / sum(D$w))
 bs <- vector("list", length(pt)); names(bs) <- names(pt)
 coefA <- NULL; coefB <- NULL; fail_log <- data.frame(draw = integer(0), reason = character(0))
 for (bb in seq_len(B)) {
-  evs <- unlist(ev_by_unit[as.character(sample(units, length(units), replace = TRUE))], use.names = FALSE)
-  Lb <- bind_rows(lapply(seq_along(evs), function(i) { x <- Lsplit[[as.character(evs[i])]]; x$ev_id <- i; x }))
-  Db <- D[Drow[as.character(evs)], ]; Db$ev_id <- seq_along(evs)
+  mult <- draw_mult()                                                  # ONE draw drives both steps (matched); reference events, x0 and grids stay fixed
+  Lb <- L[mult[as.character(L$ev_id)] > 0L, ]; Lb$w <- Lb$w * mult[as.character(Lb$ev_id)]
+  Db <- D[mult[as.character(D$ev_id)] > 0L, ]; Db$w <- Db$w * mult[as.character(Db$ev_id)]
   tt <- table(factor(Db$type, levels = 0:(G - 1L))); ft <- tapply(Db$y, factor(Db$type, levels = 0:(G - 1L)), sum)
   if (any(tt == 0L) || any(ft == 0L, na.rm = TRUE) || any(ft == tt, na.rm = TRUE)) {
     fail_log <- rbind(fail_log, data.frame(draw = bb, reason = "a type lacks events or lacks fatal / non-fatal events")); next }
@@ -254,14 +281,15 @@ for (k in names(pt)) {
   if (boot_ok) { lo <- apply(bs[[k]], 2, quantile, 0.025); hi <- apply(bs[[k]], 2, quantile, 0.975) }
   curves <- rbind(curves, data.frame(component = comp, type = who, axis = profiles$axis, x = profiles$x, dM = profiles$dM, dR = profiles$dR,
                                      estimate = pt[[k]], lo = lo, hi = hi, thin_A = profiles$thin_A, thin_B = profiles$thin_B,
-                                     profiles[, c(paste0("nA_", ROLES), paste0("nB_", ROLES)), drop = FALSE]))
+                                     profiles[, grep("^n[AB]", names(profiles)), drop = FALSE]))
 }
 od <- file.path(v2_root(), "output"); dir.create(od, showWarnings = FALSE)
 write.csv(curves, file.path(od, paste0(cell, "_curves.csv")), row.names = FALSE)
 write.csv(data.frame(term = names(bA), coef = bA), file.path(od, paste0(cell, "_coefA.csv")), row.names = FALSE)
 write.csv(data.frame(term = names(bB), coef = bB), file.path(od, paste0(cell, "_coefB.csv")), row.names = FALSE)
 saveRDS(list(pt = pt, bs = if (boot_ok) bs else NULL, coefA = coefA, coefB = coefB, fail_log = fail_log, n_ok = n_ok, B = B, x0 = x0, profiles = profiles,
-             spec = spec, types = TYPES, outcome = OUTCOME, roles = ROLES, counts = cnt, E = nrow(D), boot_unit = BOOT_UNIT), file.path(od, paste0(cell, "_boot.rds")))
+             spec = spec, types = TYPES, outcome = OUTCOME, roles = ROLES, counts = cnt, E = nrow(D), boot_unit = BOOT_UNIT,
+             x0_support = attributes(x0)[grep("^n", names(attributes(x0)))], x0_thin = c(A = x0_thin_A, B = x0_thin_B)), file.path(od, paste0(cell, "_boot.rds")))
 if (requireNamespace("ggplot2", quietly = TRUE)) {
   library(ggplot2)
   cd <- curves[curves$component %in% c("selection", "fatality", "total") & curves$type %in% ROLES, ]
@@ -269,12 +297,17 @@ if (requireNamespace("ggplot2", quietly = TRUE)) {
   cd$component <- factor(cd$component, levels = c("selection", "fatality", "total"),
                          labels = c("Selection\nlog P_A ratio", "Fatality\nlog risk ratio", "Total\nlog P_F ratio"))
   cd$axis <- factor(cd$axis, levels = c("material", "relational"), labels = c("Material gap (initiator - target)", "Relational gap (initiator - target)"))
-  p <- ggplot(cd, aes(x = x, y = estimate, colour = type, fill = type)) + geom_hline(yintercept = 0, linewidth = 0.3, colour = "grey50") +
-    { if (boot_ok) geom_ribbon(aes(ymin = lo, ymax = hi), alpha = 0.15, colour = NA) } + geom_line(linewidth = 0.7) +
-    geom_point(data = cd[cd$thin, ], shape = 4, size = 1.5, show.legend = FALSE) +
-    facet_grid(component ~ axis, scales = "free") + labs(x = NULL, y = "Relative to the reference profile", colour = "Type", fill = "Type",
-         caption = "x = thin support: a type has < 20 targets (alternatives for selection, chosen for fatality and total) within 0.25 SD on both gaps") +
+  cd$est_sup <- ifelse(cd$thin, NA_real_, cd$estimate); cd$lo_sup <- ifelse(cd$thin, NA_real_, cd$lo); cd$hi_sup <- ifelse(cd$thin, NA_real_, cd$hi)
+  p <- ggplot(cd, aes(x = x, colour = type, fill = type)) + geom_hline(yintercept = 0, linewidth = 0.3, colour = "grey50") +
+    geom_line(aes(y = estimate, group = type), colour = "grey60", linetype = "dashed", linewidth = 0.5) +       # full curve, diagnostic only
+    { if (boot_ok) geom_ribbon(aes(ymin = lo_sup, ymax = hi_sup), alpha = 0.15, colour = NA) } + geom_line(aes(y = est_sup), linewidth = 0.8, na.rm = TRUE) +
+    facet_grid(component ~ axis, scales = "free") + labs(x = NULL, y = "Relative to the reference profile x0", colour = "Type", fill = "Type",
+         caption = "Solid with pointwise 95% intervals: common support. Dashed grey: a type has < 20 distinct events near the profile or near x0 (extrapolation).") +
     theme_bw(base_size = 10) + theme(legend.position = "bottom", strip.text.y = element_text(angle = 0))
   ggsave(file.path(od, paste0(cell, "_decomposition.png")), p, width = 8, height = 7, dpi = 200)
 }
-logf("done: %s_{curves,coefA,coefB}.csv, _boot.rds, _decomposition.png", cell)
+written <- c(paste0(cell, c("_curves.csv", "_coefA.csv", "_coefB.csv", "_boot.rds")), if (requireNamespace("ggplot2", quietly = TRUE)) paste0(cell, "_decomposition.png"))
+gitc <- tryCatch(system2("git", c("-C", R_DIR, "rev-parse", "--short", "HEAD"), stdout = TRUE, stderr = FALSE), error = function(e) NA_character_, warning = function(w) NA_character_)
+write.csv(data.frame(file = written, run_time = format(Sys.time(), "%Y-%m-%d %H:%M:%S %Z"), git = if (length(gitc)) gitc[1] else NA_character_,
+                     args = paste(args, collapse = " ")), file.path(od, paste0(cell, "_manifest.csv")), row.names = FALSE)   # GPT recheck P2
+logf("done: %s_{curves,coefA,coefB,manifest}.csv, _boot.rds, _decomposition.png", cell)
