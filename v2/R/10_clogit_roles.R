@@ -254,7 +254,7 @@ stopifnot(all(c("initiator", "target", "year", "escalation", "dispnum") %in% nam
 ne <- ev_rds[!ev_rds$escalation, c("initiator", "target", "year", "dispnum")]
 stopifnot(!anyDuplicated(ne[, c("initiator", "target", "year")]))
 ek <- merge(ek, ne, by = c("initiator", "target", "year"), all.x = TRUE, sort = FALSE)
-TERMS_M1S <- c(setdiff(GAP_G, c(paste0("dMR_", ROLES), "dMR_jlag")), "dMR")   # re-audit P2: M1s has ONE shared cross term, so the joiner cross-term moderator is dropped too
+if (anyNA(ek$dispnum)) stop(sprintf("%d events have no non-escalation row with a dispnum in events.rds", sum(is.na(ek$dispnum))))
 ek <- ek[match(unique(L$ev_id), ek$ev_id), ]
 stopifnot(nrow(ek) == length(unique(L$ev_id)))
 ek$disp <- ek$dispnum; ek$tgtyr <- paste(ek$target, ek$year, sep = "_"); ek$init_disp <- paste(ek$initiator, ek$dispnum, sep = "_")
@@ -269,7 +269,7 @@ fit_cl <- function(d, terms, robust = TRUE) {
   if (robust) coxph(f, data = d, weights = w, method = "breslow", cluster = init)
   else coxph(f, data = d, weights = w, method = "breslow")
 }
-TERMS_M1S <- c(setdiff(GAP_G, paste0("dMR_", ROLES)), "dMR")
+TERMS_M1S <- c(setdiff(GAP_G, c(paste0("dMR_", ROLES), "dMR_jlag")), "dMR")   # re-audit P2: M1s has ONE shared cross term, so the joiner cross-term moderator is dropped too
 M0 <- fit_cl(L, GAP)
 M1 <- fit_cl(L, GAP_G)
 M1s <- fit_cl(L, TERMS_M1S)
