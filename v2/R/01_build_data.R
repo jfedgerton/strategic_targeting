@@ -1220,6 +1220,8 @@ add_manifest(events, "events.rds", if (EVENTS == "dymid") "directed events of th
                                            DIRECTION, if (INCLUDE_JOINERS) "included" else "excluded"))
 add_manifest(roles_ap, "roles_aprime.rds", "stage-2 role groups aprime per non-escalation event (PI decision 2026-10-31; switch roles = aprime): grp_aprime 0 alone originator / 1 co-originator / 2 joiner / 3 target joined late, from the weight-group dispute (smallest dispnum) of a collapsed key; aprime_roles()")
 add_manifest(jset_ap, "joiner_sets_aprime.rds", "joiner choice sets (PI-approved 2026-11-04; switch joiner_set = opposing): per aprime joiner event (initiator, target, year, dispnum = its weight-group dispute) the states opp_ccode on the opposite side of that dispute in the onset year (opp_two_sides: a within-year switcher); joiner_opposing_sets()")
+## Side convention (GPT recheck 2026-11-17): side_entry is the participant's INITIAL alignment, its side in the spell's first year; a state that
+## switches sides later in the same spell (side_switch, e.g. France in 258 in 1940) keeps its initial side for the entry-timing coding.
 ## ---- entry-timing table (PI request 2026-11-17; GPT + independent review of the first draft): one row per (dispute, participant, spell) of the
 ## EVENT participation table, taken BEFORE any collapse of same-year keys, with the participant's COW originator flag, its side in the spell's
 ## first year (side_entry; side_conflict = both sides recorded for it in that year; side_switch = a different side later in the dispute), its entry
@@ -1237,9 +1239,12 @@ parts_tt <- psd_tt |> as.data.frame() |>
   left_join(side_any, by = c("dispnum", "ccode")) |>
   left_join(db_tt |> select(dispnum, onset_lo = start_lo, onset_hi = start_hi), by = "dispnum") |>
   mutate(entry_lo = ifelse(entry_res <= 2L, entry_mkey, ym_index(entry_y, 1L)), entry_hi = ifelse(entry_res <= 2L, entry_mkey, ym_index(entry_y, 12L)),
+         ## a GML start before the spell's first COW year is clamped to January by participant_spell_dates(); the timing table keeps the known GML month
+         entry_clamped = entry_src == "participant (entry clamped to January)",
+         entry_lo = ifelse(entry_clamped, gml_start_mkey, entry_lo), entry_hi = ifelse(entry_clamped, gml_start_mkey, entry_hi),
          side_conflict = n_side_first > 1L, side_switch = n_side_disp > 1L) |>
-  select(dispnum, ccode, spell, spell_first, spell_last, orig, side_entry, side_conflict, side_switch, entry_src, entry_res, entry_lo, entry_hi, onset_lo, onset_hi)
-stopifnot(!anyNA(parts_tt$side_entry), !anyNA(parts_tt$onset_lo), !anyNA(parts_tt$entry_lo), all(parts_tt$entry_lo <= parts_tt$entry_hi), all(parts_tt$onset_lo <= parts_tt$onset_hi))
+  select(dispnum, ccode, spell, spell_first, spell_last, orig, side_entry, side_conflict, side_switch, entry_src, entry_res, entry_clamped, gml_start_mkey, entry_lo, entry_hi, onset_lo, onset_hi)
+stopifnot(!anyNA(parts_tt$side_entry), !anyNA(parts_tt$onset_lo), !anyNA(parts_tt$entry_lo), all(!parts_tt$entry_clamped | parts_tt$entry_lo < ym_index(parts_tt$spell_first, 1L)), all(parts_tt$entry_lo <= parts_tt$entry_hi), all(parts_tt$onset_lo <= parts_tt$onset_hi))
 assert_no_dup_keys(parts_tt, c("dispnum", "ccode", "spell"), "entry-timing participant table")
 blog("entry-timing table: %d participant spells in %d disputes; entry at day / month / year resolution %d / %d / %d; side conflict in the entry year %d; side switch within the dispute %d; entry before the dispute onset (lower bounds) %d",
      nrow(parts_tt), n_distinct(parts_tt$dispnum), sum(parts_tt$entry_res == 1L), sum(parts_tt$entry_res == 2L), sum(parts_tt$entry_res == 3L),

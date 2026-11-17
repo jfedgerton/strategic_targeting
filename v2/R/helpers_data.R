@@ -1112,8 +1112,11 @@ participant_spell_dates <- function(dd, db, part = NULL) {
     sp$exit_res[bad] <- 3L; sp$exit_m[bad] <- NA_integer_; sp$exit_d[bad] <- NA_integer_; sp$exit_mkey[bad] <- NA_integer_; sp$exit_dkey[bad] <- NA_integer_
     sp$entry_src[bad] <- "dispute (GML entry after exit)"; sp$exit_src[bad] <- "dispute (GML entry after exit)"
   }
+  ## gml_start_mkey: the unclamped GML start month of the spell (NA without a GML spell); kept for the entry-timing table (GPT review 2026-11-17:
+  ## recover the known pre-clamp date instead of treating a January-clamped entry as exact). Not used by the event machinery.
+  sp <- sp |> mutate(gml_start_mkey = ifelse(n_gml >= 1L, as.integer(g_sy) * 12L + as.integer(g_sm) - 1L, NA_integer_))   # = ym_index(), NA-safe
   out <- sp |> select(dispnum, ccode, spell, spell_first, spell_last, orig, entry_src, entry_res, entry_y, entry_m, entry_d, entry_mkey, entry_dkey,
-                      exit_src, exit_res, exit_y, exit_m, exit_d, exit_mkey, exit_dkey)
+                      exit_src, exit_res, exit_y, exit_m, exit_d, exit_mkey, exit_dkey, gml_start_mkey)
   stopifnot(all(out$entry_y == out$spell_first), all(out$exit_y == out$spell_last), !anyNA(out$entry_res), !anyNA(out$exit_res))
   assert_no_dup_keys(out, c("dispnum", "ccode", "spell"), "participant spell dates")
   attr(out, "membership") <- membership

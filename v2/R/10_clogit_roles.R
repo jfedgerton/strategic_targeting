@@ -53,7 +53,7 @@ Sys.setenv(V2_ROOT = normalizePath(file.path(R_DIR, "..")))   # audit F5 (A1 P2-
 args <- commandArgs(trailingOnly = TRUE)
 ## joint audit B2: refuse retired options, unknown flags, bare flags and duplicated flags (get_arg would silently take the first)
 refuse_archived_options(args, "10_clogit_roles.R")
-SCRIPT_FLAGS <- c("sample", "lag", "model", "boot", "types", "boot_unit", "loo", "rel_scale", "era", "coorig_months", "coorig_bound", "entry_mod")
+SCRIPT_FLAGS <- c("sample", "lag", "model", "boot", "types", "boot_unit", "loo", "rel_scale", "era", "coorig_months", "coorig_bound", "timing_ref", "entry_mod")
 KNOWN_FLAGS <- c(names(SPEC_CHOICES), "ame_K", "tag", SCRIPT_FLAGS)
 bad <- args[!grepl("^--[A-Za-z_0-9]+=.+$", args)]
 if (length(bad)) stop(sprintf("arguments must be --name=value; refused: %s", paste(bad, collapse = " ")))
@@ -73,7 +73,8 @@ spec <- parse_spec(args)
 stopifnot(spec_is_directed(spec), spec$roles == "bcj", spec_variant(spec) == "all", (if (is.null(spec$joiner_set)) "all" else spec$joiner_set) == "all",
           spec$controls == "minimal", spec$context == "all", (if (is.null(spec$mu_shift)) "none" else spec$mu_shift) == "none")
 cell <- paste0("clogit_", cell_name(SAMPLE, LAG, MODEL, spec), "_", TYPES, if (REL_SCALE == "year") "_relyear" else "", if (ERA != "all") paste0("_", ERA) else "",
-              if (COORIG_W > 0L) paste0("_com", COORIG_W, if (get_arg(args, "coorig_bound", "definite") == "possible") "p" else "d") else "", if (ENTRY_MOD) "_entrymod" else "",
+              if (COORIG_W > 0L) paste0("_com", COORIG_W, if (get_arg(args, "coorig_bound", "definite") == "possible") "p" else "d") else "",
+              if ((COORIG_W > 0L || ENTRY_MOD) && get_arg(args, "timing_ref", "originator") == "cow") "_rcow" else "", if (ENTRY_MOD) "_entrymod" else "",
               "_b", c(pigeonhole = "pig", dispute = "disp", initiator = "init")[[BOOT_UNIT]])   # GPT recheck P2: bootstrap unit is part of the run identity
 log_open(paste0("10_", cell))
 logf("cell %s; spec %s; types %s; bootstrap B = %d, unit %s, seed 123; leave-one-out %s; relational scale %s; era %s", cell, spec_string(spec), TYPES, B, BOOT_UNIT, LOO, REL_SCALE, ERA)
@@ -106,31 +107,35 @@ logf("bcj events %d (bilateral %d, coalition originator %d, joiner %d); weight s
 ##       centred at the joiners' weighted median, so the joiner coefficients and every joiner-based quantity are read at the median joiner. The lag is
 ##       descriptive heterogeneity, not a pre-treatment moderator (entry timing and the target are often chosen together).
 ## Source: participants_timing.rds of the data build, one row per (dispute, participant, spell) of the event participation table BEFORE any key
-## collapse: COW originator flag, side in the spell's first year (side_conflict, side_switch), participant entry month bounds (GML participant dates
-## at day or month resolution, else the whole first year) and the dispute onset month bounds (COW start). A fitted event is matched to its weight-
+## collapse: COW originator flag, INITIAL side (side in the spell's first year; a later switch within the spell keeps the initial side, flagged
+## side_switch), participant entry month bounds (GML participant dates at day or month resolution, January-clamped entries at their known GML
+## start month, else the whole first year) and the COW dispute onset. --timing_ref=originator|cow picks the reference date (see below). A fitted event is matched to its weight-
 ## group dispute (dispnum of its non-escalation row; the role comes from the same dispute) and to the initiator's spell covering the event year.
 ev_rds <- readRDS(file.path(data_dir, "events.rds"))
-lag_ev <- rep(NA_real_, dat$E); lag_lo_ev <- lag_hi_ev <- rep(NA_real_, dat$E); role_alt <- NULL
+lag_ev <- rep(NA_real_, dat$E); lag_lo_ev <- lag_hi_ev <- rep(NA_real_, dat$E); role_alt <- NULL; grp_alt <- NULL
 COORIG_BOUND <- get_arg(args, "coorig_bound", "definite"); stopifnot(COORIG_BOUND %in% c("definite", "possible"))
 if (any(grepl("^--coorig_bound=", args)) && COORIG_W == 0L) stop("--coorig_bound only applies with --coorig_months")
+ev_grp_default <- ev$grp
 if (COORIG_W > 0L || ENTRY_MOD) {
   stopifnot(TYPES %in% c("bc", "bcj"))
   pt_path <- file.path(data_dir, "participants_timing.rds")
   if (!file.exists(pt_path)) stop("entry timing: ", pt_path, " is missing; rebuild the data with the 2026-11-17 build (01_build_data.R)")
   P <- readRDS(pt_path)
   stopifnot(all(c("dispnum", "ccode", "spell", "spell_first", "spell_last", "orig", "side_entry", "side_conflict", "entry_src", "entry_lo", "entry_hi", "onset_lo", "onset_hi") %in% names(P)))
-  ## independent re-audit 2026-11-17 P1: the COW dispute start and the GML participant dates disagree in many disputes (1039: COW June 1970, every
-  ## originator dated September 1970 by GML), so lags are measured from the dispute's EARLIEST ORIGINATOR ENTRY on the same (participant-date)
-  ## scale; the COW start is the fallback only where no originator spell exists. Reference bounds = minimum over the dispute's originator spells.
+  stopifnot("entry_clamped" %in% names(P), !anyNA(P$entry_lo))   # January-clamped entries carry their known (earlier) GML start month (build 2026-11-17)
+  ## Reference date (--timing_ref; paired sensitivities, GPT recheck 2026-11-17). originator (default): the dispute's EARLIEST ORIGINATOR ENTRY on
+  ## the participant-date scale (bounds = minimum over originator spells; COW start where no originator spell exists), because COW starts and GML
+  ## participant dates disagree in many disputes (1039: COW June 1970, every originator September 1970). cow: time since the COW dispute start.
+  ## Both reference columns are kept and written to the event-level _timing.csv.
+  TIMING_REF <- get_arg(args, "timing_ref", "originator"); stopifnot(TIMING_REF %in% c("originator", "cow"))
   ref <- aggregate(cbind(r_lo = entry_lo, r_hi = entry_hi) ~ dispnum, data = P[P$orig == 1L, ], FUN = min)
   P <- merge(P, ref, by = "dispnum", all.x = TRUE, sort = FALSE)
-  n_cow <- sum(is.na(P$r_lo)); n_shift <- sum(!is.na(P$r_lo) & P$r_lo != P$onset_lo)
-  P$onset_lo <- ifelse(is.na(P$r_lo), P$onset_lo, P$r_lo); P$onset_hi <- ifelse(is.na(P$r_hi), P$onset_hi, P$r_hi)
-  ## P2: an entry clamped to January (GML start in an earlier year than COW's first year) is at or before that January: lower bound open
-  cl <- P$entry_src == "participant (entry clamped to January)"; P$entry_lo[cl] <- pmin(P$entry_lo[cl], P$onset_lo[cl])
+  P$cow_lo <- P$onset_lo; P$cow_hi <- P$onset_hi
+  P$orig_lo <- ifelse(is.na(P$r_lo), P$cow_lo, P$r_lo); P$orig_hi <- ifelse(is.na(P$r_hi), P$cow_hi, P$r_hi)
+  if (TIMING_REF == "originator") { P$onset_lo <- P$orig_lo; P$onset_hi <- P$orig_hi }
   P <- P[order(P$dispnum, P$ccode, P$spell), ]
-  logf("entry timing: reference = earliest originator entry (participant dates); COW start used for %d spells without an originator spell; reference differs from the COW start for %d spells; entries clamped to January given an open lower bound %d",
-       n_cow, n_shift, sum(cl))
+  logf("entry timing: reference = %s; spells without an originator spell (COW start used) %d; originator reference differs from the COW start for %d spells; January-clamped entries dated by their GML start %d",
+       if (TIMING_REF == "originator") "earliest originator entry (participant dates)" else "COW dispute start", sum(is.na(P$r_lo)), sum(P$orig_lo != P$cow_lo), sum(P$entry_clamped))
   ne_t <- ev_rds[!ev_rds$escalation, c("initiator", "target", "year", "dispnum", "dispnums")]
   stopifnot(!anyDuplicated(ne_t[, c("initiator", "target", "year")]))
   k_all <- data.frame(e = seq_len(dat$E), initiator = as.integer(sy$ccode[ev$sy_row]), target = as.integer(alts$ccode2[ev$alt_row]), year = as.integer(sy$year[ev$sy_row]))
@@ -138,9 +143,9 @@ if (COORIG_W > 0L || ENTRY_MOD) {
   if (anyNA(k_all$dispnum)) stop(sprintf("entry timing: %d stage-2 events have no non-escalation row in events.rds", sum(is.na(k_all$dispnum))))
   stopifnot(identical(k_all$e, seq_len(dat$E)))
   ## the initiator's spell in its weight-group dispute that covers the event year (the latest spell starting by then)
-  sp_of <- function(d, cc, y) { r <- which(P$dispnum == d & P$ccode == cc & P$spell_first <= y); if (!length(r)) NA_integer_ else r[which.max(P$spell_first[r])] }
+  sp_of <- function(d, cc, y) { r <- which(P$dispnum == d & P$ccode == cc & P$spell_first <= y & P$spell_last >= y); if (length(r) != 1L) NA_integer_ else r }   # exactly one covering spell
   prow <- mapply(sp_of, k_all$dispnum, k_all$initiator, k_all$year)
-  if (anyNA(prow)) stop(sprintf("entry timing: %d fitted events have no participant spell for their initiator in their weight-group dispute", sum(is.na(prow))))
+  if (anyNA(prow)) stop(sprintf("entry timing: %d fitted events do not have exactly one participant spell covering the event year in their weight-group dispute", sum(is.na(prow))))
   ## the build's originator flag must agree with the role: joiners (bcj 2) are exactly the non-originators of the weight-group dispute
   if (any((P$orig[prow] == 0L) != (ev$grp == 2L))) stop(sprintf("entry timing: originator flag and role disagree for %d events", sum((P$orig[prow] == 0L) != (ev$grp == 2L))))
   lag_lo_ev <- pmax(P$entry_lo[prow] - P$onset_hi[prow], 0)                      # earliest possible lag
@@ -169,9 +174,7 @@ if (COORIG_W > 0L || ENTRY_MOD) {
     }
     rc <- recode(COORIG_BOUND); rc_alt <- recode(setdiff(c("definite", "possible"), COORIG_BOUND))
     grp_old <- ev$grp; ev$grp <- rc$grp
-    diff_e <- which(rc$grp != rc_alt$grp)
-    role_alt <- data.frame(initiator = k_all$initiator[diff_e], target = k_all$target[diff_e], year = k_all$year[diff_e], dispnum = k_all$dispnum[diff_e],
-                           grp_this = rc$grp[diff_e], grp_other_bound = rc_alt$grp[diff_e], w = dat$ev_w[diff_e])
+    grp_alt <- rc_alt$grp; diff_e <- which(rc$grp != grp_alt)                  # role_alt (fitted sample only) is built at output time
     logf("coorig window %d months, %s bound: joiners recoded coalition originator %d; alone originators recoded %d; bcj now %d / %d / %d (was %d / %d / %d); events whose role differs under the %s bound %d (weight %.1f)",
          W, COORIG_BOUND, sum(rc$early_j), sum(rc$alone_up), sum(ev$grp == 0L), sum(ev$grp == 1L), sum(ev$grp == 2L), sum(grp_old == 0L), sum(grp_old == 1L), sum(grp_old == 2L),
          setdiff(c("definite", "possible"), COORIG_BOUND), length(diff_e), sum(dat$ev_w[diff_e]))
@@ -269,7 +272,7 @@ fit_cl <- function(d, terms, robust = TRUE) {
   if (robust) coxph(f, data = d, weights = w, method = "breslow", cluster = init)
   else coxph(f, data = d, weights = w, method = "breslow")
 }
-TERMS_M1S <- c(setdiff(GAP_G, c(paste0("dMR_", ROLES), "dMR_jlag")), "dMR")   # re-audit P2: M1s has ONE shared cross term, so the joiner cross-term moderator is dropped too
+TERMS_M1S <- c(setdiff(GAP_G, c(paste0("dMR_", ROLES), "dMR_jlag")), "dMR"); stopifnot(!"dMR_jlag" %in% TERMS_M1S)   # re-audit P2: M1s has ONE shared cross term, so the joiner cross-term moderator is dropped too
 M0 <- fit_cl(L, GAP)
 M1 <- fit_cl(L, GAP_G)
 M1s <- fit_cl(L, TERMS_M1S)
@@ -304,10 +307,11 @@ R_roles <- Rm(PAIRS_REF); R_cross <- Rm(lapply(OTHERS, function(o) c(paste0("dMR
 wald3 <- function(R, m = M1, V3 = VS) { b <- wald(m, R, V = V3$twoway); a <- wald(m, R, V = V3$init); t <- wald(m, R, V = V3$tgtyr)
   c(chi2 = b[["chi2"]], df = b[["df"]], p = b[["p"]], p_initiator = a[["p"]], p_tgtyr = t[["p"]]) }
 W_roles <- wald3(R_roles); W_cross <- wald3(R_cross)
-W_roles_med <- NULL
+W_roles_med <- NULL; W_cross_med <- NULL
 if (ENTRY_MOD) {   # GPT review 2026-11-17 P1: with the moderator the full nested null (M1 vs M0) also sets the five *_jlag terms to zero
   R_mod <- diag(length(nm1))[match(MOD, nm1), , drop = FALSE]; colnames(R_mod) <- nm1; stopifnot(!anyNA(match(MOD, nm1)))
   W_roles_med <- W_roles; W_roles <- wald3(rbind(R_roles, R_mod))
+  W_cross_med <- W_cross; W_cross <- wald3(rbind(R_cross, R_mod[match("dMR_jlag", MOD), , drop = FALSE]))   # GPT recheck P2: cross coefficient equal at every lag
   logf("entry moderator: surfaces differ at the median joiner lag only (%d df) chi2 %.2f p %.4g; the full M1 vs M0 test below includes the moderator terms", W_roles_med[["df"]], W_roles_med[["chi2"]], W_roles_med[["p"]])
 }
 logf("Wald (CR0; PRIMARY initiator x dispute; sensitivities initiator / target-year): utility surfaces differ by type (M1 vs M0) chi2 %.2f df %d p %.4g (%.4g / %.4g); cross coefficient differs by type chi2 %.2f df %d p %.4g (%.4g / %.4g) (NOT a test of equal rho)",
@@ -420,7 +424,9 @@ if (LOO) {
       if (is.null(md) || any(!is.finite(coef(md)))) { logf("loo %s %s: fit failed", kind, id); next }
       Vd <- vc_set(md, Ld); nmd <- names(coef(md))
       Rd <- function(pairs) { R <- matrix(0, length(pairs), length(nmd), dimnames = list(NULL, nmd)); for (i in seq_along(pairs)) { R[i, pairs[[i]][1]] <- 1; R[i, pairs[[i]][2]] <- -1 }; R }
-      w_s <- wald3(Rd(PAIRS_REF), md, Vd)
+      R_s <- Rd(PAIRS_REF)
+      if (ENTRY_MOD) { Rmd <- matrix(0, length(MOD), length(nmd), dimnames = list(NULL, nmd)); for (i in seq_along(MOD)) Rmd[i, MOD[i]] <- 1; R_s <- rbind(R_s, Rmd) }   # same null as the full-sample test
+      w_s <- wald3(R_s, md, Vd)
       o <- OTHERS[1]
       w_m <- wald3(Rd(lapply(c("dM", "dM2", "dMR"), function(v) c(paste0(v, "_", o), paste0(v, "_", REF)))), md, Vd)
       w_r <- wald3(Rd(lapply(c("dR", "dR2", "dMR"), function(v) c(paste0(v, "_", o), paste0(v, "_", REF)))), md, Vd)
@@ -485,11 +491,13 @@ for (g in ROLES) for (ax in list(material = c("dM", "dM2", "dMR"), relational = 
                                            chi2 = w0[["chi2"]], df = w0[["df"]], p_init_x_dispute = w0[["p"]], p_initiator = w0[["p_initiator"]], p_target_year = w0[["p_tgtyr"]]))
 }
 tests <- data.frame(test = c(sprintf("utility surfaces differ by type (M1 vs M0, %d df%s)", W_roles[["df"]], if (ENTRY_MOD) ", incl. the joiner entry-lag terms" else ""),
-                             sprintf("utility interaction (cross coefficient) differs by type (%d df; NOT equal rho)", W_cross[["df"]])),
+                             sprintf("utility interaction (cross coefficient) differs by type (%d df%s; NOT equal rho)", W_cross[["df"]], if (ENTRY_MOD) ", incl. the joiner entry-lag cross term" else "")),
                     chi2 = c(W_roles[["chi2"]], W_cross[["chi2"]]), df = c(W_roles[["df"]], W_cross[["df"]]),
                     p_init_x_dispute = c(W_roles[["p"]], W_cross[["p"]]), p_initiator = c(W_roles[["p_initiator"]], W_cross[["p_initiator"]]),
                     p_target_year = c(W_roles[["p_tgtyr"]], W_cross[["p_tgtyr"]]))
 tests <- rbind(tests, axis_rows)
+if (!is.null(W_cross_med)) tests <- rbind(tests, data.frame(test = sprintf("utility interaction differs by type at the median joiner lag (%d df; NOT equal rho)", W_cross_med[["df"]]), chi2 = W_cross_med[["chi2"]],
+                                                            df = W_cross_med[["df"]], p_init_x_dispute = W_cross_med[["p"]], p_initiator = W_cross_med[["p_initiator"]], p_target_year = W_cross_med[["p_tgtyr"]]))
 if (!is.null(W_roles_med)) tests <- rbind(tests, data.frame(test = sprintf("utility surfaces differ by type at the median joiner lag (%d df)", W_roles_med[["df"]]), chi2 = W_roles_med[["chi2"]],
                                                             df = W_roles_med[["df"]], p_init_x_dispute = W_roles_med[["p"]], p_initiator = W_roles_med[["p_initiator"]], p_target_year = W_roles_med[["p_tgtyr"]]))
 emod <- NULL
@@ -515,14 +523,27 @@ write.csv(tests, file.path(od, paste0(cell, "_tests.csv")), row.names = FALSE)
 write.csv(pw, file.path(od, paste0(cell, "_pairwise.csv")), row.names = FALSE)
 if (!is.null(loo)) write.csv(loo, file.path(od, paste0(cell, "_loo.csv")), row.names = FALSE)
 if (!is.null(emod)) write.csv(emod, file.path(od, paste0(cell, "_entrymod.csv")), row.names = FALSE)
+if (!is.null(grp_alt)) {
+  de <- which(ev$grp != grp_alt & keep)
+  role_alt <- data.frame(initiator = k_all$initiator[de], target = k_all$target[de], year = k_all$year[de], dispnum = k_all$dispnum[de],
+                         grp_this = ev$grp[de], grp_other_bound = grp_alt[de], w = dat$ev_w[de])
+}
 if (!is.null(role_alt)) write.csv(role_alt, file.path(od, paste0(cell, "_roleswitch.csv")), row.names = FALSE)   # events whose role differs under the other date bound
+timing_audit <- NULL
+if (COORIG_W > 0L || ENTRY_MOD) {   # GPT recheck: event-level timing provenance (both references), fitted events only
+  timing_audit <- data.frame(initiator = k_all$initiator, target = k_all$target, year = k_all$year, dispnum = k_all$dispnum, grp_default = ev_grp_default, grp_used = ev$grp,
+                             entry_src = P$entry_src[prow], entry_lo = P$entry_lo[prow], entry_hi = P$entry_hi[prow], ref_cow_lo = P$cow_lo[prow], ref_cow_hi = P$cow_hi[prow],
+                             ref_orig_lo = P$orig_lo[prow], ref_orig_hi = P$orig_hi[prow], side_entry = P$side_entry[prow], side_switch = P$side_switch[prow],
+                             lag_lo = lag_lo_ev, lag_hi = lag_hi_ev, lag_mid = lag_ev, w = dat$ev_w)[keep, ]
+  write.csv(timing_audit, file.path(od, paste0(cell, "_timing.csv")), row.names = FALSE)
+}
 saveRDS(list(pt = pt, bs = bs, bs_coef = bs_coef, fail_log = fail_log, n_ok = n_ok, n_fail = n_fail, B = B, spec = spec, types = TYPES, roles = ROLES,
              support = SUPPORT, n_rows = nrow(L), E = sum(keep), V = VS, boot_unit = BOOT_UNIT, loo = loo, coorig_months = COORIG_W, entry_mod = ENTRY_MOD,
-             lag_ev = lag_ev, lag_lo_ev = lag_lo_ev, lag_hi_ev = lag_hi_ev, role_alt = role_alt, coorig_bound = COORIG_BOUND, m_ctr = if (ENTRY_MOD) M_CTR else NA_real_),
+             timing_ref = if (COORIG_W > 0L || ENTRY_MOD) TIMING_REF else NA_character_, lag_ev = lag_ev, lag_lo_ev = lag_lo_ev, lag_hi_ev = lag_hi_ev, role_alt = role_alt, coorig_bound = COORIG_BOUND, m_ctr = if (ENTRY_MOD) M_CTR else NA_real_),
         file.path(od, paste0(cell, "_boot.rds")))
 ## GPT recheck P2: a manifest names exactly the artifacts written by THIS run (an older optional file, e.g. _loo.csv, is not part of it)
 written <- c(paste0(cell, c("_derived.csv", "_coefs.csv", "_tests.csv", "_pairwise.csv", "_boot.rds")), if (!is.null(loo)) paste0(cell, "_loo.csv"),
-             if (!is.null(emod)) paste0(cell, "_entrymod.csv"), if (!is.null(role_alt)) paste0(cell, "_roleswitch.csv"))
+             if (!is.null(emod)) paste0(cell, "_entrymod.csv"), if (!is.null(role_alt)) paste0(cell, "_roleswitch.csv"), if (!is.null(timing_audit)) paste0(cell, "_timing.csv"))
 gitc <- tryCatch(system2("git", c("-C", R_DIR, "rev-parse", "--short", "HEAD"), stdout = TRUE, stderr = FALSE), error = function(e) NA_character_, warning = function(w) NA_character_)
 dirty <- tryCatch(length(system2("git", c("-C", R_DIR, "status", "--porcelain", "--untracked-files=no", "--", "."), stdout = TRUE, stderr = FALSE)) > 0, error = function(e) NA, warning = function(w) NA)
 write.csv(data.frame(file = written, run_time = format(Sys.time(), "%Y-%m-%d %H:%M:%S %Z"), git = if (length(gitc)) gitc[1] else NA_character_, git_dirty = dirty,
