@@ -42,12 +42,12 @@
 ## Usage (same flags as the grid cell; --roles=bcj is required because the types are recoded from it):
 ##   Rscript v2/R/10_clogit_roles.R --sample=fmid --lag=3 --model=M1c --comparison=directed --entry=later --variant=all --roles=bcj --joiner_set=all --types=bc
 ##   --events=dymid (instead of --entry=later) for jointly fatal, --reach=capdist for the reach terms, --boot=1000, --boot_unit=pigeonhole|dispute|initiator,
-##   --loo=TRUE, --coorig_months=1|2|3 (with --coorig_bound=definite|possible) or --entry_mod=TRUE (entry-timing robustness, section 1b). Unknown, retired or duplicated options are refused (joint audit B2).
+##   --loo=TRUE, --opp_weight=0|0.5|1 (with --opp_draw=1..5 at 1; section 1a), --coorig_months=1|2|3 (with --coorig_bound=definite|possible) or --entry_mod=TRUE (entry-timing robustness, section 1b). Unknown, retired or duplicated options are refused (joint audit B2).
 suppressPackageStartupMessages({ library(dplyr); library(survival) })
 this_file <- sub("^--file=", "", grep("^--file=", commandArgs(FALSE), value = TRUE))
 R_DIR <- dirname(normalizePath(this_file))
 source(file.path(R_DIR, "spec.R")); source(file.path(R_DIR, "helpers_data.R")); source(file.path(R_DIR, "helpers_model.R"))
-source(file.path(R_DIR, "assemble_cell.R"))
+source(file.path(R_DIR, "assemble_cell.R")); source(file.path(R_DIR, "opp_weights.R"))   # opp_weights.R: functions only (offset, section 1a)
 Sys.setenv(V2_ROOT = normalizePath(file.path(R_DIR, "..")))   # audit F5 (A1 P2-3): read and write this checkout only, as 02_fit_model.R does
 
 args <- commandArgs(trailingOnly = TRUE)
@@ -93,6 +93,30 @@ stopifnot(A$sampled == 0L, identical(gt$grp, 0:2), identical(gt$group, stage2_gr
 logf("bcj events %d (bilateral %d, coalition originator %d, joiner %d); weight sums %.1f / %.1f / %.1f; Z = %s",
      dat$E, sum(ev$grp == 0), sum(ev$grp == 1), sum(ev$grp == 2),
      sum(dat$ev_w[ev$grp == 0]), sum(dat$ev_w[ev$grp == 1]), sum(dat$ev_w[ev$grp == 2]), paste(Z_cols, collapse = ","))
+
+## ---- 1a. opportunity-weight offset (run 1 weights of 08_opportunity_weights.R; PI request 2026-11-17: the clogit version of --opp_weight) -----------
+## Stage-2 utility gains the FIXED term lambda x ln q_ij (q = the auxiliary MID-propensity opportunity weight of the alternative row; no new parameter).
+## A sensitivity, as in README section 14.2: at lambda = 1 the gap terms describe target choice given militarized-contact propensity, not selection over the
+## full opportunity structure. The clogit has no stage 1, so only the stage-2 side of the Stan offset applies. lambda = 0 is an exact zero offset (the cell
+## without the switch, asserted at the fit). --opp_draw=1..5 (lambda = 1) conditions on one coherent full-vector draw of the auxiliary coefficients.
+OPP_ON <- spec_opp_on(spec); opp_off <- rep(0, dat$N2); LAMBDA <- 0; OPP_DRAW <- 0L
+if (OPP_ON) {
+  LAMBDA <- OPP_LAMBDA[[spec_opp_weight(spec)]]; OPP_DRAW <- as.integer(spec_opp_draw(spec))
+  stopifnot(identical(Z_cols, Z_DIRECTED), LAG == OPPW_LAG, OPP_DRAW == 0L || LAMBDA == 1, nrow(alts) == dat$N2)
+  w_path <- oppw_path(spec, file.path(v2_root(), "output"))
+  if (!file.exists(w_path)) stop(sprintf("--opp_weight needs %s; run `Rscript v2/R/08_opportunity_weights.R %s --opp_outcome=%s` first", w_path,
+                                         if (spec_events(spec) == "dymid") "--events=dymid" else "--entry=later", spec_opp_outcome(spec)))
+  OW <- readRDS(w_path)
+  stopifnot(identical(OW$outcome, spec_opp_outcome(spec)), identical(OW$foundation, basename(data_dir)), OW$lag == LAG, OW$n_draws == OPPW_N_DRAWS, identical(OW$a_cols, OPPW_A_COLS))
+  man_dy <- read.csv(file.path(v2_root(), "data_dymid", "manifest.csv"), stringsAsFactors = FALSE)
+  oo <- oppw_offset(alts, OW, LAMBDA, OPP_DRAW, manifest = manifest, manifest_dymid = man_dy)   # stops on other data files or a row without a weight
+  stopifnot(length(oo$off) == dat$N2, all(is.finite(oo$off)), LAMBDA != 0 || all(oo$off == 0), LAMBDA == 0 || isTRUE(all.equal(oo$off, LAMBDA * oo$lq, tolerance = 0)))
+  opp_off <- oo$off
+  os <- oppw_cell_stats(dat, oo$lq, gt$group)
+  logf("opp_weight: lambda = %s, outcome %s, draw %d (%s); weights %s (built %s, commit %s); ln q min %.2f / median %.2f / max %.2f; SENSITIVITY, q is an opportunity weight",
+       spec_opp_weight(spec), spec_opp_outcome(spec), OPP_DRAW, if (OPP_DRAW == 0L) "auxiliary MLE" else "full-vector draw", basename(w_path), OW$built, OW$git_commit,
+       min(oo$lq), stats::median(oo$lq), max(oo$lq))
+}
 
 ## ---- 1b. entry timing (PI request 2026-11-17; robustness for early vs late coordination; rebuilt after the GPT and independent reviews) -----
 ## The default coding makes every state that enters a dispute after its onset a joiner, however soon after. Two robustness options:
@@ -230,6 +254,7 @@ if (REL_SCALE == "year") {
   logf("relational gap rescaled within year: pooled scale %.3f; year scales %.3f to %.3f (median %.3f)", GSR, min(ys), max(ys), median(ys))
 }
 Zm <- dat$Z[L$row, , drop = FALSE]; colnames(Zm) <- Z_cols; L <- cbind(L, Zm)
+L$off <- opp_off[L$row]                                          # section 1a; exactly 0 without --opp_weight or at lambda = 0
 stopifnot(!anyNA(L[, c("dM", "dR", Z_cols)]))
 L$dM2 <- L$dM^2; L$dR2 <- L$dR^2; L$dMR <- L$dM * L$dR
 GAP <- c("dM", "dM2", "dR", "dR2", "dMR")
@@ -272,7 +297,7 @@ logf("clusters: %d initiators, %d disputes, %d initiator-disputes, %d target-yea
 
 ## ---- 4. fits -----------------------------------------------------------------------------------------------
 fit_cl <- function(d, terms, robust = TRUE) {
-  f <- as.formula(paste("Surv(rep(1, nrow(d)), chosen) ~", paste(c(terms, Z_cols), collapse = " + "), "+ strata(ev_id)"))
+  f <- as.formula(paste("Surv(rep(1, nrow(d)), chosen) ~", paste(c(terms, Z_cols), collapse = " + "), if (OPP_ON && LAMBDA != 0) "+ offset(off)" else "", "+ strata(ev_id)"))
   if (robust) coxph(f, data = d, weights = w, method = "breslow", cluster = init)
   else coxph(f, data = d, weights = w, method = "breslow")
 }
@@ -523,6 +548,7 @@ if (ENTRY_MOD) {
 od <- file.path(v2_root(), "output"); dir.create(od, showWarnings = FALSE)
 write.csv(tab, file.path(od, paste0(cell, "_derived.csv")), row.names = FALSE)
 write.csv(coefs, file.path(od, paste0(cell, "_coefs.csv")), row.names = FALSE)
+if (OPP_ON) write.csv(cbind(cell = cell, lambda = LAMBDA, draw = OPP_DRAW, outcome = spec_opp_outcome(spec), low_q_threshold = os$threshold, os$by_role), file.path(od, paste0(cell, "_oppw.csv")), row.names = FALSE)   # section 1a diagnostics (low-q chosen targets by type label of the build)
 write.csv(tests, file.path(od, paste0(cell, "_tests.csv")), row.names = FALSE)
 write.csv(pw, file.path(od, paste0(cell, "_pairwise.csv")), row.names = FALSE)
 if (!is.null(loo)) write.csv(loo, file.path(od, paste0(cell, "_loo.csv")), row.names = FALSE)
