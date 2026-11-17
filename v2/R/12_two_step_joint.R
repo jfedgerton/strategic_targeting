@@ -25,8 +25,9 @@
 ##
 ## Common supported profiles: x0 = the pooled median (over all events' chosen targets) of dM and dR. Material curve: dM over 21 points from the
 ## pooled 5th to 95th percentile of chosen dM, dR = x0's. Relational curve: likewise for dR, dM = x0's. Overlap (joint audit B6): a box of
-## +-0.25 SD on BOTH axes around each profile point; per type, thin_B = fewer than 20 of the type's CHOSEN targets in the box (step B is fit on
-## chosen dyads, so a thin_B point is extrapolation for fatality and total) and thin_A = fewer than 20 of the type's ALTERNATIVES in the box.
+## +-0.25 SD on BOTH axes around each profile point; per type, thin_B = fewer than 20 DISTINCT events whose CHOSEN target is in the box (step B is
+## fit on chosen dyads, so a thin_B point is extrapolation for fatality and total) and thin_A = fewer than 20 DISTINCT events with an alternative
+## in the box; both also apply at x0 (see Support below).
 ## Support (GPT recheck P2): every contrast subtracts the prediction at x0, so x0 must be supported too; a profile is thin if the profile OR x0 is
 ## thin for any type. Counts are DISTINCT events (alternatives counted once per event), with distinct initiators, disputes and (step B) fatal
 ## events reported alongside; unsupported segments are drawn dashed grey, and claims are restricted to common support.
@@ -73,7 +74,7 @@ stopifnot(spec_is_directed(spec), spec$roles == "bcj", spec_variant(spec) == "al
 cell <- paste0("joint_", cell_name(SAMPLE, LAG, MODEL, spec), "_", TYPES, "_", OUTCOME, "_b", c(pigeonhole = "pig", dispute = "disp", initiator = "init")[[BOOT_UNIT]],
                if (SIM) paste0("_SIMCHECK_seed", SIM_SEED) else "")   # joint audit B1
 log_open(paste0("12_", cell))
-logf("cell %s; spec %s; types %s; outcome in_%s; matched bootstrap B = %d over %ss, seed 123%s", cell, spec_string(spec), TYPES, OUTCOME, B, BOOT_UNIT,
+logf("cell %s; spec %s; types %s; outcome in_%s; matched bootstrap B = %d, unit %s, seed 123%s", cell, spec_string(spec), TYPES, OUTCOME, B, BOOT_UNIT,
      if (SIM) sprintf("; SIMULATION CHECK seed %d", SIM_SEED) else "")
 
 ## ---- 1. assemble (identical to 10 and 11) ----------------------------------------------------------------------------
@@ -237,7 +238,7 @@ if (SIM) {
   if (B == 0) quit(save = "no")
 }
 
-## ---- 7. matched cluster bootstrap (unit: dispute by default, or initiating state) ------------------------------------------
+## ---- 7. matched bootstrap (pigeonhole two-way by default; dispute or initiator one-way sensitivities) ------------------------------------------
 quiet_fit <- function(f, d) { warned <- FALSE
   res <- tryCatch(withCallingHandlers(f(d), warning = function(w) { warned <<- TRUE; invokeRestart("muffleWarning") }), error = function(e) NULL)
   list(fit = res, warned = warned) }
@@ -289,7 +290,7 @@ write.csv(data.frame(term = names(bA), coef = bA), file.path(od, paste0(cell, "_
 write.csv(data.frame(term = names(bB), coef = bB), file.path(od, paste0(cell, "_coefB.csv")), row.names = FALSE)
 saveRDS(list(pt = pt, bs = if (boot_ok) bs else NULL, coefA = coefA, coefB = coefB, fail_log = fail_log, n_ok = n_ok, B = B, x0 = x0, profiles = profiles,
              spec = spec, types = TYPES, outcome = OUTCOME, roles = ROLES, counts = cnt, E = nrow(D), boot_unit = BOOT_UNIT,
-             x0_support = attributes(x0)[grep("^n", names(attributes(x0)))], x0_thin = c(A = x0_thin_A, B = x0_thin_B)), file.path(od, paste0(cell, "_boot.rds")))
+             x0_support = attributes(x0)[grep("^n[AB]", names(attributes(x0)))], x0_thin = c(A = x0_thin_A, B = x0_thin_B)), file.path(od, paste0(cell, "_boot.rds")))
 if (requireNamespace("ggplot2", quietly = TRUE)) {
   library(ggplot2)
   cd <- curves[curves$component %in% c("selection", "fatality", "total") & curves$type %in% ROLES, ]
@@ -308,6 +309,7 @@ if (requireNamespace("ggplot2", quietly = TRUE)) {
 }
 written <- c(paste0(cell, c("_curves.csv", "_coefA.csv", "_coefB.csv", "_boot.rds")), if (requireNamespace("ggplot2", quietly = TRUE)) paste0(cell, "_decomposition.png"))
 gitc <- tryCatch(system2("git", c("-C", R_DIR, "rev-parse", "--short", "HEAD"), stdout = TRUE, stderr = FALSE), error = function(e) NA_character_, warning = function(w) NA_character_)
-write.csv(data.frame(file = written, run_time = format(Sys.time(), "%Y-%m-%d %H:%M:%S %Z"), git = if (length(gitc)) gitc[1] else NA_character_,
+dirty <- tryCatch(length(system2("git", c("-C", R_DIR, "status", "--porcelain", "--untracked-files=no", "--", "."), stdout = TRUE, stderr = FALSE)) > 0, error = function(e) NA, warning = function(w) NA)
+write.csv(data.frame(file = written, run_time = format(Sys.time(), "%Y-%m-%d %H:%M:%S %Z"), git = if (length(gitc)) gitc[1] else NA_character_, git_dirty = dirty,
                      args = paste(args, collapse = " ")), file.path(od, paste0(cell, "_manifest.csv")), row.names = FALSE)   # GPT recheck P2
 logf("done: %s_{curves,coefA,coefB,manifest}.csv, _boot.rds, _decomposition.png", cell)

@@ -52,7 +52,7 @@ stopifnot(spec_is_directed(spec), spec$roles == "bcj", spec_variant(spec) == "al
           spec_events(spec) == "dymid", spec$ww2 == "include")
 cell <- paste0("stepB_", cell_name(SAMPLE, LAG, MODEL, spec), "_", TYPES, "_", OUTCOME, "_b", c(pigeonhole = "pig", dispute = "disp", initiator = "init")[[BOOT_UNIT]])   # GPT recheck P2
 log_open(paste0("11_", cell))
-logf("cell %s; spec %s; types %s; outcome in_%s; bootstrap B = %d over %ss, seed 123; leave-one-out %s; Firth %s", cell, spec_string(spec), TYPES, OUTCOME, B, BOOT_UNIT, LOO, FIRTH)
+logf("cell %s; spec %s; types %s; outcome in_%s; bootstrap B = %d, unit %s, seed 123; leave-one-out %s; Firth %s", cell, spec_string(spec), TYPES, OUTCOME, B, BOOT_UNIT, LOO, FIRTH)
 
 ## ---- 1. assemble exactly as step A (10_clogit_roles.R) and 02_fit_model.R do ----------------------------------
 data_dir <- spec_data_dir(spec, v2_root())
@@ -254,7 +254,8 @@ saveRDS(list(pt = pt, bs = bs, bs_coef = bs_coef, fail_log = fail_log, n_ok = n_
 written <- c(paste0(cell, c("_readings.csv", "_coefs.csv", "_tests.csv", "_boot.rds")), if (!is.null(loo)) paste0(cell, "_loo.csv"),
              if (!is.null(firth)) paste0(cell, c("_firth_coefs.csv", "_firth_tests.csv")))   # GPT recheck P2: manifest of THIS run's artifacts
 gitc <- tryCatch(system2("git", c("-C", R_DIR, "rev-parse", "--short", "HEAD"), stdout = TRUE, stderr = FALSE), error = function(e) NA_character_, warning = function(w) NA_character_)
-write.csv(data.frame(file = written, run_time = format(Sys.time(), "%Y-%m-%d %H:%M:%S %Z"), git = if (length(gitc)) gitc[1] else NA_character_,
+dirty <- tryCatch(length(system2("git", c("-C", R_DIR, "status", "--porcelain", "--untracked-files=no", "--", "."), stdout = TRUE, stderr = FALSE)) > 0, error = function(e) NA, warning = function(w) NA)
+write.csv(data.frame(file = written, run_time = format(Sys.time(), "%Y-%m-%d %H:%M:%S %Z"), git = if (length(gitc)) gitc[1] else NA_character_, git_dirty = dirty,
                      args = paste(args, collapse = " ")), file.path(od, paste0(cell, "_manifest.csv")), row.names = FALSE)
 print(rd, row.names = FALSE); print(tests, row.names = FALSE)
 logf("done: %s_{readings,coefs,tests}.csv and _boot.rds", cell)
