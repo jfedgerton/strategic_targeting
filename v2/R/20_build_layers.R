@@ -75,11 +75,20 @@ waves <- sort(unique(dip$year))
 stopifnot(all(dip$dipl %in% 0:1))
 wave_of <- function(y) waves[pmax(1L, findInterval(y, waves))]   # 1816 -> 1817 wave (index 0 would be silently dropped)
 dy <- dy |> mutate(dipl_src = wave_of(year))
-stopifnot(!anyNA(dy$dipl_src), all(dy$dipl_src <= pmax(dy$year, min(waves))), all(dy$year - dy$dipl_src < 10))
+stopifnot(!anyNA(dy$dipl_src), all(dy$dipl_src <= pmax(dy$year, min(waves))), all(dy$year - dy$dipl_src < 10))   # checked before the next-wave fix below
+## Review fix (P2-10): a state not yet in the system at its source wave has no row there (false zero); such dyads take the NEXT wave
+## "absent" = not a COW system member in the source-wave year (entered later); members merely uncoded in a wave keep their 0
+in_wave <- bind_rows(dy |> distinct(ccode = ccode1, year), dy |> distinct(ccode = ccode2, year)) |> distinct() |> mutate(k = paste(ccode, year))
+next_wave <- function(y) { i <- findInterval(y, waves) + 1L; ifelse(i <= length(waves), waves[pmin(i, length(waves))], NA_integer_) }
+absent <- !(paste(dy$ccode1, dy$dipl_src) %in% in_wave$k) | !(paste(dy$ccode2, dy$dipl_src) %in% in_wave$k)
+nw <- next_wave(dy$year)
+dy$dipl_src[absent & !is.na(nw)] <- nw[absent & !is.na(nw)]
+logf("dipl: %d dyad-years with an endpoint absent from its source wave moved to the next wave (%d left at a wave they are absent from)",
+     sum(absent & !is.na(nw)), sum(absent & is.na(nw)))
 dy <- dy |>
   left_join(dip |> rename(dipl_src = year), by = c("ccode1", "ccode2", "dipl_src")) |>
   mutate(dipl = coalesce(dipl, 0L))
-logf("dipl: waves %s; max staleness %d years", paste(range(waves), collapse = "-"), max(dy$year - dy$dipl_src))
+logf("dipl: waves %s; source wave from %d years before to %d years after", paste(range(waves), collapse = "-"), max(dy$year - dy$dipl_src), max(dy$dipl_src - dy$year))
 
 ## ---- 4. DESTA PTAs in force ---------------------------------------------------
 load(file.path(NETDIR, "destaRaw.rda"))   # object `desta`
@@ -91,12 +100,26 @@ pt <- desta |> mutate(c1 = countrycode(iso1, "iso3n", "cown", warn = FALSE),
 unm <- pt |> filter(is.na(c1) | is.na(c2))
 logf("DESTA rows %d; rows with an unmatched country (dropped) %d; unmatched names: %s", nrow(pt), nrow(unm),
      paste(sort(unique(c(unm$country1[is.na(unm$c1)], unm$country2[is.na(unm$c2)]))), collapse = "; "))
-pt <- pt |> filter(!is.na(c1), !is.na(c2), c1 != c2) |>
-  transmute(ccode1 = as.integer(pmin(c1, c2)), ccode2 = as.integer(pmax(c1, c2)), number, start) |>
-  group_by(ccode1, ccode2, number) |> summarise(start = min(start), .groups = "drop")   # one entry per treaty-dyad
+## Review fix (2026-11-18, P1-3): countrycode maps today's Germany / Czechia / Yemen to 255 / 316 / 679, which are not COW members
+## before 1990 / 1993 / 1990, so West Germany (260), Czechoslovakia (315) and North Yemen (678) lost every PTA. Each such row is
+## duplicated onto the predecessor code; the join to the system dyad-years keeps only the code that exists in each year.
+succ <- c(`255` = 260L, `316` = 315L, `679` = 678L)
+pt <- pt |> filter(!is.na(c1), !is.na(c2))
+dup1 <- pt |> filter(as.character(c1) %in% names(succ)) |> mutate(c1 = succ[as.character(c1)])
+dup2 <- pt |> filter(as.character(c2) %in% names(succ)) |> mutate(c2 = succ[as.character(c2)])
+dup12 <- dup1 |> filter(as.character(c2) %in% names(succ)) |> mutate(c2 = succ[as.character(c2)])
+pt <- bind_rows(pt, dup1, dup2, dup12) |> filter(c1 != c2)
+## Review fix (P2-9): count distinct BASE treaties per dyad (accessions and consolidated versions share the base treaty number),
+## so a consolidated text does not double-count the dyads it already covers; start = earliest in-force year for the dyad.
+pt <- pt |> transmute(ccode1 = as.integer(pmin(c1, c2)), ccode2 = as.integer(pmax(c1, c2)), base_treaty, start) |>
+  group_by(ccode1, ccode2, base_treaty) |> summarise(start = min(start), .groups = "drop")
 pta <- dy |> distinct(ccode1, ccode2, year) |> inner_join(pt, by = c("ccode1", "ccode2"), relationship = "many-to-many") |>
   filter(start <= year) |> count(ccode1, ccode2, year, name = "pta")
 dy <- dy |> left_join(pta, by = c("ccode1", "ccode2", "year")) |> mutate(pta = coalesce(pta, 0L))
+chk_pta <- dy |> filter(year %in% c(1960, 1985), (ccode1 == 220 & ccode2 == 260) | (ccode1 == 260 & ccode2 == 325) | (ccode1 == 290 & ccode2 == 315))
+logf("PTA predecessor check (France-W.Germany, W.Germany-Italy, Poland-Czechoslovakia in 1960/1985): %s",
+     paste(sprintf("%d-%d %d: %d", chk_pta$ccode1, chk_pta$ccode2, chk_pta$year, chk_pta$pta), collapse = "; "))
+stopifnot(any(chk_pta$ccode1 == 220 & chk_pta$ccode2 == 260 & chk_pta$year == 1985 & chk_pta$pta > 0))
 
 ## ---- 5. DCA ---------------------------------------------------------------------
 dca <- read.csv(file.path(NETDIR, "dca_dyad.csv")) |>

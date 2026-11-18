@@ -370,6 +370,8 @@ if (DUMP_LONG) {
   D$c1 <- as.integer(alts$ccode1[L$row]); D$c2 <- as.integer(alts$ccode2[L$row]); D$yr <- as.integer(alts$year[L$row])
   stopifnot(!anyNA(D[, c("c1", "c2", "yr")]), all(D$c1 == D$init), all(D$c1 != D$c2))
   gc_hash <- tryCatch(system2("git", c("-C", v2_root(), "rev-parse", "HEAD"), stdout = TRUE, stderr = FALSE)[1], error = function(e) NA_character_)
+  gc_dirty <- tryCatch(length(system2("git", c("-C", v2_root(), "status", "--porcelain", "--untracked-files=no"), stdout = TRUE, stderr = FALSE)) > 0, error = function(e) NA)
+  if (isTRUE(gc_dirty)) gc_hash <- paste0(gc_hash, "-dirty")   # review P3-21
   od <- file.path(v2_root(), "output", "rel_sweep"); dir.create(od, showWarnings = FALSE, recursive = TRUE)
   f_out <- file.path(od, paste0("long_", TYPES, if (REL_SCALE == "year") "_relyear" else "", if (UNITW) "_uw" else "", "_", SAMPLE, ".rds"))
   saveRDS(list(D = D, roles = ROLES, Z_cols = Z_cols, rel_scale = REL_SCALE, types = TYPES, sample = SAMPLE, bilateral_rule = BILAT, unit_weights = UNITW,

@@ -67,13 +67,22 @@ b <- face_one(Rbase, "BASELINE|igo_pagerank_build|pr"); rows[[1]] <- b$row; tops
 for (f in POSF) {
   P <- readRDS(f); stopifnot(identical(paste(P$key$ccode, P$key$year), kk))
   t0 <- Sys.time()
-  for (k in seq_len(ncol(P$R))) { if (!P$specs$identified[k]) next
+  used_years <- sort(unique(c(D$yr, D$yr - 1L)))
+  for (k in seq_len(ncol(P$R))) {
+    cy <- as.integer(strsplit(P$specs$const_years[k], " ")[[1]])
+    bad_y <- intersect(cy, used_years)
+    if (!P$specs$identified[k] || length(bad_y)) {   # review P1-1 / P2-13: listed, not silently dropped
+      rows[[length(rows) + 1]] <- data.frame(spec_id = colnames(P$R)[k], skipped = sprintf("constant position in %d years (%d used by events)", length(cy), length(bad_y)), stringsAsFactors = FALSE)
+      next }
     o <- face_one(P$R[, k], colnames(P$R)[k]); rows[[length(rows) + 1]] <- o$row; tops[[length(tops) + 1]] <- o$top }
   logf("%s: %d specs in %.1f min", basename(f), ncol(P$R), as.numeric(difftime(Sys.time(), t0, units = "mins")))
 }
 fs <- bind_rows(rows)
 fs$centrality <- sub(".*\\|", "", fs$spec_id)
-fs <- fs |> group_by(centrality) |> mutate(sd_within_rel = sd_within / median(sd_within)) |> ungroup()
+if (!"skipped" %in% names(fs)) fs$skipped <- NA_character_
+## review P2-13: sd_within relative to a FIXED reference (the W1raw|igo spec of the same centrality), not the median of the files passed
+ref_sd <- c(pr = fs$sd_within[fs$spec_id == "W1raw|igo|pr"], deg = fs$sd_within[fs$spec_id == "W1raw|igo|deg"])
+if (length(ref_sd) == 2) fs$sd_within_rel <- fs$sd_within / ref_sd[fs$centrality] else fs$sd_within_rel <- NA_real_
 write.csv(fs, file.path(OUT_DIR, "face_summary.csv"), row.names = FALSE)
 write.csv(bind_rows(tops), file.path(OUT_DIR, "top10_by_era.csv"), row.names = FALSE)
-logf("wrote face_summary.csv (%d specs) and top10_by_era.csv", nrow(fs))
+logf("wrote face_summary.csv (%d specs, %d listed as skipped) and top10_by_era.csv", nrow(fs), sum(!is.na(fs$skipped)))

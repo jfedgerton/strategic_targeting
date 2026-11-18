@@ -100,8 +100,8 @@ edge_w <- function(W, l) {
   if (W == "W3dist")   r <- resid(lm(v ~ lcap + year, data = d))
   if (W %in% c("W4fe", "W5fesy")) {
     okd <- c(ok, ok); dd <- dbl[okd, ]; dd$v <- c(v, v)[okd]
-    m <- if (W == "W4fe") feols(v ~ contig_land + lcap | a + b + year, data = dd, notes = FALSE, warn = FALSE)
-         else feols(v ~ 1 | a^year + b^year, data = dd, notes = FALSE, warn = FALSE)
+    m <- if (W == "W4fe") feols(v ~ contig_land + lcap | a + b + year, data = dd, notes = FALSE, warn = FALSE, fixef.rm = "none")
+         else feols(v ~ 1 | a^year + b^year, data = dd, notes = FALSE, warn = FALSE, fixef.rm = "none")
     stopifnot(nobs(m) == nrow(dd))                                 # no singleton removal: residuals align with rows
     rr <- resid(m); n1 <- sum(ok)
     stopifnot(max(abs(rr[seq_len(n1)] - rr[n1 + seq_len(n1)])) < 1e-6)   # symmetric by construction
@@ -157,6 +157,9 @@ ident_check <- function(R) {                                   # share of years 
   sds <- vapply(sy_year_idx, function(ix) sd(R[ix]), 0)
   mean(sds < 1e-8)
 }
+## review fix (P1-1): the years in which the position is constant are recorded per spec; 22/23 refuse a spec whose constant years
+## are used by any event (as t for the year scale or t-1 for positions), whatever the share
+const_years <- function(R) { sds <- vapply(sy_year_idx, function(ix) sd(R[ix]), 0); paste(names(sds)[sds < 1e-8], collapse = " ") }
 
 if (ARM %in% c("core", "dipl")) {
   spec_rows <- list()
@@ -179,6 +182,7 @@ if (ARM %in% c("core", "dipl")) {
     specs <- data.frame(spec_id = sid, arm = ARM, weighting = W, layers = rep(combo_id, 2), n_layers = rep(lengths(combos), 2),
                         centrality = rep(c("pr", "deg"), each = length(combos)), stringsAsFactors = FALSE)
     specs$const_year_share <- apply(Rm, 2, ident_check)
+    specs$const_years <- apply(Rm, 2, const_years)
     specs$identified <- specs$const_year_share < 0.05
     stopifnot(!anyNA(Rm), all(is.finite(Rm)))
     saveRDS(list(key = sy, R = Rm, specs = specs, built = format(Sys.time()), layer_rds = normalizePath(LAYER_RDS)), file.path(OUT_DIR, sprintf("positions_%s_%s.rds", ARM, W)))
@@ -212,7 +216,8 @@ if (ARM == "igo") {
   sid <- c("IGOarm|bip_newman|pr", "IGOarm|bip_newman|deg", "IGOarm|cosine|pr", "IGOarm|cosine|deg"); colnames(Rm) <- sid
   specs <- data.frame(spec_id = sid, arm = "igo", weighting = c("newman", "newman", "cosine", "cosine"), layers = "igo", n_layers = 1L,
                       centrality = c("pr", "deg", "pr", "deg"), stringsAsFactors = FALSE)
-  specs$const_year_share <- apply(Rm, 2, ident_check); specs$identified <- specs$const_year_share < 0.05
+  ## note (review P3-16): Newman-weighted degree equals each state's IGO membership count (sum over its IGOs of k_g-1 partners x 1/(k_g-1))
+  specs$const_year_share <- apply(Rm, 2, ident_check); specs$const_years <- apply(Rm, 2, const_years); specs$identified <- specs$const_year_share < 0.05
   saveRDS(list(key = sy, R = Rm, specs = specs, built = format(Sys.time()), layer_rds = normalizePath(LAYER_RDS)), file.path(OUT_DIR, "positions_igo_arm.rds"))
   write.csv(specs, file.path(OUT_DIR, "specs_igo.csv"), row.names = FALSE)
   logf("IGO arm: 4 specs written")

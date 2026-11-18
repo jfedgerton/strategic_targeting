@@ -10,7 +10,11 @@
 ##   --rel_scale=year in the dump: s = gap_scale(R over all states in the EVENT year t) (10_clogit_roles.R section 3 convention);
 ##   pooled: s = gap_scale(R, year) over all state-years.
 ## Validation (always run first): with R = log PageRank from the dump's sy_positions.rds, the rebuilt dR must equal the dumped dR
-## (max abs diff < 1e-8) and the M0/M1 coefficients must equal a fit on the dumped dR; the script stops otherwise.
+## (max abs diff < 1e-8; the script stops otherwise). Because the gap is identical, the BASELINE fit is the fit on the dumped gap
+## (checked once by hand against 10_clogit_roles.R output: coefficients and two-way SEs identical).
+## A spec is refused (row model = SKIPPED, with the reason) when its position is constant in any year an event uses (t for the year
+## scale, t-1 for positions): the year scale would be ~0 and the gap ~1e13 (independent review 2026-11-18, P1-1).
+## Per spec the output also records coxph iterations, any coxph warning, and max |dR| (review P2-7).
 ##
 ## Output (one row per spec x scheme x quantity): <out_dir>/sweep_<scheme tag>_<positions file stem>.csv with
 ##   spec_id, scheme, model, quantity, est, se, lo, hi, p, df   (95% intervals, two-way CGM)
@@ -54,10 +58,15 @@ yr_ev <- as.character(D$yr)
 key_years <- split(seq_len(nrow(key)), key$year)
 stopifnot(all(unique(yr_ev) %in% names(key_years)))
 
+used_years <- sort(unique(c(D$yr, D$yr - 1L)))
 make_dR <- function(R) {                                          # R: position per key row
+  sds <- vapply(key_years[as.character(used_years)], function(ix) sd(R[ix]), 0)
+  if (any(sds < 1e-8)) stop(sprintf("position constant in event-used year(s) %s", paste(used_years[sds < 1e-8], collapse = " ")))
   num <- R[i_row] - R[j_row]
   if (dump$rel_scale == "year") {
-    ys <- vapply(key_years, function(ix) gap_scale(R[ix], rep(1L, length(ix))), 0)
+    ev_years <- unique(yr_ev)
+    ys <- vapply(key_years[ev_years], function(ix) gap_scale(R[ix], rep(1L, length(ix))), 0)
+    stopifnot(all(ys > 1e-8))
     num / ys[yr_ev]
   } else num / gap_scale(R, key$year)
 }
@@ -108,7 +117,9 @@ run_spec <- function(spec, dR) {
   if (!all(is.finite(d$dR))) stop("non-finite dR")
   d$dM2 <- d$dM^2; d$dR2 <- d$dR^2; d$dMR <- d$dM * d$dR
   for (g in 0:(G - 1L)) for (v in GAP) d[[paste0(v, "_", ROLES[g + 1])]] <- d[[v]] * (d$type == g)
-  M0 <- fit_cl(d, GAP); M1 <- fit_cl(d, GAP_G)
+  wrn <- character(0)
+  M0 <- withCallingHandlers(fit_cl(d, GAP), warning = function(w) { wrn <<- c(wrn, conditionMessage(w)); invokeRestart("muffleWarning") })
+  M1 <- withCallingHandlers(fit_cl(d, GAP_G), warning = function(w) { wrn <<- c(wrn, conditionMessage(w)); invokeRestart("muffleWarning") })
   for (m in list(M0, M1)) if (!all(is.finite(coef(m)))) stop("non-finite coefficients")
   V0 <- vc_2w(M0, d); V1 <- vc_2w(M1, d); b0 <- coef(M0); b1 <- coef(M1)
   out <- list(axis_rows(spec, "M0", b0, V0, "", ""))
@@ -118,7 +129,11 @@ run_spec <- function(spec, dR) {
   w <- wald(b1, V1, Rsel(names(b1), unlist(lapply(ROLES[-1], function(o) paste0(GAP, "_", o))), rep(paste0(GAP, "_", ROLES[1]), G - 1L)))
   out[[length(out) + 1]] <- row_out(spec, "M1", "surfaces_differ", w[["chi2"]], NA, w[["p"]], as.integer(w[["df"]]))
   out[[length(out) + 1]] <- row_out(spec, "M0", "loglik", M0$loglik[2]); out[[length(out) + 1]] <- row_out(spec, "M1", "loglik", M1$loglik[2])
-  out[[length(out) + 1]] <- row_out(spec, "M1", "cgm_neg_eigen", attr(V1, "n_neg"))
+  out[[length(out) + 1]] <- row_out(spec, "M0", "cgm_neg_eigen", attr(V0, "n_neg")); out[[length(out) + 1]] <- row_out(spec, "M1", "cgm_neg_eigen", attr(V1, "n_neg"))
+  out[[length(out) + 1]] <- row_out(spec, "M0", "iter", M0$iter); out[[length(out) + 1]] <- row_out(spec, "M1", "iter", M1$iter)
+  out[[length(out) + 1]] <- row_out(spec, "M1", "max_abs_dR", max(abs(d$dR)))
+  out[[length(out) + 1]] <- row_out(spec, "M1", "n_warnings", length(wrn))
+  if (length(wrn)) out[[length(out)]]$quantity <- paste0("n_warnings: ", paste(unique(wrn), collapse = " | "))
   do.call(rbind, out)
 }
 
@@ -128,7 +143,6 @@ stopifnot(all(c("ccode", "year", "R_pr") %in% names(posy)))
 Rb <- posy$R_pr[match(paste(key$ccode, key$year), paste(posy$ccode, posy$year))]
 ## the build's positions cover the state-years it uses; rows absent there are never looked up (asserted below)
 need <- unique(c(i_row, j_row)); stopifnot(!anyNA(Rb[need]))
-Rb_full <- Rb; Rb_full[is.na(Rb_full)] <- 0
 ## gap_scale for the year convention uses ALL states of the year in sy_positions (as 10_clogit_roles.R); recompute on posy directly
 if (dump$rel_scale == "year") {
   ysb <- vapply(split(posy$R_pr, posy$year), function(v) gap_scale(v, rep(1L, length(v))), 0)
@@ -146,11 +160,18 @@ todo <- seq_len(ncol(Rm)); if (MAX_SPECS > 0) todo <- todo[seq_len(min(MAX_SPECS
 ok_id <- specs$identified[todo]
 logf("positions %s: %d specs (%d marked not identified, skipped)", basename(POSF), length(todo), sum(!ok_id))
 t0 <- Sys.time()
-one <- function(k) tryCatch(run_spec(colnames(Rm)[k], make_dR(Rm[, k])), error = function(e) row_out(colnames(Rm)[k], "ERROR", conditionMessage(e)))
+one <- function(k) tryCatch(run_spec(colnames(Rm)[k], make_dR(Rm[, k])),
+                            error = function(e) row_out(colnames(Rm)[k], if (grepl("^position constant", conditionMessage(e))) "SKIPPED" else "ERROR", conditionMessage(e)))
 res <- if (CORES > 1) mclapply(todo[ok_id], one, mc.cores = CORES, mc.preschedule = FALSE) else lapply(todo[ok_id], one)
 res <- c(list(base_rows), res, lapply(todo[!ok_id], function(k) row_out(colnames(Rm)[k], "SKIPPED", "not identified (constant position within year)")))
+bad_res <- vapply(res, function(z) !is.data.frame(z), TRUE)
+if (any(bad_res)) stop(sprintf("%d worker results are not data frames (killed fork?)", sum(bad_res)))
 out <- do.call(rbind, res)
+stopifnot(setequal(unique(out$spec_id), c("BASELINE|igo_pagerank_build|pr", colnames(Rm)[todo])))   # review P2-8: no spec may vanish
 n_err <- sum(out$model == "ERROR")
 f_out <- file.path(OUT_DIR, sprintf("sweep_%s_%s.csv", SCHEME, sub("\\.rds$", "", basename(POSF))))
 write.csv(out, f_out, row.names = FALSE)
-logf("wrote %s: %d specs in %.1f min; errors %d", f_out, length(todo), as.numeric(difftime(Sys.time(), t0, units = "mins")), n_err)
+logf("wrote %s: %d specs in %.1f min; errors %d; skipped %d (constant in a used year %d, flagged in 21 %d); specs with coxph warnings %d",
+     f_out, length(todo), as.numeric(difftime(Sys.time(), t0, units = "mins")), n_err, length(unique(out$spec_id[out$model == "SKIPPED"])),
+     sum(out$model == "SKIPPED" & grepl("^position constant", out$quantity)), sum(!ok_id), sum(grepl("^n_warnings: ", out$quantity)))
+if (n_err > 0) logf("ERRORS: %s", paste(unique(out$quantity[out$model == "ERROR"]), collapse = " | "))
