@@ -67,7 +67,7 @@ REL_SCALE <- get_arg(args, "rel_scale", "pooled"); ERA <- get_arg(args, "era", "
 COORIG_W <- as.integer(get_arg(args, "coorig_months", 0)); ENTRY_MOD <- get_arg(args, "entry_mod", FALSE)   # PI request 2026-11-17 (robustness; see section 1b)
 stopifnot(COORIG_W %in% c(0L, 1L, 2L, 3L), is.logical(ENTRY_MOD), !(ENTRY_MOD && COORIG_W > 0L))
 stopifnot(REL_SCALE %in% c("pooled", "year"), ERA %in% c("all", "pre1946", "from1946"))
-stopifnot(SAMPLE %in% ALL_SAMPLES, LAG == 3L, MODEL == "M1c", B >= 0, TYPES %in% c("bc", "bc_nocoorig", "bcj"), BOOT_UNIT %in% c("pigeonhole", "dispute", "initiator"), is.logical(LOO))
+stopifnot(SAMPLE %in% ALL_SAMPLES, LAG == 3L, MODEL == "M1c", B >= 0, TYPES %in% c("bc", "bc_nocoorig", "bcj", "bcjs"), BOOT_UNIT %in% c("pigeonhole", "dispute", "initiator"), is.logical(LOO))
 spec <- parse_spec(args)
 ## audit F5 (A1 P2-1): the cells M1c is defined on, and nothing else (02_fit_model.R refuses the same)
 stopifnot(spec_is_directed(spec), spec$roles == "bcj", spec_variant(spec) == "all", (if (is.null(spec$joiner_set)) "all" else spec$joiner_set) == "all",
@@ -152,10 +152,10 @@ ev_grp_default <- ev$grp
 ## partner, whenever it enters, makes the initiator coalition (bcj: coalition originator; the partner stays a joiner unless a --coorig_months window
 ## makes it an originator). --bilateral=onset restores the earlier coding (bilateral = no partner at onset; windows promote early-partnered initiators).
 BILAT <- get_arg(args, "bilateral", "ever"); stopifnot(BILAT %in% c("ever", "onset"))
-if (BILAT == "ever" && !(TYPES %in% c("bc", "bcj"))) stop("--bilateral=ever (default) is defined for --types=bc|bcj; use --bilateral=onset with ", TYPES)
+if (BILAT == "ever" && !(TYPES %in% c("bc", "bcj", "bcjs"))) stop("--bilateral=ever (default) is defined for --types=bc|bcj|bcjs; use --bilateral=onset with ", TYPES)
 promoted_ever <- rep(FALSE, dat$E)
-if (COORIG_W > 0L || ENTRY_MOD || BILAT == "ever") {
-  stopifnot(TYPES %in% c("bc", "bcj"))
+if (COORIG_W > 0L || ENTRY_MOD || BILAT == "ever" || TYPES == "bcjs") {
+  stopifnot(TYPES %in% c("bc", "bcj", "bcjs"))
   pt_path <- file.path(data_dir, "participants_timing.rds")
   if (!file.exists(pt_path)) stop("entry timing: ", pt_path, " is missing; rebuild the data with the 2026-11-17 build (01_build_data.R)")
   P <- readRDS(pt_path)
@@ -244,6 +244,11 @@ if (TYPES == "bcj") {
   ROLES <- c("bil", "coal", "join"); t_ev <- ev$grp; keep <- rep(TRUE, dat$E)
 } else if (TYPES == "bc") {
   ROLES <- c("bil", "coal"); t_ev <- as.integer(ev$grp > 0L); keep <- rep(TRUE, dat$E)
+} else if (TYPES == "bcjs") {   # PI 2026-11-17: four types, joiners split by side at entry (COW side A = initiating side, side B = targeted side)
+  stopifnot(exists("prow"), !ENTRY_MOD)
+  j_side <- P$side_entry[prow]; stopifnot(!anyNA(j_side[ev$grp == 2L]), all(j_side[ev$grp == 2L] %in% 0:1))
+  ROLES <- c("bil", "coal", "joinA", "joinB"); t_ev <- ifelse(ev$grp < 2L, ev$grp, ifelse(j_side == 1L, 2L, 3L)); keep <- rep(TRUE, dat$E)
+  logf("types bcjs: joiners on side A %d, side B %d; side-conflicted joiners (classed by their initial side) %d", sum(t_ev == 2L), sum(t_ev == 3L), sum(ev$grp == 2L & P$side_conflict[prow]))
 } else {
   ROLES <- c("bil", "coal"); t_ev <- as.integer(ev$grp > 0L); keep <- ev$grp != 1L
 }
