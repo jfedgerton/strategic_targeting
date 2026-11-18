@@ -53,7 +53,7 @@ Sys.setenv(V2_ROOT = normalizePath(file.path(R_DIR, "..")))   # audit F5 (A1 P2-
 args <- commandArgs(trailingOnly = TRUE)
 ## joint audit B2: refuse retired options, unknown flags, bare flags and duplicated flags (get_arg would silently take the first)
 refuse_archived_options(args, "10_clogit_roles.R")
-SCRIPT_FLAGS <- c("sample", "lag", "model", "boot", "types", "boot_unit", "loo", "rel_scale", "era", "coorig_months", "coorig_bound", "timing_ref", "entry_mod")
+SCRIPT_FLAGS <- c("bilateral", "sample", "lag", "model", "boot", "types", "boot_unit", "loo", "rel_scale", "era", "coorig_months", "coorig_bound", "timing_ref", "entry_mod")
 KNOWN_FLAGS <- c(names(SPEC_CHOICES), "ame_K", "tag", SCRIPT_FLAGS)
 bad <- args[!grepl("^--[A-Za-z_0-9]+=.+$", args)]
 if (length(bad)) stop(sprintf("arguments must be --name=value; refused: %s", paste(bad, collapse = " ")))
@@ -73,7 +73,7 @@ spec <- parse_spec(args)
 stopifnot(spec_is_directed(spec), spec$roles == "bcj", spec_variant(spec) == "all", (if (is.null(spec$joiner_set)) "all" else spec$joiner_set) == "all",
           spec$controls == "minimal", spec$context == "all", (if (is.null(spec$mu_shift)) "none" else spec$mu_shift) == "none")
 cell <- paste0("clogit_", cell_name(SAMPLE, LAG, MODEL, spec), "_", TYPES, if (REL_SCALE == "year") "_relyear" else "", if (ERA != "all") paste0("_", ERA) else "",
-              if (COORIG_W > 0L) paste0("_com", COORIG_W, if (get_arg(args, "coorig_bound", "definite") == "possible") "p" else "d") else "",
+              if (get_arg(args, "bilateral", "ever") == "onset") "_bon" else "", if (COORIG_W > 0L) paste0("_com", COORIG_W, if (get_arg(args, "coorig_bound", "definite") == "possible") "p" else "d") else "",
               if ((COORIG_W > 0L || ENTRY_MOD) && get_arg(args, "timing_ref", "originator") == "cow") "_rcow" else "", if (ENTRY_MOD) "_entrymod" else "",
               "_b", c(pigeonhole = "pig", dispute = "disp", initiator = "init")[[BOOT_UNIT]])   # GPT recheck P2: bootstrap unit is part of the run identity
 log_open(paste0("10_", cell))
@@ -148,7 +148,13 @@ COORIG_BOUND <- get_arg(args, "coorig_bound", "definite"); stopifnot(COORIG_BOUN
 if (any(grepl("^--coorig_bound=", args)) && COORIG_W == 0L) stop("--coorig_bound only applies with --coorig_months")
 if (any(grepl("^--timing_ref=", args)) && COORIG_W == 0L && !ENTRY_MOD) stop("--timing_ref only applies with --coorig_months or --entry_mod")
 ev_grp_default <- ev$grp
-if (COORIG_W > 0L || ENTRY_MOD) {
+## ---- bilateral rule (PI 2026-11-17): an initiator is BILATERAL only if no other participant ever fights on its side in the dispute. Any same-side
+## partner, whenever it enters, makes the initiator coalition (bcj: coalition originator; the partner stays a joiner unless a --coorig_months window
+## makes it an originator). --bilateral=onset restores the earlier coding (bilateral = no partner at onset; windows promote early-partnered initiators).
+BILAT <- get_arg(args, "bilateral", "ever"); stopifnot(BILAT %in% c("ever", "onset"))
+if (BILAT == "ever" && !(TYPES %in% c("bc", "bcj"))) stop("--bilateral=ever (default) is defined for --types=bc|bcj; use --bilateral=onset with ", TYPES)
+promoted_ever <- rep(FALSE, dat$E)
+if (COORIG_W > 0L || ENTRY_MOD || BILAT == "ever") {
   stopifnot(TYPES %in% c("bc", "bcj"))
   pt_path <- file.path(data_dir, "participants_timing.rds")
   if (!file.exists(pt_path)) stop("entry timing: ", pt_path, " is missing; rebuild the data with the 2026-11-17 build (01_build_data.R)")
@@ -183,6 +189,16 @@ if (COORIG_W > 0L || ENTRY_MOD) {
   if (anyNA(prow)) stop(sprintf("entry timing: %d fitted events do not have exactly one participant spell covering the event year in their weight-group dispute", sum(is.na(prow))))
   ## the build's originator flag must agree with the role: joiners (bcj 2) are exactly the non-originators of the weight-group dispute
   if (any((P$orig[prow] == 0L) != (ev$grp == 2L))) stop(sprintf("entry timing: originator flag and role disagree for %d events", sum((P$orig[prow] == 0L) != (ev$grp == 2L))))
+  if (BILAT == "ever") {   # bilateral rule (above): same-side partner = another participant of the weight-group dispute with the same initial side, side not conflicted
+    my_side0 <- P$side_entry[prow]; my_conf0 <- P$side_conflict[prow]
+    has_partner <- vapply(seq_len(dat$E), function(e) any(P$dispnum == k_all$dispnum[e] & P$ccode != k_all$initiator[e] & P$side_entry == my_side0[e] & !P$side_conflict), TRUE)
+    promoted_ever <- ev$grp == 0L & !my_conf0 & has_partner
+    grp_pre <- ev$grp; ev$grp[promoted_ever] <- 1L
+    logf("bilateral rule (ever): %d bilateral initiators have a same-side partner at some point and are recoded coalition originator (weight %.1f); bcj now %d / %d / %d (was %d / %d / %d); side-conflicted initiators left bilateral %d",
+         sum(promoted_ever), sum(dat$ev_w[promoted_ever]), sum(ev$grp == 0L), sum(ev$grp == 1L), sum(ev$grp == 2L), sum(grp_pre == 0L), sum(grp_pre == 1L), sum(grp_pre == 2L), sum(grp_pre == 0L & my_conf0))
+    gp0 <- which(k_all$initiator == 255L & k_all$target == 290L & k_all$year == 1939L)
+    if (length(gp0)) { stopifnot(ev$grp[gp0] == 1L); logf("check: Germany -> Poland 1939 is coalition (partners from 1940)") }
+  }
   lag_lo_ev <- pmax(P$entry_lo[prow] - P$onset_hi[prow], 0)                      # earliest possible lag
   lag_hi_ev <- pmax(P$entry_hi[prow] - P$onset_lo[prow], 0)                      # latest possible lag
   lag_ev <- (lag_lo_ev + lag_hi_ev) / 2                                           # midpoint (moderator)
@@ -217,7 +233,7 @@ if (COORIG_W > 0L || ENTRY_MOD) {
     if (any(g8 > 1L)) stop(sprintf("coorig window: roles not constant within %d (initiator, dispute, year) groups", sum(g8 > 1L)))
     ## regression checks (independent review 2026-11-17)
     gp <- which(k_all$initiator == 255L & k_all$target == 290L & k_all$year == 1939L)
-    if (length(gp)) { stopifnot(ev$grp[gp] == 0L); logf("check: Germany -> Poland 1939 stays bilateral") }
+    if (length(gp) && BILAT == "onset") { stopifnot(ev$grp[gp] == 0L); logf("check: Germany -> Poland 1939 stays bilateral (onset rule; first partner after the window)") }
     for (chk in list(c(2L, 645L, 1997L), c(2L, 731L, 1950L))) { r <- which(k_all$initiator == chk[1] & k_all$target == chk[2] & k_all$year == chk[3])
       if (length(r)) logf("check: %d -> %d %d coded %d (was %d)", chk[1], chk[2], chk[3], ev$grp[r[1]], grp_old[r[1]]) }
   }
@@ -586,7 +602,7 @@ if (COORIG_W > 0L || ENTRY_MOD) {   # GPT recheck: event-level timing provenance
                              lag_lo = lag_lo_ev, lag_hi = lag_hi_ev, lag_mid = lag_ev, w = dat$ev_w)[keep, ]
   write.csv(timing_audit, file.path(od, paste0(cell, "_timing.csv")), row.names = FALSE)
 }
-saveRDS(list(opp = if (OPP_ON) list(lambda = LAMBDA, draw = OPP_DRAW, outcome = spec_opp_outcome(spec), weights = basename(w_path), built = OW$built, git_commit = OW$git_commit) else NULL, pt = pt, bs = bs, bs_coef = bs_coef, fail_log = fail_log, n_ok = n_ok, n_fail = n_fail, B = B, spec = spec, types = TYPES, roles = ROLES,
+saveRDS(list(bilateral_rule = BILAT, promoted_ever = which(promoted_ever), opp = if (OPP_ON) list(lambda = LAMBDA, draw = OPP_DRAW, outcome = spec_opp_outcome(spec), weights = basename(w_path), built = OW$built, git_commit = OW$git_commit) else NULL, pt = pt, bs = bs, bs_coef = bs_coef, fail_log = fail_log, n_ok = n_ok, n_fail = n_fail, B = B, spec = spec, types = TYPES, roles = ROLES,
              support = SUPPORT, n_rows = nrow(L), E = sum(keep), V = VS, boot_unit = BOOT_UNIT, loo = loo, coorig_months = COORIG_W, entry_mod = ENTRY_MOD,
              timing_ref = if (COORIG_W > 0L || ENTRY_MOD) TIMING_REF else NA_character_, lag_ev = lag_ev, lag_lo_ev = lag_lo_ev, lag_hi_ev = lag_hi_ev, role_alt = role_alt, coorig_bound = COORIG_BOUND, m_ctr = if (ENTRY_MOD) M_CTR else NA_real_),
         file.path(od, paste0(cell, "_boot.rds")))
