@@ -53,7 +53,7 @@ Sys.setenv(V2_ROOT = normalizePath(file.path(R_DIR, "..")))   # audit F5 (A1 P2-
 args <- commandArgs(trailingOnly = TRUE)
 ## joint audit B2: refuse retired options, unknown flags, bare flags and duplicated flags (get_arg would silently take the first)
 refuse_archived_options(args, "10_clogit_roles.R")
-SCRIPT_FLAGS <- c("bilateral", "sample", "lag", "model", "boot", "types", "boot_unit", "loo", "rel_scale", "era", "coorig_months", "coorig_bound", "timing_ref", "entry_mod")
+SCRIPT_FLAGS <- c("bilateral", "unit_weights", "sample", "lag", "model", "boot", "types", "boot_unit", "loo", "rel_scale", "era", "coorig_months", "coorig_bound", "timing_ref", "entry_mod")
 KNOWN_FLAGS <- c(names(SPEC_CHOICES), "ame_K", "tag", SCRIPT_FLAGS)
 bad <- args[!grepl("^--[A-Za-z_0-9]+=.+$", args)]
 if (length(bad)) stop(sprintf("arguments must be --name=value; refused: %s", paste(bad, collapse = " ")))
@@ -67,13 +67,13 @@ REL_SCALE <- get_arg(args, "rel_scale", "pooled"); ERA <- get_arg(args, "era", "
 COORIG_W <- as.integer(get_arg(args, "coorig_months", 0)); ENTRY_MOD <- get_arg(args, "entry_mod", FALSE)   # PI request 2026-11-17 (robustness; see section 1b)
 stopifnot(COORIG_W %in% c(0L, 1L, 2L, 3L), is.logical(ENTRY_MOD), !(ENTRY_MOD && COORIG_W > 0L))
 stopifnot(REL_SCALE %in% c("pooled", "year"), ERA %in% c("all", "pre1946", "from1946"))
-stopifnot(SAMPLE %in% ALL_SAMPLES, LAG == 3L, MODEL == "M1c", B >= 0, TYPES %in% c("bc", "bc_nocoorig", "bcj", "bcjs", "bcd"), BOOT_UNIT %in% c("pigeonhole", "dispute", "initiator"), is.logical(LOO))
+stopifnot(SAMPLE %in% ALL_SAMPLES, LAG == 3L, MODEL == "M1c", B >= 0, TYPES %in% c("bc", "bc_nocoorig", "bcj", "bcjs", "bcd", "s22"), BOOT_UNIT %in% c("pigeonhole", "dispute", "initiator"), is.logical(LOO))
 spec <- parse_spec(args)
 ## audit F5 (A1 P2-1): the cells M1c is defined on, and nothing else (02_fit_model.R refuses the same)
 stopifnot(spec_is_directed(spec), spec$roles == "bcj", spec_variant(spec) == "all", (if (is.null(spec$joiner_set)) "all" else spec$joiner_set) == "all",
           spec$controls == "minimal", spec$context == "all", (if (is.null(spec$mu_shift)) "none" else spec$mu_shift) == "none")
 cell <- paste0("clogit_", cell_name(SAMPLE, LAG, MODEL, spec), "_", TYPES, if (REL_SCALE == "year") "_relyear" else "", if (ERA != "all") paste0("_", ERA) else "",
-              if (get_arg(args, "bilateral", "ever") == "onset") "_bon" else "", if (COORIG_W > 0L) paste0("_com", COORIG_W, if (get_arg(args, "coorig_bound", "definite") == "possible") "p" else "d") else "",
+              if (get_arg(args, "bilateral", "ever") == "onset") "_bon" else "", if (as.logical(get_arg(args, "unit_weights", "FALSE"))) "_uw" else "", if (COORIG_W > 0L) paste0("_com", COORIG_W, if (get_arg(args, "coorig_bound", "definite") == "possible") "p" else "d") else "",
               if ((COORIG_W > 0L || ENTRY_MOD) && get_arg(args, "timing_ref", "originator") == "cow") "_rcow" else "", if (ENTRY_MOD) "_entrymod" else "",
               "_b", c(pigeonhole = "pig", dispute = "disp", initiator = "init")[[BOOT_UNIT]])   # GPT recheck P2: bootstrap unit is part of the run identity
 log_open(paste0("10_", cell))
@@ -93,6 +93,11 @@ stopifnot(A$sampled == 0L, identical(gt$grp, 0:2), identical(gt$group, stage2_gr
 logf("bcj events %d (bilateral %d, coalition originator %d, joiner %d); weight sums %.1f / %.1f / %.1f; Z = %s",
      dat$E, sum(ev$grp == 0), sum(ev$grp == 1), sum(ev$grp == 2),
      sum(dat$ev_w[ev$grp == 0]), sum(dat$ev_w[ev$grp == 1]), sum(dat$ev_w[ev$grp == 2]), paste(Z_cols, collapse = ","))
+UNITW <- as.logical(get_arg(args, "unit_weights", "FALSE")); stopifnot(!is.na(UNITW))
+if (UNITW) {   # PI 2026-11-18 sensitivity: every event counts 1 (no 1 / n-targets composite weight); multi-target joiners regain full weight
+  logf("unit_weights: event weights set to 1 (were: min %.3f, mean %.3f; sum %.1f -> %d)", min(dat$ev_w), mean(dat$ev_w), sum(dat$ev_w), dat$E)
+  dat$ev_w[] <- 1
+}
 
 ## ---- 1a. opportunity-weight offset (run 1 weights of 08_opportunity_weights.R; PI request 2026-11-17: the clogit version of --opp_weight) -----------
 ## Stage-2 utility gains the FIXED term lambda x ln q_ij (q = the auxiliary MID-propensity opportunity weight of the alternative row; no new parameter).
@@ -152,10 +157,10 @@ ev_grp_default <- ev$grp
 ## partner, whenever it enters, makes the initiator coalition (bcj: coalition originator; the partner stays a joiner unless a --coorig_months window
 ## makes it an originator). --bilateral=onset restores the earlier coding (bilateral = no partner at onset; windows promote early-partnered initiators).
 BILAT <- get_arg(args, "bilateral", "ever"); stopifnot(BILAT %in% c("ever", "onset"))
-if (BILAT == "ever" && !(TYPES %in% c("bc", "bcj", "bcjs", "bcd"))) stop("--bilateral=ever (default) is defined for --types=bc|bcj|bcjs|bcd; use --bilateral=onset with ", TYPES)
+if (BILAT == "ever" && !(TYPES %in% c("bc", "bcj", "bcjs", "bcd", "s22"))) stop("--bilateral=ever (default) is defined for --types=bc|bcj|bcjs|bcd|s22; use --bilateral=onset with ", TYPES)
 promoted_ever <- rep(FALSE, dat$E)
-if (COORIG_W > 0L || ENTRY_MOD || BILAT == "ever" || TYPES %in% c("bcjs", "bcd")) {
-  stopifnot(TYPES %in% c("bc", "bcj", "bcjs", "bcd"))
+if (COORIG_W > 0L || ENTRY_MOD || BILAT == "ever" || TYPES %in% c("bcjs", "bcd", "s22")) {
+  stopifnot(TYPES %in% c("bc", "bcj", "bcjs", "bcd", "s22"))
   pt_path <- file.path(data_dir, "participants_timing.rds")
   if (!file.exists(pt_path)) stop("entry timing: ", pt_path, " is missing; rebuild the data with the 2026-11-17 build (01_build_data.R)")
   P <- readRDS(pt_path)
@@ -244,6 +249,20 @@ if (TYPES == "bcj") {
   ROLES <- c("bil", "coal", "join"); t_ev <- ev$grp; keep <- rep(TRUE, dat$E)
 } else if (TYPES == "bc") {
   ROLES <- c("bil", "coal"); t_ev <- as.integer(ev$grp > 0L); keep <- rep(TRUE, dat$E)
+} else if (TYPES == "s22") {   # PI 2026-11-18: 2x2 coordination structure = initiator side alone/coordinated x target side alone/coordinated
+  ## side sizes = distinct participants of the weight-group dispute on each initial side (initial-alignment convention, as the bilateral rule); "ever" counts
+  stopifnot(exists("prow"), !ENTRY_MOD)
+  my_side <- P$side_entry[prow]; stopifnot(!anyNA(my_side))
+  PP <- unique(P[, c("dispnum", "ccode", "side_entry")])
+  n_own <- vapply(seq_len(dat$E), function(e) sum(PP$dispnum == k_all$dispnum[e] & PP$side_entry == my_side[e]), 0L)
+  n_opp <- vapply(seq_len(dat$E), function(e) sum(PP$dispnum == k_all$dispnum[e] & PP$side_entry != my_side[e]), 0L)
+  stopifnot(all(n_own >= 1L), all(n_opp >= 1L))
+  mis <- which((n_own > 1L) != (ev$grp > 0L))   # initiator-side coordination follows the bilateral rule (coalition = grp > 0); side counts that disagree are logged
+  if (length(mis)) logf("types s22: %d events where the initial-side count disagrees with the bilateral rule (kept as coded by the rule): %s", length(mis),
+                        paste(sprintf("%d->%d %d (grp %d, own %d)", k_all$initiator[mis], k_all$target[mis], k_all$year[mis], ev$grp[mis], n_own[mis]), collapse = "; "))
+  ROLES <- c("one_one", "one_many", "many_one", "many_many"); t_ev <- 2L * as.integer(ev$grp > 0L) + as.integer(n_opp > 1L); keep <- rep(TRUE, dat$E)
+  logf("types s22: 1v1 %d, 1 v many %d, many v 1 %d, many v many %d (weights %s)", sum(t_ev == 0L), sum(t_ev == 1L), sum(t_ev == 2L), sum(t_ev == 3L),
+       paste(sprintf("%.1f", vapply(0:3, function(g) sum(dat$ev_w[t_ev == g]), 0)), collapse = " / "))
 } else if (TYPES == "bcd") {   # PI 2026-11-17: bilateral / coalition choosers (originators + side-A joiners) / defenders (side-B joiners)
   stopifnot(exists("prow"), !ENTRY_MOD)
   j_side <- P$side_entry[prow]; stopifnot(!anyNA(j_side[ev$grp == 2L]), all(j_side[ev$grp == 2L] %in% 0:1))
