@@ -12,8 +12,10 @@
 ## Validation (always run first): with R = log PageRank from the dump's sy_positions.rds, the rebuilt dR must equal the dumped dR
 ## (max abs diff < 1e-8; the script stops otherwise). Because the gap is identical, the BASELINE fit is the fit on the dumped gap
 ## (checked once by hand against 10_clogit_roles.R output: coefficients and two-way SEs identical).
-## A spec is refused (row model = SKIPPED, with the reason) when its position is constant in any year an event uses (t for the year
-## scale, t-1 for positions): the year scale would be ~0 and the gap ~1e13 (independent review 2026-11-18, P1-1).
+## A spec is refused (row model = SKIPPED, with the reason) when its position is constant in any year this fit uses (t-1 for positions;
+## also t under the year-t scale): the year scale would be ~0 and the gap ~1e13 (independent review 2026-11-18, P1-1; GPT P2-5).
+## A fit with separation / non-convergence warnings, non-finite coefficients or the iteration limit is model = INVALID: it stays in the
+## census with its iterations and max |dR| but has no estimate rows (GPT review P1-3). Each sweep log line is the census for that file.
 ## Per spec the output also records coxph iterations, any coxph warning, and max |dR| (review P2-7).
 ##
 ## Output (one row per spec x scheme x quantity): <out_dir>/sweep_<scheme tag>_<positions file stem>.csv with
@@ -60,7 +62,8 @@ yr_ev <- as.character(D$yr)
 key_years <- split(seq_len(nrow(key)), key$year)
 stopifnot(all(unique(c(yr_ev, as.character(D$yr - 1L))) %in% names(key_years)))
 
-used_years <- sort(unique(c(D$yr, D$yr - 1L)))
+## GPT review P2-5: the years a fit actually needs are the positions' year (t-1) plus, under the year-t scale, year t
+used_years <- sort(unique(if (dump$rel_scale == "year" && YSCALE == "t") c(D$yr, D$yr - 1L) else D$yr - 1L))
 make_dR <- function(R) {                                          # R: position per key row
   sds <- vapply(key_years[as.character(used_years)], function(ix) sd(R[ix]), 0)
   if (any(sds < 1e-8)) stop(sprintf("position constant in event-used year(s) %s", paste(used_years[sds < 1e-8], collapse = " ")))
@@ -123,7 +126,11 @@ run_spec <- function(spec, dR) {
   wrn <- character(0)
   M0 <- withCallingHandlers(fit_cl(d, GAP), warning = function(w) { wrn <<- c(wrn, conditionMessage(w)); invokeRestart("muffleWarning") })
   M1 <- withCallingHandlers(fit_cl(d, GAP_G), warning = function(w) { wrn <<- c(wrn, conditionMessage(w)); invokeRestart("muffleWarning") })
-  for (m in list(M0, M1)) if (!all(is.finite(coef(m)))) stop("non-finite coefficients")
+  ## GPT review P1-3: separation / non-convergence is an INVALID fit, kept in the census but with no inferential rows
+  bad_w <- grepl("converge|infinite|singular", wrn, ignore.case = TRUE)
+  invalid <- any(bad_w) || !all(is.finite(coef(M0))) || !all(is.finite(coef(M1))) || M0$iter >= 20L || M1$iter >= 20L
+  if (invalid) return(rbind(row_out(spec, "INVALID", paste0("fit invalid: ", if (length(wrn)) paste(unique(wrn), collapse = " | ") else "non-finite coefficients or iteration limit")),
+                            row_out(spec, "M0", "iter", M0$iter), row_out(spec, "M1", "iter", M1$iter), row_out(spec, "M1", "max_abs_dR", max(abs(d$dR)))))
   V0 <- vc_2w(M0, d); V1 <- vc_2w(M1, d); b0 <- coef(M0); b1 <- coef(M1)
   out <- list(axis_rows(spec, "M0", b0, V0, "", ""))
   for (k in ROLES) out[[length(out) + 1]] <- axis_rows(spec, "M1", b1, V1, paste0("_", k), paste0(k, ":"))
@@ -135,9 +142,11 @@ run_spec <- function(spec, dR) {
   out[[length(out) + 1]] <- row_out(spec, "M0", "cgm_neg_eigen", attr(V0, "n_neg")); out[[length(out) + 1]] <- row_out(spec, "M1", "cgm_neg_eigen", attr(V1, "n_neg"))
   out[[length(out) + 1]] <- row_out(spec, "M0", "iter", M0$iter); out[[length(out) + 1]] <- row_out(spec, "M1", "iter", M1$iter)
   out[[length(out) + 1]] <- row_out(spec, "M1", "max_abs_dR", max(abs(d$dR)))
-  out[[length(out) + 1]] <- row_out(spec, "M1", "n_warnings", length(wrn))
+  out[[length(out) + 1]] <- row_out(spec, "M1", "n_warnings", length(wrn))   # only benign warnings can remain here
   if (length(wrn)) out[[length(out)]]$quantity <- paste0("n_warnings: ", paste(unique(wrn), collapse = " | "))
-  do.call(rbind, out)
+  out <- do.call(rbind, out)
+  n_na <- sum(out$df > 1 & is.na(out$p))                          # GPT review P1-3: Wald tests that could not be computed (singular)
+  rbind(out, row_out(spec, "ALL", "n_wald_na", n_na))
 }
 
 ## ---- 2. validation against the dumped gap (baseline log IGO PageRank from the data build) --------------------------
@@ -165,13 +174,14 @@ base_rows <- run_spec("BASELINE|igo_pagerank_build|pr", dRb)
 
 ## ---- 3. sweep -------------------------------------------------------------------------------------------------------
 todo <- seq_len(ncol(Rm)); if (MAX_SPECS > 0) todo <- todo[seq_len(min(MAX_SPECS, length(todo)))]
-ok_id <- specs$identified[todo]
-logf("positions %s: %d specs (%d marked not identified, skipped)", basename(POSF), length(todo), sum(!ok_id))
+## GPT review P2-5: eligibility is decided per fit by make_dR() on the years this fit needs; the all-years flag from 21 is metadata only
+ok_id <- rep(TRUE, length(todo))
+logf("positions %s: %d specs (%d constant in >= 5%% of all years, metadata only; eligibility checked on the years each fit uses)", basename(POSF), length(todo), sum(!specs$identified[todo]))
 t0 <- Sys.time()
 one <- function(k) tryCatch(run_spec(colnames(Rm)[k], make_dR(Rm[, k])),
                             error = function(e) row_out(colnames(Rm)[k], if (grepl("^position constant", conditionMessage(e))) "SKIPPED" else "ERROR", conditionMessage(e)))
 res <- if (CORES > 1) mclapply(todo[ok_id], one, mc.cores = CORES, mc.preschedule = FALSE) else lapply(todo[ok_id], one)
-res <- c(list(base_rows), res, lapply(todo[!ok_id], function(k) row_out(colnames(Rm)[k], "SKIPPED", "not identified (constant position within year)")))
+res <- c(list(base_rows), res)
 bad_res <- vapply(res, function(z) !is.data.frame(z), TRUE)
 if (any(bad_res)) stop(sprintf("%d worker results are not data frames (killed fork?)", sum(bad_res)))
 out <- do.call(rbind, res)
@@ -179,7 +189,8 @@ stopifnot(setequal(unique(out$spec_id), c("BASELINE|igo_pagerank_build|pr", coln
 n_err <- sum(out$model == "ERROR")
 f_out <- file.path(OUT_DIR, sprintf("sweep_%s_%s.csv", SCHEME, sub("\\.rds$", "", basename(POSF))))
 write.csv(out, f_out, row.names = FALSE)
-logf("wrote %s: %d specs in %.1f min; errors %d; skipped %d (constant in a used year %d, flagged in 21 %d); specs with coxph warnings %d",
-     f_out, length(todo), as.numeric(difftime(Sys.time(), t0, units = "mins")), n_err, length(unique(out$spec_id[out$model == "SKIPPED"])),
-     sum(out$model == "SKIPPED" & grepl("^position constant", out$quantity)), sum(!ok_id), sum(grepl("^n_warnings: ", out$quantity)))
+logf("CENSUS %s: specs %d | valid %d | skipped (constant in a used year) %d | invalid fits (separation / non-convergence) %d | errors %d | valid fits with a Wald test not computable %d | in %.1f min",
+     f_out, length(todo), length(setdiff(unique(out$spec_id[out$model == "M0"]), unique(out$spec_id[out$model == "INVALID"]))) - 1L,
+     length(unique(out$spec_id[out$model == "SKIPPED"])), length(unique(out$spec_id[out$model == "INVALID"])), n_err,
+     length(unique(out$spec_id[out$quantity == "n_wald_na" & out$est > 0])), as.numeric(difftime(Sys.time(), t0, units = "mins")))
 if (n_err > 0) logf("ERRORS: %s", paste(unique(out$quantity[out$model == "ERROR"]), collapse = " | "))

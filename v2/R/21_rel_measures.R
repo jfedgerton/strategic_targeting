@@ -117,9 +117,15 @@ edge_w <- function(W, l) {
   x <- numeric(nrow(dy)); x[ok] <- r
   ## PI 2026-11-18: residuals CLIPPED at zero (only ties stronger than expected count; IO-9933 Euclidean version), then divided by the
   ## layer-year maximum so each layer lies in [0, 1] before combining; a dyad at or below expectation has weight 0
+  ## GPT review P1-2: residuals within numerical tolerance of zero are zero, so solver noise in a layer the covariates fit exactly
+  ## cannot be stretched into weight-1 ties by the year-maximum division; tolerance relative to the layer's own scale
+  tol <- 1e-8 * max(1, max(abs(v[ok])))
+  x[abs(x) < tol] <- 0
   x <- pmax(x, 0)
-  for (ix in yr_split) { j <- ix[ok[ix]]; if (length(j)) { m <- max(x[j]); if (m > 0) e[j] <- x[j] / m } }
+  n_num_empty <- 0L
+  for (ix in yr_split) { j <- ix[ok[ix]]; if (length(j)) { m <- max(x[j]); if (m > 0) e[j] <- x[j] / m else n_num_empty <- n_num_empty + 1L } }
   e[!ok] <- 0
+  attr(e, "n_num_empty") <- n_num_empty
   e
 }
 
@@ -132,6 +138,9 @@ if (ARM %in% c("core", "dipl")) {
     combos[[length(combos) + 1]] <- if (ARM == "dipl") c(inc, "dipl") else inc
   }
   stopifnot(length(combos) == 384L)
+  ## GPT review P2-8: under --pta=inforce, combos without the PTA layer are identical to the --pta=all ones; build only combos with PTA
+  if (PTA == "inforce") { combos <- combos[vapply(combos, function(x) "pta" %in% x, TRUE)]; stopifnot(length(combos) == 192L)
+    logf("pta = inforce: only the %d combos containing PTA are built (the rest duplicate --pta=all)", length(combos)) }
   if (MAX_COMBOS > 0) { combos <- combos[c(1:min(MAX_COMBOS, 384))]; logf("SMOKE TEST: first %d combos only", length(combos)) }
   combo_id <- vapply(combos, function(x) paste(x, collapse = "+"), "")
   logf("%d layer combos (each contains igo or def)%s", length(combos), if (ARM == "dipl") " + dipl" else "")
@@ -173,7 +182,10 @@ if (ARM %in% c("core", "dipl")) {
   spec_rows <- list()
   for (W in WEIGHTINGS) {
     t0 <- Sys.time()
-    EL <- sapply(LAYERS, function(l) edge_w(W, l))          # dyad-year x layer
+    EW <- lapply(LAYERS, function(l) edge_w(W, l)); names(EW) <- LAYERS
+    if (W != "W1raw") logf("%s: layer-years with no positive residual (zero weight) %s", W,
+                           paste(sprintf("%s %d", LAYERS, vapply(EW, function(e) attr(e, "n_num_empty"), 0L)), collapse = ", "))
+    EL <- sapply(EW, as.numeric); colnames(EL) <- LAYERS; rm(EW)   # dyad-year x layer
     stopifnot(!anyNA(EL), all(EL >= 0), all(EL <= 1 + 1e-12))
     logf("%s: per-layer edge weights built (mean weight by layer: %s)", W, paste(sprintf("%s %.3f", LAYERS, colMeans(EL)), collapse = ", "))
     one <- function(k) {
@@ -208,12 +220,13 @@ if (ARM == "igo") {
   for (y in names(yr_split)) {
     dd <- d[d$year == as.integer(y), ]
     B <- (as.matrix(dd[, igo_cols]) == 1) * 1; rownames(B) <- dd$ccode
-    B <- B[, colSums(B) >= 2, drop = FALSE]
+    Bfull <- B                                                   # GPT review P2-4: cosine norms use the FULL membership vectors
+    B <- B[, colSums(B) >= 2, drop = FALSE]                      # Newman needs k_g >= 2
     ei <- yr_split[[y]]
     if (ncol(B) == 0) next
     kg <- colSums(B)
     N <- B %*% (t(B) / (kg - 1)); diag(N) <- 0                  # Newman: each shared IGO weighted 1 / (k_g - 1)
-    A <- B %*% t(B); ks <- sqrt(diag(A)); C <- A / outer(pmax(ks, 1e-12), pmax(ks, 1e-12)); diag(C) <- 0   # cosine of membership vectors
+    A <- Bfull %*% t(Bfull); ks <- sqrt(diag(A)); C <- A / outer(pmax(ks, 1e-12), pmax(ks, 1e-12)); diag(C) <- 0   # cosine of full membership vectors
     i1 <- match(as.character(dy$ccode1[ei]), rownames(B)); i2 <- match(as.character(dy$ccode2[ei]), rownames(B))
     okp <- !is.na(i1) & !is.na(i2)
     Enew[ei[okp]] <- N[cbind(i1[okp], i2[okp])]; Ecos[ei[okp]] <- C[cbind(i1[okp], i2[okp])]

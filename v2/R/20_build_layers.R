@@ -36,7 +36,8 @@ logf("frame: %d dyad-years, %d-%d; capdist NA %d; conttype NA %d", nrow(dy), min
 
 ## ---- 1. IGO -------------------------------------------------------------------
 igo <- peacesciencer::cow_igo_ndy |>
-  transmute(ccode1 = as.integer(pmin(ccode1, ccode2)), ccode2 = as.integer(pmax(ccode1, ccode2)), year = as.integer(year),
+  mutate(a_ = pmin(ccode1, ccode2), b_ = pmax(ccode1, ccode2)) |>   # GPT review P1-1: both ends from the ORIGINAL columns
+  transmute(ccode1 = as.integer(a_), ccode2 = as.integer(b_), year = as.integer(year),
             igo = ifelse(dyadigos < 0, NA_real_, as.numeric(dyadigos))) |>
   distinct(ccode1, ccode2, year, .keep_all = TRUE)
 dy <- dy |> left_join(igo, by = c("ccode1", "ccode2", "year"))
@@ -48,7 +49,8 @@ dy <- dy |> left_join(igo_years, by = "year") |> mutate(igo = ifelse(ok & is.na(
 
 ## ---- 2. ATOP ------------------------------------------------------------------
 atop <- peacesciencer::atop_alliance |>
-  transmute(ccode1 = as.integer(pmin(ccode1, ccode2)), ccode2 = as.integer(pmax(ccode1, ccode2)), year = as.integer(year),
+  mutate(a_ = pmin(ccode1, ccode2), b_ = pmax(ccode1, ccode2)) |>   # GPT review P1-1: both ends from the ORIGINAL columns
+  transmute(ccode1 = as.integer(a_), ccode2 = as.integer(b_), year = as.integer(year),
             ally = as.integer((atop_defense + atop_offense + atop_neutral + atop_nonagg + atop_consul) > 0),
             def = as.integer(atop_defense > 0), off = as.integer(atop_offense > 0), neu = as.integer(atop_neutral > 0),
             nonagg = as.integer(atop_nonagg > 0), consul = as.integer(atop_consul > 0)) |>
@@ -57,10 +59,13 @@ atop <- peacesciencer::atop_alliance |>
 dy <- dy |> left_join(atop, by = c("ccode1", "ccode2", "year")) |>
   mutate(across(c(ally, def, off, neu, nonagg, consul), ~ coalesce(.x, 0L)))
 stopifnot(all(dy$ally == pmax(dy$def, dy$off, dy$neu, dy$nonagg, dy$consul)))
+## GPT review P1-1 regression check: an obligation recorded in ONE direction only must survive (France -> Belgium 1832 defense)
+stopifnot(all(atop$ccode1 < atop$ccode2), dy$def[dy$ccode1 == 211 & dy$ccode2 == 220 & dy$year == 1832] == 1L)
 
 ## ---- 2b. UN voting agreement (kappa), 1946+ ---------------------------------------
 fp <- readRDS(file.path(system.file("extdata", package = "peacesciencer"), "dyadic_fp_similarity.rds")) |>
-  transmute(ccode1 = as.integer(pmin(ccode1, ccode2)), ccode2 = as.integer(pmax(ccode1, ccode2)), year = as.integer(year), un = kappavv) |>
+  mutate(a_ = pmin(ccode1, ccode2), b_ = pmax(ccode1, ccode2)) |>   # GPT review P1-1: both ends from the ORIGINAL columns
+  transmute(ccode1 = as.integer(a_), ccode2 = as.integer(b_), year = as.integer(year), un = kappavv) |>
   filter(!is.na(un)) |> group_by(ccode1, ccode2, year) |> summarise(un = mean(un), .groups = "drop")
 un_first <- min(fp$year)
 stopifnot(un_first >= 1945L, all(fp$un >= -1 - 1e-9 & fp$un <= 1 + 1e-9))
@@ -69,7 +74,8 @@ logf("UN kappa: first year %d (structural 0 before); NA share in UN years %.3f",
 
 ## ---- 3. Diplomatic exchange (5-year waves, carried forward) -------------------
 dip <- read.csv(file.path(NETDIR, "dipl_dyad.csv")) |>
-  transmute(ccode1 = as.integer(pmin(ccode1, ccode2)), ccode2 = as.integer(pmax(ccode1, ccode2)), year = as.integer(year),
+  mutate(a_ = pmin(ccode1, ccode2), b_ = pmax(ccode1, ccode2)) |>   # GPT review P1-1: both ends from the ORIGINAL columns
+  transmute(ccode1 = as.integer(a_), ccode2 = as.integer(b_), year = as.integer(year),
             dipl = as.integer(DE == 1)) |>
   group_by(ccode1, ccode2, year) |> summarise(dipl = max(dipl), .groups = "drop")
 waves <- sort(unique(dip$year))
@@ -132,7 +138,8 @@ stopifnot(any(chk_pta$ccode1 == 220 & chk_pta$ccode2 == 260 & chk_pta$year == 19
 
 ## ---- 5. DCA ---------------------------------------------------------------------
 dca <- read.csv(file.path(NETDIR, "dca_dyad.csv")) |>
-  transmute(ccode1 = as.integer(pmin(ccode1, ccode2)), ccode2 = as.integer(pmax(ccode1, ccode2)), year = as.integer(year),
+  mutate(a_ = pmin(ccode1, ccode2), b_ = pmax(ccode1, ccode2)) |>   # GPT review P1-1: both ends from the ORIGINAL columns
+  transmute(ccode1 = as.integer(a_), ccode2 = as.integer(b_), year = as.integer(year),
             dca = as.integer(dcaAnyV1 > 0)) |>
   group_by(ccode1, ccode2, year) |> summarise(dca = max(dca), .groups = "drop")
 dca_rng <- range(dca$year)
@@ -151,7 +158,8 @@ logf("DCA: structural zeros before %d; %d carried forward to %d", dca_rng[1], dc
 ## COW itself records some implausible zeros (e.g. USSR-Poland 1960); those are kept as reported.
 ## PI decision 2026-11-18: any spec that uses the trade layer is subset to 1870+.
 trd <- readRDS(file.path(system.file("extdata", package = "peacesciencer"), "cow_trade_ddy.rds")) |>
-  transmute(ccode1 = as.integer(pmin(ccode1, ccode2)), ccode2 = as.integer(pmax(ccode1, ccode2)), year = as.integer(year),
+  mutate(a_ = pmin(ccode1, ccode2), b_ = pmax(ccode1, ccode2)) |>   # GPT review P1-1: both ends from the ORIGINAL columns
+  transmute(ccode1 = as.integer(a_), ccode2 = as.integer(b_), year = as.integer(year),
             flow = ifelse(is.na(smoothflow1) & is.na(smoothflow2), NA_real_,
                           pmax(coalesce(smoothflow1, 0), 0) + pmax(coalesce(smoothflow2, 0), 0))) |>
   group_by(ccode1, ccode2, year) |> summarise(flow = max(flow), .groups = "drop")
@@ -166,6 +174,7 @@ logf("trade: %d-%d, NA before %d; share of 1870+ dyad-years with positive trade 
 
 ## ---- 6. checks -------------------------------------------------------------------
 stopifnot(!anyDuplicated(dy[, c("ccode1", "ccode2", "year")]))
+for (src in list(igo, atop, fp, dip, dca, trd)) stopifnot(all(src$ccode1 < src$ccode2))   # no self-pairs from any import
 era <- cut(dy$year, c(1815, 1870, 1914, 1945, 1979, 1990, 2014), labels = c("1816-70", "1871-1914", "1915-45", "1946-79", "1980-90", "1991-2014"))
 dens <- dy |> mutate(era = era) |> group_by(era) |>
   summarise(dyad_years = n(), igo_mean = mean(igo, na.rm = TRUE), igo_na = mean(is.na(igo)), ally = mean(ally), def = mean(def),

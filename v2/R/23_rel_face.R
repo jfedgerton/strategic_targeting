@@ -45,13 +45,14 @@ ERAS <- list(`1816-1870` = c(1816, 1870), `1871-1913` = c(1871, 1913), `1914-194
 
 face_one <- function(R, spec) {
   pct <- numeric(length(R)); for (ix in yrs) pct[ix] <- rank(R[ix]) / length(ix)
+  n_const <- sum(vapply(yrs, function(ix) sd(R[ix]) < 1e-8, TRUE))   # constant years are excluded from the correlations (count reported)
   cb <- mean(vapply(yrs, function(ix) suppressWarnings(cor(R[ix], Rbase[ix], method = "spearman")), 0), na.rm = TRUE)
   cc <- mean(vapply(yrs, function(ix) suppressWarnings(cor(R[ix], Mcinc[ix], method = "spearman")), 0), na.rm = TRUE)
   st <- { ok <- !is.na(prev); d <- data.frame(y = key$year[ok], a = R[ok], b = R[prev[ok]])
           mean(vapply(split(d, d$y), function(z) suppressWarnings(cor(z$a, z$b, method = "spearman")), 0), na.rm = TRUE) }
   sdw <- median(vapply(yrs, function(ix) sd(R[ix]), 0))
   an <- vapply(ANCH, function(a) { s <- key$ccode == a[1] & key$year >= a[2] & key$year <= a[3]; if (any(s)) mean(pct[s]) else NA_real_ }, 0)
-  ys <- vapply(yrs, function(ix) gap_scale(R[ix], rep(1L, length(ix))), 0)
+  ys <- vapply(yrs[unique(yr_ev)], function(ix) gap_scale(R[ix], rep(1L, length(ix))), 0)   # GPT review P2-6: event years only
   dR <- if (dump$rel_scale == "year") (R[i_row] - R[j_row]) / ys[yr_ev] else (R[i_row] - R[j_row]) / gap_scale(R, key$year)
   tg <- tapply(seq_len(nrow(D)), D$ev_id, function(r) dR[r][D$chosen[r] == 1L] - mean(dR[r]))
   ew <- tapply(D$w, D$ev_id, `[`, 1); et <- tapply(D$type, D$ev_id, `[`, 1)
@@ -59,7 +60,7 @@ face_one <- function(R, spec) {
   top <- do.call(rbind, lapply(names(ERAS), function(e) { s <- key$year >= ERAS[[e]][1] & key$year <= ERAS[[e]][2]
     m <- tapply(pct[s], key$ccode[s], mean); n <- tapply(pct[s], key$ccode[s], length); m <- m[n >= 5]
     o <- order(-m)[1:min(10, length(m))]; data.frame(spec_id = spec, era = e, rank = seq_along(o), ccode = as.integer(names(m)[o]), mean_pct = round(m[o], 3)) }))
-  list(row = data.frame(spec_id = spec, cor_baseline = cb, cor_cinc = cc, stability = st, sd_within = sdw, t(an), t(tgap), stringsAsFactors = FALSE), top = top)
+  list(row = data.frame(spec_id = spec, n_const_years = n_const, cor_baseline = cb, cor_cinc = cc, stability = st, sd_within = sdw, t(an), t(tgap), stringsAsFactors = FALSE), top = top)
 }
 
 rows <- list(); tops <- list()
@@ -67,14 +68,16 @@ b <- face_one(Rbase, "BASELINE|igo_pagerank_build|pr"); rows[[1]] <- b$row; tops
 for (f in POSF) {
   P <- readRDS(f); stopifnot(identical(paste(P$key$ccode, P$key$year), kk))
   t0 <- Sys.time()
-  used_years <- sort(unique(c(D$yr, D$yr - 1L)))
+  used_years <- sort(unique(c(D$yr, D$yr - 1L)))                # face uses the dump's year-t convention: t and t-1 are needed
   for (k in seq_len(ncol(P$R))) {
     cy <- as.integer(strsplit(P$specs$const_years[k], " ")[[1]])
     bad_y <- intersect(cy, used_years)
-    if (!P$specs$identified[k] || length(bad_y)) {   # review P1-1 / P2-13: listed, not silently dropped
+    if (length(bad_y)) {   # review P1-1 / P2-13 / GPT P2-5: decided on the years events use; listed, not silently dropped
       rows[[length(rows) + 1]] <- data.frame(spec_id = colnames(P$R)[k], skipped = sprintf("constant position in %d years (%d used by events)", length(cy), length(bad_y)), stringsAsFactors = FALSE)
       next }
-    o <- face_one(P$R[, k], colnames(P$R)[k]); rows[[length(rows) + 1]] <- o$row; tops[[length(tops) + 1]] <- o$top }
+    o <- tryCatch(face_one(P$R[, k], colnames(P$R)[k]), error = function(e) e)   # GPT review P2-6: one bad spec cannot stop the stage
+    if (inherits(o, "error")) { rows[[length(rows) + 1]] <- data.frame(spec_id = colnames(P$R)[k], skipped = paste("error:", conditionMessage(o)), stringsAsFactors = FALSE); next }
+    rows[[length(rows) + 1]] <- o$row; tops[[length(tops) + 1]] <- o$top }
   logf("%s: %d specs in %.1f min", basename(f), ncol(P$R), as.numeric(difftime(Sys.time(), t0, units = "mins")))
 }
 fs <- bind_rows(rows)
