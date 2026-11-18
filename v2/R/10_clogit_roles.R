@@ -67,7 +67,7 @@ REL_SCALE <- get_arg(args, "rel_scale", "pooled"); ERA <- get_arg(args, "era", "
 COORIG_W <- as.integer(get_arg(args, "coorig_months", 0)); ENTRY_MOD <- get_arg(args, "entry_mod", FALSE)   # PI request 2026-11-17 (robustness; see section 1b)
 stopifnot(COORIG_W %in% c(0L, 1L, 2L, 3L), is.logical(ENTRY_MOD), !(ENTRY_MOD && COORIG_W > 0L))
 stopifnot(REL_SCALE %in% c("pooled", "year"), ERA %in% c("all", "pre1946", "from1946"))
-stopifnot(SAMPLE %in% ALL_SAMPLES, LAG == 3L, MODEL == "M1c", B >= 0, TYPES %in% c("bc", "bc_nocoorig", "bcj", "bcjs"), BOOT_UNIT %in% c("pigeonhole", "dispute", "initiator"), is.logical(LOO))
+stopifnot(SAMPLE %in% ALL_SAMPLES, LAG == 3L, MODEL == "M1c", B >= 0, TYPES %in% c("bc", "bc_nocoorig", "bcj", "bcjs", "bcd"), BOOT_UNIT %in% c("pigeonhole", "dispute", "initiator"), is.logical(LOO))
 spec <- parse_spec(args)
 ## audit F5 (A1 P2-1): the cells M1c is defined on, and nothing else (02_fit_model.R refuses the same)
 stopifnot(spec_is_directed(spec), spec$roles == "bcj", spec_variant(spec) == "all", (if (is.null(spec$joiner_set)) "all" else spec$joiner_set) == "all",
@@ -152,10 +152,10 @@ ev_grp_default <- ev$grp
 ## partner, whenever it enters, makes the initiator coalition (bcj: coalition originator; the partner stays a joiner unless a --coorig_months window
 ## makes it an originator). --bilateral=onset restores the earlier coding (bilateral = no partner at onset; windows promote early-partnered initiators).
 BILAT <- get_arg(args, "bilateral", "ever"); stopifnot(BILAT %in% c("ever", "onset"))
-if (BILAT == "ever" && !(TYPES %in% c("bc", "bcj", "bcjs"))) stop("--bilateral=ever (default) is defined for --types=bc|bcj|bcjs; use --bilateral=onset with ", TYPES)
+if (BILAT == "ever" && !(TYPES %in% c("bc", "bcj", "bcjs", "bcd"))) stop("--bilateral=ever (default) is defined for --types=bc|bcj|bcjs|bcd; use --bilateral=onset with ", TYPES)
 promoted_ever <- rep(FALSE, dat$E)
-if (COORIG_W > 0L || ENTRY_MOD || BILAT == "ever" || TYPES == "bcjs") {
-  stopifnot(TYPES %in% c("bc", "bcj", "bcjs"))
+if (COORIG_W > 0L || ENTRY_MOD || BILAT == "ever" || TYPES %in% c("bcjs", "bcd")) {
+  stopifnot(TYPES %in% c("bc", "bcj", "bcjs", "bcd"))
   pt_path <- file.path(data_dir, "participants_timing.rds")
   if (!file.exists(pt_path)) stop("entry timing: ", pt_path, " is missing; rebuild the data with the 2026-11-17 build (01_build_data.R)")
   P <- readRDS(pt_path)
@@ -244,6 +244,11 @@ if (TYPES == "bcj") {
   ROLES <- c("bil", "coal", "join"); t_ev <- ev$grp; keep <- rep(TRUE, dat$E)
 } else if (TYPES == "bc") {
   ROLES <- c("bil", "coal"); t_ev <- as.integer(ev$grp > 0L); keep <- rep(TRUE, dat$E)
+} else if (TYPES == "bcd") {   # PI 2026-11-17: bilateral / coalition choosers (originators + side-A joiners) / defenders (side-B joiners)
+  stopifnot(exists("prow"), !ENTRY_MOD)
+  j_side <- P$side_entry[prow]; stopifnot(!anyNA(j_side[ev$grp == 2L]), all(j_side[ev$grp == 2L] %in% 0:1))
+  ROLES <- c("bil", "chooser", "defender"); t_ev <- ifelse(ev$grp == 0L, 0L, ifelse(ev$grp == 1L | j_side == 1L, 1L, 2L)); keep <- rep(TRUE, dat$E)
+  logf("types bcd: choosers = coalition originators %d + side-A joiners %d; defenders = side-B joiners %d", sum(ev$grp == 1L), sum(ev$grp == 2L & j_side == 1L), sum(t_ev == 2L))
 } else if (TYPES == "bcjs") {   # PI 2026-11-17: four types, joiners split by side at entry (COW side A = initiating side, side B = targeted side)
   stopifnot(exists("prow"), !ENTRY_MOD)
   j_side <- P$side_entry[prow]; stopifnot(!anyNA(j_side[ev$grp == 2L]), all(j_side[ev$grp == 2L] %in% 0:1))
@@ -593,7 +598,7 @@ write.csv(pw, file.path(od, paste0(cell, "_pairwise.csv")), row.names = FALSE)
 if (!is.null(loo)) write.csv(loo, file.path(od, paste0(cell, "_loo.csv")), row.names = FALSE)
 if (!is.null(emod)) write.csv(emod, file.path(od, paste0(cell, "_entrymod.csv")), row.names = FALSE)
 if (!is.null(grp_alt)) {
-  fit_type <- function(g) if (TYPES == "bc") as.integer(g > 0L) else g   # audit P2-1: compare the fitted type (bc pools originators and joiners)
+  fit_type <- function(g) if (TYPES == "bc") as.integer(g > 0L) else g   # bcjs/bcd: raw bcj groups (side split not window-dependent)   # audit P2-1: compare the fitted type (bc pools originators and joiners)
   de <- which(fit_type(ev$grp) != fit_type(grp_alt) & keep)
   role_alt <- data.frame(initiator = k_all$initiator[de], target = k_all$target[de], year = k_all$year[de], dispnum = k_all$dispnum[de],
                          grp_this = ev$grp[de], grp_other_bound = grp_alt[de], w = dat$ev_w[de])
