@@ -53,7 +53,7 @@ Sys.setenv(V2_ROOT = normalizePath(file.path(R_DIR, "..")))   # audit F5 (A1 P2-
 args <- commandArgs(trailingOnly = TRUE)
 ## joint audit B2: refuse retired options, unknown flags, bare flags and duplicated flags (get_arg would silently take the first)
 refuse_archived_options(args, "10_clogit_roles.R")
-SCRIPT_FLAGS <- c("bilateral", "unit_weights", "sample", "lag", "model", "boot", "types", "boot_unit", "loo", "rel_scale", "era", "coorig_months", "coorig_bound", "timing_ref", "entry_mod")
+SCRIPT_FLAGS <- c("dump_long", "bilateral", "unit_weights", "sample", "lag", "model", "boot", "types", "boot_unit", "loo", "rel_scale", "era", "coorig_months", "coorig_bound", "timing_ref", "entry_mod")
 KNOWN_FLAGS <- c(names(SPEC_CHOICES), "ame_K", "tag", SCRIPT_FLAGS)
 bad <- args[!grepl("^--[A-Za-z_0-9]+=.+$", args)]
 if (length(bad)) stop(sprintf("arguments must be --name=value; refused: %s", paste(bad, collapse = " ")))
@@ -76,6 +76,7 @@ cell <- paste0("clogit_", cell_name(SAMPLE, LAG, MODEL, spec), "_", TYPES, if (R
               if (get_arg(args, "bilateral", "ever") == "onset") "_bon" else "", if (as.logical(get_arg(args, "unit_weights", "FALSE"))) "_uw" else "", if (COORIG_W > 0L) paste0("_com", COORIG_W, if (get_arg(args, "coorig_bound", "definite") == "possible") "p" else "d") else "",
               if ((COORIG_W > 0L || ENTRY_MOD) && get_arg(args, "timing_ref", "originator") == "cow") "_rcow" else "", if (ENTRY_MOD) "_entrymod" else "",
               "_b", c(pigeonhole = "pig", dispute = "disp", initiator = "init")[[BOOT_UNIT]])   # GPT recheck P2: bootstrap unit is part of the run identity
+DUMP_LONG <- as.logical(get_arg(args, "dump_long", "FALSE")); stopifnot(!is.na(DUMP_LONG))   # PI 2026-11-18: relational-measure sweep (22_rel_sweep.R)
 log_open(paste0("10_", cell))
 logf("cell %s; spec %s; types %s; bootstrap B = %d, unit %s, seed 123; leave-one-out %s; relational scale %s; era %s", cell, spec_string(spec), TYPES, B, BOOT_UNIT, LOO, REL_SCALE, ERA)
 
@@ -357,6 +358,25 @@ L$disp <- ek$disp[match(L$ev_id, ek$ev_id)]; L$tgtyr <- ek$tgtyr[match(L$ev_id, 
 stopifnot(!anyNA(L[, c("disp", "tgtyr", "init_disp")]))
 logf("clusters: %d initiators, %d disputes, %d initiator-disputes, %d target-years", length(unique(ek$initiator)), length(unique(ek$disp)),
      length(unique(ek$init_disp)), length(unique(ek$tgtyr)))
+
+## ---- 3b. --dump_long=TRUE: write the long frame for the relational-measure sweep and stop (no fits) ------------------------------------------
+## 22_rel_sweep.R swaps dR for each candidate measure and refits M0 (pooled) and M1 (types) with the same strata, weights, Z and clusters.
+## Keys per row: initiator (c1), alternative target (c2), event year (yr); dR as used here (after --rel_scale) is kept so the sweep can
+## verify that it reproduces this script's gap from sy_positions.rds before it substitutes anything.
+if (DUMP_LONG) {
+  stopifnot(!OPP_ON, !ENTRY_MOD)
+  keep_cols <- c("ev_id", "row", "chosen", "type", "w", "init", "disp", "init_disp", "tgtyr", "dM", "dR", Z_cols)
+  D <- L[, keep_cols]
+  D$c1 <- as.integer(alts$ccode1[L$row]); D$c2 <- as.integer(alts$ccode2[L$row]); D$yr <- as.integer(alts$year[L$row])
+  stopifnot(!anyNA(D[, c("c1", "c2", "yr")]), all(D$c1 == D$init), all(D$c1 != D$c2))
+  gc_hash <- tryCatch(system2("git", c("-C", v2_root(), "rev-parse", "HEAD"), stdout = TRUE, stderr = FALSE)[1], error = function(e) NA_character_)
+  od <- file.path(v2_root(), "output", "rel_sweep"); dir.create(od, showWarnings = FALSE, recursive = TRUE)
+  f_out <- file.path(od, paste0("long_", TYPES, if (REL_SCALE == "year") "_relyear" else "", if (UNITW) "_uw" else "", "_", SAMPLE, ".rds"))
+  saveRDS(list(D = D, roles = ROLES, Z_cols = Z_cols, rel_scale = REL_SCALE, types = TYPES, sample = SAMPLE, bilateral_rule = BILAT, unit_weights = UNITW,
+               data_dir = data_dir, cell = cell, git_commit = gc_hash, built = format(Sys.time())), f_out)
+  logf("dump_long: wrote %s (%d rows, %d strata); no fits run", f_out, nrow(D), length(unique(D$ev_id)))
+  quit(save = "no", status = 0)
+}
 
 ## ---- 4. fits -----------------------------------------------------------------------------------------------
 fit_cl <- function(d, terms, robust = TRUE) {

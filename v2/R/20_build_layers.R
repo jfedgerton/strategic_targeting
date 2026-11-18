@@ -3,12 +3,15 @@
 ## Builds ONE undirected dyad-year panel (ccode1 < ccode2, COW system members, 1816-2014) with one column
 ## per cooperative layer, plus contiguity and capital distance for later residualisation.
 ##   igo   : shared COW IGO memberships (peacesciencer cow_igo_ndy). Raw; years with no IGO data stay NA.
-##   ally  : any ATOP obligation (defense/offense/neutral/nonagg/consul), binary (peacesciencer atop_alliance)
-##   def   : ATOP defense pact, binary
+##   ally  : any ATOP obligation (defense/offense/neutral/nonagg/consul), binary (peacesciencer atop_alliance; descriptive only)
+##   def, off, neu, nonagg, consul : the five ATOP obligation types, each binary (PI 2026-11-18: nine-layer grid)
+##   un    : UN General Assembly voting agreement, Cohen's kappa (Hage 2011 via peacesciencer dyadic_fp_similarity, kappavv),
+##           1946+; before 1946 a STRUCTURAL zero (no UN); in UN years a dyad without a kappa (non-member, not voting) -> NA
 ##   dipl  : COW diplomatic exchange DE (both sides represented), binary; 5-year waves carried forward
 ##           to the year before the next wave (1816 takes the 1817 wave)
 ##   pta   : count of DESTA PTAs in force (entry-into-force year, else signing year; no exits recorded)
-##   dca   : Kinne DCAD dcaAnyV1 (any DCA in force), binary; 1980-2010, NA outside
+##   dca   : Kinne DCAD dcaAnyV1 (any DCA in force), binary; STRUCTURAL zeros before 1980; 2010 carried forward to 2014
+##   trade : COW trade, built but NOT in the grid (PI 2026-11-18: skipped for missingness)
 ## *_src columns record the source year used, so staleness is auditable.
 ## Usage: Rscript v2/R/20_build_layers.R <netdata_dir> <out_rds>
 ## ============================================================================
@@ -46,10 +49,22 @@ dy <- dy |> left_join(igo_years, by = "year") |> mutate(igo = ifelse(ok & is.na(
 atop <- peacesciencer::atop_alliance |>
   transmute(ccode1 = as.integer(pmin(ccode1, ccode2)), ccode2 = as.integer(pmax(ccode1, ccode2)), year = as.integer(year),
             ally = as.integer((atop_defense + atop_offense + atop_neutral + atop_nonagg + atop_consul) > 0),
-            def = as.integer(atop_defense > 0)) |>
-  group_by(ccode1, ccode2, year) |> summarise(ally = max(ally), def = max(def), .groups = "drop")
+            def = as.integer(atop_defense > 0), off = as.integer(atop_offense > 0), neu = as.integer(atop_neutral > 0),
+            nonagg = as.integer(atop_nonagg > 0), consul = as.integer(atop_consul > 0)) |>
+  group_by(ccode1, ccode2, year) |>
+  summarise(across(c(ally, def, off, neu, nonagg, consul), max), .groups = "drop")
 dy <- dy |> left_join(atop, by = c("ccode1", "ccode2", "year")) |>
-  mutate(ally = coalesce(ally, 0L), def = coalesce(def, 0L))
+  mutate(across(c(ally, def, off, neu, nonagg, consul), ~ coalesce(.x, 0L)))
+stopifnot(all(dy$ally == pmax(dy$def, dy$off, dy$neu, dy$nonagg, dy$consul)))
+
+## ---- 2b. UN voting agreement (kappa), 1946+ ---------------------------------------
+fp <- readRDS(file.path(system.file("extdata", package = "peacesciencer"), "dyadic_fp_similarity.rds")) |>
+  transmute(ccode1 = as.integer(pmin(ccode1, ccode2)), ccode2 = as.integer(pmax(ccode1, ccode2)), year = as.integer(year), un = kappavv) |>
+  filter(!is.na(un)) |> group_by(ccode1, ccode2, year) |> summarise(un = mean(un), .groups = "drop")
+un_first <- min(fp$year)
+stopifnot(un_first >= 1945L, all(fp$un >= -1 - 1e-9 & fp$un <= 1 + 1e-9))
+dy <- dy |> left_join(fp, by = c("ccode1", "ccode2", "year")) |> mutate(un = ifelse(year < un_first, 0, un))
+logf("UN kappa: first year %d (structural 0 before); NA share in UN years %.3f", un_first, mean(is.na(dy$un[dy$year >= un_first])))
 
 ## ---- 3. Diplomatic exchange (5-year waves, carried forward) -------------------
 dip <- read.csv(file.path(NETDIR, "dipl_dyad.csv")) |>
@@ -122,10 +137,11 @@ stopifnot(!anyDuplicated(dy[, c("ccode1", "ccode2", "year")]))
 era <- cut(dy$year, c(1815, 1870, 1914, 1945, 1979, 1990, 2014), labels = c("1816-70", "1871-1914", "1915-45", "1946-79", "1980-90", "1991-2014"))
 dens <- dy |> mutate(era = era) |> group_by(era) |>
   summarise(dyad_years = n(), igo_mean = mean(igo, na.rm = TRUE), igo_na = mean(is.na(igo)), ally = mean(ally), def = mean(def),
+            off = mean(off), neu = mean(neu), nonagg = mean(nonagg), consul = mean(consul), un_mean = mean(un, na.rm = TRUE), un_na = mean(is.na(un)),
             dipl = mean(dipl), pta_any = mean(pta > 0), dca = mean(dca), trade_pos = mean(trade > 0, na.rm = TRUE), .groups = "drop")
-print(as.data.frame(dens), digits = 3)
+print(as.data.frame(dens), digits = 3, width = 200)
 chk <- function(a, b, y) dy |> filter(ccode1 == min(a, b), ccode2 == max(a, b), year == y) |>
-  transmute(pair = sprintf("%d-%d", a, b), year, igo, ally, def, dipl, pta, dca, trade = round(trade, 2))
+  transmute(pair = sprintf("%d-%d", a, b), year, igo, def, off, neu, nonagg, consul, un = round(un, 2), dipl, pta, dca)
 face <- bind_rows(chk(2, 200, 1955), chk(2, 365, 1925), chk(2, 365, 1960), chk(365, 290, 1960), chk(200, 255, 1960),
                   chk(220, 255, 1995), chk(2, 840, 1995), chk(2, 70, 2000), chk(2, 365, 1935), chk(200, 220, 1880), chk(2, 840, 2012), chk(2, 20, 1990))
 print(as.data.frame(face))
