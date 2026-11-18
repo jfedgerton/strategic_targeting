@@ -8,7 +8,7 @@
 ## Needs: R >= 4.3 with dplyr, tidyr, peacesciencer (+ download_extdata() once), countrycode, fixest, igraph, igoR, survival;
 ##        the entry data build in v2/data_entry (01_build_data.R --entry=later) already present.
 ## Stages (each writes to v2/output/rel_sweep/; rerunning a stage overwrites it):
-##   1 layers  2 long frames (5 type schemes)  3 positions (core 5 x 768, dipl arm 5 x 768, IGO arm 4)
+##   1 layers  2 long frames (5 type schemes)  3 positions (core 4 weightings x 768 x 2 PTA codings, dipl arm 4 x 768, IGO arm 6)
 ##   4 plausibility (no models)  5 sweep (every position x every scheme)
 ## ============================================================================
 set -euo pipefail
@@ -26,18 +26,22 @@ for T in bc bcj bcjs bcd s22; do
   Rscript v2/R/10_clogit_roles.R --comparison=directed --roles=bcj --entry=later --types=$T --rel_scale=year --boot=0 --dump_long=TRUE 2>&1 | tail -2 | tee -a "$LOG"
 done
 
-## 3. positions
-Rscript v2/R/21_rel_measures.R "$OUT/layers_dy.rds" "$OUT/positions" --arm=core --cores="$CORES" 2>&1 | tee -a "$LOG"
-Rscript v2/R/21_rel_measures.R "$OUT/layers_dy.rds" "$OUT/positions" --arm=dipl --cores="$CORES" 2>&1 | tee -a "$LOG"
+## 3. positions (PI 2026-11-18: W1-W4, clipped residuals; PTAs both ways; dipl arm at pta=all only)
+for PT in all inforce; do
+  Rscript v2/R/21_rel_measures.R "$OUT/layers_dy.rds" "$OUT/positions" --arm=core --pta=$PT --cores="$CORES" 2>&1 | tee -a "$LOG"
+done
+Rscript v2/R/21_rel_measures.R "$OUT/layers_dy.rds" "$OUT/positions" --arm=dipl --pta=all --cores="$CORES" 2>&1 | tee -a "$LOG"
 Rscript v2/R/21_rel_measures.R "$OUT/layers_dy.rds" "$OUT/positions" --arm=igo 2>&1 | tee -a "$LOG"
 
 ## 4. plausibility (read this before the sweep output)
 Rscript v2/R/23_rel_face.R "$OUT/long_bc_relyear_fmid.rds" "$OUT/face" "$OUT"/positions/positions_*.rds 2>&1 | tee -a "$LOG"
 
-## 5. sweep
-for T in bc bcj bcjs bcd s22; do
-  for F in "$OUT"/positions/positions_*.rds; do
-    Rscript v2/R/22_rel_sweep.R "$OUT/long_${T}_relyear_fmid.rds" "$F" "$OUT/sweep" --cores="$CORES" 2>&1 | tail -3 | tee -a "$LOG"
+## 5. sweep: every position x every scheme x both year-scale conventions (t as 10_clogit_roles.R; t-1)
+for YS in t tm1; do
+  for T in bc bcj bcjs bcd s22; do
+    for F in "$OUT"/positions/positions_*.rds; do
+      Rscript v2/R/22_rel_sweep.R "$OUT/long_${T}_relyear_fmid.rds" "$F" "$OUT/sweep" --yscale=$YS --cores="$CORES" 2>&1 | tail -3 | tee -a "$LOG"
+    done
   done
 done
 echo "done $(date)" | tee -a "$LOG"

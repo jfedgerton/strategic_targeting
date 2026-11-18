@@ -20,7 +20,7 @@
 ##   spec_id, scheme, model, quantity, est, se, lo, hi, p, df   (95% intervals, two-way CGM)
 ##   M0: b_dR, b_dR2, b_dMR, u_R_less (dR=+1: b_dR + b_dR2), u_R_more (dR=-1: -b_dR + b_dR2), the same for M, axis_R (3 df), axis_M (3 df)
 ##   M1: per type the same; per pair of types the differences (diff_*), diff_axis_R, diff_axis_M (3 df), diff_surface (5 df)
-## Usage: Rscript v2/R/22_rel_sweep.R <long_dump.rds> <positions_*.rds> <out_dir> [--cores=N] [--max_specs=K]
+## Usage: Rscript v2/R/22_rel_sweep.R <long_dump.rds> <positions_*.rds> <out_dir> [--yscale=t|tm1] [--cores=N] [--max_specs=K]
 ## ============================================================================
 suppressMessages({ library(survival); library(parallel) })
 set.seed(123)
@@ -29,6 +29,7 @@ stopifnot(length(args) >= 3)
 DUMP <- args[1]; POSF <- args[2]; OUT_DIR <- args[3]
 opt <- function(name, default) { a <- grep(paste0("^--", name, "="), args, value = TRUE); if (length(a)) sub(paste0("^--", name, "="), "", a) else default }
 CORES <- as.integer(opt("cores", "1")); MAX_SPECS <- as.integer(opt("max_specs", "0"))
+YSCALE <- opt("yscale", "t"); stopifnot(YSCALE %in% c("t", "tm1"))   # PI 2026-11-18: both conventions (scale from year t, as 10_clogit_roles.R, or t-1, the positions' year)
 dir.create(OUT_DIR, showWarnings = FALSE, recursive = TRUE)
 logf <- function(...) cat(sprintf("[%s] ", format(Sys.time(), "%H:%M:%S")), sprintf(...), "\n", sep = "")
 logf("R %s | survival %s | cores %d", getRversion(), packageVersion("survival"), CORES)
@@ -46,7 +47,8 @@ gap_scale <- function(v, yr) {
 dump <- readRDS(DUMP); D <- dump$D; ROLES <- dump$roles; Z_cols <- dump$Z_cols; G <- length(ROLES)
 stopifnot(all(c("ev_id", "chosen", "type", "w", "init", "disp", "init_disp", "dM", "dR", "c1", "c2", "yr", Z_cols) %in% names(D)),
           all(D$type %in% 0:(G - 1L)), all(tapply(D$chosen, D$ev_id, sum) == 1L))
-SCHEME <- paste0(dump$types, if (dump$rel_scale == "year") "_relyear" else "", if (isTRUE(dump$unit_weights)) "_uw" else "", "_", dump$sample)
+SCHEME <- paste0(dump$types, if (dump$rel_scale == "year") paste0("_relyear", if (YSCALE == "tm1") "tm1" else "") else "", if (isTRUE(dump$unit_weights)) "_uw" else "", "_", dump$sample)
+if (YSCALE == "tm1" && dump$rel_scale != "year") stop("--yscale=tm1 needs a dump with rel_scale = year")
 logf("dump %s: scheme %s, %d rows, %d strata, types %s, rel_scale %s, commit %s", basename(DUMP), SCHEME, nrow(D), length(unique(D$ev_id)),
      paste(ROLES, collapse = "/"), dump$rel_scale, dump$git_commit)
 P <- readRDS(POSF); key <- P$key; Rm <- P$R; specs <- P$specs
@@ -56,7 +58,7 @@ i_row <- kidx[paste(D$c1, D$yr - 1L)]; j_row <- kidx[paste(D$c2, D$yr - 1L)]
 if (anyNA(i_row) || anyNA(j_row)) stop(sprintf("positions missing at t-1 for %d initiator / %d target rows", sum(is.na(i_row)), sum(is.na(j_row))))
 yr_ev <- as.character(D$yr)
 key_years <- split(seq_len(nrow(key)), key$year)
-stopifnot(all(unique(yr_ev) %in% names(key_years)))
+stopifnot(all(unique(c(yr_ev, as.character(D$yr - 1L))) %in% names(key_years)))
 
 used_years <- sort(unique(c(D$yr, D$yr - 1L)))
 make_dR <- function(R) {                                          # R: position per key row
@@ -64,10 +66,11 @@ make_dR <- function(R) {                                          # R: position 
   if (any(sds < 1e-8)) stop(sprintf("position constant in event-used year(s) %s", paste(used_years[sds < 1e-8], collapse = " ")))
   num <- R[i_row] - R[j_row]
   if (dump$rel_scale == "year") {
-    ev_years <- unique(yr_ev)
+    sc_yr <- if (YSCALE == "t") yr_ev else as.character(D$yr - 1L)
+    ev_years <- unique(sc_yr)
     ys <- vapply(key_years[ev_years], function(ix) gap_scale(R[ix], rep(1L, length(ix))), 0)
     stopifnot(all(ys > 1e-8))
-    num / ys[yr_ev]
+    num / ys[sc_yr]
   } else num / gap_scale(R, key$year)
 }
 
@@ -153,6 +156,11 @@ if (mx > 1e-8) stop("validation failed: the sweep does not reproduce the dumped 
 ## the key table (COW state-years) and sy_positions should hold the same state-years; differences change the year scale and are reported
 n_key_only <- sum(is.na(Rb)); n_pos_only <- sum(!paste(posy$ccode, posy$year) %in% paste(key$ccode, key$year))
 logf("state-years in the measure key but not in sy_positions %d; in sy_positions but not in the key %d (year scales use each measure's own key)", n_key_only, n_pos_only)
+if (YSCALE == "tm1") {   # validation above is for the dumped (year t) convention; the BASELINE row uses this run's convention
+  ysb1 <- vapply(split(posy$R_pr, posy$year), function(v) gap_scale(v, rep(1L, length(v))), 0)
+  dRb <- (Rb[i_row] - Rb[j_row]) / ysb1[as.character(D$yr - 1L)]
+  logf("yscale = tm1: BASELINE rebuilt with the year t-1 scale (correlation with the dumped gap %.4f)", cor(dRb, D$dR))
+}
 base_rows <- run_spec("BASELINE|igo_pagerank_build|pr", dRb)
 
 ## ---- 3. sweep -------------------------------------------------------------------------------------------------------

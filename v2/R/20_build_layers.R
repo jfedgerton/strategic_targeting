@@ -9,7 +9,8 @@
 ##           1946+; before 1946 a STRUCTURAL zero (no UN); in UN years a dyad without a kappa (non-member, not voting) -> NA
 ##   dipl  : COW diplomatic exchange DE (both sides represented), binary; 5-year waves carried forward
 ##           to the year before the next wave (1816 takes the 1817 wave)
-##   pta   : count of DESTA PTAs in force (entry-into-force year, else signing year; no exits recorded)
+##   pta   : count of DESTA base treaties per dyad from entry into force (signing year when DESTA has no entry-into-force year)
+##   pta_inforce : the same, counting ONLY treaties with an entry-into-force year (PI 2026-11-18: run PTAs both ways)
 ##   dca   : Kinne DCAD dcaAnyV1 (any DCA in force), binary; STRUCTURAL zeros before 1980; 2010 carried forward to 2014
 ##   trade : COW trade, built but NOT in the grid (PI 2026-11-18: skipped for missingness)
 ## *_src columns record the source year used, so staleness is auditable.
@@ -94,7 +95,7 @@ logf("dipl: waves %s; source wave from %d years before to %d years after", paste
 load(file.path(NETDIR, "destaRaw.rda"))   # object `desta`
 pt <- desta |> mutate(c1 = countrycode(iso1, "iso3n", "cown", warn = FALSE),
                       c2 = countrycode(iso2, "iso3n", "cown", warn = FALSE),
-                      start = as.integer(ifelse(is.na(entryforceyear), year, entryforceyear))) |>
+                      start = as.integer(ifelse(is.na(entryforceyear), year, entryforceyear)), inforce = !is.na(entryforceyear)) |>
   mutate(c1 = ifelse(country1 == "Serbia", 345L, ifelse(country1 == "Kosovo", 347L, c1)),     # COW Yugoslavia/Serbia, Kosovo
          c2 = ifelse(country2 == "Serbia", 345L, ifelse(country2 == "Kosovo", 347L, c2)))
 unm <- pt |> filter(is.na(c1) | is.na(c2))
@@ -111,11 +112,19 @@ dup12 <- dup1 |> filter(as.character(c2) %in% names(succ)) |> mutate(c2 = succ[a
 pt <- bind_rows(pt, dup1, dup2, dup12) |> filter(c1 != c2)
 ## Review fix (P2-9): count distinct BASE treaties per dyad (accessions and consolidated versions share the base treaty number),
 ## so a consolidated text does not double-count the dyads it already covers; start = earliest in-force year for the dyad.
-pt <- pt |> transmute(ccode1 = as.integer(pmin(c1, c2)), ccode2 = as.integer(pmax(c1, c2)), base_treaty, start) |>
+pt_all <- pt
+pt <- pt_all |> transmute(ccode1 = as.integer(pmin(c1, c2)), ccode2 = as.integer(pmax(c1, c2)), base_treaty, start) |>
+  group_by(ccode1, ccode2, base_treaty) |> summarise(start = min(start), .groups = "drop")
+pt_if <- pt_all |> filter(inforce) |> transmute(ccode1 = as.integer(pmin(c1, c2)), ccode2 = as.integer(pmax(c1, c2)), base_treaty, start) |>
   group_by(ccode1, ccode2, base_treaty) |> summarise(start = min(start), .groups = "drop")
 pta <- dy |> distinct(ccode1, ccode2, year) |> inner_join(pt, by = c("ccode1", "ccode2"), relationship = "many-to-many") |>
   filter(start <= year) |> count(ccode1, ccode2, year, name = "pta")
 dy <- dy |> left_join(pta, by = c("ccode1", "ccode2", "year")) |> mutate(pta = coalesce(pta, 0L))
+pta_if <- dy |> distinct(ccode1, ccode2, year) |> inner_join(pt_if, by = c("ccode1", "ccode2"), relationship = "many-to-many") |>
+  filter(start <= year) |> count(ccode1, ccode2, year, name = "pta_inforce")
+dy <- dy |> left_join(pta_if, by = c("ccode1", "ccode2", "year")) |> mutate(pta_inforce = coalesce(pta_inforce, 0L))
+stopifnot(all(dy$pta_inforce <= dy$pta))
+logf("PTA: dyad-years with any PTA %d (signed or in force) vs %d (in force only)", sum(dy$pta > 0), sum(dy$pta_inforce > 0))
 chk_pta <- dy |> filter(year %in% c(1960, 1985), (ccode1 == 220 & ccode2 == 260) | (ccode1 == 260 & ccode2 == 325) | (ccode1 == 290 & ccode2 == 315))
 logf("PTA predecessor check (France-W.Germany, W.Germany-Italy, Poland-Czechoslovakia in 1960/1985): %s",
      paste(sprintf("%d-%d %d: %d", chk_pta$ccode1, chk_pta$ccode2, chk_pta$year, chk_pta$pta), collapse = "; "))

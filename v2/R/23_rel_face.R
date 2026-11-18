@@ -6,7 +6,7 @@
 ##   cor_baseline   mean within-year Spearman with the build's log IGO PageRank
 ##   cor_cinc       mean within-year Spearman with log CINC share (high = the measure re-measures material power)
 ##   stability      mean Spearman of a state's position between t-1 and t (states present in both years)
-##   sd_within      median within-year SD of the position, divided by the median within-year SD over all specs of the same centrality
+##   sd_within      median within-year SD of the position; sd_within_rel divides it by that of W1raw_ptaall|igo (same centrality)
 ##   anchors        mean within-year percentile (1 = most central) for UK and France 1816-1913, USA 1946-2014, USSR 1946-1990,
 ##                  Germany 1991-2014 (expected high); Cuba 1962-1990, North Korea 1991-2014, Iran 1980-2014 (expected low)
 ##   target_gap_<type>  weighted mean over events of (chosen target's dR - mean dR of the event's choice set), rebuilt per measure
@@ -81,7 +81,7 @@ fs <- bind_rows(rows)
 fs$centrality <- sub(".*\\|", "", fs$spec_id)
 if (!"skipped" %in% names(fs)) fs$skipped <- NA_character_
 ## review P2-13: sd_within relative to a FIXED reference (the W1raw|igo spec of the same centrality), not the median of the files passed
-ref_sd <- c(pr = fs$sd_within[fs$spec_id == "W1raw|igo|pr"], deg = fs$sd_within[fs$spec_id == "W1raw|igo|deg"])
+ref_sd <- c(pr = fs$sd_within[fs$spec_id == "W1raw_ptaall|igo|pr"], deg = fs$sd_within[fs$spec_id == "W1raw_ptaall|igo|deg"])
 if (length(ref_sd) == 2) fs$sd_within_rel <- fs$sd_within / ref_sd[fs$centrality] else fs$sd_within_rel <- NA_real_
 write.csv(fs, file.path(OUT_DIR, "face_summary.csv"), row.names = FALSE)
 write.csv(bind_rows(tops), file.path(OUT_DIR, "top10_by_era.csv"), row.names = FALSE)

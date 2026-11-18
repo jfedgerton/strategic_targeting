@@ -11,13 +11,14 @@
 ##              W2 contig: per layer, residual of v ~ contig_land + year (pooled OLS over the layer's existence years)
 ##              W3 dist  : per layer, residual of v ~ log(1 + capdist) + year
 ##              W4 fe    : per layer, residual of v ~ contig_land + log(1 + capdist) | state FE (both ends) + year FE
-##              W5 fesy  : per layer, residual of v ~ 1 | state x year FE (both ends)          (PI 2026-11-18; FE only)
-##              W2-W5: residuals rescaled to [0,1] within layer-year; combo edge = sqrt(sum of squares) rescaled to [0,1] within year
-##              (the IO-9933 / 2_downweight_data.R construction: Euclidean root, range01)
+##              (W5, state x year FE, dropped by the PI 2026-11-18: it removes each state's tie level, so centrality is unidentified)
+##              W2-W4: residuals clipped at 0 and divided by the layer-year maximum; combo edge = sqrt(sum of squares) rescaled to
+##              [0,1] within year (IO-9933 Euclidean root of clipped positive residuals; PI 2026-11-18)
+##   PTAs: --pta=all (signed or in force) | inforce (only treaties with an entry-into-force year); both are run (PI 2026-11-18)
 ##   centrality: pr  = log PageRank (igraph default damping 0.85, undirected, weighted; isolates keep the teleport share)
 ##               deg = weighted degree / (n_t - 1)  (no log: isolates have 0)
 ##   IGO arm (--arm=igo): bipartite IGO memberships (igoR, full members), Newman weights 1/(k_g - 1), and cosine-normalised
-##               shared-IGO ties; pr and deg of each (4 specs).
+##               shared-IGO ties, plus the raw shared-IGO count network of 01_build_data.R as an anchor; pr and deg of each (6 specs).
 ##
 ## Conventions
 ##   * Layer values: igo and pta enter as log(1 + count); the binary ATOP / DCA layers and the UN kappa enter as they are.
@@ -27,12 +28,10 @@
 ##   * Undirected dyads: the FE models (W4, W5) are fit on the doubled (both orientations) data so the state effects are symmetric;
 ##     the residual of the original orientation is kept (identical in both orientations by symmetry; asserted).
 ##   * Vertices of year t = all COW system members in t (create_stateyears); edges with weight 0 are dropped.
-##   * KNOWN DEGENERACY (flagged, not fixed): under W5 every state-year's residuals sum to zero, so after the affine within-year
-##     rescaling every node of a single-layer network has the SAME strength; deg is then constant within year and PageRank of an
-##     undirected graph is close to strength-proportional. Such specs are detected (within-year SD ~ 0) and marked not identified.
+##   * A spec whose position is constant within a year is marked (const_years); 22/23 refuse it if an event uses that year.
 ## Output: <out_dir>/positions_<arm>_<W>.rds  list(key = data.frame(ccode, year), R = matrix [state-year x spec], specs = data.frame)
 ##         <out_dir>/specs_<arm>.csv
-## Usage: Rscript v2/R/21_rel_measures.R <layers_dy.rds> <out_dir> [--arm=core|dipl|igo] [--cores=N]
+## Usage: Rscript v2/R/21_rel_measures.R <layers_dy.rds> <out_dir> [--arm=core|dipl|igo] [--pta=all|inforce] [--cores=N]
 ## ============================================================================
 suppressMessages({ library(dplyr); library(fixest); library(igraph); library(peacesciencer); library(parallel) })
 set.seed(123)
@@ -41,6 +40,8 @@ stopifnot(length(args) >= 2)
 LAYER_RDS <- args[1]; OUT_DIR <- args[2]
 opt <- function(name, default) { a <- grep(paste0("^--", name, "="), args, value = TRUE); if (length(a)) sub(paste0("^--", name, "="), "", a) else default }
 ARM <- opt("arm", "core"); CORES <- as.integer(opt("cores", "1"))
+PTA <- opt("pta", "all"); stopifnot(PTA %in% c("all", "inforce"))   # PI 2026-11-18: PTAs both ways
+TAG <- paste0("pta", PTA)
 ONLY_W <- opt("weightings", ""); MAX_COMBOS <- as.integer(opt("max_combos", "0"))   # smoke-test options; a full run uses neither
 stopifnot(ARM %in% c("core", "dipl", "igo"), CORES >= 1)
 dir.create(OUT_DIR, showWarnings = FALSE, recursive = TRUE)
@@ -65,7 +66,7 @@ logf("vertices %d state-years (%d-%d); edges %d dyad-years", nrow(sy), min(years
 CORE <- c("igo", "def", "off", "neu", "nonagg", "consul", "pta", "dca", "un")
 LAYERS <- if (ARM == "dipl") c(CORE, "dipl") else CORE
 V <- sapply(LAYERS, function(l) {
-  v <- as.numeric(dy[[l]])
+  v <- as.numeric(dy[[if (l == "pta" && PTA == "inforce") "pta_inforce" else l]])
   if (l %in% c("igo", "pta")) v <- log1p(v)
   if (l == "un") v[is.na(v)] <- NA_real_                        # handled below: no tie
   v })
@@ -76,8 +77,13 @@ dens <- sapply(LAYERS, function(l) mean(V[dy$year >= first_year[l], l] != 0, na.
 logf("share of non-zero dyad-years within existence years: %s", paste(sprintf("%s %.3f", LAYERS, dens), collapse = ", "))
 
 ## ---- 2. per-layer edge weights under each weighting ----------------------------------------------------------------
-WEIGHTINGS <- c("W1raw", "W2contig", "W3dist", "W4fe", "W5fesy")
-if (nzchar(ONLY_W)) { WEIGHTINGS <- strsplit(ONLY_W, ",")[[1]]; stopifnot(all(WEIGHTINGS %in% c("W1raw", "W2contig", "W3dist", "W4fe", "W5fesy"))) }
+WEIGHTINGS <- c("W1raw", "W2contig", "W3dist", "W4fe")      # PI 2026-11-18: W5 (state x year FE) dropped
+if (nzchar(ONLY_W)) { WEIGHTINGS <- strsplit(ONLY_W, ",")[[1]]; stopifnot(all(WEIGHTINGS %in% c("W1raw", "W2contig", "W3dist", "W4fe"))) }
+## layer-years with no non-zero value (e.g. offensive alliances in years nobody holds one) carry ZERO weight, like pre-existence
+## years (PI 2026-11-18, review P1-2): otherwise the residual of an all-zero year is a pure contiguity / distance surface
+yr_has <- sapply(LAYERS, function(l) { v <- V[, l]; a <- tapply(!is.na(v) & v != 0, dy$year, any); a[as.character(dy$year)] })
+logf("empty layer-years after existence (zero weight): %s", paste(sprintf("%s %d", LAYERS, sapply(LAYERS, function(l)
+  sum(tapply(yr_has[, l], dy$year, `[`, 1) == FALSE & as.integer(names(tapply(yr_has[, l], dy$year, `[`, 1))) >= first_year[[l]]))), collapse = ", "))
 dy$lcap <- log1p(dy$capdist)
 yr_split <- split(seq_len(nrow(dy)), dy$year)
 within_year_range01 <- function(x) { out <- numeric(length(x)); for (ix in yr_split) out[ix] <- range01(x[ix]); out }
@@ -88,6 +94,7 @@ dbl <- data.frame(a = c(dy$ccode1, dy$ccode2), b = c(dy$ccode2, dy$ccode1), year
 
 edge_w <- function(W, l) {
   v <- V[, l]; ex <- dy$year >= first_year[[l]]
+  ex <- ex & yr_has[, l]
   if (l == "un") { ok <- ex & !is.na(v) } else ok <- ex
   e <- numeric(nrow(dy))
   if (W == "W1raw") {
@@ -98,10 +105,9 @@ edge_w <- function(W, l) {
   d <- data.frame(v = v, year = dy$year, contig_land = dy$contig_land, lcap = dy$lcap)[ok, ]
   if (W == "W2contig") r <- resid(lm(v ~ contig_land + year, data = d))
   if (W == "W3dist")   r <- resid(lm(v ~ lcap + year, data = d))
-  if (W %in% c("W4fe", "W5fesy")) {
+  if (W == "W4fe") {
     okd <- c(ok, ok); dd <- dbl[okd, ]; dd$v <- c(v, v)[okd]
-    m <- if (W == "W4fe") feols(v ~ contig_land + lcap | a + b + year, data = dd, notes = FALSE, warn = FALSE, fixef.rm = "none")
-         else feols(v ~ 1 | a^year + b^year, data = dd, notes = FALSE, warn = FALSE, fixef.rm = "none")
+    m <- feols(v ~ contig_land + lcap | a + b + year, data = dd, notes = FALSE, warn = FALSE, fixef.rm = "none")
     stopifnot(nobs(m) == nrow(dd))                                 # no singleton removal: residuals align with rows
     rr <- resid(m); n1 <- sum(ok)
     stopifnot(max(abs(rr[seq_len(n1)] - rr[n1 + seq_len(n1)])) < 1e-6)   # symmetric by construction
@@ -109,8 +115,10 @@ edge_w <- function(W, l) {
   }
   stopifnot(length(r) == sum(ok), !anyNA(r))
   x <- numeric(nrow(dy)); x[ok] <- r
-  ## within layer-year rescaling over the dyads that carry the layer; dyads without it (pre-existence, UN NA) stay 0
-  for (ix in yr_split) { j <- ix[ok[ix]]; if (length(j)) e[j] <- range01(x[j]) }
+  ## PI 2026-11-18: residuals CLIPPED at zero (only ties stronger than expected count; IO-9933 Euclidean version), then divided by the
+  ## layer-year maximum so each layer lies in [0, 1] before combining; a dyad at or below expectation has weight 0
+  x <- pmax(x, 0)
+  for (ix in yr_split) { j <- ix[ok[ix]]; if (length(j)) { m <- max(x[j]); if (m > 0) e[j] <- x[j] / m } }
   e[!ok] <- 0
   e
 }
@@ -177,19 +185,19 @@ if (ARM %in% c("core", "dipl")) {
     res <- if (CORES > 1) mclapply(seq_along(combos), one, mc.cores = CORES, mc.set.seed = FALSE) else lapply(seq_along(combos), one)
     bad <- vapply(res, function(z) inherits(z, "try-error") || is.null(z$pr), TRUE); if (any(bad)) stop(sprintf("%s: %d combos failed", W, sum(bad)))
     Rm <- cbind(sapply(res, `[[`, "pr"), sapply(res, `[[`, "deg"))
-    sid <- c(paste(W, combo_id, "pr", sep = "|"), paste(W, combo_id, "deg", sep = "|"))
+    sid <- c(paste(paste0(W, "_", TAG), combo_id, "pr", sep = "|"), paste(paste0(W, "_", TAG), combo_id, "deg", sep = "|"))
     colnames(Rm) <- sid
-    specs <- data.frame(spec_id = sid, arm = ARM, weighting = W, layers = rep(combo_id, 2), n_layers = rep(lengths(combos), 2),
+    specs <- data.frame(spec_id = sid, arm = ARM, weighting = W, pta = PTA, layers = rep(combo_id, 2), n_layers = rep(lengths(combos), 2),
                         centrality = rep(c("pr", "deg"), each = length(combos)), stringsAsFactors = FALSE)
     specs$const_year_share <- apply(Rm, 2, ident_check)
     specs$const_years <- apply(Rm, 2, const_years)
     specs$identified <- specs$const_year_share < 0.05
     stopifnot(!anyNA(Rm), all(is.finite(Rm)))
-    saveRDS(list(key = sy, R = Rm, specs = specs, built = format(Sys.time()), layer_rds = normalizePath(LAYER_RDS)), file.path(OUT_DIR, sprintf("positions_%s_%s.rds", ARM, W)))
+    saveRDS(list(key = sy, R = Rm, specs = specs, built = format(Sys.time()), layer_rds = normalizePath(LAYER_RDS)), file.path(OUT_DIR, sprintf("positions_%s_%s_%s.rds", ARM, W, TAG)))
     spec_rows[[W]] <- specs
     logf("%s: %d specs in %.1f min; not identified (constant in >= 5%% of years): %d", W, ncol(Rm), as.numeric(difftime(Sys.time(), t0, units = "mins")), sum(!specs$identified))
   }
-  write.csv(bind_rows(spec_rows), file.path(OUT_DIR, sprintf("specs_%s.csv", ARM)), row.names = FALSE)
+  write.csv(bind_rows(spec_rows), file.path(OUT_DIR, sprintf("specs_%s_%s.csv", ARM, TAG)), row.names = FALSE)
 }
 
 ## ---- 5. IGO arm: bipartite (Newman) and cosine-normalised shared-IGO ties --------------------------------------------
@@ -212,14 +220,15 @@ if (ARM == "igo") {
   }
   logf("IGO arm: dyad-years with a positive Newman tie %.3f, cosine tie %.3f", mean(Enew > 0), mean(Ecos > 0))
   cN <- cent(Enew); cC <- cent(Ecos)
-  Rm <- cbind(cN$pr, cN$deg, cC$pr, cC$deg)
-  sid <- c("IGOarm|bip_newman|pr", "IGOarm|bip_newman|deg", "IGOarm|cosine|pr", "IGOarm|cosine|deg"); colnames(Rm) <- sid
-  specs <- data.frame(spec_id = sid, arm = "igo", weighting = c("newman", "newman", "cosine", "cosine"), layers = "igo", n_layers = 1L,
-                      centrality = c("pr", "deg", "pr", "deg"), stringsAsFactors = FALSE)
+  cR <- cent(as.numeric(dy$igo))                                  # anchor: raw shared-IGO counts, as 01_build_data.R (the current measure)
+  Rm <- cbind(cN$pr, cN$deg, cC$pr, cC$deg, cR$pr, cR$deg)
+  sid <- c("IGOarm|bip_newman|pr", "IGOarm|bip_newman|deg", "IGOarm|cosine|pr", "IGOarm|cosine|deg", "IGOarm|raw_count|pr", "IGOarm|raw_count|deg"); colnames(Rm) <- sid
+  specs <- data.frame(spec_id = sid, arm = "igo", weighting = c("newman", "newman", "cosine", "cosine", "raw_count", "raw_count"), pta = NA, layers = "igo", n_layers = 1L,
+                      centrality = rep(c("pr", "deg"), 3), stringsAsFactors = FALSE)
   ## note (review P3-16): Newman-weighted degree equals each state's IGO membership count (sum over its IGOs of k_g-1 partners x 1/(k_g-1))
   specs$const_year_share <- apply(Rm, 2, ident_check); specs$const_years <- apply(Rm, 2, const_years); specs$identified <- specs$const_year_share < 0.05
   saveRDS(list(key = sy, R = Rm, specs = specs, built = format(Sys.time()), layer_rds = normalizePath(LAYER_RDS)), file.path(OUT_DIR, "positions_igo_arm.rds"))
   write.csv(specs, file.path(OUT_DIR, "specs_igo.csv"), row.names = FALSE)
-  logf("IGO arm: 4 specs written")
+  logf("IGO arm: 6 specs written (raw_count|pr is the current measure rebuilt here; 23 reports its correlation with the build)")
 }
 logf("done")
