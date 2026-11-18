@@ -89,21 +89,45 @@ dca <- read.csv(file.path(NETDIR, "dca_dyad.csv")) |>
             dca = as.integer(dcaAnyV1 > 0)) |>
   group_by(ccode1, ccode2, year) |> summarise(dca = max(dca), .groups = "drop")
 dca_rng <- range(dca$year)
+stopifnot(dca_rng[1] == 1980L, dca_rng[2] == 2010L)
+## PI decision 2026-11-18: pre-1980 zeros are STRUCTURAL (no DCAs existed); 2011-2014 carry the 2010 value forward
+dca_last <- dca |> filter(year == dca_rng[2]) |> select(ccode1, ccode2, dca_last = dca)
 dy <- dy |> left_join(dca, by = c("ccode1", "ccode2", "year")) |>
-  mutate(dca = ifelse(year >= dca_rng[1] & year <= dca_rng[2], coalesce(dca, 0L), NA_integer_))
-logf("DCA years %d-%d (NA outside)", dca_rng[1], dca_rng[2])
+  left_join(dca_last, by = c("ccode1", "ccode2")) |>
+  mutate(dca_src = ifelse(year < dca_rng[1], NA_integer_, pmin(year, dca_rng[2])),
+         dca = ifelse(year < dca_rng[1], 0L, ifelse(year <= dca_rng[2], coalesce(dca, 0L), coalesce(dca_last, 0L)))) |>
+  select(-dca_last)
+logf("DCA: structural zeros before %d; %d carried forward to %d", dca_rng[1], dca_rng[2], LAST_YEAR)
+
+## ---- 5b. COW bilateral trade (1870-2014; NA before 1870 = true missingness) -------------------
+## log(1 + smoothflow1 + smoothflow2), millions current USD. Missing flows (NA in COW, or dyad absent) stay NA.
+## COW itself records some implausible zeros (e.g. USSR-Poland 1960); those are kept as reported.
+## PI decision 2026-11-18: any spec that uses the trade layer is subset to 1870+.
+trd <- readRDS(file.path(system.file("extdata", package = "peacesciencer"), "cow_trade_ddy.rds")) |>
+  transmute(ccode1 = as.integer(pmin(ccode1, ccode2)), ccode2 = as.integer(pmax(ccode1, ccode2)), year = as.integer(year),
+            flow = ifelse(is.na(smoothflow1) & is.na(smoothflow2), NA_real_,
+                          pmax(coalesce(smoothflow1, 0), 0) + pmax(coalesce(smoothflow2, 0), 0))) |>
+  group_by(ccode1, ccode2, year) |> summarise(flow = max(flow), .groups = "drop")
+trd_rng <- range(trd$year)
+stopifnot(trd_rng[1] == 1870L)
+dy <- dy |> left_join(trd, by = c("ccode1", "ccode2", "year")) |>
+  mutate(trade = ifelse(year < trd_rng[1], NA_real_, log1p(flow))) |> select(-flow)   # missing flows stay NA (no fabricated zeros)
+logf("trade: 1870+ dyad-years with NA trade (missing in COW or absent): %d (%.3f)", sum(is.na(dy$trade) & dy$year >= trd_rng[1]),
+     mean(is.na(dy$trade[dy$year >= trd_rng[1]])))
+logf("trade: %d-%d, NA before %d; share of 1870+ dyad-years with positive trade %.3f", trd_rng[1], trd_rng[2], trd_rng[1],
+     mean(dy$trade[dy$year >= trd_rng[1]] > 0, na.rm = TRUE))
 
 ## ---- 6. checks -------------------------------------------------------------------
 stopifnot(!anyDuplicated(dy[, c("ccode1", "ccode2", "year")]))
 era <- cut(dy$year, c(1815, 1870, 1914, 1945, 1979, 1990, 2014), labels = c("1816-70", "1871-1914", "1915-45", "1946-79", "1980-90", "1991-2014"))
 dens <- dy |> mutate(era = era) |> group_by(era) |>
   summarise(dyad_years = n(), igo_mean = mean(igo, na.rm = TRUE), igo_na = mean(is.na(igo)), ally = mean(ally), def = mean(def),
-            dipl = mean(dipl), pta_any = mean(pta > 0), dca = mean(dca, na.rm = TRUE), .groups = "drop")
+            dipl = mean(dipl), pta_any = mean(pta > 0), dca = mean(dca), trade_pos = mean(trade > 0, na.rm = TRUE), .groups = "drop")
 print(as.data.frame(dens), digits = 3)
 chk <- function(a, b, y) dy |> filter(ccode1 == min(a, b), ccode2 == max(a, b), year == y) |>
-  transmute(pair = sprintf("%d-%d", a, b), year, igo, ally, def, dipl, pta, dca)
+  transmute(pair = sprintf("%d-%d", a, b), year, igo, ally, def, dipl, pta, dca, trade = round(trade, 2))
 face <- bind_rows(chk(2, 200, 1955), chk(2, 365, 1925), chk(2, 365, 1960), chk(365, 290, 1960), chk(200, 255, 1960),
-                  chk(220, 255, 1995), chk(2, 840, 1995), chk(2, 70, 2000), chk(2, 365, 1935), chk(200, 220, 1880))
+                  chk(220, 255, 1995), chk(2, 840, 1995), chk(2, 70, 2000), chk(2, 365, 1935), chk(200, 220, 1880), chk(2, 840, 2012), chk(2, 20, 1990))
 print(as.data.frame(face))
 saveRDS(dy, OUT)
 logf("saved %s (%d rows, %d cols)", OUT, nrow(dy), ncol(dy))
