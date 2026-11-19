@@ -1,0 +1,1140 @@
+## ============================================================================
+## assemble_cell.R -- assemble the sy / alts / ev frames for one real-data cell
+## Used by 02_fit_model.R (fits) and 05_robustness.R (refit presets, measurement tests) so that every consumer sees the SAME
+## rows (audit F3/F8: one assembly path, manifest-checked inputs). assemble_cell_spec() maps a spec (spec.R) onto the arguments.
+## Returns list(sy, alts, ev, W_cols, X_cols, Z_cols, state_codes, x_ref, n_full, sampled, log lines)
+## ============================================================================
+## Switches of spec.R handled here (every other switch is a constant of the main specification since 2026-10-25):
+##   PAIRS         = "all" (main) | "originators" (events with is_joiner_pair FALSE) | "joiners" (TRUE). The events of the sample
+##                   are filtered and y1 is recomputed from the kept events exactly as DROP_WW2 does, so a state-year whose
+##                   only events were in the other group gets y1 = 0. Joiners-only is a STAGE-2 comparison: its stage 1 counts a
+##                   state as initiating only when it joined (is_joiner_pair is FALSE for a collapsed key with any originator pair).
+##                   D8 weights (PI decision 2026-10-26): in every (initiator, dispute, year) group the filter splits, the kept events'
+##                   weights are divided by their kept sum so the group sums to 1 again (EVENT_WEIGHTS = "dispute" only); groups kept
+##                   whole keep the build's weights; a collapsed key is grouped by its dispnum column (its smallest dispute).
+##   CHANGES      = "raw" (main) | "winsor": the initiator changes dM_i, dR_i and the target changes dM_j_h, dRpr_j_h are clipped
+##                   at the WINSOR_PROBS (1st / 99th percentile) quantiles of the stage-1 panel's dM_h / dRpr_h for the cell's lag
+##                   (the target change is the same state-year change table, so one pair of cut points per axis), BEFORE the Z
+##                   centring; cut points and the number of clipped values are logged. A target without a change value stays 0.
+##   CONTEXT       = "all" (main) | "bilateral" | "coalition" (dual typology stage a, 2026-10-25): keeps the STAGE-2 events whose D8 group
+##                   (initiator, dispute, onset year) has the given coalition context, read from the build's coal_<COAL_TIES> column
+##                   (COAL_TIES = "inclusive" -> coal_incl, "strict" -> coal_strict). Stage 1 is NOT touched: y1 stays the sample's, so a
+##                   state-year whose events are all in the other context keeps y1 = 1 without a stage-2 event (counted as an orphan).
+##                   A D8 group is kept or dropped whole; the only exception is a key the build collapsed from a bilateral and a coalition
+##                   dispute (ORed to coalition), asserted and logged. COAL_DROP = "top3" (CONTEXT = "coalition" only) also removes the
+##                   events of the 3 disputes contributing the most coalition events of the sample (a collapsed key counts for each of its
+##                   disputes and leaves when any of them is in the top 3; ties at the third place are logged).
+##   MAJOR         = "none" (main) | "joint" (PI-approved 2026-10-27, cell suffix _major): Z gains two 0/1 indicators built from the
+##                   alternatives' major_count (COW major-power status of both states at t-1, major1 + major2 from the build), one_major =
+##                   (major_count == 1) and both_major = (major_count == 2), zero majors the reference; appended after the main Z columns,
+##                   NOT centred (the convention for every 0/1 Z column, contig_land, joint_dem, dy_mid_tm1, dch_j_missing; only the
+##                   continuous Z columns in Z_CENTRED are centred over the IV rows). They are identified only through within-choice-set
+##                   variation (b_j absorbs time-invariant target attractiveness), so the assembly stops unless each varies within some
+##                   IV set and within some stage-2 set of an initiating state-year, and logs how many sets vary and the shares of
+##                   alternatives and of stage-2 events in each category. W gains the initiator's own indicator cowmaj_tm1 (the panel's
+##                   major-power status at t-1, the same source and lag as major1 in major_count), appended after the minimal W controls
+##                   and grand-centred like the other 0/1 W controls (dem_tm1, ongoing_tm1; SY_INDICATORS); it is in neither control set by
+##                   itself (since 2026-10-27 the full set carries no major-power status), so it is appended under either. X is unchanged.
+##                   Its mean and its correlation with M_lvl are logged.
+##   INTERACT      = "none" (main) | "prefixed" (PI-approved 2026-10-27, cell suffix _ix): Z gains four products of the change columns
+##                   already in the data, in the scaled change units of X / Z: ix_dMj_dRj = dM_j_h x dRpr_j_h, ix_dMi_dMj = dM_i x dM_j_h,
+##                   ix_dRi_dRj = dR_i x dRpr_j_h, ix_dMi_dRj = dM_i x dRpr_j_h, with dM_i / dR_i the initiator changes of the row's
+##                   state-year exactly as they enter X and dM_j_h / dRpr_j_h the target changes exactly as they enter Z (both after the
+##                   winsor clipping when CHANGES = "winsor"). The products are formed from the UNCENTRED scaled values (before the Z
+##                   centring of dM_j_h / dRpr_j_h) and then centred over the IV rows like every continuous Z column (Z_CENTRED); forming
+##                   them from the centred target changes instead would be the same model up to a reparameterisation absorbed by the Z
+##                   main effects, alpha0 and alpha (dM_i, dR_i are in W). Appended after the major indicators when both switches are on.
+##   DISTANCE      = "none" (main) | "capital" (PI request 2026-10-28, cell suffix _dist): Z gains log_capdist = log1p(capital-to-capital
+##                   great-circle distance in km at t-1, built by 01_build_data.R from peacesciencer's add_capital_distance() with every other
+##                   dyadic control at t-1), inserted after the dyadic controls and before the target changes (z_columns()), continuous and
+##                   centred over the IV rows like the other Z_CENTRED columns. Contiguity stays in Z. Alternatives WITHOUT a distance (NA
+##                   kept by the build) are dropped from the assembled block, which removes them from the IV set and the stage-2 set at once
+##                   (one row carries both flags); the counts of rows, state-years and events affected are logged, a state-year whose IV set
+##                   would become empty stops the run, and an event whose chosen target has no distance leaves stage 2 and is COUNTED: in
+##                   the "all" variant the usable events must equal the expected events minus exactly these (reconciled, not bounded). Its
+##                   state-year keeps y1 = 1 (an orphan, like a fighting_at_ref event) and its D8 group's weights are not rescaled (logged).
+##                   The current build has no NA distance in alts_lag3_all.rds, so on the real data nothing is dropped. The mean uncentred
+##                   log_capdist of the chosen targets against every stage-2 alternative and cor(log_capdist, contig_land) over the IV rows
+##                   are logged and returned (distance_stats). Until 2026-10-28 this was the archived global flag DISTANCE = TRUE / FALSE.
+##   CONTIGUITY    = "land" (main) | "none" (PI request 2026-10-28, cell suffix _nocontig): contig_land is dropped from Z (the distance REPLACES
+##                   contiguity), so a "none" cell needs DISTANCE = "capital" and is refused otherwise (parse_spec() refuses the switch combination
+##                   before any script gets here; the assembly refuses it again). Nothing else changes: the same rows, the same NA-distance drop
+##                   and reconciliation, log_capdist in the same position and centred the same way, so the _dist_nocontig Z is the _dist Z minus
+##                   its first column. cor(log_capdist, contig_land) over the IV rows is still logged (the column stays in the alternatives
+##                   file). Until 2026-10-28 this was the archived global flag CONTIGUITY = TRUE / FALSE; a logical is refused.
+##   CONVENTIONAL  = FALSE (every cell so far) | TRUE (the conventional comparison specification, PI-approved 2026-10-31, switch comparison =
+##                   conventional, suffix _conv; assemble_cell_spec() sets it with DISTANCE = "capital" and MAJOR = "joint"): W, Z and X are
+##                   fixed to W_CONVENTIONAL, Z_CONVENTIONAL and NO X (P = 0), asserted exactly. Stage 1 keeps the levels, the major-power,
+##                   democracy and ongoing indicators (grand-centred like the other W controls), the
+##                   prior-MID count, the log system size and multi_mid_jan for EVERY model (not M1c alone); the power changes dM_i / dR_i
+##                   leave W and X. Stage 2 keeps land contiguity, the capital distance (the NA-distance drop and reconciliation of DISTANCE =
+##                   "capital"), joint democracy, the defense alliance, the two major-power indicators (MAJOR = "joint"), dy_mid_tm1, the
+##                   dyadic prior-MID count (no peace years in either stage: PI decision 2026-10-31, the cubics of the first draft dropped); the target changes dM_j_h / dRpr_j_h and
+##                   dch_j_missing leave Z. Requires DISTANCE = "capital", MAJOR = "joint", CONTIGUITY = "land", FULL_CONTROLS = FALSE,
+##                   INTERACT = "none", CHANGES = "raw" (asserted; parse_spec() refuses those switches on the command line). Nothing else
+##                   changes (rows, events, weights, groups), so a cell with CONVENTIONAL = FALSE is byte-identical to before.
+##   DIRECTED      = FALSE (every cell before 2026-11-01) | TRUE (the directed comparison, PI-approved 2026-11-01, switch comparison = directed,
+##                   suffix _cdir; assemble_cell_spec() sets it with DISTANCE = "capital" and MAJOR = "joint", and CONVENTIONAL stays FALSE): the
+##                   conventional comparison in every respect (W = W_CONVENTIONAL, no X, the same rows, events, weights, groups and requirements)
+##                   EXCEPT Z = Z_DIRECTED, where joint_dem / one_major / both_major are replaced by the target's own status and its product with
+##                   the initiator's: tgt_dem = dem2, tgt_dem_x_init_dem = dem2 * dem1, tgt_major = major2, tgt_major_x_init_major = major2 * major1.
+##                   dem1 / dem2 and major1 / major2 are the build's dyad-year columns at t-1 (01_build_data.R section 6: dem = polity2 >=
+##                   POLITY_DEM_CUT with polity2 missing -> 0, the coding of joint_dem = dem1 * dem2; major = COW major-power status, missing -> 0,
+##                   the source and timing of major_count = major1 + major2 and of the panel's cowmaj_tm1). Asserted on every assembled row:
+##                   dem1 = the panel's dem_tm1 and major1 = its cowmaj_tm1 (initiator status, uncentred), tgt_dem_x_init_dem = joint_dem,
+##                   one_major = tgt_major + init_major - 2 tgt_major init_major, both_major = tgt_major init_major. The four columns are 0/1 and
+##                   NOT centred (the 0/1 Z convention); each must vary within some IV set and some event-bearing stage-2 set (else stop).
+##   MU_SHIFT      = "none" (every cell before 2026-11-02) | "traits" (PI-approved 2026-11-02, switch mu_shift, suffix _mst; DIRECTED = TRUE only):
+##                   X = X_MU_TRAITS = M_lvl, R_lvl, cowmaj_tm1, dem_tm1 (P = 4), the very W columns of the directed comparison after the W
+##                   centring (the levels within-year centred by the build and NOT grand-centred, cowmaj_tm1 / dem_tm1 grand-centred over the
+##                   cell's state-years like every 0/1 W control), so mu = mu0 + X beta + a_i shifts the ideal point with the initiator's traits
+##                   at t-1. x_ref is computed as for every cell with an X: the mean X over the cell's INITIATING state-years (y1 = 1). Rows,
+##                   events, weights, W and Z are those of the directed cell (asserted in the tests); "none" leaves every cell byte-identical.
+##                   rhoreg_Zr() returns the same four columns as the N1 x 4 matrix Zr of the rho-regression model M1bz (02_fit_model.R).
+##   REACH         = "none" | "capdist" (run 0a, 2026-11-10, switch reach, suffix _reach; DIRECTED only): Z = Z_DIRECTED + Z_REACH (the squared centred
+##                   log_capdist and its product with the initiator's M_lvl, both centred over the IV rows). "none" leaves every cell byte-identical.
+##   SUBSAMPLE     = "none" | "prtarget" | "bilateral" | "majinit" | "mininit" (runs 0b-0d, 2026-11-10, switch subsample; DIRECTED only, full choice set):
+##                   prtarget / bilateral filter the STAGE-2 events (chosen target politically relevant / bcj role bilateral; stage 1 unchanged, D8 weights
+##                   NOT rescaled, as in the polrel cell: PI decision 2026-11-10); majinit / mininit restrict BOTH stages to the state-years of major / minor initiators
+##                   (cowmaj_tm1 leaves W, tgt_major_x_init_major leaves Z). "none" leaves every cell byte-identical.
+##   VARIANT       = "all" | "polrel" | "mid3" (2026-11-10): mid3 = the lag-3 MID-history choice set, cut from alts_lag<h>_all.rds at assembly (the block
+##                   after the input checks); every event gets its own set (history rows of its state-year + its chosen target) through ev_sets.
+##   DROP_WW2, FULL_CONTROLS, EVENT_WEIGHTS: the ww2, controls and weights switches (below).
+##   CONTEXT_MODEL = FALSE (every model of MODELS) | TRUE (the M1c model of dual typology stage b, 2026-10-27): the build's state-year
+##                   column multi_mid_jan (a multilateral MID the state had not entered is active at 1 January of t) is appended to W as
+##                   its last column, grand-centred like the other 0/1 controls. Nothing else changes, so the main specification's W is
+##                   untouched. The three stage-2 event groups (bilateral / coalition leader / joiner; stage2_groups() in helpers_data.R,
+##                   from coal_incl and the initiator's orig1 (joiner = orig1 == 0, PI 2026-10-27); COAL_TIES applies to the context filter only) are computed, asserted and logged for EVERY model and returned as ev$grp;
+##                   only the M1c model passes them to Stan (02_fit_model.R), so the Stan data of the existing models are unchanged.
+## Control sets (PI decision 2026-10-24, minimal controls). Major-power status and alliance are components of material
+## and relational power, so they are bad controls and left the main specification; the main sets are as small as the
+## design allows.
+##   W (stage 1), main : dM_i, dR_i, M_lvl, R_lvl (D2), ongoing_tm1, log1p(monadic prior MIDs) [CONFLICT_HISTORY], dem_tm1, log_n_system_tm1 (D3)
+##   X (mu shifters), main : dM_i, dR_i only (no monadic controls)
+##   Z (dyadic), main : land contiguity [CONTIGUITY = "land"; "none" drops it, with DISTANCE = "capital" only], joint democracy, log1p(dyadic prior MIDs) [CONFLICT_HISTORY],
+##                      dy_mid_tm1, [log1p dyadic peace years, DY_PEACE_YEARS], [log1p capital distance, DISTANCE = "capital"],
+##                      the target's power changes dM_j_h, dRpr_j_h, [dch_j_missing when non-constant, TARGET_MISSING]
+## FULL_CONTROLS = TRUE (switch controls = full, cell suffix _fullctrl; PI decision 2026-10-27, item 7) is the MAIN specification plus
+## the controls the minimal sets dropped, WITHOUT major-power status (which has its own switch, MAJOR):
+##   W     = main W + log_peace_years (log1p monadic peace years) [CONFLICT_HISTORY], appended after log_n_system_tm1   (P1 = 9)
+##   X     = main X (dM_i, dR_i; the mu shifters carry no controls in either set)
+##   Z     = main Z + alliance_def_off (0/1, uncentred) + log_dy_peace_years (continuous, centred), inserted after dy_mid_tm1 and
+##           before the target changes; DY_PEACE_YEARS adds nothing under FULL_CONTROLS (the column is already there)      (Pz = 8 or 9)
+## Until 2026-10-27 `full` reproduced the base specification of commit 8bf0ce1 (W = X = dM_i, dR_i, cowmaj_tm1, dem_tm1,
+## log_prior_mids, log_peace_years; Z = contig_land, alliance_def_off, joint_dem, major_count, log_dy_prior_mids, log_dy_peace_years,
+## dM_j_h, dRpr_j_h), which lacked the D2 / D3 stage-1 columns, ongoing_tm1 and dy_mid_tm1, so it was NOT main + extra controls, and its
+## major_count was exactly collinear with the MAJOR = joint indicators. That set is no longer reachable (CHANGELOG). The lists below are
+## hard-coded per set (no shared abstraction) so that each one can be read off and tested. w_controls() / x_controls() return the monadic
+## controls (the columns after dM_i, dR_i) so that assemble_cell(), benchmarks.R and the tests share one list.
+## Main W since 2026-10-25 (PI decisions D2 and D3): the initiator's power LEVELS at t-1, M_lvl and R_lvl (within-year centred log
+## CINC share / log PageRank divided by the gap constants, built by 01_build_data.R; 0 = the system-average level that year, so
+## they are NOT grand-centred here), and the centred log system size at t-1, log_n_system_tm1 (the IV grows with the number of
+## alternatives, so tau * IV carried a system-size trend). Neither enters X.
+W_LEVELS <- c("M_lvl", "R_lvl")
+## MAJOR = "joint" (2026-10-27) appends the initiator's major-power indicator cowmaj_tm1 LAST to either W set (it is in neither by itself)
+w_controls <- function(CONFLICT_HISTORY = TRUE, FULL_CONTROLS = FALSE, MAJOR = "none") {
+  stopifnot(MAJOR %in% c("none", "joint"))
+  c("M_lvl", "R_lvl", "ongoing_tm1", if (CONFLICT_HISTORY) "log_prior_mids", "dem_tm1", "log_n_system_tm1",
+    if (FULL_CONTROLS && CONFLICT_HISTORY) "log_peace_years", if (MAJOR == "joint") "cowmaj_tm1")
+}
+x_controls <- function(CONFLICT_HISTORY = TRUE, FULL_CONTROLS = FALSE) character(0)     # the mu shifters carry no controls in either set (2026-10-27)
+## the Z columns the 2026-10-27 switches append (after the base list, major indicators first): Z_MAJOR under MAJOR = "joint" (0/1, not centred),
+## Z_INTERACT under INTERACT = "prefixed" (continuous, centred over the IV rows after the products are formed)
+Z_MAJOR    <- c("one_major", "both_major")
+Z_INTERACT <- c("ix_dMj_dRj", "ix_dMi_dMj", "ix_dRi_dRj", "ix_dMi_dRj")
+## the two dyadic controls the full set adds to the main Z (2026-10-27): alliance_def_off (0/1, uncentred), log_dy_peace_years (centred)
+Z_FULL_EXTRA <- c("alliance_def_off", "log_dy_peace_years")
+## DISTANCE (2026-10-28) is the `distance` switch, "none" | "capital" (a logical is refused: the old global flag is gone); "capital" inserts
+## log_capdist after the dyadic controls and before the target changes, the position the archived flag used.
+## CONTIGUITY (2026-10-28) is the `contiguity` switch, "land" | "none" (a logical is refused likewise); "none" drops contig_land, the first column.
+## The column list does not enforce the distance requirement of "none" (assemble_cell() and parse_spec() do).
+z_columns <- function(CONFLICT_HISTORY = TRUE, DISTANCE = "none", CONTIGUITY = "land", TARGET_MISSING = FALSE, DY_PEACE_YEARS = FALSE,
+                      FULL_CONTROLS = FALSE, MAJOR = "none", INTERACT = "none") {
+  stopifnot(is.character(DISTANCE), length(DISTANCE) == 1L, DISTANCE %in% c("none", "capital"), MAJOR %in% c("none", "joint"), INTERACT %in% c("none", "prefixed"),
+            is.character(CONTIGUITY), length(CONTIGUITY) == 1L, CONTIGUITY %in% c("land", "none"))
+  base <- c(if (CONTIGUITY == "land") "contig_land", "joint_dem",
+            if (CONFLICT_HISTORY) "log_dy_prior_mids",
+            "dy_mid_tm1",
+            if (FULL_CONTROLS) Z_FULL_EXTRA else if (DY_PEACE_YEARS) "log_dy_peace_years",
+            if (DISTANCE == "capital") "log_capdist",
+            "dM_j_h", "dRpr_j_h",
+            if (TARGET_MISSING) "dch_j_missing")
+  stopifnot(!anyDuplicated(base))
+  c(base, if (MAJOR == "joint") Z_MAJOR, if (INTERACT == "prefixed") Z_INTERACT)
+}
+## the conventional comparison specification (PI-approved 2026-10-31; CONVENTIONAL = TRUE): the exact column lists, in this order.
+## No peace years in either stage (PI decision 2026-10-31: neither the cubics of the first draft nor the log columns); lagged conflict
+## (ongoing_tm1, dy_mid_tm1) and the prior-MID counts stay. No X (P = 0). The change columns must appear in none of the three (asserted).
+W_CONVENTIONAL <- c("M_lvl", "R_lvl", "cowmaj_tm1", "dem_tm1", "ongoing_tm1", "log_prior_mids", "log_n_system_tm1", "multi_mid_jan")
+Z_CONVENTIONAL <- c("contig_land", "log_capdist", "joint_dem", "alliance_def_off", "one_major", "both_major", "dy_mid_tm1", "log_dy_prior_mids")
+## the directed comparison (PI-approved 2026-11-01; DIRECTED = TRUE): W = W_CONVENTIONAL, no X, and this Z, exactly in this order (Pz = 9)
+Z_DIRECTED     <- c("contig_land", "log_capdist", "tgt_dem", "tgt_dem_x_init_dem", "alliance_def_off", "tgt_major", "tgt_major_x_init_major", "dy_mid_tm1", "log_dy_prior_mids")
+Z_DIRECTED_TGT <- c("tgt_dem", "tgt_dem_x_init_dem", "tgt_major", "tgt_major_x_init_major")   # the four 0/1 columns formed at assembly (uncentred)
+## the ideal-point shifters of mu_shift = traits and the rho-regression traits Zr of M1bz (PI-approved 2026-11-02): exactly these W_CONVENTIONAL columns, in this order
+X_MU_TRAITS    <- c("M_lvl", "R_lvl", "cowmaj_tm1", "dem_tm1")
+## run 0 (2026-11-10): the two reach terms of reach = capdist, appended LAST to the directed Z (formed and centred in assemble_cell(), not in Z_CENTRED, so
+## no existing cell's centring list changes), and the directed W / Z lists as a function of the two run-0 switches. With both at "none" these return
+## W_CONVENTIONAL and Z_DIRECTED exactly. Under subsample = majinit | mininit the initiator's major-power status is constant: cowmaj_tm1 leaves W and
+## tgt_major_x_init_major (identical to tgt_major among majors, identically 0 among minors) leaves Z.
+Z_REACH <- c("log_capdist_sq", "log_capdist_x_init_M")
+directed_w_cols <- function(SUBSAMPLE = "none") if (SUBSAMPLE %in% INIT_SUBSAMPLES) setdiff(W_CONVENTIONAL, "cowmaj_tm1") else W_CONVENTIONAL
+directed_z_cols <- function(REACH = "none", SUBSAMPLE = "none") c(if (SUBSAMPLE %in% INIT_SUBSAMPLES) setdiff(Z_DIRECTED, "tgt_major_x_init_major") else Z_DIRECTED, if (REACH == "capdist") Z_REACH)
+PEACE_COLUMNS  <- c("log_peace_years", "log_dy_peace_years")
+CHANGE_COLUMNS <- c("dM_i", "dR_i", "dM_j_h", "dRpr_j_h", "dch_j_missing", Z_INTERACT)
+## continuous Z columns that assemble_cell() centres over the assembled alternative rows (the 0/1 indicators, dy_mid_tm1
+## included, stay as is); the interaction products (2026-10-27) are continuous and centred like the target changes they are built from
+Z_CENTRED <- c("log_dy_prior_mids", "log_dy_peace_years", "log_capdist", "dM_j_h", "dRpr_j_h", Z_INTERACT)
+## Monadic 0/1 indicators available in the panel (major power, democracy, ongoing_tm1 = participant in any MID active at
+## t-1). Those that enter W or X are centred like the conflict-history counts; the main W uses dem_tm1 and ongoing_tm1.
+SY_INDICATORS <- c("cowmaj_tm1", "dem_tm1", "ongoing_tm1")
+## manifest: NULL reads data_dir/manifest.csv now; a data.frame is a SNAPSHOT read earlier by the caller (02_fit_model.R passes
+## the manifest it read at load, so a rebuild between that read and the loading of the inputs stops the run; review P2-5).
+## EVENT_WEIGHTS (PI decision 2026-10-25, D8): "dispute" (main) gives every stage-2 event the build's weight w_<sample> = 1 / (the
+## initiator's targets in the same dispute and onset year), a composite likelihood with dispute-level weighting; "none" gives weight 1
+## (the robustness comparison, cell suffix _w1). The weights multiply the stage-2 log-lik terms in the Stan programs; log_lik_stage2
+## stays unweighted per event.
+assemble_cell <- function(SAMPLE, LAG, VARIANT, CENT = "pr", CONFLICT_HISTORY = TRUE, SAMPLED_M = 0L,
+                          DISTANCE = "none", CONTIGUITY = "land", DY_PEACE_YEARS = FALSE, DROP_WW2 = FALSE, FULL_CONTROLS = FALSE,
+                          EVENT_WEIGHTS = "dispute", PAIRS = "all", CHANGES = "raw", CONTEXT = "all", COAL_TIES = "inclusive", COAL_DROP = "none",
+                          MAJOR = "none", INTERACT = "none", ROLES = "stageb", MU_SHIFT = "none", JOINER_SET = "all", REACH = "none", SUBSAMPLE = "none",
+                          CONTEXT_MODEL = FALSE, CONVENTIONAL = FALSE, DIRECTED = FALSE, data_dir = file.path(v2_root(), "data"), manifest = NULL) {
+  stopifnot(SAMPLE %in% ALL_SAMPLES, LAG %in% c(1L, 3L, 5L, 10L), VARIANT %in% c("all", "polrel", "mid3"), CENT %in% c("pr", "eig"),
+            EVENT_WEIGHTS %in% c("dispute", "none"), PAIRS %in% c("all", "originators", "joiners"), CHANGES %in% c("raw", "winsor"),
+            CONTEXT %in% c("all", "bilateral", "coalition"), COAL_TIES %in% c("inclusive", "strict"), COAL_DROP %in% c("none", "top3"),
+            MAJOR %in% c("none", "joint"), INTERACT %in% c("none", "prefixed"),
+            is.character(DISTANCE), length(DISTANCE) == 1L, DISTANCE %in% c("none", "capital"),      # 2026-10-28: the switch's values, never TRUE / FALSE
+            is.character(CONTIGUITY), length(CONTIGUITY) == 1L, CONTIGUITY %in% c("land", "none"))  # 2026-10-28: likewise
+  ## contiguity = none is defined only as "distance replaces contiguity" (PI request 2026-10-28): a Z without either is refused
+  if (CONTIGUITY == "none" && DISTANCE != "capital") stop(sprintf("CONTIGUITY = none needs DISTANCE = capital (distance replaces contiguity; got DISTANCE = %s)", DISTANCE))
+  stopifnot(is.logical(CONTEXT_MODEL), length(CONTEXT_MODEL) == 1L, !is.na(CONTEXT_MODEL), is.logical(CONVENTIONAL), length(CONVENTIONAL) == 1L, !is.na(CONVENTIONAL))
+  ## the conventional comparison (2026-10-31) carries the distance and the major indicators and nothing of the other control extensions
+  if (CONVENTIONAL && !(DISTANCE == "capital" && MAJOR == "joint" && CONTIGUITY == "land" && !FULL_CONTROLS && INTERACT == "none" && CHANGES == "raw"))
+    stop(sprintf("CONVENTIONAL = TRUE needs DISTANCE = capital, MAJOR = joint, CONTIGUITY = land, FULL_CONTROLS = FALSE, INTERACT = none, CHANGES = raw (got %s, %s, %s, %s, %s, %s); assemble_cell_spec() sets them from the switch", DISTANCE, MAJOR, CONTIGUITY, FULL_CONTROLS, INTERACT, CHANGES))
+  ## the directed comparison (2026-11-01): the same requirements; exclusive with CONVENTIONAL. FIXED_WZX = either spec (W_CONVENTIONAL, no X)
+  stopifnot(is.logical(DIRECTED), length(DIRECTED) == 1L, !is.na(DIRECTED))
+  if (DIRECTED && CONVENTIONAL) stop("DIRECTED = TRUE and CONVENTIONAL = TRUE are exclusive (comparison = directed | conventional)")
+  if (DIRECTED && !(DISTANCE == "capital" && MAJOR == "joint" && CONTIGUITY == "land" && !FULL_CONTROLS && INTERACT == "none" && CHANGES == "raw"))
+    stop(sprintf("DIRECTED = TRUE needs DISTANCE = capital, MAJOR = joint, CONTIGUITY = land, FULL_CONTROLS = FALSE, INTERACT = none, CHANGES = raw (got %s, %s, %s, %s, %s, %s); assemble_cell_spec() sets them from the switch", DISTANCE, MAJOR, CONTIGUITY, FULL_CONTROLS, INTERACT, CHANGES))
+  FIXED_WZX <- CONVENTIONAL || DIRECTED
+  ## mu_shift = traits (2026-11-02): the directed comparison only
+  stopifnot(is.character(MU_SHIFT), length(MU_SHIFT) == 1L, MU_SHIFT %in% c("none", "traits"))
+  if (MU_SHIFT == "traits" && !DIRECTED) stop("MU_SHIFT = traits needs DIRECTED = TRUE (the shifters are the directed comparison's W columns; switch mu_shift needs --comparison=directed)")
+  ## run 0 and the MID-history choice set (2026-11-10): the combinations parse_spec() refuses are refused here again
+  stopifnot(is.character(REACH), length(REACH) == 1L, REACH %in% c("none", "capdist"), is.character(SUBSAMPLE), length(SUBSAMPLE) == 1L, SUBSAMPLE %in% c("none", EVENT_SUBSAMPLES, INIT_SUBSAMPLES))
+  if (REACH != "none" && !(DIRECTED && MU_SHIFT == "none" && VARIANT == "all" && SUBSAMPLE == "none")) stop("REACH = capdist needs DIRECTED = TRUE, MU_SHIFT = none, VARIANT = all, SUBSAMPLE = none")
+  if (SUBSAMPLE != "none" && !(DIRECTED && MU_SHIFT == "none" && VARIANT == "all" && PAIRS == "all" && CONTEXT == "all" && !DROP_WW2 && JOINER_SET == "all" && SAMPLED_M == 0))
+    stop(sprintf("SUBSAMPLE = %s needs DIRECTED = TRUE, MU_SHIFT = none, VARIANT = all, PAIRS = all, CONTEXT = all, DROP_WW2 = FALSE, JOINER_SET = all and full choice sets", SUBSAMPLE))
+  if (VARIANT == "mid3" && !(DIRECTED && MU_SHIFT == "none" && PAIRS == "all" && CONTEXT == "all" && !DROP_WW2 && JOINER_SET == "all" && SAMPLED_M == 0 && ROLES %in% c("aprime", "bc", "bcj")))
+    stop("VARIANT = mid3 needs DIRECTED = TRUE, MU_SHIFT = none, PAIRS = all, CONTEXT = all, DROP_WW2 = FALSE, JOINER_SET = all, full choice sets and ROLES = aprime, bc or bcj (the role models' event-level sets)")
+  INIT_SUB <- SUBSAMPLE %in% INIT_SUBSAMPLES
+  W_DIR <- directed_w_cols(SUBSAMPLE); Z_DIR <- directed_z_cols(REACH, SUBSAMPLE)      # = W_CONVENTIONAL / Z_DIRECTED with both switches at none
+  ## M1c outside the conventional comparison: the main Z, the minimal W (its refusals of 2026-10-27); under CONVENTIONAL the spec defines W / Z for M1c too
+  if (CONTEXT_MODEL && !FIXED_WZX && DISTANCE != "none") stop("CONTEXT_MODEL (M1c) with DISTANCE != none is not specified; run M1c with DISTANCE = none")
+  if (CONTEXT_MODEL && !FIXED_WZX && CONTIGUITY != "land") stop("CONTEXT_MODEL (M1c) with CONTIGUITY != land is not specified; run M1c with CONTIGUITY = land")
+  if (COAL_DROP != "none" && CONTEXT != "coalition") stop("COAL_DROP = top3 needs CONTEXT = coalition")
+  if (CONTEXT_MODEL && FULL_CONTROLS) stop("CONTEXT_MODEL (M1c) is defined on the minimal control set only (FULL_CONTROLS = TRUE not supported)")
+  ## merge 2026-10-27: the M1c model and the major / interact switches were developed independently; their combination is not specified
+  ## (W would carry cowmaj_tm1 before multi_mid_jan, Z the extra columns), so it is refused here until the PI decides
+  if (CONTEXT_MODEL && !FIXED_WZX && (MAJOR != "none" || INTERACT != "none")) stop("CONTEXT_MODEL (M1c) with MAJOR != none or INTERACT != none is not specified; run M1c with MAJOR = none, INTERACT = none")
+  manifest_path <- file.path(data_dir, "manifest.csv")
+  stopifnot(file.exists(manifest_path))
+  if (is.null(manifest)) { manifest <- read.csv(manifest_path, stringsAsFactors = FALSE); manifest_source <- "read now" }
+  else { stopifnot(is.data.frame(manifest), all(c("file", "nrow", "sha256") %in% names(manifest))); manifest_source <- "snapshot passed by the caller" }
+  ## ---- load inputs, each asserted against the manifest (snapshot) -------------------------------------
+  panel  <- assert_matches_manifest(file.path(data_dir, sprintf("stage1_panel_lag%d.rds", LAG)), manifest)
+  alts   <- assert_matches_manifest(file.path(data_dir, sprintf("alts_lag%d_%s.rds", LAG, if (VARIANT == "mid3") "all" else VARIANT)), manifest)   # mid3 (2026-11-10) is cut from the all-states file below
+  events <- assert_matches_manifest(file.path(data_dir, "events.rds"), manifest)
+  ## ROLES = aprime (PI decision 2026-10-31): the 4 role groups from the build's roles_aprime.rds (read only under this switch, so every other
+  ## cell reads exactly the three files it read before)
+  stopifnot(is.character(ROLES), length(ROLES) == 1L, ROLES %in% c("stageb", "aprime", "bc", "bcj"))
+  APRIME_BASED <- ROLES %in% c("aprime", "bc", "bcj")       # bc / bcj (2026-11-04) are derived from the same file
+  roles_ap <- if (APRIME_BASED || SUBSAMPLE == "bilateral") assert_matches_manifest(file.path(data_dir, "roles_aprime.rds"), manifest) else NULL
+  ## JOINER_SET = opposing (PI-approved 2026-11-04): the joiner choice sets of the build's joiner_sets_aprime.rds (read only under this switch, so
+  ## every other cell reads exactly the files it read before); needs the aprime groups (role 2 = joiner) and full choice sets
+  stopifnot(is.character(JOINER_SET), length(JOINER_SET) == 1L, JOINER_SET %in% c("all", "opposing"))
+  if (JOINER_SET == "opposing" && !APRIME_BASED) stop("JOINER_SET = opposing needs ROLES = aprime, bc or bcj (the restriction applies to the joiner events; switch joiner_set needs one of those roles)")
+  if (JOINER_SET == "opposing" && SAMPLED_M > 0) stop("JOINER_SET = opposing is not defined with sampled alternatives (SAMPLED_M > 0)")
+  jsets <- if (JOINER_SET == "opposing") assert_matches_manifest(file.path(data_dir, "joiner_sets_aprime.rds"), manifest) else NULL
+  stopifnot(all(panel$h == LAG), all(alts$h == LAG))
+  stopifnot(all(c("escalation", "is_joiner_pair", "is_ww2", "target_has_pos_tm1", "fighting_at_ref", "dispnums", "n_disputes", "war_disp",
+                  "in_mid_noww2", "in_fmid_noww2", "in_fmidub_noww2", "in_war_noww2", paste0("in_", SAMPLE), paste0("in_", SAMPLE, "_noww2")) %in% names(events)),   # fmidcow / fmidany: the build's own (2026-11-04)
+            all(c("ongoing_tm1", "M_lvl", "R_lvl", "log_n_system_tm1") %in% names(panel)), all(c("dy_mid_tm1", "in_iv", "in_s2") %in% names(alts)),
+            all(c("dir_flipped", "dir_source", paste0("w_", SAMPLE), "coal_incl", "coal_strict") %in% names(events)))
+  stopifnot(!anyNA(events$coal_incl[!events$escalation]), !anyNA(events$coal_strict[!events$escalation]), all(events$coal_incl[!events$escalation] >= events$coal_strict[!events$escalation]))
+  stopifnot(!anyNA(alts$in_iv), !anyNA(alts$in_s2), all(alts$in_iv %in% 0:1), all(alts$in_s2 %in% 0:1), all(alts$in_iv == 1L | alts$in_s2 == 1L))
+  assert_no_dup_keys(events |> filter(!escalation), c("initiator", "target", "year"), "events (one per initiator, target, year after the collapse)")
+  logf("inputs verified against the manifest (%s): panel %d rows, alts %d rows (in both sets %d, IV only %d, stage 2 only %d), events %d rows (%d escalations, %d joiner pairs, %d WWII, %d collapsed from more than one dispute, %d fighting at the reference date)",
+       manifest_source, nrow(panel), nrow(alts), sum(alts$in_iv == 1L & alts$in_s2 == 1L), sum(alts$in_iv == 1L & alts$in_s2 == 0L), sum(alts$in_iv == 0L & alts$in_s2 == 1L),
+       nrow(events), sum(events$escalation), sum(events$is_joiner_pair), sum(events$is_ww2), sum(events$n_disputes > 1L), sum(events$fighting_at_ref))
+
+  y1_col <- paste0("y1_", SAMPLE); ev_flag <- paste0("in_", SAMPLE)
+  ## ---- run 0d (2026-11-10): SUBSAMPLE = majinit | mininit restricts BOTH stages to the state-years whose initiator is / is not a COW major power at
+  ## t-1 (the panel's cowmaj_tm1, the stage-1 W column). The panel is cut here, before anything else: the alternatives are joined onto the kept
+  ## state-years below (targets of either status stay in every kept choice set) and the events of the other subset find no state-year and leave.
+  init_sub_stats <- NULL
+  if (INIT_SUB) {
+    stopifnot("cowmaj_tm1" %in% names(panel), !anyNA(panel$cowmaj_tm1), all(panel$cowmaj_tm1 %in% c(0L, 1L)))
+    want_major <- as.integer(SUBSAMPLE == "majinit"); n_panel <- nrow(panel); y1_panel <- sum(panel[[y1_col]])
+    panel <- panel |> filter(cowmaj_tm1 == want_major)
+    if (nrow(panel) == 0L || sum(panel[[y1_col]]) == 0L) stop(sprintf("subsample = %s leaves no initiating state-year in sample %s", SUBSAMPLE, SAMPLE))
+    init_sub_stats <- list(n_panel = n_panel, n_kept = nrow(panel), y1_panel = y1_panel, y1_kept = sum(panel[[y1_col]]), n_states = n_distinct(panel$ccode))
+    logf("subsample = %s (run 0d, 2026-11-10): stage 1 AND stage 2 restricted to the state-years with cowmaj_tm1 = %d: %d of %d panel state-years kept (%d distinct states), %d of %d initiations of sample %s; cowmaj_tm1 leaves W and tgt_major_x_init_major leaves Z (constant / collinear in the subset)",
+         SUBSAMPLE, want_major, nrow(panel), n_panel, init_sub_stats$n_states, init_sub_stats$y1_kept, y1_panel, SAMPLE)
+  }
+  ## ---- variant = mid3 (2026-11-10): the lag-3 MID-history choice set, cut from the all-states alternatives ---------------------------------------------
+  ## History of (i, j, t): a MID onset between i and j (either direction) in [t - MID3_WINDOW, t - 1] (mid3_history() on every row of events.rds: all
+  ## hostility levels, escalations included) OR dy_mid_tm1 == 1 (the build's lagged dyadic MID). Year t is never used. As for polrel, ONE rule cuts both
+  ## sets: the stage-1 IV set is the in_iv rows (January reference) with history; the stage-2 rows are the in_s2 rows with history plus the chosen target
+  ## of every event of the sample (a conditional logit needs the chosen alternative; each event is then scored against the history rows of its
+  ## state-year plus its OWN chosen target only, through the event-level sets below). A state-year without any history row in its IV set has no
+  ## inclusive value and leaves stage 1 with its events, exactly as a polrel state-year without a politically relevant alternative does.
+  ## REFUSED since the audit of 2026-11-10 (P1-1): parse_spec() and cell_name() stop on --variant=mid3 (MID3_REFUSAL, spec.R), so this block and the
+  ## event-level block below are reachable only by calling the assembly directly (the unit tests). A chosen target without history is the only non-history
+  ## member of its set, so its stage-2 term is not a valid conditional probability; the code is kept for reference, not for fits.
+  mid3_stats <- NULL; mid3_sy_dropped <- NULL
+  if (VARIANT == "mid3") {
+    stopifnot(all(c("ccode1", "ccode2", "year", "dy_mid_tm1") %in% names(alts)), !anyNA(alts$dy_mid_tm1), min(alts$year) - MID3_WINDOW >= min(events$year),
+              !any(c("mid3_onset", "mid3_hist", "mid3_chosen") %in% names(alts)))
+    hist_keys <- mid3_history(events, MID3_WINDOW)
+    n_all <- nrow(alts); n_iv_all <- sum(alts$in_iv); n_s2_all <- sum(alts$in_s2)
+    chosen_keys <- events |> filter(.data[[ev_flag]]) |> distinct(ccode1 = initiator, ccode2 = target, year) |> mutate(.c = 1L)
+    alts <- alts |> left_join(hist_keys |> mutate(.h = 1L), by = c("ccode1", "ccode2", "year")) |> left_join(chosen_keys, by = c("ccode1", "ccode2", "year")) |>
+      mutate(mid3_onset = coalesce(.h, 0L), mid3_hist = as.integer(mid3_onset == 1L | dy_mid_tm1 == 1L), mid3_chosen = coalesce(.c, 0L)) |> select(-.h, -.c)
+    stopifnot(nrow(alts) == n_all, all(alts$mid3_hist %in% 0:1), all(alts$mid3_chosen %in% 0:1))
+    n_hist_onset <- sum(alts$mid3_onset); n_hist_tm1 <- sum(alts$dy_mid_tm1); n_hist <- sum(alts$mid3_hist)
+    alts <- alts |> mutate(in_iv = as.integer(in_iv == 1L & mid3_hist == 1L), in_s2 = as.integer(in_s2 == 1L & (mid3_hist == 1L | mid3_chosen == 1L)))
+    sy_iv <- alts |> group_by(ccode1, year) |> summarise(n_iv = sum(in_iv), .groups = "drop")
+    mid3_sy_dropped <- sy_iv |> filter(n_iv == 0L) |> select(ccode1, year)
+    alts <- alts |> anti_join(mid3_sy_dropped, by = c("ccode1", "year")) |> filter(in_iv == 1L | in_s2 == 1L)
+    if (nrow(alts) == 0L) stop("variant = mid3: no state-year has a MID-history alternative in its IV set")
+    stopifnot(all(alts$in_iv == 0L | alts$mid3_hist == 1L), all(alts$in_s2 == 0L | alts$mid3_hist == 1L | alts$mid3_chosen == 1L))
+    pan_drop <- panel |> semi_join(mid3_sy_dropped, by = c("ccode" = "ccode1", "year"))
+    mid3_stats <- list(n_rows_all = n_all, n_rows = nrow(alts), n_hist_rows = n_hist, n_hist_onset = n_hist_onset, n_hist_tm1 = n_hist_tm1, n_iv_all = n_iv_all, n_iv = sum(alts$in_iv),
+                       n_s2_all = n_s2_all, n_s2 = sum(alts$in_s2), n_sy_dropped = nrow(pan_drop), n_sy_panel = nrow(panel), y1_dropped = sum(pan_drop[[y1_col]]), y1_panel = sum(panel[[y1_col]]))
+    logf("variant = mid3 (2026-11-10): MID-history alternatives = a MID onset of the pair in [t - %d, t - 1] (events.rds, %d rows, all hostility levels, both directions; year t never used) OR dy_mid_tm1 = 1: %d of %d all-states rows have history (%d by an onset, %d by dy_mid_tm1); IV rows %d -> %d, stage-2 rows %d -> %d (history rows plus the chosen targets of the sample's events); %d of %d panel state-years have NO history alternative in their IV set and leave stage 1 (no inclusive value; %d of the %d initiations of sample %s among them)",
+         MID3_WINDOW, nrow(events), n_hist, n_all, n_hist_onset, n_hist_tm1, n_iv_all, mid3_stats$n_iv, n_s2_all, mid3_stats$n_s2, mid3_stats$n_sy_dropped, nrow(panel), mid3_stats$y1_dropped, mid3_stats$y1_panel, SAMPLE)
+  }
+  ## ---- stage-1 panel -> sy ------------------------------------------------------------------
+  dR_col <- if (CENT == "pr") "dRpr_h" else "dReig_h"
+  dRalt_col <- if (CENT == "pr") "dR_pr" else "dR_eig"
+  ## drop panel state-years with no alternative row at all in this variant (logged by the build). A state-year that has
+  ## rows but none in the stage-1 IV set is an error, not a drop.
+  has_cs <- panel |> semi_join(alts, by = c("ccode" = "ccode1", "year"))
+  no_cs <- panel |> anti_join(alts, by = c("ccode" = "ccode1", "year"))
+  logf("panel state-years with a non-empty choice set: %d of %d", nrow(has_cs), nrow(panel))
+  if (nrow(no_cs) > 0) {
+    ## P3 (2026-10-25): in the all-states variant every panel state-year has alternatives by construction, so a missing block is an
+    ## error; in polrel an isolated non-major state can have none and is dropped, listed with its ccodes
+    msg <- sprintf("%d panel state-years have NO alternative row in variant %s: %s", nrow(no_cs), VARIANT, paste(sprintf("%d-%d", no_cs$ccode, no_cs$year), collapse = " "))
+    if (VARIANT == "all") stop(msg) else if (VARIANT == "mid3") {
+      ## mid3: the state-years without a MID-history IV alternative (counted above; thousands, so not listed)
+      stopifnot(nrow(no_cs) == mid3_stats$n_sy_dropped)
+      logf("dropped from stage 1: %d panel state-years without a MID-history alternative in their IV set (variant mid3)", nrow(no_cs))
+    } else logf("dropped from stage 1: %s", msg)
+  }
+  n_iv_sy <- alts |> group_by(ccode1, year) |> summarise(n_iv = sum(in_iv), .groups = "drop")
+  if (any(n_iv_sy$n_iv == 0L)) stop(sprintf("%d state-years have alternative rows but an EMPTY stage-1 IV set (no row with in_iv = 1); rebuild the data", sum(n_iv_sy$n_iv == 0L)))
+  sy <- has_cs |> arrange(year, ccode) |>
+    mutate(y1 = .data[[y1_col]],
+           log_prior_mids = log1p(mon_prior_mids_h), log_peace_years = log1p(mon_peace_years_h),
+           dM_i = dM_h, dR_i = .data[[dR_col]])
+  ## changes = winsor: cut points from the stage-1 PANEL of this lag (every state-year the build wrote, before the choice-set join),
+  ## one pair per axis, applied to the initiator changes here and to the target changes below (same change table)
+  winsor <- NULL
+  if (CHANGES == "winsor") {
+    winsor <- list(M = unname(quantile(panel$dM_h, WINSOR_PROBS, type = 7)), R = unname(quantile(panel[[dR_col]], WINSOR_PROBS, type = 7)))
+    stopifnot(all(is.finite(unlist(winsor))), winsor$M[1] < 0, winsor$M[2] > 0, winsor$R[1] < 0, winsor$R[2] > 0)   # 0 stays inside the caps
+    n_clip_M <- sum(sy$dM_i < winsor$M[1] | sy$dM_i > winsor$M[2]); n_clip_R <- sum(sy$dR_i < winsor$R[1] | sy$dR_i > winsor$R[2])
+    sy <- sy |> mutate(dM_i = pmin(pmax(dM_i, winsor$M[1]), winsor$M[2]), dR_i = pmin(pmax(dR_i, winsor$R[1]), winsor$R[2]))
+    logf("changes = winsor: cut points at the %s / %s percentiles of the lag-%d panel (%d state-years): dM_h [%.4f, %.4f], %s [%.4f, %.4f]; initiator values clipped: dM_i %d, dR_i %d of %d",
+         WINSOR_PROBS[1] * 100, WINSOR_PROBS[2] * 100, LAG, nrow(panel), winsor$M[1], winsor$M[2], dR_col, winsor$R[1], winsor$R[2], n_clip_M, n_clip_R, nrow(sy))
+    stopifnot(all(sy$dM_i >= winsor$M[1] & sy$dM_i <= winsor$M[2]), all(sy$dR_i >= winsor$R[1] & sy$dR_i <= winsor$R[2]))
+  }
+  ## state index: union of initiators (panel) and targets (alts), sorted by ccode (index only; anchors are NOT taken from this order)
+  state_codes <- sort(unique(c(sy$ccode, alts$ccode2)))
+  sy$state_idx <- match(sy$ccode, state_codes)
+  ctrl_w <- w_controls(CONFLICT_HISTORY, FULL_CONTROLS, MAJOR = MAJOR); ctrl_x <- x_controls(CONFLICT_HISTORY, FULL_CONTROLS)
+  stopifnot(!anyDuplicated(ctrl_w))
+  if (CONTEXT_MODEL || FIXED_WZX) {
+    ## stage b: the outcome-blind multilateral-opportunity control, LAST in W (0/1 from the build; grand-centred below like the other indicators);
+    ## under the conventional comparison (2026-10-31) it is in W for every model, through W_CONVENTIONAL below
+    if (!"multi_mid_jan" %in% names(sy)) stop("CONTEXT_MODEL (M1c) / CONVENTIONAL need the panel column multi_mid_jan (rebuild the data with 01_build_data.R of 2026-10-27 or later)")
+    stopifnot(!anyNA(sy$multi_mid_jan), all(sy$multi_mid_jan %in% c(0, 1)))
+    logf("multi_mid_jan (stage b, %s): mean %.4f over %d state-years (%d with a multilateral MID they had not entered active at 1 January of t); among initiators (y1 = 1) %.4f", if (CONVENTIONAL) "every model of the conventional comparison" else if (DIRECTED) "every model of the directed comparison" else "M1c", mean(sy$multi_mid_jan), nrow(sy), sum(sy$multi_mid_jan), mean(sy$multi_mid_jan[sy$y1 == 1L]))
+    if (!FIXED_WZX) ctrl_w <- c(ctrl_w, "multi_mid_jan")
+    stopifnot(!anyDuplicated(ctrl_w))
+  }
+  if (CONVENTIONAL) {
+    ## the conventional comparison (PI-approved 2026-10-31): the fixed W list; no power changes, no peace years in W, no X at all
+    ctrl_w <- W_CONVENTIONAL; ctrl_x <- character(0)
+    stopifnot(!anyDuplicated(ctrl_w), all(ctrl_w %in% names(sy)), "cowmaj_tm1" %in% ctrl_w, "multi_mid_jan" %in% ctrl_w, !any(CHANGE_COLUMNS %in% ctrl_w), !any(PEACE_COLUMNS %in% ctrl_w))
+    logf("conventional comparison (2026-10-31): W = %s (P1 = %d); X = none (P = 0); neither the power changes nor the peace years enter",
+         paste(ctrl_w, collapse = ","), length(ctrl_w))
+  }
+  if (DIRECTED) {
+    ## the directed comparison (PI-approved 2026-11-01): the conventional W list and no X, exactly as under CONVENTIONAL
+    ctrl_w <- W_DIR; ctrl_x <- if (MU_SHIFT == "traits") X_MU_TRAITS else character(0)      # W_DIR = W_CONVENTIONAL unless SUBSAMPLE = majinit | mininit (2026-11-10)
+    stopifnot(!anyDuplicated(ctrl_w), all(ctrl_w %in% names(sy)), INIT_SUB || identical(ctrl_w, W_CONVENTIONAL), xor(INIT_SUB, "cowmaj_tm1" %in% ctrl_w), "multi_mid_jan" %in% ctrl_w, !any(CHANGE_COLUMNS %in% ctrl_w), !any(PEACE_COLUMNS %in% ctrl_w),
+              INIT_SUB || all(X_MU_TRAITS %in% ctrl_w), all(ctrl_x %in% ctrl_w))
+    logf("directed comparison (2026-11-01): W = %s (P1 = %d; the conventional W); X = %s; neither the power changes nor the peace years enter",
+         paste(ctrl_w, collapse = ","), length(ctrl_w), if (MU_SHIFT == "traits") sprintf("%s (P = %d; mu_shift = traits, 2026-11-02: the W columns, centred as in W)", paste(ctrl_x, collapse = ","), length(ctrl_x)) else "none (P = 0)")
+  }
+  ## directed (2026-11-01): the initiator's UNCENTRED status at t-1, kept before the grand-centring below for the identity checks of the Z columns
+  init_raw <- if (DIRECTED) sy |> transmute(sy_row = row_number(), dem_tm1_raw = dem_tm1, cowmaj_tm1_raw = cowmaj_tm1) else NULL
+  ctrl_sy <- union(ctrl_w, ctrl_x)
+  ## major = joint (2026-10-27): the initiator's own major-power indicator at t-1 enters W (grand-centred below like dem_tm1 and ongoing_tm1);
+  ## logged BEFORE the centring with its correlation with the material level M_lvl, which it is bound to track
+  if (INIT_SUB) {
+    stopifnot(!"cowmaj_tm1" %in% ctrl_w, all(sy$cowmaj_tm1 == as.integer(SUBSAMPLE == "majinit")))
+    logf("subsample = %s: cowmaj_tm1 is constant (%d) over the %d state-years and is NOT in W (P1 = %d)", SUBSAMPLE, sy$cowmaj_tm1[1], nrow(sy), length(ctrl_w))
+  } else if (MAJOR == "joint") {
+    stopifnot("cowmaj_tm1" %in% ctrl_w, "cowmaj_tm1" %in% names(sy), all(sy$cowmaj_tm1 %in% c(0L, 1L)))
+    if (length(unique(sy$cowmaj_tm1)) < 2) stop("major = joint: cowmaj_tm1 is constant over the stage-1 panel of this cell; it cannot enter W")
+    logf("major = joint: cowmaj_tm1 in W (%s): mean %.4f over %d state-years (%d major-power state-years); cor(cowmaj_tm1, M_lvl) = %.3f; grand-centred like the other 0/1 W controls",
+         if (FIXED_WZX) "in W_CONVENTIONAL" else if (FULL_CONTROLS) "appended to the full controls" else "appended to the minimal controls", mean(sy$cowmaj_tm1), nrow(sy), sum(sy$cowmaj_tm1), cor(sy$cowmaj_tm1, sy$M_lvl))
+  }
+  ## centre every stage-1 / mu control that enters W or X (the 0/1 indicators as well as the conflict-history counts; PI
+  ## decisions 2026-10-23 / 2026-10-24) so that alpha0 in stage 1 is the log-odds at zero power change and average
+  ## controls. X has no controls in either control set (2026-10-27), so mu0 is the ideal gap of a state with zero power
+  ## change. dM_i and dR_i are NOT centred (zero power change is the reference).
+  stopifnot(all(ctrl_sy %in% names(sy)), all(ctrl_x %in% ctrl_w), length(ctrl_x) == 0L || (DIRECTED && MU_SHIFT == "traits" && identical(ctrl_x, X_MU_TRAITS)))
+  for (cc in SY_INDICATORS) stopifnot(!anyNA(sy[[cc]]), all(sy[[cc]] %in% c(0, 1)))
+  logf("ongoing_tm1: mean %.4f over %d state-years (%d in a MID active at t-1)", mean(sy$ongoing_tm1), nrow(sy), sum(sy$ongoing_tm1))
+  ## the power levels (D2) are already centred within year over every state with positions (0 = the system average that year) and
+  ## are left as they are, like dM_i and dR_i; every other control is grand-centred
+  ctrl_cent <- setdiff(ctrl_sy, W_LEVELS)
+  for (cc in ctrl_cent) sy[[cc]] <- sy[[cc]] - mean(sy[[cc]])
+  stopifnot(all(abs(colMeans(as.matrix(sy[, ctrl_cent, drop = FALSE]))) < 1e-8), all(is.finite(as.matrix(sy[, ctrl_sy, drop = FALSE]))))
+  if (any(W_LEVELS %in% ctrl_sy)) logf("power levels in W (D2, within-year centred over all states with positions, gap-scaled, NOT grand-centred): M_lvl mean %.4f SD %.3f, R_lvl mean %.4f SD %.3f",
+                                        mean(sy$M_lvl), sd(sy$M_lvl), mean(sy$R_lvl), sd(sy$R_lvl))
+  if (FIXED_WZX) {
+    W_cols <- ctrl_w; X_cols <- character(0)           # conventional (2026-10-31) / directed (2026-11-01) comparison: no power changes in W, no X (P = 0)
+    stopifnot(identical(W_cols, if (DIRECTED) W_DIR else W_CONVENTIONAL), length(X_cols) == 0L)
+    if (MU_SHIFT == "traits") {
+      ## mu_shift = traits (2026-11-02): X = the four W columns, already centred above exactly as they enter W (ctrl_x is part of ctrl_sy)
+      X_cols <- X_MU_TRAITS
+      stopifnot(DIRECTED, identical(X_cols, c("M_lvl", "R_lvl", "cowmaj_tm1", "dem_tm1")), all(X_cols %in% W_cols), !any(CHANGE_COLUMNS %in% X_cols),
+                abs(mean(sy$cowmaj_tm1)) < 1e-8, abs(mean(sy$dem_tm1)) < 1e-8, all(is.finite(as.matrix(sy[, X_cols]))))
+      logf("mu_shift = traits (2026-11-02): X = %s (P = %d), the W columns: M_lvl mean %.4f SD %.3f and R_lvl mean %.4f SD %.3f (within-year centred, not grand-centred); cowmaj_tm1 and dem_tm1 grand-centred (mean 0; SD %.3f, %.3f)",
+           paste(X_cols, collapse = ","), length(X_cols), mean(sy$M_lvl), sd(sy$M_lvl), mean(sy$R_lvl), sd(sy$R_lvl), sd(sy$cowmaj_tm1), sd(sy$dem_tm1))
+    }
+  } else {
+    W_cols <- c("dM_i", "dR_i", ctrl_w)      # PI decision 2026-10-22: initiator power changes also enter stage 1 directly
+    X_cols <- c("dM_i", "dR_i", ctrl_x)      # power changes only (both control sets)
+  }
+  logf("control set: %s%s; W = %s; X = %s", if (CONVENTIONAL) "CONVENTIONAL comparison (2026-10-31; W_CONVENTIONAL, Z_CONVENTIONAL, no X)" else if (DIRECTED) "DIRECTED comparison (2026-11-01; W_CONVENTIONAL, Z_DIRECTED, no X)" else if (FULL_CONTROLS) "FULL (main + log_peace_years in W, alliance_def_off + log_dy_peace_years in Z; 2026-10-27)" else "MINIMAL (main)", if (CONTEXT_MODEL && !FIXED_WZX) " + multi_mid_jan (M1c)" else "", paste(W_cols, collapse = ","), if (length(X_cols)) paste(X_cols, collapse = ",") else "(none)")
+  
+  ## ---- alternatives -----------------------------------------------------------------------------
+  sy_key <- sy |> transmute(ccode1 = ccode, year, sy_row = row_number())
+  alts <- alts |> inner_join(sy_key, by = c("ccode1", "year")) |> arrange(sy_row, ccode2) |>
+    mutate(state_idx = match(ccode1, state_codes), target_idx = match(ccode2, state_codes), dR = .data[[dRalt_col]],
+           log_dy_prior_mids = log1p(dy_prior_mids_h), log_dy_peace_years = log1p(dy_peace_years_h))
+  stopifnot(!anyNA(alts$target_idx), !anyNA(alts$sy_row))
+  reach_stats <- NULL                                  # run 0a (2026-11-10): filled under REACH = capdist
+  ## distance = capital (2026-10-28): alternatives without a capital distance leave the assembled block, i.e. the IV set AND the stage-2 set at
+  ## once (a row carries both flags, so the two sets cannot be filtered differently). Their keys are kept (dist_dropped) so that the events
+  ## whose chosen target was among them are counted below and the usable-event count is reconciled against them, never bounded.
+  dist_dropped <- NULL; distance_stats <- NULL
+  if (DISTANCE == "capital") {
+    stopifnot("log_capdist" %in% names(alts))
+    n_rows_before <- nrow(alts)
+    dist_dropped <- alts |> filter(is.na(log_capdist)) |> select(ccode1, ccode2, year, sy_row, in_iv, in_s2)
+    stopifnot(all(is.finite(alts$log_capdist[!is.na(alts$log_capdist)])), all(alts$log_capdist[!is.na(alts$log_capdist)] >= 0))
+    if (nrow(dist_dropped) > 0) {
+      alts <- alts |> filter(!is.na(log_capdist))
+      stopifnot(nrow(alts) + nrow(dist_dropped) == n_rows_before, !anyNA(alts$log_capdist))
+      ## a state-year whose IV set empties is an error (the IV of stage 1 is undefined), not a drop; a stage-2 set that empties or shrinks to the
+      ## chosen target alone is caught by the existing check once ev exists
+      n_iv_after <- alts |> group_by(sy_row) |> summarise(n_iv = sum(in_iv), .groups = "drop")
+      lost_sy <- setdiff(seq_len(nrow(sy)), n_iv_after$sy_row[n_iv_after$n_iv > 0L])
+      if (length(lost_sy) > 0) stop(sprintf("distance = capital: %d state-years would lose every IV-set alternative (no capital distance for any of them): %s",
+                                            length(lost_sy), paste(sprintf("%d-%d", sy$ccode[lost_sy], sy$year[lost_sy]), collapse = " ")))
+    }
+    ## the IV-set sizes logged with the stage-2 sets below describe the block AFTER the drop (audit of ec9d8ae, P3 2)
+    n_iv_sy <- alts |> group_by(ccode1, year) |> summarise(n_iv = sum(in_iv), .groups = "drop")
+    stopifnot(all(n_iv_sy$n_iv > 0L), nrow(n_iv_sy) == nrow(sy))
+    logf("distance = capital: log_capdist (log1p km at t-1) enters Z after the dyadic controls, centred over the IV rows; %d of %d alternative rows have NO capital distance and are dropped from both sets (%d were in the IV set, %d in the stage-2 set) across %d state-years; %d rows remain",
+         nrow(dist_dropped), n_rows_before, sum(dist_dropped$in_iv), sum(dist_dropped$in_s2), n_distinct(dist_dropped$sy_row), nrow(alts))
+    if (CONTIGUITY == "none") logf("contiguity = none (2026-10-28): contig_land is NOT in Z (distance replaces contiguity); the rows, the NA-distance drop and the centring are those of the distance = capital cell")
+  } else stopifnot(is.null(dist_dropped))
+  ## target power changes (PI decision 2026-10-23): dM_j_h / dRpr_j_h are always in Z. The missing-target indicator
+  ## enters only when it is non-constant in THIS assembled cell (a constant column has no coefficient to estimate).
+  stopifnot(all(c("dM_j_h", "dRpr_j_h", "dch_j_missing") %in% names(alts)), all(alts$dch_j_missing %in% c(0L, 1L)),
+            all(alts$dM_j_h[alts$dch_j_missing == 1L] == 0), all(alts$dRpr_j_h[alts$dch_j_missing == 1L] == 0))
+  n_miss <- sum(alts$dch_j_missing); target_missing <- n_miss > 0 && n_miss < nrow(alts)
+  if (CHANGES == "winsor") {
+    ## the target change is the same state-year change as the initiator's (asserted by the build), so the SAME cut points apply;
+    ## the relational target change follows the PageRank table (dRpr_j_h) in both centralities, as in z_columns()
+    n_clip_Mj <- sum(alts$dM_j_h < winsor$M[1] | alts$dM_j_h > winsor$M[2]); n_clip_Rj <- sum(alts$dRpr_j_h < winsor$R[1] | alts$dRpr_j_h > winsor$R[2])
+    alts <- alts |> mutate(dM_j_h = pmin(pmax(dM_j_h, winsor$M[1]), winsor$M[2]), dRpr_j_h = pmin(pmax(dRpr_j_h, winsor$R[1]), winsor$R[2]))
+    stopifnot(all(alts$dM_j_h[alts$dch_j_missing == 1L] == 0), all(alts$dRpr_j_h[alts$dch_j_missing == 1L] == 0))
+    logf("changes = winsor: target values clipped before the Z centring: dM_j_h %d, dRpr_j_h %d of %d alternative rows", n_clip_Mj, n_clip_Rj, nrow(alts))
+  }
+  logf("target changes: %d of %d alternative rows have a target without a change value (set to 0); dch_j_missing %s Z (%s)",
+       n_miss, nrow(alts), if (target_missing) "enters" else "is NOT in",
+       if (target_missing) "non-constant in this cell" else "constant in this cell")
+  ## major = joint (2026-10-27): the dyad's number of major powers at t-1 (major_count = major1 + major2 from the build, COW majors lagged like
+  ## every dyadic control) as two 0/1 indicators with zero majors as the reference. Shares over the alternative rows are logged here; the
+  ## within-choice-set variation (the only source of identification next to b_j) and the event shares are checked below, once ev exists.
+  major_stats <- NULL
+  if (MAJOR == "joint") {
+    stopifnot("major_count" %in% names(alts), !anyNA(alts$major_count), all(alts$major_count %in% 0:2))
+    alts <- alts |> mutate(one_major = as.integer(major_count == 1L), both_major = as.integer(major_count == 2L))
+    stopifnot(all(alts$one_major + alts$both_major <= 1L), all((alts$one_major == 1L) == (alts$major_count == 1L)), all((alts$both_major == 1L) == (alts$major_count == 2L)))
+    sh_alt <- tabulate(alts$major_count + 1L, nbins = 3L) / nrow(alts)
+    logf("major = joint: alternative rows by the dyad's major-power count at t-1: 0 majors %.4f, 1 major (one_major) %.4f, 2 majors (both_major) %.4f of %d rows; the indicators enter Z uncentred (0/1 convention)",
+         sh_alt[1], sh_alt[2], sh_alt[3], nrow(alts))
+    major_stats <- list(share_alts = setNames(sh_alt, c("zero", "one", "both")))
+  }
+  ## interact = prefixed (2026-10-27): four products of the change columns, formed from the UNCENTRED scaled values exactly as they stand after
+  ## the winsor step (dM_i / dR_i of the row's state-year as in X, dM_j_h / dRpr_j_h of the target as in Z before its centring), then centred
+  ## over the IV rows with the other continuous Z columns below (Z_INTERACT is in Z_CENTRED)
+  if (INTERACT == "prefixed") {
+    stopifnot(!anyNA(alts$sy_row), all(alts$sy_row %in% seq_len(nrow(sy))))
+    dMi <- sy$dM_i[alts$sy_row]; dRi <- sy$dR_i[alts$sy_row]
+    stopifnot(all(is.finite(dMi)), all(is.finite(dRi)), all(is.finite(alts$dM_j_h)), all(is.finite(alts$dRpr_j_h)))
+    alts <- alts |> mutate(ix_dMj_dRj = dM_j_h * dRpr_j_h, ix_dMi_dMj = .env$dMi * dM_j_h, ix_dRi_dRj = .env$dRi * dRpr_j_h, ix_dMi_dRj = .env$dMi * dRpr_j_h)
+    stopifnot(all(is.finite(as.matrix(alts[, Z_INTERACT]))))
+    logf("interact = prefixed: four change products in Z, formed before the Z centring (%s): SD before centring ix_dMj_dRj %.4f, ix_dMi_dMj %.4f, ix_dRi_dRj %.4f, ix_dMi_dRj %.4f over %d rows; a target without a change value contributes 0 to every product",
+         if (CHANGES == "winsor") "winsorised changes" else "raw changes", sd(alts$ix_dMj_dRj), sd(alts$ix_dMi_dMj), sd(alts$ix_dRi_dRj), sd(alts$ix_dMi_dRj), nrow(alts))
+  }
+  if (CONVENTIONAL) {
+    ## the conventional comparison (2026-10-31): the fixed Z list (no target changes, no peace years, no dch_j_missing whether or not it varies in the cell)
+    stopifnot("alliance_def_off" %in% names(alts), !anyNA(alts$alliance_def_off), all(alts$alliance_def_off %in% c(0L, 1L)))
+    Z_cols <- Z_CONVENTIONAL
+    stopifnot(identical(Z_cols, Z_CONVENTIONAL), !any(CHANGE_COLUMNS %in% Z_cols), !any(PEACE_COLUMNS %in% Z_cols), !anyNA(as.matrix(alts[, Z_cols])))
+    logf("conventional comparison (2026-10-31): Z = %s (Pz = %d; no peace years; dch_j_missing is %s in this cell and NOT in Z)",
+         paste(Z_cols, collapse = ","), length(Z_cols), if (target_missing) "non-constant" else "constant")
+  } else if (DIRECTED) {
+    ## the directed comparison (PI-approved 2026-11-01): the target's own democracy / major-power status and its product with the initiator's,
+    ## from the build's dyad-year columns at t-1 (dem1 / dem2, major1 / major2: the coding behind joint_dem and major_count), 0/1, uncentred
+    stopifnot("alliance_def_off" %in% names(alts), !anyNA(alts$alliance_def_off), all(alts$alliance_def_off %in% c(0L, 1L)))
+    miss <- setdiff(c("dem1", "dem2", "major1", "major2", "joint_dem", "major_count", "one_major", "both_major"), names(alts))
+    if (length(miss)) stop(sprintf("directed comparison: the alternatives lack %s (dem1 / dem2 / major1 / major2 are written by 01_build_data.R section 6; one_major / both_major by MAJOR = joint)", paste(miss, collapse = ", ")))
+    for (cc in c("dem1", "dem2", "major1", "major2", "joint_dem")) if (anyNA(alts[[cc]]) || !all(alts[[cc]] %in% c(0L, 1L))) stop(sprintf("directed comparison: %s must be 0/1 without NA", cc))
+    alts <- alts |> mutate(tgt_dem = as.integer(dem2), tgt_dem_x_init_dem = as.integer(dem2 * dem1), tgt_major = as.integer(major2), tgt_major_x_init_major = as.integer(major2 * major1))
+    ## the initiator's status in the alternatives equals the panel's (same coding and timing as the W controls dem_tm1 / cowmaj_tm1), uncentred
+    stopifnot(!is.null(init_raw), nrow(init_raw) == nrow(sy), all(alts$sy_row %in% init_raw$sy_row))
+    if (!all(alts$dem1 == init_raw$dem_tm1_raw[alts$sy_row])) stop(sprintf("directed comparison: dem1 differs from the panel's dem_tm1 on %d alternative rows", sum(alts$dem1 != init_raw$dem_tm1_raw[alts$sy_row])))
+    if (!all(alts$major1 == init_raw$cowmaj_tm1_raw[alts$sy_row])) stop(sprintf("directed comparison: major1 differs from the panel's cowmaj_tm1 on %d alternative rows", sum(alts$major1 != init_raw$cowmaj_tm1_raw[alts$sy_row])))
+    ## the exact identities with the conventional columns, on every row
+    if (!all(alts$tgt_dem_x_init_dem == alts$joint_dem)) stop(sprintf("directed comparison: tgt_dem_x_init_dem != joint_dem on %d rows", sum(alts$tgt_dem_x_init_dem != alts$joint_dem)))
+    if (!all(alts$one_major == alts$tgt_major + alts$major1 - 2L * alts$tgt_major * alts$major1)) stop("directed comparison: one_major != tgt_major + init_major - 2 tgt_major init_major on some rows")
+    if (!all(alts$both_major == alts$tgt_major_x_init_major)) stop("directed comparison: both_major != tgt_major x init_major on some rows")
+    stopifnot(all(alts$major_count == alts$major1 + alts$major2))
+    if (INIT_SUB) {
+      ## run 0d: among major initiators the product equals tgt_major on every row, among minor initiators it is 0 on every row: not a separate column
+      stopifnot(if (SUBSAMPLE == "majinit") all(alts$major1 == 1L) && all(alts$tgt_major_x_init_major == alts$tgt_major) else all(alts$major1 == 0L) && all(alts$tgt_major_x_init_major == 0L))
+      logf("subsample = %s: tgt_major_x_init_major %s on all %d rows and is NOT in Z", SUBSAMPLE, if (SUBSAMPLE == "majinit") "equals tgt_major" else "is 0", nrow(alts))
+    }
+    if (REACH == "capdist") {
+      ## run 0a (2026-11-10): the distance functional form. c = log_capdist centred over the IV rows (the SAME constant the Z centring below subtracts
+      ## from log_capdist itself); log_capdist_sq = c^2 and log_capdist_x_init_M = c x the initiator's M_lvl (sy$M_lvl of the row's state-year: the
+      ## within-year centred, gap-scaled log CINC level exactly as it enters W). Forming both from the CENTRED distance keeps the square and the product
+      ## from being near-copies of the linear term (logged: their IV-row correlations with it); both are then centred over the IV rows like every
+      ## continuous Z column. No rescaling (no existing continuous Z column is rescaled). An initiator-only M_lvl cancels in the conditional logit; its
+      ## product with the distance does not.
+      stopifnot("log_capdist" %in% names(alts), !anyNA(alts$log_capdist), all(is.finite(sy$M_lvl)), !any(Z_REACH %in% names(alts)))
+      ivr <- alts$in_iv == 1L
+      cd_c <- alts$log_capdist - mean(alts$log_capdist[ivr]); m_i <- sy$M_lvl[alts$sy_row]
+      alts$log_capdist_sq <- cd_c^2; alts$log_capdist_x_init_M <- cd_c * m_i
+      reach_stats <- list(mean_sq = mean(alts$log_capdist_sq[ivr]), sd_sq = sd(alts$log_capdist_sq[ivr]), mean_x = mean(alts$log_capdist_x_init_M[ivr]), sd_x = sd(alts$log_capdist_x_init_M[ivr]),
+                          cor_lin_sq = cor(cd_c[ivr], alts$log_capdist_sq[ivr]), cor_lin_x = cor(cd_c[ivr], alts$log_capdist_x_init_M[ivr]), cor_sq_x = cor(alts$log_capdist_sq[ivr], alts$log_capdist_x_init_M[ivr]),
+                          cor_raw_lin_sq = cor(alts$log_capdist[ivr], alts$log_capdist[ivr]^2))
+      for (cc in Z_REACH) alts[[cc]] <- alts[[cc]] - mean(alts[[cc]][ivr])
+      stopifnot(all(is.finite(as.matrix(alts[, Z_REACH]))), all(abs(colMeans(as.matrix(alts[ivr, Z_REACH]))) < 1e-8), sd(alts$log_capdist_sq[ivr]) > 0, sd(alts$log_capdist_x_init_M[ivr]) > 0)
+      logf("reach = capdist (run 0a, 2026-11-10): Z gains %s, formed from log_capdist centred over the %d IV rows and the initiator's M_lvl, then centred over the IV rows: log_capdist_sq mean before centring %.4f, SD %.4f; log_capdist_x_init_M mean %.4f, SD %.4f; IV-row correlations: linear x square %.3f (the UNCENTRED square would be %.3f), linear x product %.3f, square x product %.3f",
+           paste(Z_REACH, collapse = ", "), sum(ivr), reach_stats$mean_sq, reach_stats$sd_sq, reach_stats$mean_x, reach_stats$sd_x, reach_stats$cor_lin_sq, reach_stats$cor_raw_lin_sq, reach_stats$cor_lin_x, reach_stats$cor_sq_x)
+    }
+    Z_cols <- Z_DIR                                    # = Z_DIRECTED with reach = none and no initiator subsample
+    stopifnot(identical(Z_cols, directed_z_cols(REACH, SUBSAMPLE)), length(Z_cols) == 9L - as.integer(INIT_SUB) + 2L * as.integer(REACH == "capdist"), (REACH != "none" || INIT_SUB) || identical(Z_cols, Z_DIRECTED), !any(CHANGE_COLUMNS %in% Z_cols), !any(PEACE_COLUMNS %in% Z_cols), !any(c("joint_dem", Z_MAJOR) %in% Z_cols),
+              !any(Z_DIRECTED_TGT %in% Z_CENTRED), !anyNA(as.matrix(alts[, Z_cols])))
+    for (cc in Z_DIRECTED_TGT) stopifnot(all(alts[[cc]] %in% c(0L, 1L)))
+    logf("directed comparison (2026-11-01): Z = %s (Pz = %d; no peace years; dch_j_missing is %s in this cell and NOT in Z); alternative rows with tgt_dem %.4f, tgt_dem_x_init_dem %.4f, tgt_major %.4f, tgt_major_x_init_major %.4f (uncentred 0/1); identities with joint_dem / one_major / both_major hold on all %d rows",
+         paste(Z_cols, collapse = ","), length(Z_cols), if (target_missing) "non-constant" else "constant",
+         mean(alts$tgt_dem), mean(alts$tgt_dem_x_init_dem), mean(alts$tgt_major), mean(alts$tgt_major_x_init_major), nrow(alts))
+  } else {
+    Z_cols <- z_columns(CONFLICT_HISTORY, DISTANCE, CONTIGUITY, TARGET_MISSING = target_missing, DY_PEACE_YEARS = DY_PEACE_YEARS, FULL_CONTROLS = FULL_CONTROLS,
+                        MAJOR = MAJOR, INTERACT = INTERACT)
+  }
+  stopifnot(all(Z_cols %in% names(alts)), !anyDuplicated(Z_cols))
+  ## centre the continuous Z columns (conflict history, distance, target changes). The centring constants are the means over
+  ## the stage-1 IV rows (in_iv = 1) ONLY (Codex re-check P2, 2026-10-24): the IV set is defined at January of t and does
+  ## not depend on year-t events, whereas the stage-2-only rows do. Centring over the whole union block let a stage-2-only
+  ## row move the means, which shifts every utility by a common constant: harmless in the stage-2 softmax but it enters
+  ## stage 1 through tau * IV. The same constant is subtracted from every row (IV and stage-2 alike), so stage-2
+  ## likelihoods are unchanged.
+  z_cent <- intersect(Z_cols, Z_CENTRED)
+  iv_rows <- alts$in_iv == 1L
+  stopifnot(any(iv_rows))
+  if (DISTANCE == "capital") {
+    ## the uncentred distance is kept for the descriptive statistics below (chosen targets against every stage-2 alternative) and its
+    ## overlap with land contiguity is logged here, over the IV rows the centring constant comes from
+    stopifnot("log_capdist" %in% z_cent, !anyNA(alts$log_capdist), all(is.finite(alts$log_capdist)))
+    raw_capdist <- alts$log_capdist
+    ## NA (no warning) when either column is constant over the IV rows (audit of ec9d8ae, P3 3; the toy cell's contiguity can be). Computed under
+    ## either contiguity value (the column stays in the alternatives file; under contiguity = none it describes what the distance replaces)
+    stopifnot("contig_land" %in% names(alts))
+    cor_contig <- if (sd(raw_capdist[iv_rows]) > 0 && sd(alts$contig_land[iv_rows]) > 0) cor(raw_capdist[iv_rows], alts$contig_land[iv_rows]) else NA_real_
+    logf("distance = capital: log_capdist over the %d IV rows: mean %.4f (the centring constant), SD %.4f, range [%.3f, %.3f]; cor(log_capdist, contig_land) = %.3f (%s)",
+         sum(iv_rows), mean(raw_capdist[iv_rows]), sd(raw_capdist[iv_rows]), min(raw_capdist[iv_rows]), max(raw_capdist[iv_rows]), cor_contig,
+         if (CONTIGUITY == "land") "contiguity stays in Z" else "contiguity = none: contig_land is NOT in Z")
+    distance_stats <- list(n_rows_dropped = nrow(dist_dropped), n_rows_dropped_iv = sum(dist_dropped$in_iv), n_rows_dropped_s2 = sum(dist_dropped$in_s2),
+                           n_sy_affected = n_distinct(dist_dropped$sy_row), n_events_dropped = NA_integer_,
+                           mean_iv = mean(raw_capdist[iv_rows]), sd_iv = sd(raw_capdist[iv_rows]), cor_contig_iv = cor_contig,
+                           mean_chosen = NA_real_, mean_s2 = NA_real_)
+  }
+  for (cc in z_cent) alts[[cc]] <- alts[[cc]] - mean(alts[[cc]][iv_rows])
+  stopifnot(all(abs(colMeans(as.matrix(alts[iv_rows, z_cent, drop = FALSE]))) < 1e-8))
+  logf("Z centring: %d continuous Z columns centred over the %d stage-1 IV rows (of %d assembled rows)", length(z_cent), sum(iv_rows), nrow(alts))
+  ## dyadic lagged DV (PI decision 2026-10-24): 0/1, not centred, must vary within the assembled cell when it is in Z (both control sets since 2026-10-27)
+  stopifnot(!anyNA(alts$dy_mid_tm1), all(alts$dy_mid_tm1 %in% c(0L, 1L)))
+  if ("dy_mid_tm1" %in% Z_cols && length(unique(alts$dy_mid_tm1)) < 2)
+    stop(sprintf("dy_mid_tm1 is constant (%d) over the %d assembled alternative rows of this cell (sample %s, lag %d, variant %s); it cannot enter Z",
+                 alts$dy_mid_tm1[1], nrow(alts), SAMPLE, LAG, VARIANT))
+  logf("choice-set flags: %d alternative rows; in the stage-1 IV set %d, in the stage-2 set %d, in both %d; state-years whose two sets differ %d of %d",
+       nrow(alts), sum(alts$in_iv), sum(alts$in_s2), sum(alts$in_iv == 1L & alts$in_s2 == 1L),
+       nrow(alts |> group_by(sy_row) |> summarise(d = any(in_iv != in_s2), .groups = "drop") |> filter(d)), nrow(sy))
+  ## ---- D3 diagnostic: the IV at a null point against the system size -----------------------------------------------------------
+  ## IV_null[n] = log sum over the IV rows of exp(-1/2 (dM^2 + dR^2)) (mu = 0, Sigma = I, b = gamma = 0, no u'v): it grows with the
+  ## number of alternatives, so without log_n_system_tm1 in W the trend in the system's size entered stage 1 through tau * IV.
+  ## Logged: cor(IV_null, log_n_system_tm1), and the share of IV_null's variance explained by W BEFORE (W without log_n_system_tm1)
+  ## and AFTER (with it) adding the column.
+  iv_null <- as.numeric(rowsum(exp(-0.5 * (alts$dM^2 + alts$dR^2)) * (alts$in_iv == 1L), alts$sy_row, reorder = TRUE))
+  stopifnot(length(iv_null) == nrow(sy), all(iv_null > 0)); iv_null <- log(iv_null)
+  r2 <- function(cols) if (length(cols)) summary(lm(iv_null ~ as.matrix(sy[, cols, drop = FALSE])))$r.squared else 0
+  w_before <- setdiff(W_cols, "log_n_system_tm1"); w_after <- W_cols          # = c(dM_i, dR_i, ctrl_w) outside the conventional comparison
+  logf("IV at a null point (D3): cor(IV_null, log_n_system_tm1) = %.3f; R^2 of IV_null on W without / with log_n_system_tm1 = %.3f / %.3f (log_n_system_tm1 %s W)",
+       cor(iv_null, sy$log_n_system_tm1), r2(w_before), r2(w_after), if ("log_n_system_tm1" %in% ctrl_w) "in" else "NOT in")
+
+  ## ---- events in this sample -------------------------------------------------------------------------
+  ## The sample flag in_<sample> already excludes escalations (events whose pair was fighting in another dispute at t);
+  ## asserted here, not assumed. --drop_ww2 (appendix) uses the build's in_<sample>_noww2 flag (review P2-3): the sample flag
+  ## of the non-WWII disputes of the (i, j, t) alone, so an event collapsed from a WWII and a non-WWII dispute stays when the
+  ## non-WWII dispute qualifies (the old rule in_<sample> & !is_ww2 dropped it). Their stage-1 initiations go with them.
+  ev_all <- events |> filter(.data[[ev_flag]])
+  stopifnot(!any(ev_all$escalation))
+  n_ww2 <- sum(ev_all$is_ww2)
+  ## D8 weight column of the sample; every in-sample event carries a weight in (0, 1] from the build (the pairs rule below may rescale it)
+  w_col <- paste0("w_", SAMPLE)
+  stopifnot(!anyNA(ev_all[[w_col]]), all(ev_all[[w_col]] > 0), all(ev_all[[w_col]] <= 1))
+  if (DROP_WW2) {
+    ev_flag_noww2 <- paste0(ev_flag, "_noww2")
+    n_before <- nrow(ev_all); ev_before <- ev_all
+    ev_all <- events |> filter(.data[[ev_flag_noww2]])
+    stopifnot(!any(ev_all$escalation), all(events[[ev_flag]][events[[ev_flag_noww2]]]), !any(ev_all$is_ww2 & ev_all$n_disputes == 1L))
+    logf("--drop_ww2: sample %s %d -> %d events using %s (%d events flagged is_ww2 removed; %d events collapsed from a WWII and a non-WWII dispute kept because a non-WWII dispute qualifies, whereas in_%s & !is_ww2 would keep %d events); WWII disputes %s",
+         SAMPLE, n_before, nrow(ev_all), ev_flag_noww2, n_before - nrow(ev_all), sum(ev_all$is_ww2), SAMPLE, sum(events[[ev_flag]] & !events$is_ww2),
+         paste(sort(unique(events$dispnum[events$is_ww2])), collapse = ","))
+    ## D8 group integrity (2026-10-26): whole disputes leave, so every (initiator, dispute, year) group is untouched or dropped whole; a split
+    ## among single-dispute members stops the run; a split through a collapsed key kept by its non-WWII dispute is logged, NOT rescaled
+    ww <- d8_assert_groups_whole(ev_before, ev_all, w_col, "--ww2=drop")
+    logf("--ww2=drop D8 groups (initiator, dispute, year) of sample %s: %d kept whole, %d dropped whole, %d split through a collapsed key kept by its non-WWII dispute%s; weights %.1f -> %.1f, not rescaled",
+         SAMPLE, ww$n_whole_kept, ww$n_whole_dropped, ww$n_split_collapsed, if (ww$n_split_collapsed > 0) " (WARNING: these groups no longer sum to one decision)" else "",
+         sum(ev_before[[w_col]]), sum(ev_all[[w_col]]))
+  } else logf("WWII events in sample %s: %d of %d (kept; --drop_ww2=TRUE removes them)", SAMPLE, n_ww2, nrow(ev_all))
+  ## stage-1 outcome recounted from the kept events (independent path through the escalation and WWII columns). Without
+  ## --drop_ww2 it must equal the panel's y1_<sample>; with it the recount IS y1, so WWII-only state-years get y1 = 0.
+  y1_re <- ev_all |> distinct(ccode = initiator, year) |> mutate(.y1 = 1L)
+  sy <- sy |> left_join(y1_re, by = c("ccode", "year")) |> mutate(.y1 = coalesce(.y1, 0L))
+  if (!DROP_WW2) {
+    if (!all(sy$y1 == sy$.y1)) stop(sprintf("y1_%s disagrees with the recount from non-escalation events on %d state-years", SAMPLE, sum(sy$y1 != sy$.y1)))
+  } else {
+    logf("--drop_ww2: stage-1 initiations %d -> %d (%d state-years whose only %s events were WWII now have y1 = 0)", sum(sy$y1), sum(sy$.y1), sum(sy$y1 == 1L & sy$.y1 == 0L), SAMPLE)
+    stopifnot(all(sy$.y1 <= sy$y1))
+    sy$y1 <- sy$.y1
+  }
+  sy <- sy |> select(-.y1)
+  ## pairs = originators | joiners: keep one group of event pairs and recompute y1 from the kept events (as --ww2=drop does), so the
+  ## stage-1 outcome and the stage-2 events describe the same group. is_joiner_pair is FALSE for a collapsed key with any originator
+  ## pair. Joiners-only is a stage-2 comparison (its stage 1 counts a state as initiating only when it joined).
+  ## D8 weights under pairs != all (PI decision 2026-10-26): the filter can keep part of an (initiator, dispute, year) group (a dispute
+  ## where the initiator faced originators AND joiners), so the kept members' weights are divided by their kept sum and every split group
+  ## sums to 1 again; groups kept whole keep the build's weights exactly. A collapsed key is grouped by its dispnum column (the smallest
+  ## of its disputes), the only group it can belong to after the collapse (d8_rescale_split_groups, helpers_data.R). Only this filter
+  ## rescales: ww2 = drop and coal_drop = top3 remove whole disputes (asserted); context keeps groups whole (asserted above / below); the
+  ## events that leave stage 2 through the choice set are logged, not rescaled. With weights = none every event has weight 1 anyway.
+  pairs_w <- list(n_groups = 0L, n_groups_split = 0L, n_groups_rescaled = 0L, n_events_rescaled = 0L, w_before = NA_real_, w_after = NA_real_)
+  if (PAIRS != "all") {
+    n_before <- nrow(ev_all); n_join_before <- sum(ev_all$is_joiner_pair); y1_before <- sum(sy$y1); ev_before <- ev_all
+    ev_all <- if (PAIRS == "originators") ev_all |> filter(!is_joiner_pair) else ev_all |> filter(is_joiner_pair)
+    if (nrow(ev_all) == 0) stop(sprintf("pairs = %s leaves no event in sample %s", PAIRS, SAMPLE))
+    y1_pairs <- ev_all |> distinct(ccode = initiator, year) |> mutate(.y1 = 1L)
+    sy <- sy |> left_join(y1_pairs, by = c("ccode", "year")) |> mutate(.y1 = coalesce(.y1, 0L))
+    stopifnot(all(sy$.y1 <= sy$y1), all(sy$.y1 %in% 0:1))
+    sy$y1 <- sy$.y1; sy <- sy |> select(-.y1)
+    logf("pairs = %s: sample %s %d -> %d events (%d originator pairs and %d joiner pairs before the filter); stage-1 initiations %d -> %d (%d state-years whose %s events were all in the other group now have y1 = 0)",
+         PAIRS, SAMPLE, n_before, nrow(ev_all), n_before - n_join_before, n_join_before, y1_before, sum(sy$y1), y1_before - sum(sy$y1), SAMPLE)
+    if (EVENT_WEIGHTS == "dispute") {
+      ev_all <- d8_rescale_split_groups(ev_before, ev_all, w_col)
+      g <- attr(ev_all, "groups")
+      pairs_w <- list(n_groups = nrow(g), n_groups_split = attr(ev_all, "n_groups_split"), n_groups_rescaled = attr(ev_all, "n_groups_rescaled"),
+                      n_events_rescaled = attr(ev_all, "n_events_rescaled"), w_before = attr(ev_all, "w_before"), w_after = attr(ev_all, "w_after"))
+      stopifnot(abs(pairs_w$w_before - sum(ev_before[[w_col]][ev_before$is_joiner_pair == (PAIRS == "joiners")])) < 1e-9, nrow(ev_all) == sum(ev_before$is_joiner_pair == (PAIRS == "joiners")))
+      logf("pairs = %s, D8 weights rescaled within the (initiator, dispute, year) groups the filter split (PI decision 2026-10-26; a collapsed key belongs to the group of its smallest dispute number): %d groups in sample %s, %d kept whole (build weights unchanged; %d of them do not sum to 1 through collapsed keys, as under pairs = all), %d dropped whole, %d split (%d holding a collapsed key); %d split groups rescaled to sum 1 (%d had a kept sum of 1 already), %d of %d kept events rescaled; sum of weights over the kept events %.1f -> %.1f",
+           PAIRS, pairs_w$n_groups, SAMPLE, sum(g$n_kept == g$n), sum(g$n_kept == g$n & abs(g$w_before - 1) > 1e-9), sum(g$n_kept == 0L),
+           pairs_w$n_groups_split, attr(ev_all, "n_split_with_collapsed"), pairs_w$n_groups_rescaled, pairs_w$n_groups_split - pairs_w$n_groups_rescaled,
+           pairs_w$n_events_rescaled, nrow(ev_all), pairs_w$w_before, pairs_w$w_after)
+      for (a in c("n_groups_split", "n_groups_rescaled", "n_events_rescaled", "n_events_in_split", "w_before", "w_after", "n_split_with_collapsed", "groups"))
+        attr(ev_all, a) <- NULL                                       # the helper's attributes do not travel on
+    } else logf("pairs = %s with weights = none: weight 1 on every event, no D8 rescale", PAIRS)
+  } else logf("pairs = all: %d events in sample %s (%d joiner pairs); D8 weights as built", nrow(ev_all), SAMPLE, sum(ev_all$is_joiner_pair))
+  ## context = bilateral | coalition (dual typology stage a, 2026-10-25): STAGE-2 events of one coalition context only. y1 is NOT recomputed
+  ## (stage 1 is unchanged by design; a state-year whose events are all in the other context keeps y1 = 1 and is counted as an orphan below).
+  coal_col <- c(inclusive = "coal_incl", strict = "coal_strict")[[COAL_TIES]]
+  context_top3 <- NULL; n_context_dropped <- 0L; n_split_groups <- 0L
+  if (CONTEXT != "all") {
+    n_before <- nrow(ev_all); w_before <- sum(ev_all[[w_col]])
+    keep <- if (CONTEXT == "coalition") ev_all[[coal_col]] else !ev_all[[coal_col]]
+    stopifnot(!anyNA(keep))
+    dropped <- ev_all[!keep, ]; ev_all <- ev_all[keep, ]
+    if (nrow(ev_all) == 0) stop(sprintf("context = %s (%s) leaves no event in sample %s", CONTEXT, COAL_TIES, SAMPLE))
+    n_context_dropped <- nrow(dropped)
+    ## D8 group integrity: every (initiator, dispute, year) group of the sample is kept or dropped WHOLE, except through a key the build
+    ## collapsed from a bilateral and a coalition dispute (ORed to coalition). Per group: the single-dispute members must agree, and any
+    ## member with the other status must be a collapsed key. Anything else is an error.
+    gs <- bind_rows(ev_all |> mutate(.kept = TRUE), dropped |> mutate(.kept = FALSE)) |> select(initiator, year, dispnums, n_disputes, .kept) |>
+      mutate(.disp = strsplit(dispnums, ";", fixed = TRUE)) |> tidyr::unnest(.disp) |> mutate(dispnum = as.integer(.disp)) |>
+      group_by(initiator, dispnum, year) |>
+      summarise(n = n(), n_kept = sum(.kept), n_single_kept = sum(.kept & n_disputes == 1L), n_single = sum(n_disputes == 1L),
+                n_coll_kept = sum(.kept & n_disputes > 1L), n_coll = sum(n_disputes > 1L), .groups = "drop")
+    split_g <- gs |> filter(n_kept > 0L, n_kept < n)
+    bad_single <- split_g |> filter(n_single_kept > 0L, n_single_kept < n_single)
+    if (nrow(bad_single) > 0) stop(sprintf("context = %s: %d (initiator, dispute, year) groups are split between kept and dropped events among their single-dispute members; the coalition flag is not constant within the group (rebuild the data)", CONTEXT, nrow(bad_single)))
+    ## in a split group the minority members are collapsed keys (given the check above, by construction), and the split can go ONE way
+    ## only, because the collapse ORs the flag over a key's disputes: a collapsed key in a COALITION group is itself coalition, so under
+    ## context = bilateral the single-dispute members of a split group must all be kept (bilateral group, collapsed keys dropped through
+    ## their other dispute) and under context = coalition they must all be dropped (bilateral group, collapsed keys kept through the other
+    ## dispute). The reverse split means a collapsed key's flag contradicts its own group's flag (audit fix 21, 2026-10-26: the former
+    ## bad_mix condition was unreachable after the single-member check; a group of collapsed keys only cannot be checked this way).
+    bad_dir <- split_g |> filter(n_single > 0L, if (CONTEXT == "bilateral") n_single_kept < n_single else n_single_kept > 0L)
+    if (nrow(bad_dir) > 0) stop(sprintf("context = %s: %d split groups have a collapsed key whose flag contradicts the group's own flag (a key collapsed from a %s dispute must carry the coalition flag of the OR); rebuild the data",
+                                        CONTEXT, nrow(bad_dir), "coalition"))
+    stopifnot(all(split_g$n_kept == split_g$n_single_kept + split_g$n_coll_kept))
+    n_split_groups <- nrow(split_g)
+    logf("context = %s (ties %s, column %s): sample %s %d -> %d stage-2 events (%d removed; weights %.1f -> %.1f); stage 1 unchanged (y1 stays %d initiations); (initiator, dispute, year) groups of the sample %d, kept whole %d, dropped whole %d, split through collapsed keys mixing a bilateral and a coalition dispute %d (their weights no longer sum to one decision; logged, not rescaled)",
+         CONTEXT, COAL_TIES, coal_col, SAMPLE, n_before, nrow(ev_all), n_before - nrow(ev_all), w_before, sum(ev_all[[w_col]]), sum(sy$y1),
+         nrow(gs), sum(gs$n_kept == gs$n), sum(gs$n_kept == 0L), n_split_groups)
+    if (COAL_DROP == "top3") {
+      ## the 3 disputes contributing the most coalition events of this sample (a collapsed key counts for each of its disputes)
+      cnt <- ev_all |> select(dispnums) |> mutate(.disp = strsplit(dispnums, ";", fixed = TRUE)) |> tidyr::unnest(.disp) |> count(dispnum = as.integer(.disp), name = "n_events") |> arrange(desc(n_events), dispnum)
+      if (nrow(cnt) < 4L) stop(sprintf("coal_drop = top3: only %d disputes contribute coalition events in sample %s", nrow(cnt), SAMPLE))
+      context_top3 <- cnt[1:3, ]
+      tie <- cnt$n_events[4] == cnt$n_events[3]
+      in_top3 <- vapply(strsplit(ev_all$dispnums, ";", fixed = TRUE), function(z) any(as.integer(z) %in% context_top3$dispnum), logical(1))
+      n_b <- nrow(ev_all); w_b <- sum(ev_all[[w_col]]); ev_b <- ev_all
+      ev_all <- ev_all[!in_top3, ]
+      if (nrow(ev_all) == 0) stop("coal_drop = top3 leaves no event")
+      n_context_dropped <- n_context_dropped + sum(in_top3)
+      logf("coal_drop = top3: the 3 disputes with the most coalition events in sample %s are %s; %d -> %d events (%d removed, weights %.1f -> %.1f)%s",
+           SAMPLE, paste(sprintf("%d (%d events)", context_top3$dispnum, context_top3$n_events), collapse = ", "), n_b, nrow(ev_all), sum(in_top3), w_b, sum(ev_all[[w_col]]),
+           if (tie) sprintf("; WARNING: dispute %d ties with the third place (%d events) and is kept (smallest dispute numbers win ties)", cnt$dispnum[4], cnt$n_events[4]) else "")
+      ## D8 group integrity (2026-10-26): whole disputes leave, so groups are untouched or dropped whole; the only possible split is a collapsed
+      ## key leaving through its OTHER (top-3) dispute while its own group stays (none on the current data); logged, NOT rescaled
+      cd <- d8_assert_groups_whole(ev_b, ev_all, w_col, "coal_drop = top3")
+      logf("coal_drop = top3 D8 groups (initiator, dispute, year) of the coalition events: %d kept whole, %d dropped whole, %d split through a collapsed key%s; weights not rescaled",
+           cd$n_whole_kept, cd$n_whole_dropped, cd$n_split_collapsed, if (cd$n_split_collapsed > 0) " (WARNING: these groups no longer sum to one decision)" else "")
+    }
+  } else logf("context = all: %d events in sample %s (coalition context: %d inclusive, %d strict)", nrow(ev_all), SAMPLE, sum(ev_all$coal_incl), sum(ev_all$coal_strict))
+  ## ---- run 0b-0d (2026-11-10): the event subsamples ------------------------------------------------------------------------------------------------
+  ## prtarget (0b): the events whose chosen target has a stage-2 row in the FULL set and is not politically relevant (the alternatives' polrel column,
+  ##   the rule behind alts_lag<h>_polrel.rds) leave stage 2: exactly the events variant = polrel loses, while the choice set stays the full set.
+  ##   Events without a stage-2 row (stage 1 only anyway) are untouched. Stage 1 is unchanged: y1 is NOT recomputed (orphans counted below).
+  ## bilateral (0c): only the events of bcj role bilateral (aprime group 0, alone originator; roles_aprime.rds) stay in stage 2. Stage 1 unchanged.
+  ## majinit / mininit (0d): the events of initiators outside the kept state-years leave (their state-years left stage 1 above).
+  ## D8 weights: NOT rescaled under any subsample (PI decision 2026-11-10 after the audit; the first build rescaled the split groups by the pairs rule).
+  ## The polrel cell does not rescale the groups its choice set splits, so 0b keeps the build's weights and matches that cell event for event. The
+  ## initiator subsamples keep or drop every group whole (a group has one initiator and one year; asserted).
+  subsample_stats <- NULL
+  if (SUBSAMPLE != "none") {
+    ev_before <- ev_all
+    ## bcj role of every event for the log (roles_aprime.rds when the cell reads it; the stage-b groups otherwise)
+    if (!is.null(roles_ap)) {
+      stopifnot(all(c("initiator", "target", "year", "grp_aprime") %in% names(roles_ap)), !anyNA(roles_ap$grp_aprime))
+      rj <- ev_before |> select(initiator, target, year) |> left_join(roles_ap |> select(initiator, target, year, grp_aprime), by = c("initiator", "target", "year"))
+      if (anyNA(rj$grp_aprime)) stop(sprintf("subsample = %s: %d sample events have no row in roles_aprime.rds (rebuild the data)", SUBSAMPLE, sum(is.na(rj$grp_aprime))))
+      if (any(rj$grp_aprime == 3L)) stop(sprintf("subsample = %s: %d sample events are aprime group 3 (target joined late); the bcj roles need the entry = later or dymid events", SUBSAMPLE, sum(rj$grp_aprime == 3L)))
+      sub_lab <- BCJ_GROUPS; sub_role <- ROLE_FROM_APRIME$bcj[rj$grp_aprime + 1L]; ap_before <- rj$grp_aprime
+    } else { sub_lab <- STAGE2_GROUPS; sub_role <- stage2_groups(ev_before, "coal_incl"); ap_before <- NULL }
+    stopifnot(length(sub_role) == nrow(ev_before), !anyNA(sub_role))
+    if (SUBSAMPLE == "prtarget") {
+      stopifnot("polrel" %in% names(alts), !anyNA(alts$polrel), all(alts$polrel %in% 0:1))
+      pj <- ev_before |> select(initiator, target, year) |> left_join(alts |> filter(in_s2 == 1L) |> select(initiator = ccode1, target = ccode2, year, polrel), by = c("initiator", "target", "year"))
+      stopifnot(nrow(pj) == nrow(ev_before))
+      keep <- is.na(pj$polrel) | pj$polrel == 1L          # NA: no stage-2 row in the full set (stage 1 only; untouched)
+    } else if (SUBSAMPLE == "bilateral") {
+      stopifnot(!is.null(ap_before))
+      keep <- ap_before == 0L
+    } else {
+      keep <- paste(ev_before$initiator, ev_before$year) %in% paste(sy$ccode, sy$year)
+    }
+    stopifnot(length(keep) == nrow(ev_before), !anyNA(keep))
+    ev_all <- ev_before[keep, ]
+    if (nrow(ev_all) == 0L) stop(sprintf("subsample = %s leaves no event in sample %s", SUBSAMPLE, SAMPLE))
+    ## NO D8 rescale (audit of d60da78, PI decision 2026-11-10): the kept events keep the build's weights, as the events of the polrel cell do, so
+    ## 0b = the polrel cell's events, roles AND weights on the full choice set. The groups the filter split are counted and logged.
+    w_before_kept <- sum(ev_all[[w_col]]); n_resc <- 0L
+    g <- d8_group_table(ev_before, ev_all, w_col); n_split <- sum(g$n_kept > 0L & g$n_kept < g$n)
+    if (INIT_SUB) stopifnot(n_split == 0L)                # a D8 group has one initiator-year: kept or dropped whole
+    stopifnot(identical(ev_all[[w_col]], ev_before[[w_col]][keep]))
+    nG <- length(sub_lab)
+    subsample_stats <- list(labels = sub_lab, n_before = as.integer(tabulate(sub_role + 1L, nbins = nG)), n_dropped = as.integer(tabulate(sub_role[!keep] + 1L, nbins = nG)),
+                            w_dropped = vapply(0:(nG - 1L), function(g) sum(ev_before[[w_col]][!keep & sub_role == g]), 0), n_kept = nrow(ev_all),
+                            w_kept_before = w_before_kept, w_kept_after = sum(ev_all[[w_col]]), n_events_rescaled = n_resc, n_groups_split = n_split)
+    logf("subsample = %s (run 0, 2026-11-10): sample %s %d -> %d events; dropped by role (events of the sample, D8 weights as built): %s; D8 groups split by the filter %d, %d kept events rescaled (NO rescale since 2026-11-10: the weights are the build's, as in the polrel cell; a split group no longer sums to 1); weights of the kept events %.1f -> %.1f; stage 1 %s",
+         SUBSAMPLE, SAMPLE, nrow(ev_before), nrow(ev_all), paste(sprintf("%s %d of %d (weights %.1f)", sub_lab, subsample_stats$n_dropped, subsample_stats$n_before, subsample_stats$w_dropped), collapse = "; "),
+         n_split, n_resc, w_before_kept, subsample_stats$w_kept_after, if (INIT_SUB) "restricted to the same state-years (above)" else sprintf("unchanged (y1 stays %d initiations)", sum(sy$y1)))
+  }
+  ## one chosen alternative per (i, j, t): same-year duplicates were collapsed by the build (PI decision 2026-10-24)
+  ## stage-2 event groups (dual typology stage b, 2026-10-27): bilateral / coalition leader / joiner from coal_incl (the spec's column; the
+  ## stage-a tie convention COAL_TIES applies to the context FILTER only) and the initiator's originator flag orig1 (joiner = orig1 == 0,
+  ## PI decision 2026-10-27; stage2_groups(): exactly one group per event, asserted); counted with their D8 weight sums here and again on
+  ## the usable events below. The pair-level is_joiner_pair (the `pairs` switch) is logged beside it for the comparison.
+  stopifnot("orig1" %in% names(ev_all), !anyNA(ev_all$orig1), all(ev_all$orig1 %in% c(0L, 1L)))
+  grp_all <- stage2_groups(ev_all, "coal_incl")
+  ev_keys <- ev_all |> transmute(ccode1 = initiator, ccode2 = target, year, dispnum, dispnums, target_has_pos_tm1, fighting_at_ref, dir_flipped,
+                                 w = if (EVENT_WEIGHTS == "dispute") .data[[w_col]] else 1, grp = grp_all)
+  assert_no_dup_keys(ev_keys, c("ccode1", "ccode2", "year"), sprintf("events of sample %s", SAMPLE))
+  GROUP_LABELS <- stage2_group_labels(ROLES)
+  ev_keys$ap_grp <- NA_integer_                                  # the aprime group of every event (2026-11-04: the joiner flag of joiner_set)
+  if (APRIME_BASED) {
+    ## the aprime groups (PI decision 2026-10-31): 0 alone originator, 1 co-originator (another COW originator on the initiator's own side of
+    ## the dispute, side-aware after the direction rule), 2 joiner (orig1 == 0), 3 target joined late (orig1 == 1, orig2 == 0; per event, takes
+    ## precedence). Built per source dispute by aprime_roles() in the build; a collapsed key carries its weight-group dispute's role (smallest
+    ## dispnum = the events' dispnum). Weights unchanged. Groups 0-2 are constant within every D8 group (dispnum, initiator, year), asserted.
+    stopifnot(all(c("initiator", "target", "year", "dispnum", "grp_aprime") %in% names(roles_ap)), !anyNA(roles_ap$grp_aprime), all(roles_ap$grp_aprime %in% 0:3))
+    assert_no_dup_keys(roles_ap, c("initiator", "target", "year"), "roles_aprime.rds")
+    jr <- ev_keys |> select(ccode1, ccode2, year, dispnum) |> left_join(roles_ap |> select(ccode1 = initiator, ccode2 = target, year, r_disp = dispnum, grp_aprime), by = c("ccode1", "ccode2", "year"))
+    if (anyNA(jr$grp_aprime)) stop(sprintf("roles = %s: %d sample events have no row in roles_aprime.rds (rebuild the data)", ROLES, sum(is.na(jr$grp_aprime))))
+    stopifnot(nrow(jr) == nrow(ev_keys), all(jr$r_disp == jr$dispnum))
+    xt <- table(stageb = factor(STAGE2_GROUPS[ev_keys$grp + 1L], levels = STAGE2_GROUPS), aprime = factor(APRIME_GROUPS[jr$grp_aprime + 1L], levels = APRIME_GROUPS))
+    logf("roles = %s: cross-tab of the %d sample events, stage-b 3 groups (rows) x aprime 4 groups (columns): %s", ROLES, nrow(ev_keys),
+         paste(sprintf("%s: %s", rownames(xt), apply(xt, 1, function(r) paste(sprintf("%s %d", colnames(xt), r), collapse = " / "))), collapse = "; "))
+    ev_keys$grp <- as.integer(jr$grp_aprime)
+    chk <- ev_keys |> filter(grp != 3L) |> group_by(dispnum, ccode1, year) |> summarise(n = n_distinct(grp), .groups = "drop")
+    if (any(chk$n != 1L)) stop(sprintf("roles = %s: groups 0-2 not constant within %d D8 groups (dispnum, initiator, year)", ROLES, sum(chk$n != 1L)))
+    ev_keys$ap_grp <- as.integer(jr$grp_aprime)
+    if (ROLES %in% c("bc", "bcj")) {
+      ## bc / bcj (PI decision 2026-11-04): from the aprime groups; no late-target event may exist (entry = later)
+      if (any(ev_keys$ap_grp == 3L)) stop(sprintf("roles = %s: %d sample events are aprime group 3 (target joined late); bc / bcj are defined on the entry = later events only", ROLES, sum(ev_keys$ap_grp == 3L)))
+      ev_keys$grp <- ROLE_FROM_APRIME[[ROLES]][ev_keys$ap_grp + 1L]
+      stopifnot(!anyNA(ev_keys$grp), all((ev_keys$grp == 0L) == (ev_keys$ap_grp == 0L)),
+                if (ROLES == "bc") all((ev_keys$grp == 1L) == (ev_keys$ap_grp %in% 1:2)) else all(ev_keys$grp == ev_keys$ap_grp))
+      xr <- table(aprime = factor(APRIME_GROUPS[ev_keys$ap_grp + 1L], levels = APRIME_GROUPS), roles = factor(GROUP_LABELS[ev_keys$grp + 1L], levels = GROUP_LABELS))
+      logf("roles = %s: cross-tab of the %d sample events, aprime 4 groups (rows) x %s %d groups (columns): %s", ROLES, nrow(ev_keys), ROLES, length(GROUP_LABELS),
+           paste(sprintf("%s: %s", rownames(xr), apply(xr, 1, function(r) paste(sprintf("%s %d", colnames(xr), r), collapse = " / "))), collapse = "; "))
+    }
+  }
+  G_GRP <- length(GROUP_LABELS)       # the number of stage-2 groups (2026-10-31: G is data in the M1c programs; 3 stage-b groups, 4 under roles = aprime)
+  stopifnot(G_GRP >= 2L, all(ev_keys$grp %in% 0:(G_GRP - 1L)), sum(vapply(0:(G_GRP - 1L), function(g) sum(ev_keys$grp == g), 1L)) == nrow(ev_keys))
+  if (ROLES == "stageb") logf("stage-2 event groups (stage b; coalition column %s, joiner = the initiator's orig1 == 0) over the %d sample events: bilateral %d (weights %.1f), coalition leader %d (%.1f), joiner %d (%.1f); pair-level joiner pairs (is_joiner_pair, the `pairs` switch) %d, of which the initiator is an originator (orig1 = 1, target a joiner; bilateral or leader here) %d",
+       "coal_incl", nrow(ev_keys), sum(ev_keys$grp == 0L), sum(ev_keys$w[ev_keys$grp == 0L]), sum(ev_keys$grp == 1L), sum(ev_keys$w[ev_keys$grp == 1L]), sum(ev_keys$grp == 2L), sum(ev_keys$w[ev_keys$grp == 2L]),
+       sum(ev_all$is_joiner_pair), sum(ev_all$is_joiner_pair & ev_all$orig1 == 1L))
+  else logf("stage-2 event groups (roles = %s) over the %d sample events: %s", ROLES, nrow(ev_keys),
+            paste(sprintf("%d %s %d (weights %.1f)", 0:(G_GRP - 1L), GROUP_LABELS, vapply(0:(G_GRP - 1L), function(g) sum(ev_keys$grp == g), 1L), vapply(0:(G_GRP - 1L), function(g) sum(ev_keys$w[ev_keys$grp == g]), 0)), collapse = "; "))
+  stopifnot(all(is.finite(ev_keys$w)), all(ev_keys$w > 0), all(ev_keys$w <= 1))
+  logf("direction (D1): %d of %d events in sample %s have the reversed direction (COW war initiator)", sum(ev_keys$dir_flipped), nrow(ev_keys), SAMPLE)
+  ## an event whose pair was already fighting at the state-year's reference date (its earlier dispute ended before the
+  ## event) has no STAGE-2 row by construction and enters stage 1 only; its (i, j, t) may keep an IV-only row (in_s2 = 0)
+  far_keys <- ev_keys |> filter(fighting_at_ref)
+  if (nrow(far_keys |> semi_join(alts |> filter(in_s2 == 1L), by = c("ccode1", "ccode2", "year"))) > 0) stop("fighting_at_ref events have stage-2 rows (in_s2 = 1); rebuild the data")
+  logf("events in sample %s flagged fighting_at_ref (pair already fighting at the reference date; stage 1 only): %d of %d (%d keep an IV-only row)", SAMPLE, nrow(far_keys), nrow(ev_keys),
+       nrow(far_keys |> semi_join(alts, by = c("ccode1", "ccode2", "year"))))
+  ## the chosen alternative must be a STAGE-2 row of the state-year's block (alt_row indexes the full block)
+  ev <- ev_keys |> inner_join(sy_key, by = c("ccode1", "year")) |>
+    inner_join(alts |> mutate(alt_row = row_number()) |> filter(in_s2 == 1L) |> select(ccode1, ccode2, year, alt_row, dy_mid_tm1), by = c("ccode1", "ccode2", "year"))
+  stopifnot(all(ev$grp %in% 0:(G_GRP - 1L)))
+  ## ---- variant = mid3 (2026-11-10): event-level choice sets = the MID-history stage-2 rows of the state-year plus the event's OWN chosen target --------
+  ## The chosen target is always in its set. Recorded per event: whether the chosen target itself has MID history. An event whose set holds only the
+  ## chosen target (no other history alternative) has log-probability 0 whatever the parameters and is DROPPED from stage 2 (counted by role; D8
+  ## weights of its group not rescaled, the convention for events that leave through the choice set); its state-year stays in stage 1 with y1 = 1.
+  ev_sets_mid3 <- NULL
+  if (VARIANT == "mid3") {
+    lost_sy <- ev_keys |> semi_join(mid3_sy_dropped, by = c("ccode1", "year")) |> filter(target_has_pos_tm1, !fighting_at_ref)
+    n_hist_sy <- as.integer(rowsum(as.integer(alts$in_s2 == 1L & alts$mid3_hist == 1L), alts$sy_row, reorder = TRUE)[, 1])
+    stopifnot(length(n_hist_sy) == nrow(sy), all(alts$in_s2[ev$alt_row] == 1L), all(alts$mid3_chosen[ev$alt_row] == 1L))
+    ev$chosen_hist <- alts$mid3_hist[ev$alt_row]
+    ev$set_n <- n_hist_sy[ev$sy_row] + 1L - ev$chosen_hist
+    stopifnot(all(ev$set_n >= 1L))
+    by_role <- function(f) vapply(0:(G_GRP - 1L), function(g) f(ev[ev$grp == g, , drop = FALSE]), numeric(1))
+    mid3_stats$by_role <- data.frame(group = GROUP_LABELS, n_lost_with_sy = vapply(0:(G_GRP - 1L), function(g) sum(lost_sy$grp == g), 1L), n_events = by_role(nrow),
+                                     share_chosen_hist = by_role(function(d) mean(d$chosen_hist)), set_median = by_role(function(d) stats::median(d$set_n)),
+                                     share_set1 = by_role(function(d) mean(d$set_n == 1L)), n_set1 = by_role(function(d) sum(d$set_n == 1L)), w_set1 = by_role(function(d) sum(d$w[d$set_n == 1L])), stringsAsFactors = FALSE)
+    mid3_stats$n_events <- nrow(ev); mid3_stats$share_chosen_hist <- mean(ev$chosen_hist); mid3_stats$set_median <- stats::median(ev$set_n); mid3_stats$share_set1 <- mean(ev$set_n == 1L)
+    mid3_stats$n_lost_with_sy <- nrow(lost_sy)
+    logf("variant = mid3: %d expected stage-2 events of sample %s leave with the %d state-years that have no MID-history IV alternative (by role: %s); of the %d remaining events the chosen target has MID history for %.4f; event set size (history rows + the chosen target) median %.0f, share of size 1 %.4f; by role (events, share chosen with history, median set size, share size 1): %s",
+         nrow(lost_sy), SAMPLE, mid3_stats$n_sy_dropped, paste(sprintf("%s %d", GROUP_LABELS, mid3_stats$by_role$n_lost_with_sy), collapse = ", "), nrow(ev), mid3_stats$share_chosen_hist, mid3_stats$set_median, mid3_stats$share_set1,
+         paste(sprintf("%s %d / %.4f / %.0f / %.4f", GROUP_LABELS, mid3_stats$by_role$n_events, mid3_stats$by_role$share_chosen_hist, mid3_stats$by_role$set_median, mid3_stats$by_role$share_set1), collapse = "; "))
+    set1 <- ev$set_n == 1L
+    logf("variant = mid3: %d events whose set holds only the chosen target are dropped from stage 2 (weights %.1f; by role: %s); their state-years stay in stage 1 with y1 = 1; D8 weights not rescaled",
+         sum(set1), sum(ev$w[set1]), paste(sprintf("%s %d (weights %.1f)", GROUP_LABELS, mid3_stats$by_role$n_set1, mid3_stats$by_role$w_set1), collapse = ", "))
+    mid3_stats$n_set1 <- sum(set1)
+    ev <- ev[!set1, ]
+    if (nrow(ev) == 0L) stop("variant = mid3 leaves no stage-2 event with a second alternative")
+    hist_rows <- data.frame(sy_row = alts$sy_row, alt_row = seq_len(nrow(alts)))[alts$in_s2 == 1L & alts$mid3_hist == 1L, ]
+    ev_sets_mid3 <- bind_rows(data.frame(ev_idx = seq_len(nrow(ev)), sy_row = ev$sy_row) |> inner_join(hist_rows, by = "sy_row", relationship = "many-to-many") |> select(ev_idx, alt_row),
+                              data.frame(ev_idx = seq_len(nrow(ev)), alt_row = ev$alt_row)) |> distinct() |> arrange(ev_idx, alt_row)
+    n_set <- tabulate(ev_sets_mid3$ev_idx, nbins = nrow(ev))
+    ## every event: its chosen target is in its set, the set has a second alternative, every allowed row is a stage-2 row of its own state-year, and
+    ## every allowed row other than the chosen one has MID history
+    stopifnot(identical(n_set, as.integer(ev$set_n)), all(n_set >= 2L), all(alts$in_s2[ev_sets_mid3$alt_row] == 1L), all(alts$sy_row[ev_sets_mid3$alt_row] == ev$sy_row[ev_sets_mid3$ev_idx]),
+              nrow(ev |> mutate(ev_idx = row_number()) |> anti_join(ev_sets_mid3, by = c("ev_idx", "alt_row"))) == 0L,
+              all(alts$mid3_hist[ev_sets_mid3$alt_row] == 1L | ev_sets_mid3$alt_row == ev$alt_row[ev_sets_mid3$ev_idx]))
+    mid3_stats$n_usable <- nrow(ev); mid3_stats$n_ev_alt <- nrow(ev_sets_mid3)
+    mid3_stats$ev <- ev |> transmute(ccode1, ccode2, year, grp, chosen_hist, set_n)
+    ev$chosen_hist <- NULL; ev$set_n <- NULL
+  }
+  group_table <- data.frame(group = GROUP_LABELS, grp = 0:(G_GRP - 1L),
+                            n_sample = as.integer(tabulate(ev_keys$grp + 1L, nbins = G_GRP)), w_sample = vapply(0:(G_GRP - 1L), function(g) sum(ev_keys$w[ev_keys$grp == g]), numeric(1)),
+                            n_usable = as.integer(tabulate(ev$grp + 1L, nbins = G_GRP)), w_usable = vapply(0:(G_GRP - 1L), function(g) sum(ev$w[ev$grp == g]), numeric(1)),   # (rowsum() would drop an empty group)
+                            n_states = vapply(0:(G_GRP - 1L), function(g) n_distinct(ev$ccode1[ev$grp == g]), 1L), stringsAsFactors = FALSE)
+  stopifnot(nrow(group_table) == G_GRP)
+  if (APRIME_BASED) {
+    ## stage 1 is unchanged in this round: count the initiating state-years whose usable stage-2 events are all target-joined-late (group 3)
+    only3 <- ev |> group_by(sy_row) |> summarise(all3 = all(ap_grp == 3L), .groups = "drop")
+    logf("roles = %s: initiating state-years with usable stage-2 events %d, of which only group-3 (target joined late) events %d (y1 unchanged)", ROLES, nrow(only3), sum(only3$all3))
+  }
+  stopifnot(sum(group_table$n_usable) == nrow(ev), sum(group_table$n_sample) == nrow(ev_keys), abs(sum(group_table$w_usable) - sum(ev$w)) < 1e-9)
+  logf("stage-2 event groups over the %d usable events (sample %s; events, weight sum, distinct initiating states): %s", nrow(ev), SAMPLE,
+       paste(sprintf("%d %s %d (%.1f, %d)", group_table$grp, group_table$group, group_table$n_usable, group_table$w_usable, group_table$n_states), collapse = "; "))
+  logf("events in sample %s: %d (from %d dispute pairs); usable (initiator in panel AND target in the stage-2 choice set): %d", SAMPLE, nrow(ev_keys),
+       sum(lengths(strsplit(ev_keys$dispnums, ";", fixed = TRUE))), nrow(ev))
+  stopifnot(nrow(ev) > 0, all(sy$y1[ev$sy_row] == 1L), all(alts$in_s2[ev$alt_row] == 1L), all(alts$sy_row[ev$alt_row] == ev$sy_row))
+  assert_no_dup_keys(ev, c("sy_row", "alt_row"), "events (one chosen alternative per state-year and target)")
+  ## every event whose chosen alternative can exist (initiator in sy, target with positions at t-1 and in the system at t,
+  ## pair not fighting at the reference date) has it in its stage-2 set; in the "all" variant this is exact (with distance = capital,
+  ## exact after subtracting the counted events whose target has no distance), in polrel a lower bound
+  expected <- ev_keys |> semi_join(sy_key, by = c("ccode1", "year")) |> filter(target_has_pos_tm1, !fighting_at_ref)
+  ## distance = capital: the expected events whose chosen target left the stage-2 set for lack of a distance are counted (dist_dropped holds the
+  ## dropped rows' keys with their flags), asserted absent from ev, and subtracted from the expectation, so the count is reconciled exactly
+  n_ev_dist <- 0L
+  if (DISTANCE == "capital") {
+    ev_dist <- expected |> semi_join(dist_dropped |> filter(in_s2 == 1L), by = c("ccode1", "ccode2", "year"))
+    n_ev_dist <- nrow(ev_dist)
+    stopifnot(nrow(ev_dist |> semi_join(ev, by = c("ccode1", "ccode2", "year"))) == 0L)        # none of them survived into ev
+    ## an expected event whose key is among the dropped rows but flagged in_s2 = 0 cannot exist (its stage-2 row would be the dropped one)
+    stopifnot(nrow(expected |> semi_join(dist_dropped |> filter(in_s2 == 0L), by = c("ccode1", "ccode2", "year"))) == 0L)
+    distance_stats$n_events_dropped <- n_ev_dist
+    logf("distance = capital: %d of the %d expected stage-2 events of sample %s have a chosen target without a capital distance and leave stage 2 (counted; their state-years keep y1 = 1 as orphans; D8 weights of their groups not rescaled)%s",
+         n_ev_dist, nrow(expected), SAMPLE, if (n_ev_dist > 0) sprintf(": %s", paste(sprintf("%d->%d %d", ev_dist$ccode1, ev_dist$ccode2, ev_dist$year), collapse = ", ")) else "")
+  }
+  if (VARIANT == "all") {
+    if (nrow(ev) != nrow(expected) - n_ev_dist) stop(sprintf("%d events with initiator in the panel, a target with positions at t-1 and a pair not fighting at the reference date are not in their stage-2 choice set (expected %d usable%s, got %d)",
+                                                             abs(nrow(expected) - n_ev_dist - nrow(ev)), nrow(expected) - n_ev_dist, if (DISTANCE == "capital") sprintf(" = %d minus %d without a capital distance", nrow(expected), n_ev_dist) else "", nrow(ev)))
+  } else {
+    stopifnot(nrow(ev) <= nrow(expected) - n_ev_dist)
+    ## polrel (2026-11-04 logging): an expected event whose chosen target is not politically relevant has no stage-2 row in this variant and leaves
+    ## stage 2 (the archived variant's rule, kept); its state-year keeps y1 = 1. Counted per stage-2 group (events and D8 weights).
+    pr_drop <- expected |> anti_join(ev, by = c("ccode1", "ccode2", "year"))
+    if (DISTANCE == "capital") pr_drop <- pr_drop |> anti_join(dist_dropped |> filter(in_s2 == 1L), by = c("ccode1", "ccode2", "year"))
+    stopifnot(nrow(pr_drop) == nrow(expected) - n_ev_dist - nrow(ev))
+    ## mid3 (2026-11-10): the chosen target is always kept, so the only expected events missing from stage 2 are the chosen-only sets dropped above
+    if (VARIANT == "mid3") stopifnot(nrow(pr_drop) == mid3_stats$n_set1)
+    if (VARIANT != "mid3") logf("variant %s: %d of %d expected stage-2 events of sample %s have a chosen target outside the choice set and leave stage 2 (weights %.1f of %.1f); by group: %s",
+         VARIANT, nrow(pr_drop), nrow(expected) - n_ev_dist, SAMPLE, sum(pr_drop$w), sum(expected$w),
+         paste(sprintf("%s %d of %d (weights %.1f of %.1f)", GROUP_LABELS, vapply(0:(G_GRP - 1L), function(g) sum(pr_drop$grp == g), 1L), vapply(0:(G_GRP - 1L), function(g) sum(expected$grp == g), 1L),
+                       vapply(0:(G_GRP - 1L), function(g) sum(pr_drop$w[pr_drop$grp == g]), 0), vapply(0:(G_GRP - 1L), function(g) sum(expected$w[expected$grp == g]), 0)), collapse = "; "))
+  }
+  stopifnot(nrow(ev_keys |> semi_join(sy_key, by = c("ccode1", "year")) |> filter(!target_has_pos_tm1) |> semi_join(alts, by = c("ccode1", "ccode2", "year"))) == 0)
+  ## no initiating state-year with a usable event may have an empty or chosen-only stage-2 set (review coverage gap); the
+  ## empty-IV-set check is above, so a state-year here always has >= 1 IV row as well
+  n_s2_sy <- alts |> group_by(sy_row) |> summarise(n_s2 = sum(in_s2), .groups = "drop")
+  s2_small <- n_s2_sy |> filter(sy_row %in% ev$sy_row, n_s2 < 2L)
+  if (nrow(s2_small) > 0) stop(sprintf("%d initiating state-years have a stage-2 set that is empty or holds only the chosen target (sample %s, lag %d, variant %s)", nrow(s2_small), SAMPLE, LAG, VARIANT))
+  logf("stage-2 sets of the %d initiating state-years with a usable event: size min %d, median %d; IV sets of all %d state-years: size min %d, median %d; empty IV sets 0, chosen-only stage-2 sets 0",
+       n_distinct(ev$sy_row), min(n_s2_sy$n_s2[n_s2_sy$sy_row %in% ev$sy_row]), as.integer(median(n_s2_sy$n_s2[n_s2_sy$sy_row %in% ev$sy_row])),
+       nrow(sy), min(n_iv_sy$n_iv), as.integer(median(n_iv_sy$n_iv)))
+  logf("dy_mid_tm1: %d of %d alternative rows = 1; chosen events with dy_mid_tm1 = 1: %d of %d", sum(alts$dy_mid_tm1), nrow(alts), sum(ev$dy_mid_tm1), nrow(ev))
+  ## distance = capital: the uncentred distance of the chosen targets against every stage-2 alternative (alt_row indexes the assembled block)
+  if (DISTANCE == "capital") {
+    stopifnot(length(raw_capdist) == nrow(alts), all(ev$alt_row %in% seq_len(nrow(alts))))
+    distance_stats$mean_chosen <- mean(raw_capdist[ev$alt_row]); distance_stats$mean_s2 <- mean(raw_capdist[alts$in_s2 == 1L])
+    logf("distance = capital: mean log_capdist (uncentred) of the %d chosen targets %.4f (km ~ %.0f) against %.4f (km ~ %.0f) over the %d stage-2 alternatives",
+         nrow(ev), distance_stats$mean_chosen, expm1(distance_stats$mean_chosen), distance_stats$mean_s2, expm1(distance_stats$mean_s2), sum(alts$in_s2 == 1L))
+  }
+  ## major = joint: the event shares per category and the within-choice-set variation of each indicator. one_major / both_major are identified
+  ## only by variation INSIDE a choice set (b_j absorbs anything constant per target; a constant per state-year drops from the softmax), so
+  ## each must vary within some IV set (it enters the IV of stage 1) and within some stage-2 set of an initiating state-year with a usable
+  ## event (the sets the stage-2 likelihood runs over); otherwise the run stops. For a major initiator one_major marks the non-major targets
+  ## and both_major the major ones; for a non-major initiator one_major marks the major targets and both_major is 0 throughout its set.
+  if (MAJOR == "joint") {
+    mc_ev <- alts$major_count[ev$alt_row]
+    sh_ev <- tabulate(mc_ev + 1L, nbins = 3L) / nrow(ev)
+    var_in <- function(rows) {
+      g <- alts[rows, c("sy_row", "one_major", "both_major")] |> group_by(sy_row) |>
+        summarise(v1 = n_distinct(one_major) > 1L, v2 = n_distinct(both_major) > 1L, .groups = "drop")
+      c(n_sets = nrow(g), one_major = sum(g$v1), both_major = sum(g$v2))
+    }
+    v_iv <- var_in(alts$in_iv == 1L)
+    v_s2 <- var_in(alts$in_s2 == 1L & alts$sy_row %in% ev$sy_row)
+    logf("major = joint: stage-2 events by the dyad's major-power count: 0 majors %.4f (%d), 1 major %.4f (%d), 2 majors %.4f (%d) of %d usable events",
+         sh_ev[1], sum(mc_ev == 0L), sh_ev[2], sum(mc_ev == 1L), sh_ev[3], sum(mc_ev == 2L), nrow(ev))
+    logf("major = joint: within-choice-set variation: IV sets (all %d state-years) with variation in one_major %d, in both_major %d; stage-2 sets of the %d initiating state-years with a usable event: one_major %d, both_major %d (both_major varies only in a major initiator's set)",
+         v_iv[["n_sets"]], v_iv[["one_major"]], v_iv[["both_major"]], v_s2[["n_sets"]], v_s2[["one_major"]], v_s2[["both_major"]])
+    ## run 0d: under an initiator subsample the dyad dummies are not in Z (directed) and both_major cannot vary among minor initiators: no stop
+    if (!INIT_SUB && (v_iv[["one_major"]] == 0L || v_iv[["both_major"]] == 0L || v_s2[["one_major"]] == 0L || v_s2[["both_major"]] == 0L))
+      stop(sprintf("major = joint: an indicator does not vary within any choice set (IV sets: one_major %d, both_major %d; event-bearing stage-2 sets: one_major %d, both_major %d); it is not identified in this cell",
+                   v_iv[["one_major"]], v_iv[["both_major"]], v_s2[["one_major"]], v_s2[["both_major"]]))
+    major_stats$share_events <- setNames(sh_ev, c("zero", "one", "both"))
+    major_stats$n_events <- setNames(c(sum(mc_ev == 0L), sum(mc_ev == 1L), sum(mc_ev == 2L)), c("zero", "one", "both"))
+    major_stats$var_iv_sets <- v_iv; major_stats$var_s2_sets <- v_s2
+  }
+  ## directed (2026-11-01): each of the four target columns is identified only by variation INSIDE a choice set, so each must vary within some
+  ## IV set and within some stage-2 set of an initiating state-year with a usable event (as for the major indicators); otherwise the run stops
+  directed_stats <- NULL
+  if (DIRECTED) {
+    Z_TGT <- intersect(Z_DIRECTED_TGT, Z_cols)          # 2026-11-10: the target columns IN Z (all four unless SUBSAMPLE = majinit | mininit)
+    stopifnot(INIT_SUB || identical(Z_TGT, Z_DIRECTED_TGT))
+    var_dir <- function(rows) {
+      g <- alts[rows, c("sy_row", Z_TGT)] |> group_by(sy_row) |> summarise(across(all_of(Z_TGT), ~ n_distinct(.x) > 1L), .groups = "drop")
+      c(n_sets = nrow(g), vapply(Z_TGT, function(cc) sum(g[[cc]]), 1L))
+    }
+    d_iv <- var_dir(alts$in_iv == 1L); d_s2 <- var_dir(alts$in_s2 == 1L & alts$sy_row %in% ev$sy_row)
+    logf("directed comparison: within-choice-set variation: IV sets (all %d) with variation in %s; event-bearing stage-2 sets (%d) in %s", d_iv[["n_sets"]],
+         paste(sprintf("%s %d", Z_TGT, d_iv[Z_TGT]), collapse = ", "), d_s2[["n_sets"]], paste(sprintf("%s %d", Z_TGT, d_s2[Z_TGT]), collapse = ", "))
+    if (any(d_iv[Z_TGT] == 0L) || any(d_s2[Z_TGT] == 0L))
+      stop(sprintf("directed comparison: a target column does not vary within any choice set (IV sets: %s; event-bearing stage-2 sets: %s); it is not identified in this cell",
+                   paste(sprintf("%s %d", Z_TGT, d_iv[Z_TGT]), collapse = ", "), paste(sprintf("%s %d", Z_TGT, d_s2[Z_TGT]), collapse = ", ")))
+    directed_stats <- list(var_iv_sets = d_iv, var_s2_sets = d_s2, share_alts = vapply(Z_TGT, function(cc) mean(alts[[cc]]), 0),
+                           share_events = vapply(Z_TGT, function(cc) mean(alts[[cc]][ev$alt_row]), 0))
+  }
+  n_orphan <- sum(sy$y1 == 1L & !(seq_len(nrow(sy)) %in% ev$sy_row))
+  logf("state-years with y1 = 1 but no usable stage-2 event (kept in stage 1 only): %d", n_orphan)
+  ## stage-2 event weights (D8): w_<sample> from the build (or 1 under EVENT_WEIGHTS = "none"); build_stan_data() passes them as ev_w
+  logf("event weights (D8, %s): %d usable events, sum of weights %.1f; weight 1 on %d events, min %.4f; weights of the events in the panel's (initiator, dispute, year) groups whose other targets left stage 2 through the choice set no longer sum to 1 (logged, not rescaled; only the pairs filter rescales, see above)",
+       EVENT_WEIGHTS, nrow(ev), sum(ev$w), sum(ev$w == 1), min(ev$w))
+  ## ---- joiner choice sets (JOINER_SET = opposing, PI-approved 2026-11-04) ------------------------------------------------------------------
+  ## Every usable event of aprime group 2 (joiner) is scored only against the stage-2 rows (in_s2 = 1) of its state-year whose target is on the side
+  ## of its (weight-group) dispute opposite to the joiner's, in the onset year (joiner_sets_aprime.rds). Every other event keeps the full stage-2 set.
+  ## ev_sets: one row per (event index in ev, allowed alternative row) for the joiner events; set size 1 is kept (log-prob 0, the D8 weights stay).
+  ev_sets <- NULL; jset_stats <- NULL
+  if (JOINER_SET == "opposing") {
+    stopifnot(all(c("initiator", "target", "year", "dispnum", "opp_ccode") %in% names(jsets)), !anyNA(jsets[, c("initiator", "target", "year", "dispnum", "opp_ccode")]))
+    assert_no_dup_keys(jsets, c("initiator", "target", "year", "opp_ccode"), "joiner_sets_aprime.rds")
+    ev$.ev_idx <- seq_len(nrow(ev))
+    jev <- ev |> filter(ap_grp == 2L)                    # 2026-11-04: the initiator is a joiner (aprime 2), whatever group the role coding gives it (bc: part of group 1)
+    if (nrow(jev) == 0L) stop(sprintf("joiner_set = opposing: no usable joiner event (initiator a joiner, aprime group 2) in sample %s", SAMPLE))
+    js <- jev |> select(.ev_idx, ccode1, ccode2, year, dispnum, sy_row, alt_row) |>
+      inner_join(jsets |> select(ccode1 = initiator, ccode2 = target, year, dispnum, opp_ccode), by = c("ccode1", "ccode2", "year", "dispnum"), relationship = "one-to-many")
+    no_set <- jev |> filter(!.ev_idx %in% js$.ev_idx)
+    if (nrow(no_set) > 0L) stop(sprintf("joiner_set = opposing: %d joiner events have no row in joiner_sets_aprime.rds (rebuild the data): %s", nrow(no_set),
+                                        paste(sprintf("%d->%d %d (dispute %d)", no_set$ccode1, no_set$ccode2, no_set$year, no_set$dispnum), collapse = "; ")))
+    s2_alt <- alts |> mutate(.row = row_number()) |> filter(in_s2 == 1L) |> select(sy_row, opp_ccode = ccode2, .row)
+    ev_sets <- js |> inner_join(s2_alt, by = c("sy_row", "opp_ccode")) |> transmute(ev_idx = .ev_idx, alt_row = .row, opp_ccode) |> arrange(ev_idx, alt_row)
+    ## the chosen target is in its restricted set (loud failure with the list)
+    bad <- jev |> anti_join(ev_sets, by = c(".ev_idx" = "ev_idx", "alt_row"))
+    if (nrow(bad) > 0L) stop(sprintf("joiner_set = opposing: the chosen target of %d joiner events is not in its restricted set: %s", nrow(bad),
+                                     paste(sprintf("%d->%d %d (dispute %d)", bad$ccode1, bad$ccode2, bad$year, bad$dispnum), collapse = "; ")))
+    ## every allowed row is a stage-2 row of the event's own state-year and an opposing state of the event's dispute (by construction; asserted)
+    stopifnot(all(alts$in_s2[ev_sets$alt_row] == 1L), all(alts$sy_row[ev_sets$alt_row] == ev$sy_row[ev_sets$ev_idx]), all(alts$ccode2[ev_sets$alt_row] == ev_sets$opp_ccode),
+              !anyDuplicated(ev_sets[, c("ev_idx", "alt_row")]), setequal(unique(ev_sets$ev_idx), jev$.ev_idx), all(ev$ap_grp[ev_sets$ev_idx] == 2L))
+    n_set <- tabulate(ev_sets$ev_idx, nbins = nrow(ev))[jev$.ev_idx]
+    n_full_s2 <- vapply(jev$sy_row, function(n) sum(alts$in_s2[alts$sy_row == n]), 1L)
+    stopifnot(all(n_set >= 1L), all(n_set <= n_full_s2))
+    jset_stats <- list(n_joiner_events = nrow(jev), size_min = min(n_set), size_median = stats::median(n_set), size_max = max(n_set), n_singleton = sum(n_set == 1L),
+                       n_unrestricted = sum(n_set == n_full_s2), n_removed = sum(n_full_s2 - n_set), n_full_rows = sum(n_full_s2), w_joiner = sum(jev$w), w_singleton = sum(jev$w[n_set == 1L]))
+    logf("joiner_set = opposing (2026-11-04): %d usable joiner events (initiator a joiner; roles %s; weights %.1f) scored against the opposing side of their dispute only; restricted set size min %d / median %.1f / max %d; %d events with set size 1 (log-prob 0 in stage 2, kept so the D8 weights are unchanged; weights %.1f); %d events whose restricted set equals their full stage-2 set; alternatives removed in total %d of %d stage-2 rows of the joiner events; every other event (%d) keeps its full stage-2 set; stage 1 / IV unchanged",
+         jset_stats$n_joiner_events, ROLES, jset_stats$w_joiner, jset_stats$size_min, jset_stats$size_median, jset_stats$size_max, jset_stats$n_singleton, jset_stats$w_singleton,
+         jset_stats$n_unrestricted, jset_stats$n_removed, jset_stats$n_full_rows, nrow(ev) - nrow(jev))
+    ev_sets <- ev_sets |> select(ev_idx, alt_row)
+    ev$.ev_idx <- NULL
+  }
+  ev_joiner <- if (APRIME_BASED) ev$ap_grp == 2L else rep(FALSE, nrow(ev))      # 2026-11-04: the initiator is a joiner (for 02_fit_model.R's checks)
+  ev <- ev |> select(sy_row, alt_row, w, grp)        # grp: the stage-b group (0 bilateral, 1 leader, 2 joiner); build_stan_data() ignores it, 02_fit_model.R passes it for M1c only
+  
+  ## ---- optional sampled alternatives ------------------------------------------------------------------
+  n_full <- NULL; sampled <- 0L
+  if (SAMPLED_M > 0) {
+    sa <- sample_alternatives(alts, ev, m = SAMPLED_M, seed = V2_SEED)
+    alts <- sa$alts; ev <- sa$ev; n_full <- sa$n_full; sampled <- 1L
+    logf("sampled alternatives: m = %d -> %d alternative rows", SAMPLED_M, nrow(alts))
+    if ("dch_j_missing" %in% Z_cols && length(unique(alts$dch_j_missing)) < 2)
+      stop("dch_j_missing is in Z but became constant after sampling alternatives; rerun with a larger --sampled_m or full choice sets")
+  }
+  
+  ## ---- reference X for mu_state: mean X over INITIATING state-years in this sample -----------------------
+  x_ref <- colMeans(as.matrix(sy[sy$y1 == 1L, X_cols, drop = FALSE]))
+  if (CONVENTIONAL) {
+    ## no X: x_ref is empty, mu_state = mu0 + a_i; every assembled matrix is asserted against the spec's lists once more, with the change columns absent
+    stopifnot(length(x_ref) == 0L, identical(W_cols, W_CONVENTIONAL), identical(Z_cols, Z_CONVENTIONAL), length(X_cols) == 0L,
+              !any(CHANGE_COLUMNS %in% c(W_cols, X_cols, Z_cols)), !any(PEACE_COLUMNS %in% c(W_cols, Z_cols)), !anyNA(as.matrix(sy[, W_cols])), !anyNA(as.matrix(alts[, Z_cols])))
+    logf("x_ref: none (P = 0 under the conventional comparison; mu_state = mu0 + a_i)")
+  } else if (DIRECTED && MU_SHIFT == "traits") {
+    ## mu_shift = traits (2026-11-02): X = X_MU_TRAITS; x_ref is the mean X over the initiating state-years (the rule of every cell with an X)
+    stopifnot(identical(X_cols, X_MU_TRAITS), length(x_ref) == 4L, identical(names(x_ref), X_MU_TRAITS), all(is.finite(x_ref)), identical(W_cols, W_CONVENTIONAL), identical(Z_cols, Z_DIRECTED),
+              !any(CHANGE_COLUMNS %in% c(W_cols, X_cols, Z_cols)), !any(PEACE_COLUMNS %in% c(W_cols, Z_cols)), !anyNA(as.matrix(sy[, W_cols])), !anyNA(as.matrix(alts[, Z_cols])),
+              identical(as.matrix(sy[, X_cols]), as.matrix(sy[, W_cols])[, X_MU_TRAITS, drop = FALSE]))
+    logf("x_ref (mean X over the %d initiating state-years; mu_shift = traits): %s", sum(sy$y1 == 1L), paste(sprintf("%s=%.4f", X_cols, x_ref), collapse = ", "))
+  } else if (DIRECTED) {
+    stopifnot(length(x_ref) == 0L, identical(W_cols, W_DIR), identical(Z_cols, Z_DIR), length(X_cols) == 0L,      # W_DIR / Z_DIR = W_CONVENTIONAL / Z_DIRECTED unless a run-0 switch is on
+              !any(CHANGE_COLUMNS %in% c(W_cols, X_cols, Z_cols)), !any(PEACE_COLUMNS %in% c(W_cols, Z_cols)), !anyNA(as.matrix(sy[, W_cols])), !anyNA(as.matrix(alts[, Z_cols])))
+    logf("x_ref: none (P = 0 under the directed comparison; mu_state = mu0 + a_i)")
+  } else logf("x_ref (mean X over initiating state-years): %s", paste(sprintf("%s=%.3f", X_cols, x_ref), collapse = ", "))
+  list(sy = sy, alts = alts, ev = ev, W_cols = W_cols, X_cols = X_cols, Z_cols = Z_cols, state_codes = state_codes,
+       x_ref = x_ref, n_full = n_full, sampled = sampled, n_orphan = n_orphan, manifest_path = manifest_path,
+       n_ww2 = n_ww2, drop_ww2 = DROP_WW2, dy_peace_years = DY_PEACE_YEARS, full_controls = FULL_CONTROLS, n_fighting_at_ref = nrow(far_keys),
+       event_weights = EVENT_WEIGHTS, n_flipped = sum(ev_keys$dir_flipped), iv_null_cor_logn = cor(iv_null, sy$log_n_system_tm1),
+       pairs = PAIRS, pairs_weights = pairs_w, changes = CHANGES, winsor = winsor, context = CONTEXT, coal_ties = COAL_TIES, coal_drop = COAL_DROP, context_top3 = context_top3,
+       n_context_dropped = n_context_dropped, n_context_split_groups = n_split_groups, context_model = CONTEXT_MODEL, group_table = group_table,
+       major = MAJOR, major_stats = major_stats, interact = INTERACT, distance = DISTANCE, distance_stats = distance_stats, contiguity = CONTIGUITY,
+       conventional = CONVENTIONAL, roles = ROLES, directed = DIRECTED, directed_stats = directed_stats,
+       joiner_set = JOINER_SET, ev_sets = if (VARIANT == "mid3") ev_sets_mid3 else ev_sets, jset_stats = jset_stats, ev_joiner = ev_joiner,   # 2026-11-04: ev_sets = NULL unless JOINER_SET = opposing; 2026-11-10: or VARIANT = mid3 (every event's set)
+       variant = VARIANT, mid3_stats = mid3_stats, reach = REACH, reach_stats = reach_stats, subsample = SUBSAMPLE, subsample_stats = subsample_stats, init_sub_stats = init_sub_stats)   # run 0 / mid3 (2026-11-10): NULL stats unless the switch is on
+}
+## assemble_cell_spec(SAMPLE, LAG, spec, ...): the main-specification constants of spec.R plus the switches of `spec`
+## model = NULL or a model code: the M1c model (CONTEXT_MODELS) switches CONTEXT_MODEL on; every other model leaves it off
+## comparison = conventional (2026-10-31): CONVENTIONAL = TRUE with DISTANCE = "capital" and MAJOR = "joint" (the spec's own fields of those
+## switches are at their defaults, parse_spec() refuses them on the command line); every other switch is passed as it is
+assemble_cell_spec <- function(SAMPLE, LAG, spec, data_dir = spec_data_dir(spec, v2_root()), manifest = NULL, model = NULL) {
+  stopifnot(is.null(model) || model %in% ALL_MODELS)
+  conv <- spec_is_conventional(spec)
+  VARIANT <- spec_variant(spec)                            # 2026-11-04: the variant switch (polrel for the role / AME models); "all" otherwise
+  if (VARIANT == "polrel") stopifnot(is.null(model) || model %in% POLREL_MODELS)
+  if (VARIANT == "mid3") stopifnot(is.null(model) || model %in% MID3_MODELS)                 # 2026-11-10
+  ## run 0 (2026-11-10): the two switches and their models (a spec saved before has neither field: none)
+  reach_v <- spec_reach(spec); sub_v <- spec_subsample(spec)
+  if (reach_v != "none") stopifnot(spec_is_directed(spec), is.null(model) || model %in% REACH_MODELS)
+  if (sub_v != "none") stopifnot(spec_is_directed(spec), is.null(model) || identical(model, SUBSAMPLE_MODELS[[sub_v]]))
+  if (conv && (LAG != 3L || VARIANT != "all")) stop(sprintf("--comparison=conventional is defined on the lag-3 data with all-states choice sets (got lag %s, variant %s)", LAG, VARIANT))   # audit 2026-10-31 (1)
+  if (conv) stopifnot(all(vapply(CONVENTIONAL_FIXED, function(nm) identical(spec[[nm]], SPEC_DEFAULTS[[nm]]), logical(1))), is.null(model) || model %in% CONVENTIONAL_MODELS)
+  ## the directed comparison (2026-11-01): the same lag / variant rule and the same internal DISTANCE / MAJOR mapping; models DIRECTED_MODELS
+  dirc <- spec_is_directed(spec)
+  if (dirc && LAG != 3L) stop(sprintf("--comparison=directed is defined on the lag-3 data (got lag %s)", LAG))   # polrel allowed since 2026-11-04 (role / AME models)
+  if (dirc) stopifnot(!conv, all(vapply(CONVENTIONAL_FIXED, function(nm) identical(spec[[nm]], SPEC_DEFAULTS[[nm]]), logical(1))), is.null(model) || model %in% c(DIRECTED_MODELS, RHOREG_MODELS, AME_CONTEXT_MODELS))
+  ## mu_shift (2026-11-02): directed only, models MU_SHIFT_MODELS; M1bz (RHOREG_MODELS) directed only. A spec saved before has no field: none
+  mu_shift <- if (is.null(spec$mu_shift)) "none" else spec$mu_shift
+  if (mu_shift != "none") stopifnot(dirc, is.null(model) || model %in% MU_SHIFT_MODELS)
+  if (!is.null(model) && model %in% RHOREG_MODELS && !dirc) stop(sprintf("the model %s is defined under --comparison=directed only", model))
+  ## M2c (2026-11-04): directed with roles = aprime only; joiner_set (2026-11-04): roles = aprime and a role model only (a spec saved before: all)
+  roles_v <- if (is.null(spec$roles)) "stageb" else spec$roles
+  if (!is.null(model) && model %in% AME_CONTEXT_MODELS && !(dirc && roles_v %in% JOINER_ROLES)) stop(sprintf("the model %s is defined under --comparison=directed with --roles=aprime, bc or bcj only", model))
+  entry_v <- if (is.null(spec$entry)) "keep" else spec$entry
+  if (roles_v %in% ENTRY_ROLES && entry_v != "later" && spec_events(spec) != "dymid") stop(sprintf("--roles=%s needs --entry=later or --events=dymid", roles_v))
+  if (entry_v == "later") stopifnot(basename(data_dir) == "data_entry")
+  ## events = dymid (2026-11-04): the interacting-dyads build v2/data_dymid; its samples (fmidany, no fmidcow); bc / bcj need no entry switch there
+  events_v <- spec_events(spec)
+  sample_in_events(SAMPLE, spec)
+  if (events_v == "dymid") stopifnot(basename(data_dir) == "data_dymid", entry_v == "keep", spec$direction == "cowwar", roles_v != "aprime")
+  jset <- if (is.null(spec$joiner_set)) "all" else spec$joiner_set
+  if (jset != "all" && !roles_v %in% JOINER_ROLES) stop(sprintf("--joiner_set=%s needs --roles=aprime, bc or bcj", jset))
+  if (jset != "all" && !is.null(model) && !model %in% ROLE_MODELS) stop(sprintf("--joiner_set=%s with the model %s (the restriction applies to %s only)", jset, model, paste(ROLE_MODELS, collapse = ", ")))
+  assemble_cell(SAMPLE, LAG, VARIANT, CENTRALITY, CONFLICT_HISTORY, SAMPLED_M, DISTANCE = if (conv || dirc) "capital" else spec$distance, CONTIGUITY = spec$contiguity,
+                DY_PEACE_YEARS = DY_PEACE_YEARS, DROP_WW2 = spec$ww2 == "drop", FULL_CONTROLS = spec$controls == "full",
+                EVENT_WEIGHTS = spec$weights, PAIRS = spec$pairs, CHANGES = spec$changes, CONTEXT = spec$context, COAL_TIES = spec$coal_ties,
+                COAL_DROP = spec$coal_drop, MAJOR = if (conv || dirc) "joint" else spec$major, INTERACT = spec$interact,
+                CONTEXT_MODEL = !is.null(model) && model %in% ROLE_MODELS, CONVENTIONAL = conv, DIRECTED = dirc,
+                ROLES = if (is.null(spec$roles)) "stageb" else spec$roles, MU_SHIFT = mu_shift, JOINER_SET = jset, REACH = reach_v, SUBSAMPLE = sub_v, data_dir = data_dir, manifest = manifest)
+}
+## rhoreg_Zr(A): the N1 x Q trait matrix Zr of the rho-regression model M1bz (PI-approved 2026-11-02), rho_n = tanh(g0 + Zr[n] g): the columns
+## X_MU_TRAITS (M_lvl, R_lvl, cowmaj_tm1, dem_tm1) of the assembled directed cell's state-years, i.e. exactly the W columns as they enter W (the
+## levels within-year centred, the 0/1 indicators grand-centred). Asserted: a directed cell (W = W_CONVENTIONAL, Z = Z_DIRECTED), Q = 4, finite,
+## the four W columns exactly (with or without mu_shift = traits, whose X is the same matrix). Column names are dropped for Stan.
+rhoreg_Zr <- function(A) {
+  stopifnot(is.list(A), isTRUE(A$directed), identical(A$W_cols, W_CONVENTIONAL), identical(A$Z_cols, Z_DIRECTED), length(A$X_cols) == 0L || identical(A$X_cols, X_MU_TRAITS),
+            all(X_MU_TRAITS %in% names(A$sy)))
+  Zr <- as.matrix(A$sy[, X_MU_TRAITS, drop = FALSE])
+  stopifnot(identical(colnames(Zr), c("M_lvl", "R_lvl", "cowmaj_tm1", "dem_tm1")), ncol(Zr) == 4L, nrow(Zr) == nrow(A$sy), all(is.finite(Zr)),
+            identical(Zr, as.matrix(A$sy[, A$W_cols, drop = FALSE])[, X_MU_TRAITS, drop = FALSE]), abs(mean(Zr[, "cowmaj_tm1"])) < 1e-8, abs(mean(Zr[, "dem_tm1"])) < 1e-8)
+  dimnames(Zr) <- NULL
+  Zr
+}

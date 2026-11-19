@@ -1,0 +1,1392 @@
+## ============================================================================
+## helpers_data.R -- data-side helper functions of the v2 pipeline (functions only, no side effects)
+## Sourced after spec.R by every script: paths and logging, assertions, the power-change table, the fatal-MID coding,
+## dispute participation and the month-level escalation rule, the two choice sets, the duplicate collapse, event weights,
+## the initiator-direction rule (D1), the WWII list, the gap scale, and the manifest checks. Model-side helpers (Stan data
+## assembly, anchors, sampled alternatives, the brute-force likelihood, fit provenance and safety) are in helpers_model.R.
+## ============================================================================
+suppressPackageStartupMessages({ library(dplyr); library(tidyr) })
+
+## ---- paths -----------------------------------------------------------------
+v2_root <- function() {
+  root <- Sys.getenv("V2_ROOT", unset = "")
+  if (root == "") {
+    ## fall back: directory that contains this file's parent (v2/)
+    args <- commandArgs(trailingOnly = FALSE)
+    fa <- sub("^--file=", "", args[grepl("^--file=", args)])
+    if (length(fa) == 1) root <- normalizePath(file.path(dirname(fa), ".."))
+    else root <- normalizePath("v2", mustWork = FALSE)
+  }
+  root
+}
+
+## ---- logging -----------------------------------------------------------------
+## .v2_log_file is the one piece of state: the path logf() appends to once log_open() has been called (NULL = console only)
+.v2_log_file <- NULL
+log_open <- function(name) {
+  dir.create(file.path(v2_root(), "logs"), showWarnings = FALSE, recursive = TRUE)
+  .v2_log_file <<- file.path(v2_root(), "logs",
+                             paste0(name, "_", format(Sys.time(), "%Y%m%d_%H%M%S"), ".log"))
+  cat("", file = .v2_log_file)
+  logf("log opened: %s", .v2_log_file)
+  invisible(.v2_log_file)
+}
+logf <- function(fmt, ...) {
+  msg <- sprintf(paste0("[", format(Sys.time(), "%H:%M:%S"), "] ", fmt), ...)
+  cat(msg, "\n", sep = "")
+  if (!is.null(.v2_log_file)) cat(msg, "\n", sep = "", file = .v2_log_file, append = TRUE)
+  invisible(msg)
+}
+
+## ---- assertions ------------------------------------------------------------------
+assert_no_dup_keys <- function(df, keys, what = "data") {
+  n_dup <- nrow(df) - nrow(distinct(df[, keys, drop = FALSE]))
+  if (n_dup != 0) stop(sprintf("%s: %d duplicate rows on keys (%s)", what, n_dup, paste(keys, collapse = ", ")))
+  invisible(TRUE)
+}
+assert_no_na <- function(df, cols, what = "data") {
+  bad <- cols[vapply(cols, function(cc) anyNA(df[[cc]]), logical(1))]
+  if (length(bad) > 0) stop(sprintf("%s: NA present in model columns: %s", what, paste(bad, collapse = ", ")))
+  invisible(TRUE)
+}
+assert_finite <- function(df, cols, what = "data") {
+  bad <- cols[vapply(cols, function(cc) !all(is.finite(df[[cc]])), logical(1))]
+  if (length(bad) > 0) stop(sprintf("%s: non-finite values (NA / NaN / Inf) in columns: %s", what, paste(bad, collapse = ", ")))
+  invisible(TRUE)
+}
+assert_standardized <- function(df, col, by = "year", tol = 1e-6, what = "data") {
+  chk <- df |> group_by(across(all_of(by))) |>
+    summarise(m = mean(.data[[col]]), s = sd(.data[[col]]), n = n(), .groups = "drop") |>
+    filter(n > 1)
+  if (any(abs(chk$m) > tol) || any(abs(chk$s - 1) > 1e-3))
+    stop(sprintf("%s: %s is not standardized within %s (max |mean| = %.2e, sd range [%.4f, %.4f])",
+                 what, col, by, max(abs(chk$m)), min(chk$s), max(chk$s)))
+  invisible(TRUE)
+}
+
+## ---- power changes (PI decision 2026-10-23; see README "Positions" and "Changes") -----------
+## pos  : state-year levels with columns ccode, year, M (log CINC share), R_pr (log IGO PageRank)
+## at_t : the (ccode, year) state-years at t for which a change is wanted (the state-year panel)
+## h    : window length. The change at (ccode, t) is level(t-1) - level(t-1-h), by CALENDAR joins.
+## Returns list(tbl, scale). tbl has one row per (ccode, year) in at_t with levels at both dates:
+##   dM_raw_h, dRpr_raw_h : the raw change in log units (log ratio of the state's own share across the window)
+##   dM_h, dRpr_h         : the raw change minus the mean raw change of all states with a change in that year,
+##                          divided by ONE pooled constant per lag and variable (the SD of the year-centred change
+##                          over all rows of the table). Zero means "changed like the average state that year";
+##                          the pooled SD is 1 by construction.
+## scale is a data.frame(h, variable, pooled_sd, n_rows, n_years) with the two constants.
+## The same table serves the initiator change in stage 1 (W, X) and the target change in stage 2 (Z).
+build_change_table <- function(pos, at_t, h) {
+  stopifnot(all(c("ccode", "year", "M", "R_pr") %in% names(pos)), all(c("ccode", "year") %in% names(at_t)),
+            length(h) == 1, h >= 1)
+  h <- as.integer(h)
+  assert_no_dup_keys(pos, c("ccode", "year"), "change table: positions")
+  assert_finite(pos, c("M", "R_pr"), "change table: positions")
+  tbl <- at_t |> distinct(ccode, year) |>
+    inner_join(pos |> transmute(ccode, year = year + 1L, .M_tm1 = M, .R_tm1 = R_pr), by = c("ccode", "year")) |>
+    inner_join(pos |> transmute(ccode, year = year + 1L + h, .M_w0 = M, .R_w0 = R_pr), by = c("ccode", "year")) |>
+    mutate(dM_raw_h = .M_tm1 - .M_w0, dRpr_raw_h = .R_tm1 - .R_w0) |>
+    group_by(year) |>
+    mutate(.dM_c = dM_raw_h - mean(dM_raw_h), .dR_c = dRpr_raw_h - mean(dRpr_raw_h)) |> ungroup()
+  if (nrow(tbl) < 3) stop(sprintf("change table h=%d: only %d state-years have levels at t-1 and t-1-h", h, nrow(tbl)))
+  sd_M <- sd(tbl$.dM_c); sd_R <- sd(tbl$.dR_c)
+  if (!is.finite(sd_M) || sd_M <= 0 || !is.finite(sd_R) || sd_R <= 0)
+    stop(sprintf("change table h=%d: pooled SD of the year-centred change is not positive (M %.3g, R_pr %.3g)", h, sd_M, sd_R))
+  tbl <- tbl |> mutate(dM_h = .dM_c / sd_M, dRpr_h = .dR_c / sd_R, h = h) |>
+    select(ccode, year, h, dM_raw_h, dRpr_raw_h, dM_h, dRpr_h) |> arrange(year, ccode)
+  assert_no_dup_keys(tbl, c("ccode", "year"), sprintf("change table h=%d", h))
+  assert_finite(tbl, c("dM_raw_h", "dRpr_raw_h", "dM_h", "dRpr_h"), sprintf("change table h=%d", h))
+  ## invariants: within-year mean 0 (tolerance), pooled SD exactly 1 after scaling
+  yr <- tbl |> group_by(year) |> summarise(mM = mean(dM_h), mR = mean(dRpr_h), .groups = "drop")
+  if (any(abs(yr$mM) > 1e-8) || any(abs(yr$mR) > 1e-8))
+    stop(sprintf("change table h=%d: within-year mean of the centred change is not 0 (max |mean| M %.2e, R_pr %.2e)", h, max(abs(yr$mM)), max(abs(yr$mR))))
+  if (abs(sd(tbl$dM_h) - 1) > 1e-8 || abs(sd(tbl$dRpr_h) - 1) > 1e-8)
+    stop(sprintf("change table h=%d: pooled SD after scaling is not 1 (M %.6f, R_pr %.6f)", h, sd(tbl$dM_h), sd(tbl$dRpr_h)))
+  list(tbl = tbl,
+       scale = data.frame(h = h, variable = c("dM_h", "dRpr_h"), pooled_sd = c(sd_M, sd_R),
+                          n_rows = nrow(tbl), n_years = n_distinct(tbl$year)))
+}
+
+## ---- fatal-MID coding (PI decision 2026-10-23; see README "Samples") -----------------
+## fatal_cow : COW coding (TRUE / FALSE / NA when every COW fatality code is missing)
+## fatal_mic : MIC 1.0 confrontation fatalmin >= 1 (NA when the dispute is not in MIC)
+## war       : COW dispute hostility level 5
+## fatal_gml : GML MID 2.2.1 coding of the same directed pair (NA when missing or not in GML)
+## Main fmid = war (fatal by definition) OR COW fatal OR (COW missing AND MIC fatal)
+##             OR (COW missing AND MIC missing AND GML fatal).
+## Each source only fills cases the earlier ones leave missing; none overrides a coded value.
+## Returns logical, never NA.
+code_fatal_main <- function(fatal_cow, fatal_mic, war, fatal_gml) {
+  n <- length(fatal_cow)
+  stopifnot(length(fatal_mic) == n, length(war) == n, length(fatal_gml) == n)
+  (war %in% TRUE) | (fatal_cow %in% TRUE) | (is.na(fatal_cow) & fatal_mic %in% TRUE) |
+    (is.na(fatal_cow) & is.na(fatal_mic) & fatal_gml %in% TRUE)
+}
+MIC_CONF_SHA256 <- "41cef02d0dcb23f91658b2367864b018a517e13d5b0278394dc12775fa5a5ee0"   # mic-conf-1.0.csv
+
+## ---- dispute participation (PI decisions 2026-10-24; README "Events", "Ongoing disputes") ----------------------
+## dd: COW-MID directed dispute-years (cow_mid_dirdisps) with integer dispnum, ccode1, ccode2, year. The data hold
+## both directions of every opposing pair for every year the pair is in the dispute. Every function below uses
+## EVERY participant (originators and joiners, both sides), so the already-fighting rule, the stage-1 control
+## ongoing_tm1 and the dyadic lagged DV dy_mid_tm1 count joiner involvement the same way the events do.
+## pair_dispute_years(): one row per (dispnum, ccode1, ccode2, year) with pair_onset = the pair's first year in
+## that dispute (the events' onset year uses the same definition).
+pair_dispute_years <- function(dd) {
+  stopifnot(all(c("dispnum", "ccode1", "ccode2", "year") %in% names(dd)))
+  out <- dd |> distinct(dispnum, ccode1, ccode2, year) |> group_by(dispnum, ccode1, ccode2) |>
+    mutate(pair_onset = min(year)) |> ungroup()
+  assert_no_dup_keys(out, c("dispnum", "ccode1", "ccode2", "year"), "pair dispute-years")
+  out
+}
+## already_fighting_keys(): directed (ccode1, ccode2, year, dispnum) such that the pair is a participant pair of
+## dispute dispnum, the dispute is active for the pair in `year` and the pair's onset in it is BEFORE `year`.
+## A stage-2 alternative (i, j, t) matching any row is "already fighting" and is dropped from the choice set.
+already_fighting_keys <- function(dd) {
+  pair_dispute_years(dd) |> filter(year > pair_onset) |> select(ccode1, ccode2, year, dispnum)
+}
+## flag_escalations(): events (initiator, target, year, dispnum) get escalation = TRUE when (initiator, target, year)
+## is already fighting in a dispute OTHER than the event's own. The own dispute can never match because the event
+## year is the pair's onset in it, and this is asserted.
+flag_escalations <- function(events, af) {
+  stopifnot(all(c("initiator", "target", "year", "dispnum") %in% names(events)), all(c("ccode1", "ccode2", "year", "dispnum") %in% names(af)))
+  hit <- events |> select(initiator, target, year, dispnum) |>
+    inner_join(af |> rename(initiator = ccode1, target = ccode2, af_dispnum = dispnum), by = c("initiator", "target", "year"), relationship = "many-to-many")
+  if (nrow(hit) > 0 && any(hit$dispnum == hit$af_dispnum)) stop("flag_escalations: an event matched an already-fighting row of its OWN dispute (onset year is not the pair's first year)")
+  esc <- hit |> distinct(initiator, target, year, dispnum) |> mutate(escalation = TRUE)
+  out <- events |> left_join(esc, by = c("initiator", "target", "year", "dispnum")) |> mutate(escalation = coalesce(escalation, FALSE))
+  stopifnot(nrow(out) == nrow(events), !anyNA(out$escalation))
+  out
+}
+## active_state_years(): (ccode, year) for every state that is a participant (any role) in a dispute active that year.
+## Joined at year t-1 it is the stage-1 control ongoing_tm1.
+active_state_years <- function(dd) dd |> distinct(ccode = ccode1, year) |> mutate(active = 1L)
+## active_pair_years(): (ccode1, ccode2, year), both directions, for every pair of opposing participants in a dispute
+## active that year. Joined at year t-1 it is the dyadic lagged DV dy_mid_tm1.
+active_pair_years <- function(dd) {
+  a <- dd |> distinct(ccode1, ccode2, year)
+  bind_rows(a, a |> rename(ccode1 = ccode2, ccode2 = ccode1)) |> distinct() |> mutate(active = 1L)
+}
+
+## ---- month-level escalation rule (PI decision 2026-10-24, second round; README "Ongoing disputes") ---------------
+## The year rule above mislabels disputes that ended early in the year before a new one started (China -> USA 1950,
+## Korea, was dropped because a short 1949 incident had a 1950 row) and misses within-year re-entries. The month rule
+## works with COW dispute dates at month resolution. peacesciencer 1.2.0 supplies, in cow_mid_disps, the dispute
+## START month and year (stmon, styear) and the dispute duration in days (mindur, maxdur) but no end month and no
+## participant-level dates; cow_mid_dirdisps has only the year. So every date here is DISPUTE-level, and the end
+## date is bounded, not known: the start day is unknown, so the end lies between (first day of the start month +
+## mindur - 1) and (last day of the start month + maxdur), intersected with the dispute's last year in the directed
+## dispute-years. Every date is an interval [lo, hi] of month indices (ym_index); exact dates have lo == hi.
+## A pair that enters a dispute after the dispute's start year has an unknown entry month (interval = that whole
+## year), and a pair that leaves before the dispute's last year has an unknown exit month. Comparisons between
+## intervals are three-valued (TRUE / FALSE / NA); NA falls back to the year rule and is counted.
+ym_index <- function(year, month) {
+  stopifnot(all(month %in% 1:12))
+  as.integer(year) * 12L + as.integer(month) - 1L
+}
+ym_year <- function(ym) ym %/% 12L
+ym_label <- function(ym) sprintf("%d-%02d", ym %/% 12L, ym %% 12L + 1L)
+## "a is before b" (a < b) and "a is not before b" (a >= b) for intervals; NA when the intervals overlap
+interval_before <- function(a_lo, a_hi, b_lo, b_hi) case_when(a_hi < b_lo ~ TRUE, a_lo >= b_hi ~ FALSE, TRUE ~ NA)
+interval_not_before <- function(a_lo, a_hi, b_lo, b_hi) case_when(a_lo >= b_hi ~ TRUE, a_hi < b_lo ~ FALSE, TRUE ~ NA)
+## dispute_date_bounds(disp, dd): one row per dispute in dd with start_lo / start_hi (exact when styear equals the first
+## directed dispute-year, else the whole first year with start_month_known = FALSE), end_lo / end_hi (duration bounds
+## within the last year; the whole last year with end_rule = "year_only" when the bounds miss that year), y0, y1.
+dispute_date_bounds <- function(disp, dd) {
+  stopifnot(all(c("dispnum", "styear", "stmon", "mindur", "maxdur") %in% names(disp)), all(c("dispnum", "year") %in% names(dd)))
+  yrs <- dd |> distinct(dispnum, year) |> group_by(dispnum) |> summarise(y0 = min(year), y1 = max(year), .groups = "drop")
+  db <- disp |> transmute(dispnum = as.integer(dispnum), styear = as.integer(styear), stmon = as.integer(stmon),
+                          mindur = as.numeric(mindur), maxdur = as.numeric(maxdur)) |> inner_join(yrs, by = "dispnum")
+  if (nrow(db) != nrow(yrs)) stop(sprintf("dispute_date_bounds: %d disputes in the directed dispute-years have no dispute-level row", nrow(yrs) - nrow(db)))
+  assert_no_dup_keys(db, "dispnum", "dispute date bounds")
+  if (!all(db$stmon %in% 1:12)) stop(sprintf("dispute_date_bounds: %d disputes have a start month outside 1..12", sum(!db$stmon %in% 1:12)))
+  if (any(db$mindur < 0 | db$maxdur < db$mindur)) stop("dispute_date_bounds: negative or inverted durations")
+  first_day <- as.Date(sprintf("%d-%02d-01", db$styear, db$stmon))
+  next_first <- as.Date(sprintf("%d-%02d-01", db$styear + (db$stmon == 12L), ifelse(db$stmon == 12L, 1L, db$stmon + 1L)))
+  end_lo_d <- first_day + pmax(db$mindur - 1, 0); end_hi_d <- (next_first - 1) + db$maxdur
+  to_ym <- function(d) ym_index(as.integer(format(d, "%Y")), as.integer(format(d, "%m")))
+  db <- db |> mutate(start_month_known = styear == y0,
+                     start_lo = ifelse(start_month_known, ym_index(styear, stmon), ym_index(y0, 1L)),
+                     start_hi = ifelse(start_month_known, ym_index(styear, stmon), ym_index(y0, 12L)),
+                     end_lo = pmax(to_ym(end_lo_d), ym_index(y1, 1L)), end_hi = pmin(to_ym(end_hi_d), ym_index(y1, 12L)),
+                     end_rule = ifelse(end_lo <= end_hi, "duration", "year_only"))
+  bad <- db$end_rule == "year_only"
+  db$end_lo[bad] <- ym_index(db$y1[bad], 1L); db$end_hi[bad] <- ym_index(db$y1[bad], 12L)
+  stopifnot(all(db$start_lo <= db$start_hi), all(db$end_lo <= db$end_hi), all(db$start_lo <= db$end_hi),
+            all(ym_year(db$start_lo) == db$y0), all(ym_year(db$end_hi) == db$y1))
+  db |> select(dispnum, styear, stmon, mindur, maxdur, y0, y1, start_month_known, start_lo, start_hi, end_lo, end_hi, end_rule)
+}
+## pair_dispute_intervals(dd, db): one row per directed (dispnum, ccode1, ccode2, spell), a spell being a run of
+## consecutive years the pair is in the dispute (a pair that leaves and re-enters, e.g. France and Germany in dispute
+## 258, has two spells; most pairs have one). pair_onset / pair_last are the whole pair's first and last year (the year
+## rule's quantities), spell_first / spell_last the spell's. The spell's entry interval (start_lo / start_hi) is the
+## dispute's start when the spell begins in the dispute's first year AND both members are originators (orig == 1 in the
+## directed dispute-years; Codex review P1-2, 2026-10-24). When either member is a joiner its entry date within the first
+## year is unknown, so the entry interval is [dispute start, December of y0] with start_exact = FALSE (the month rule's
+## NA then falls back to the year rule). Spells beginning after the dispute's first year get the whole first year of the
+## spell. The exit interval (end_lo / end_hi) is the dispute's end bounds when the spell ends in the dispute's last year,
+## else the whole last year of the spell. both_orig is kept in the output for logging.
+## joiner_entry_unknown = FALSE reproduces the rule before the review (joiner pairs get the exact dispute start); the build
+## uses it only to log the before / after counts.
+## Participant-level dates (PI decision 2026-10-25, D5). part = gml_part (peacesciencer 1.2.0, bundled): one row per
+## participant SPELL with start and end year / month (dispnum, ccode, styear, stmon, endyear, endmon; the day is often -9 and
+## is not used, every date here is a month index). About 2165 of the 2436 COW dispnums are in it. For a pair spell whose
+## dispute is in part, the pair's entry is the LATER of the two participants' starts and its exit the EARLIER of their ends,
+## both exact months, provided (a) each participant has exactly one gml_part spell overlapping the pair spell's years, (b) the
+## entry month lies in the spell's first COW year and the exit month in its last COW year (GML and COW disagree on the
+## participation years of some pairs; those keep the dispute-level bounds), and (c) entry <= exit. Otherwise the dispute-level
+## bounds above apply; date_source records which ("participant" / "dispute") and part_reason why not.
+## Clipping (D5): an unknown entry bound can exceed the feasible exit (a joiner pair entering some time in y0 when the dispute
+## ended in y0 before December): start_hi is clipped to end_hi; start_clipped marks those spells.
+pair_dispute_intervals <- function(dd, db, joiner_entry_unknown = TRUE, part = NULL) {
+  stopifnot(all(c("orig1", "orig2") %in% names(dd)))
+  orig <- dd |> group_by(dispnum, ccode1, ccode2) |>
+    summarise(n_orig = n_distinct(orig1 == 1L & orig2 == 1L), both_orig = first(orig1 == 1L & orig2 == 1L), .groups = "drop")
+  if (any(orig$n_orig != 1L)) stop("pair_dispute_intervals: originator status of a pair differs across its dispute-years")
+  stopifnot(!anyNA(orig$both_orig))
+  py <- pair_dispute_years(dd) |> arrange(dispnum, ccode1, ccode2, year) |> group_by(dispnum, ccode1, ccode2) |>
+    mutate(spell = cumsum(c(1L, diff(year) != 1L)), pair_onset = min(year), pair_last = max(year)) |> ungroup()
+  pdi <- py |> group_by(dispnum, ccode1, ccode2, spell, pair_onset, pair_last) |>
+    summarise(spell_first = min(year), spell_last = max(year), n_years = n(), .groups = "drop") |>
+    inner_join(db |> select(dispnum, y0, y1, d_start_lo = start_lo, d_start_hi = start_hi, d_end_lo = end_lo, d_end_hi = end_hi), by = "dispnum") |>
+    inner_join(orig |> select(dispnum, ccode1, ccode2, both_orig), by = c("dispnum", "ccode1", "ccode2"))
+  stopifnot(all(pdi$n_years == pdi$spell_last - pdi$spell_first + 1L), all(pdi$spell_first >= pdi$y0), all(pdi$spell_last <= pdi$y1),
+            !anyNA(pdi$both_orig))
+  exact_entry <- if (joiner_entry_unknown) pdi$both_orig else rep(TRUE, nrow(pdi))
+  pdi <- pdi |> mutate(start_exact = spell_first == y0 & d_start_lo == d_start_hi & exact_entry,
+                       start_lo = ifelse(spell_first == y0, d_start_lo, ym_index(spell_first, 1L)),
+                       start_hi = ifelse(spell_first == y0 & exact_entry, d_start_hi, ym_index(spell_first, 12L)),
+                       end_lo = ifelse(spell_last == y1, d_end_lo, ym_index(spell_last, 1L)),
+                       end_hi = ifelse(spell_last == y1, d_end_hi, ym_index(spell_last, 12L))) |>
+    select(dispnum, ccode1, ccode2, spell, pair_onset, pair_last, spell_first, spell_last, both_orig, start_exact, start_lo, start_hi, end_lo, end_hi) |>
+    mutate(date_source = "dispute", part_reason = if (is.null(part)) "no participant data" else "dispute not in gml_part")
+  stopifnot(all(pdi$start_lo <= pdi$start_hi), all(pdi$end_lo <= pdi$end_hi), all(pdi$start_lo <= pdi$end_hi), !anyNA(pdi$start_lo), !anyNA(pdi$end_hi),
+            all(pdi$spell_first[pdi$spell == 1L] == pdi$pair_onset[pdi$spell == 1L]))
+  ## ---- participant-level dates (D5) -----------------------------------------------------------------------------------------
+  if (!is.null(part)) {
+    stopifnot(all(c("dispnum", "ccode", "styear", "stmon", "endyear", "endmon") %in% names(part)))
+    ps <- part |> transmute(dispnum = as.integer(dispnum), ccode = as.integer(ccode), p_y0 = as.integer(styear), p_y1 = as.integer(endyear),
+                            p_start = ym_index(as.integer(styear), as.integer(stmon)), p_end = ym_index(as.integer(endyear), as.integer(endmon)))
+    stopifnot(!anyNA(ps), all(ps$p_start <= ps$p_end))
+    in_part <- pdi$dispnum %in% ps$dispnum
+    ## participant spells of ccode1 / ccode2 overlapping the pair spell's COW years; count them per pair spell
+    one_side <- function(code_col, pre) {
+      pdi |> mutate(.id = row_number()) |> select(.id, dispnum, ccode = all_of(code_col), spell_first, spell_last) |>
+        inner_join(ps, by = c("dispnum", "ccode"), relationship = "many-to-many") |>
+        filter(p_y1 >= spell_first, p_y0 <= spell_last) |> group_by(.id) |>
+        summarise(n = n(), start = p_start[1], end = p_end[1], .groups = "drop") |> rename_with(~ paste0(pre, .x), -.id)
+    }
+    s1 <- one_side("ccode1", "a_"); s2 <- one_side("ccode2", "b_")
+    pp <- pdi |> mutate(.id = row_number()) |> left_join(s1, by = ".id") |> left_join(s2, by = ".id") |>
+      mutate(a_n = coalesce(a_n, 0L), b_n = coalesce(b_n, 0L),
+             p_entry_raw = pmax(a_start, b_start), p_exit_raw = pmin(a_end, b_end),
+             ## GML and COW disagree on some participation years (e.g. Egypt and Israel in dispute 1035 start 1966-12 in gml_part but
+             ## their COW pair-years begin in 1967). An entry before the spell's first COW year means the pair was in the dispute at
+             ## January of that year at the latest: clamp to January (exact at the COW year's start); an exit after the spell's last
+             ## COW year is clamped to December of it. An entry AFTER the first COW year or an exit BEFORE the last one contradicts
+             ## the COW years and falls back to the dispute-level bounds.
+             p_entry = pmax(p_entry_raw, ym_index(spell_first, 1L)), p_exit = pmin(p_exit_raw, ym_index(spell_last, 12L)),
+             part_reason = case_when(!in_part ~ "dispute not in gml_part",
+                                     a_n == 0L | b_n == 0L ~ "a participant has no gml_part spell overlapping the pair spell",
+                                     a_n > 1L | b_n > 1L ~ "a participant has several gml_part spells overlapping the pair spell",
+                                     ym_year(p_entry_raw) > spell_first ~ "participant entry after the spell's first COW year",
+                                     ym_year(p_exit_raw) < spell_last ~ "participant exit before the spell's last COW year",
+                                     p_entry > p_exit ~ "participant entry after exit",
+                                     ym_year(p_entry_raw) < spell_first & ym_year(p_exit_raw) > spell_last ~ "participant dates used (entry and exit clamped to the COW years)",
+                                     ym_year(p_entry_raw) < spell_first ~ "participant dates used (entry clamped to January of the first COW year)",
+                                     ym_year(p_exit_raw) > spell_last ~ "participant dates used (exit clamped to December of the last COW year)",
+                                     TRUE ~ "participant dates used"))
+    use <- startsWith(pp$part_reason, "participant dates used")
+    pdi$start_lo[use] <- pp$p_entry[use]; pdi$start_hi[use] <- pp$p_entry[use]
+    pdi$end_lo[use] <- pp$p_exit[use]; pdi$end_hi[use] <- pp$p_exit[use]
+    pdi$start_exact[use] <- TRUE; pdi$date_source[use] <- "participant"; pdi$part_reason <- pp$part_reason
+    stopifnot(all(ym_year(pdi$start_lo) == pdi$spell_first), all(ym_year(pdi$end_hi) == pdi$spell_last), all(pdi$start_lo <= pdi$end_hi))
+  }
+  ## ---- clip an unknown entry bound by the feasible exit (D5) ---------------------------------------------------------------
+  pdi <- pdi |> mutate(start_clipped = start_hi > end_hi, start_hi = pmin(start_hi, end_hi))
+  stopifnot(all(pdi$start_lo <= pdi$start_hi), all(pdi$start_hi <= pdi$end_hi), all(pdi$end_lo <= pdi$end_hi), !any(pdi$start_clipped & pdi$date_source == "participant"))
+  assert_no_dup_keys(pdi, c("dispnum", "ccode1", "ccode2", "spell"), "pair dispute intervals")
+  pdi
+}
+## month_rule(): is the pair "already fighting" in dispute D at the reference interval [ref_lo, ref_hi]? TRUE when D's
+## pair start is before the reference and its pair end is not before it; FALSE when either fails for sure; NA otherwise,
+## in which case the caller falls back to the year rule.
+month_rule <- function(start_lo, start_hi, end_lo, end_hi, ref_lo, ref_hi) {
+  sb <- interval_before(start_lo, start_hi, ref_lo, ref_hi)
+  ne <- interval_not_before(end_lo, end_hi, ref_lo, ref_hi)
+  case_when(sb %in% FALSE | ne %in% FALSE ~ FALSE, sb %in% TRUE & ne %in% TRUE ~ TRUE, TRUE ~ NA)
+}
+## flag_escalations_month(events, pdi): events (initiator, target, year, dispnum) get
+##   ev_start_lo / ev_start_hi : the event's date = the pair's entry interval in its own dispute
+##   escalation                : TRUE when the pair is already fighting in ANOTHER dispute at that date (month rule, year
+##                               rule where the month rule is undecided)
+##   escalation_year           : the year rule alone (pair in another dispute active in `year` with pair onset before it)
+##   esc_fallback              : TRUE when the decision rests on at least one year-rule fallback (no comparison was a
+##                               certain TRUE and at least one was undecided)
+## attr(, "comparisons") holds the per-(event, other dispute) table for logging.
+flag_escalations_month <- function(events, pdi) {
+  stopifnot(all(c("initiator", "target", "year", "dispnum") %in% names(events)))
+  own <- pdi |> filter(spell == 1L) |> select(dispnum, initiator = ccode1, target = ccode2, pair_onset, ev_start_lo = start_lo, ev_start_hi = start_hi)
+  ev <- events |> select(initiator, target, year, dispnum) |> inner_join(own, by = c("dispnum", "initiator", "target"))
+  if (nrow(ev) != nrow(events)) stop("flag_escalations_month: an event has no pair-dispute interval")
+  if (any(ev$pair_onset != ev$year)) stop("flag_escalations_month: an event's year is not the pair's onset year in its dispute")
+  ## one comparison per (event, other dispute, spell of the pair in it); the year rule is the whole pair's onset and the
+  ## spell's years, so any() over spells reproduces already_fighting_keys() exactly
+  cmp <- ev |> select(-pair_onset) |>
+    inner_join(pdi |> select(initiator = ccode1, target = ccode2, other_dispnum = dispnum, o_spell = spell, o_onset = pair_onset,
+                             o_first = spell_first, o_last = spell_last, o_start_lo = start_lo, o_start_hi = start_hi, o_end_lo = end_lo, o_end_hi = end_hi),
+               by = c("initiator", "target"), relationship = "many-to-many") |>
+    filter(other_dispnum != dispnum) |>
+    mutate(month_dec = month_rule(o_start_lo, o_start_hi, o_end_lo, o_end_hi, ev_start_lo, ev_start_hi),
+           year_dec = o_onset < year & o_first <= year & o_last >= year,
+           fallback = is.na(month_dec), decision = ifelse(fallback, year_dec, month_dec))
+  stopifnot(!anyNA(cmp$decision), !anyNA(cmp$year_dec))
+  agg <- cmp |> group_by(initiator, target, year, dispnum) |>
+    summarise(escalation = any(decision), escalation_year = any(year_dec),
+              esc_fallback = !any(month_dec %in% TRUE) & any(fallback), .groups = "drop")
+  out <- events |> left_join(ev |> select(initiator, target, year, dispnum, ev_start_lo, ev_start_hi), by = c("initiator", "target", "year", "dispnum")) |>
+    left_join(agg, by = c("initiator", "target", "year", "dispnum")) |>
+    mutate(escalation = coalesce(escalation, FALSE), escalation_year = coalesce(escalation_year, FALSE), esc_fallback = coalesce(esc_fallback, FALSE))
+  stopifnot(nrow(out) == nrow(events), !anyNA(out$escalation), !anyNA(out$ev_start_lo), !anyNA(out$ev_start_hi))
+  ## the year rule here must equal the earlier already_fighting_keys() / flag_escalations() path
+  attr(out, "comparisons") <- cmp
+  out
+}
+## reference_dates(events): for every (ccode, year) that initiates (has a non-escalation event), the interval of its
+## EARLIEST non-escalation event's start (lo = min of the lower bounds, hi = min of the upper bounds). State-years absent
+## from this table use January of year t (the caller coalesces).
+reference_dates <- function(events) {
+  stopifnot(all(c("initiator", "year", "escalation", "ev_start_lo", "ev_start_hi") %in% names(events)))
+  out <- events |> filter(!escalation) |> group_by(ccode = initiator, year) |>
+    summarise(ref_lo = min(ev_start_lo), ref_hi = min(ev_start_hi), .groups = "drop")
+  stopifnot(all(out$ref_lo <= out$ref_hi), all(ym_year(out$ref_lo) == out$year))
+  out
+}
+## already_fighting_keys_month(pdi, ref): directed (ccode1, ccode2, year, dispnum) rows for every pair-dispute and
+## every year the pair is in it, with drop = TRUE when the pair is already fighting in that dispute at the state-year's
+## reference date (month rule, year fallback), drop_year = the year rule, fallback flag. The reference date of
+## (ccode1, year) is its row in ref, else January of year. ref = NULL (Codex review P1-1, 2026-10-24) uses January of
+## year for EVERY state-year: this is the stage-1 IV choice set, which must not depend on the state-year's own events
+## (the reference-date set is the stage-2 set). No information from after the reference date is used.
+already_fighting_keys_month <- function(pdi, ref = NULL) {
+  if (is.null(ref)) ref <- tibble(ccode = integer(0), year = integer(0), ref_lo = integer(0), ref_hi = integer(0))
+  stopifnot(all(c("ccode", "year", "ref_lo", "ref_hi") %in% names(ref)))
+  keys <- pdi |> rowwise() |> mutate(year = list(seq.int(spell_first, spell_last))) |> ungroup() |> tidyr::unnest(year) |>
+    left_join(ref |> rename(ccode1 = ccode), by = c("ccode1", "year")) |>
+    mutate(ref_lo = coalesce(ref_lo, ym_index(year, 1L)), ref_hi = coalesce(ref_hi, ym_index(year, 1L)),
+           month_dec = month_rule(start_lo, start_hi, end_lo, end_hi, ref_lo, ref_hi),
+           drop_year = year > pair_onset,
+           fallback = is.na(month_dec), drop = ifelse(fallback, drop_year, month_dec))
+  stopifnot(!anyNA(keys$drop))
+  keys |> select(ccode1, ccode2, year, dispnum, spell, ref_lo, ref_hi, drop, drop_year, fallback)
+}
+## choice_set_flags(alts, af_iv, af_s2) (Codex review P1-1, PI choice "A'", 2026-10-24). alts has one row per
+## (ccode1, ccode2, year); af_iv / af_s2 are the distinct directed (ccode1, ccode2, year) keys already fighting at
+## January (stage-1 IV set) and at the state-year's reference date (stage-2 set). Returns alts with
+##   in_iv : 1 when the row is in the stage-1 IV set (not in af_iv)
+##   in_s2 : 1 when the row is in the stage-2 choice set (not in af_s2)
+## and WITHOUT the rows that are in neither set. One row block per state-year is the UNION of both sets; the Stan
+## programs take IV[n] over the in_iv rows and the stage-2 softmax over the in_s2 rows. For a non-initiating
+## state-year the two sets are identical (the reference date is January in both). in_iv never depends on af_s2.
+choice_set_flags <- function(alts, af_iv, af_s2) {
+  stopifnot(all(c("ccode1", "ccode2", "year") %in% names(alts)), all(c("ccode1", "ccode2", "year") %in% names(af_iv)),
+            all(c("ccode1", "ccode2", "year") %in% names(af_s2)), !any(c("in_iv", "in_s2") %in% names(alts)))
+  assert_no_dup_keys(alts, c("ccode1", "ccode2", "year"), "choice_set_flags: alts")
+  k_alt <- paste(alts$ccode1, alts$ccode2, alts$year)
+  k_iv <- unique(paste(af_iv$ccode1, af_iv$ccode2, af_iv$year)); k_s2 <- unique(paste(af_s2$ccode1, af_s2$ccode2, af_s2$year))
+  out <- alts |> mutate(in_iv = as.integer(!(k_alt %in% k_iv)), in_s2 = as.integer(!(k_alt %in% k_s2)))
+  n_neither <- sum(out$in_iv == 0L & out$in_s2 == 0L)
+  out <- out |> filter(in_iv == 1L | in_s2 == 1L)
+  stopifnot(nrow(out) == nrow(alts) - n_neither, all(out$in_iv %in% 0:1), all(out$in_s2 %in% 0:1), all(out$in_iv == 1L | out$in_s2 == 1L))
+  attr(out, "n_neither") <- n_neither
+  out
+}
+## collapse_duplicate_events(events): one event per (initiator, target, year) among the non-escalation rows (PI decision
+## 2026-10-24). Sample flags and codings are ORed, is_joiner_pair is FALSE when any collapsed row is an originator pair,
+## dispnum keeps the smallest dispute number and dispnums lists them all. Escalation rows are kept as they are. Every
+## column must be named in one of the rules below, so a new column fails loudly instead of being collapsed by accident.
+## event_weights(events) (PI decision 2026-10-25, D8; README "Coalition expansion"): per sample s, w_s = 1 / (number of the
+## initiator's targets in the SAME dispute and onset year that are in sample s), so an initiator facing k Side-B members of one
+## dispute contributes one decision's weight to the stage-2 composite likelihood; targets in different disputes stay separate
+## decisions. 0 for rows outside the sample. Computed on the pre-collapse rows (one per dispute pair); the collapse sums the
+## weights of a key's source rows and caps at 1.
+event_weights <- function(events, samples = c("mid", "fmid", "fmidcow", "fmidub", "war")) {
+  stopifnot(all(c("dispnum", "initiator", "year") %in% names(events)), all(paste0("in_", samples) %in% names(events)))
+  out <- events
+  for (s in samples) {
+    f <- out[[paste0("in_", s)]]
+    stopifnot(!anyNA(f), is.logical(f))
+    n <- out |> mutate(.f = f) |> group_by(dispnum, initiator, year) |> mutate(.n = sum(.f)) |> ungroup() |> pull(.n)
+    w <- ifelse(f, 1 / n, 0)
+    stopifnot(all(is.finite(w)), all(w[f] > 0), all(w[f] <= 1), all(w[!f] == 0))
+    tot <- out |> mutate(.w = w) |> group_by(dispnum, initiator, year) |> summarise(.s = sum(.w), .groups = "drop")
+    stopifnot(all(abs(tot$.s - 1) < 1e-12 | tot$.s == 0))
+    out[[paste0("w_", s)]] <- w
+  }
+  out
+}
+## Direction columns (2026-10-25, D1): dir_flipped is ORed, dir_source / dir_rule are pasted, war_link and n_war_match take the
+## max; sidea1 (initiator on MID Side A) is TRUE only when it holds in EVERY source dispute and sidea2 (initiator on MID Side B,
+## i.e. flipped) when it holds in ANY, so sidea1 + sidea2 == 1 still marks a key whose sources agree. Event weights (D8): the
+## per-sample stage-2 weights w_<sample> are summed over the collapsed rows and capped at 1 (one chosen alternative can carry
+## at most one decision's weight).
+collapse_duplicate_events <- function(events) {
+  key_cols   <- c("initiator", "target", "year")
+  same_cols  <- c("target_has_pos_tm1", "fighting_at_ref")                                     # must agree within a key
+  all_cols   <- c("sidea1"); any_cols <- c("sidea2")                                           # 0/1, see above
+  wsum_cols  <- c("w_mid", "w_fmid", "w_fmidcow", "w_fmidub", "w_war")                         # min(1, sum)
+  ## the *_noww2 flags (Codex review P2-3) are the sample flags of the NON-WWII source rows only: ORing them over a key
+  ## that mixes a WWII and a non-WWII dispute keeps the event in the no-WWII sample iff a non-WWII dispute qualifies
+  or_cols    <- c("war", "war_disp", "escalation_year", "esc_fallback", "is_ww2", "fatal_main", "fatal_cow", "fatal_ub",
+                  "in_mid", "in_fmid", "in_fmidcow", "in_fmidub", "in_war",
+                  "in_mid_noww2", "in_fmid_noww2", "in_fmidcow_noww2", "in_fmidub_noww2", "in_war_noww2", "dir_flipped")   # never NA
+  tri_cols   <- c("fatal1", "fatal2", "fatal_disp", "fatal", "fatal_mic", "fatal_gml")          # TRUE if any TRUE, NA if all NA
+  max_cols   <- c("orig1", "orig2", "fatality1", "fatality2", "hostlev1", "hostlev2", "fatality_disp", "hostlev_disp", "mic_fatalmin",
+                  "war_link", "n_war_match")
+  min_cols   <- c("dispnum", "ev_start_lo", "ev_start_hi")
+  paste_cols <- c("fatal_source", "dir_source", "dir_rule")
+  ## entry = later (2026-11-04): entry_reversed is ORed and entry_rule pasted; both columns exist only in that build variant
+  if ("entry_reversed" %in% names(events)) or_cols <- c(or_cols, "entry_reversed")
+  if ("entry_rule" %in% names(events)) paste_cols <- c(paste_cols, "entry_rule")
+  ## events = dymid (2026-11-04; recognised by its fatal_any column): the dymid samples (fmidany in place of fmidcow), no MIC / GML columns, and the
+  ## event-dyad columns: war_ddiw / war_dymid / recip ORed, warnum_ddiw / n_spells max, ev_source pasted
+  if ("fatal_any" %in% names(events)) {
+    wsum_cols <- c("w_mid", "w_fmid", "w_fmidany", "w_fmidub", "w_war")
+    or_cols <- c(setdiff(or_cols, c("fatal_cow", "in_fmidcow", "in_fmidcow_noww2")), "fatal_any", "in_fmidany", "in_fmidany_noww2", "war_ddiw", "war_dymid", "recip")
+    tri_cols <- setdiff(tri_cols, c("fatal_mic", "fatal_gml"))
+    max_cols <- c(setdiff(max_cols, "mic_fatalmin"), "warnum_ddiw", "n_spells")
+    paste_cols <- c(paste_cols, "ev_source")
+  }
+  known <- c(key_cols, same_cols, all_cols, any_cols, wsum_cols, or_cols, tri_cols, max_cols, min_cols, paste_cols, "is_joiner_pair", "escalation")
+  extra <- setdiff(names(events), known); missing <- setdiff(known, names(events))
+  if (length(extra)) stop("collapse_duplicate_events: unclassified columns: ", paste(extra, collapse = ", "))
+  if (length(missing)) stop("collapse_duplicate_events: expected columns absent: ", paste(missing, collapse = ", "))
+  for (cc in c(or_cols, all_cols, any_cols, wsum_cols)) if (anyNA(events[[cc]])) stop("collapse_duplicate_events: NA in ", cc)
+  for (cc in c(all_cols, any_cols)) if (!all(events[[cc]] %in% 0:1)) stop("collapse_duplicate_events: ", cc, " is not 0/1")
+  for (cc in wsum_cols) if (any(events[[cc]] < 0 | events[[cc]] > 1)) stop("collapse_duplicate_events: ", cc, " outside [0, 1]")
+  esc <- events |> filter(escalation) |> mutate(dispnums = as.character(dispnum), n_disputes = 1L)
+  keep <- events |> filter(!escalation)
+  tri <- function(x) if (all(is.na(x))) NA else any(x, na.rm = TRUE)
+  mx <- function(x) if (all(is.na(x))) x[1] else max(x, na.rm = TRUE)
+  same <- function(x) { if (length(unique(x)) != 1) stop("collapse_duplicate_events: a 'same' column differs within a key"); x[1] }
+  ## dispnums and n_disputes come FIRST: inside summarise() a later expression sees the already-reduced dispnum
+  out <- keep |> group_by(across(all_of(key_cols))) |>
+    summarise(dispnums = paste(sort(dispnum), collapse = ";"), n_disputes = n(),
+              across(all_of(same_cols), same), across(all_of(or_cols), ~ any(.x)), across(all_of(tri_cols), tri),
+              across(all_of(max_cols), mx), across(all_of(min_cols), ~ min(.x)),
+              across(all_of(paste_cols), ~ paste(sort(unique(.x)), collapse = ";")),
+              across(all_of(all_cols), ~ as.integer(all(.x == 1L))), across(all_of(any_cols), ~ as.integer(any(.x == 1L))),
+              across(all_of(wsum_cols), ~ pmin(1, sum(.x))),
+              is_joiner_pair = all(is_joiner_pair), escalation = FALSE, .groups = "drop")
+  stopifnot(nrow(out) == nrow(distinct(keep, initiator, target, year)), sum(out$n_disputes) == nrow(keep),
+            all(out$in_mid), !any(out$escalation), all(out$w_mid > 0), all(out$w_mid <= 1),
+            all(lengths(strsplit(out$dispnums, ";", fixed = TRUE)) == out$n_disputes),
+            all(vapply(strsplit(out$dispnums, ";", fixed = TRUE), function(z) as.integer(z[1]), 1L) == out$dispnum),
+            setequal(as.integer(unlist(strsplit(out$dispnums, ";", fixed = TRUE))), keep$dispnum),
+            length(unlist(strsplit(out$dispnums, ";", fixed = TRUE))) == nrow(keep))
+  ## ORed flags are exactly "any row had the flag", checked column by column against the uncollapsed rows
+  for (cc in or_cols) {
+    chk <- keep |> group_by(across(all_of(key_cols))) |> summarise(v = any(.data[[cc]]), .groups = "drop") |> inner_join(out |> select(all_of(key_cols), w = all_of(cc)), by = key_cols)
+    stopifnot(nrow(chk) == nrow(out), all(chk$v == chk$w))
+  }
+  res <- bind_rows(out, esc |> select(all_of(names(out))))
+  assert_no_dup_keys(res |> filter(!escalation), key_cols, "collapsed events")
+  assert_no_dup_keys(res, c("dispnum", "initiator", "target"), "collapsed events (dispute keys)")
+  res
+}
+
+## ---- D8 groups at assembly (PI decision 2026-10-26; README "pairs" switch) ---------------------------------------------------------
+## The D8 weight group is (initiator, dispnum, year), the key event_weights() used on the pre-collapse rows. After the collapse a key
+## collapsed from several disputes carries ONE weight (the capped sum of its per-dispute weights) and ONE dispnum (the smallest), so at
+## assembly every event belongs to exactly one group, that of its dispnum column; the other disputes of a collapsed key form no group of
+## their own (their per-dispute weights are not recoverable from events.rds). The three helpers below all use this key.
+## d8_group_table(before, kept, w_col): one row per group of `before` (the sample's events before a filter) with the members that survived
+## the filter (`kept`, a subset of `before` on (initiator, target, year)): n, n_kept, w_before, w_kept (the kept members' BUILD weights),
+## n_single / n_single_kept (single-dispute members), n_collapsed / n_collapsed_kept (collapsed keys).
+d8_group_table <- function(before, kept, w_col) {
+  stopifnot(is.character(w_col), length(w_col) == 1L, all(c("initiator", "target", "year", "dispnum", "n_disputes", w_col) %in% names(before)),
+            all(c("initiator", "target", "year") %in% names(kept)), !anyNA(before[[w_col]]))
+  assert_no_dup_keys(before, c("initiator", "target", "year"), "d8_group_table: events before the filter")
+  assert_no_dup_keys(kept, c("initiator", "target", "year"), "d8_group_table: kept events")
+  k <- kept |> select(initiator, target, year) |> mutate(.kept = TRUE)
+  b <- before |> left_join(k, by = c("initiator", "target", "year")) |> mutate(.kept = coalesce(.kept, FALSE))
+  if (sum(b$.kept) != nrow(kept)) stop("d8_group_table: the kept events are not a subset of the events before the filter")
+  b |> group_by(initiator, dispnum, year) |>
+    summarise(n = n(), n_kept = sum(.kept), w_before = sum(.data[[w_col]]), w_kept = sum(.data[[w_col]][.kept]),
+              n_single = sum(n_disputes == 1L), n_single_kept = sum(.kept & n_disputes == 1L),
+              n_collapsed = sum(n_disputes > 1L), n_collapsed_kept = sum(.kept & n_disputes > 1L), .groups = "drop")
+}
+## d8_assert_groups_whole(before, kept, w_col, what): the filter `what` (ww2 = drop, coal_drop = top3) removes whole disputes, so every group
+## must be untouched or dropped whole. A split among SINGLE-dispute members means the flag is not constant within a dispute (stop). A split
+## through a collapsed key alone (a key kept by one of its other disputes, e.g. the no-WWII flag of a key mixing a WWII and a non-WWII
+## dispute, review P2-3) is the documented collapse behaviour: counted and returned (the caller logs a WARNING), weights NOT rescaled.
+## Returns list(groups, n_whole_kept, n_whole_dropped, n_split_collapsed).
+d8_assert_groups_whole <- function(before, kept, w_col, what) {
+  g <- d8_group_table(before, kept, w_col)
+  split <- g |> filter(n_kept > 0L, n_kept < n)
+  bad <- split |> filter(n_single_kept > 0L, n_single_kept < n_single)
+  if (nrow(bad) > 0) stop(sprintf("%s: %d (initiator, dispute, year) groups are split among their single-dispute members (%s); the flag is not constant within the dispute (rebuild the data)",
+                                  what, nrow(bad), paste(sprintf("%d/%d/%d", bad$initiator, bad$dispnum, bad$year), collapse = ", ")))
+  stopifnot(all(split$n_collapsed > 0L))
+  list(groups = g, n_whole_kept = sum(g$n_kept == g$n), n_whole_dropped = sum(g$n_kept == 0L), n_split_collapsed = nrow(split))
+}
+## d8_rescale_split_groups(before, kept, w_col): the pairs rule (PI decision 2026-10-26). In every group the pairs filter SPLIT (some members
+## kept, some dropped) the kept members' weights are divided by their kept sum, so the group sums to 1 again (w_new = w / sum(w kept));
+## a group kept whole keeps the build's weights exactly, whatever they sum to (a group of collapsed keys may sum to more or less than 1
+## under pairs = all and stays so). Groups fully dropped have no members left. Asserts: every split group sums to 1 after the rescale,
+## every weight is in (0, 1], weights outside the split groups are unchanged. Returns `kept` with w_col rescaled and the attributes
+## n_groups_split, n_groups_rescaled (split groups whose factor differs from 1), n_events_rescaled, w_before, w_after (sums over the kept
+## events), n_split_with_collapsed (split groups holding a collapsed key), groups (the table).
+d8_rescale_split_groups <- function(before, kept, w_col) {
+  g <- d8_group_table(before, kept, w_col)
+  split <- g |> filter(n_kept > 0L, n_kept < n)
+  stopifnot(all(split$w_kept > 0), !".fac" %in% names(kept))
+  out <- kept |> left_join(split |> transmute(initiator, dispnum, year, .fac = 1 / w_kept), by = c("initiator", "dispnum", "year")) |>
+    mutate(.fac = coalesce(.fac, 1))
+  w_old <- out[[w_col]]
+  stopifnot(all(is.finite(w_old)), all(w_old > 0), all(w_old <= 1), sum(out$.fac != 1) <= nrow(out))
+  out[[w_col]] <- w_old * out$.fac
+  in_split <- out |> semi_join(split, by = c("initiator", "dispnum", "year")) |> nrow()
+  chk <- out |> group_by(initiator, dispnum, year) |> summarise(.s = sum(.data[[w_col]]), .groups = "drop") |> semi_join(split, by = c("initiator", "dispnum", "year"))
+  stopifnot(nrow(chk) == nrow(split), all(abs(chk$.s - 1) < 1e-9),
+            all(is.finite(out[[w_col]])), all(out[[w_col]] > 0), all(out[[w_col]] <= 1 + 1e-12),
+            all(out[[w_col]][out$.fac == 1] == w_old[out$.fac == 1]))
+  out[[w_col]] <- pmin(out[[w_col]], 1)
+  n_resc <- sum(abs(out$.fac - 1) > 1e-12)
+  res <- out |> select(-.fac)
+  stopifnot(identical(names(res), names(kept)), nrow(res) == nrow(kept))
+  attr(res, "n_groups_split") <- nrow(split)
+  attr(res, "n_groups_rescaled") <- sum(abs(split$w_kept - 1) > 1e-12)
+  attr(res, "n_events_rescaled") <- n_resc
+  attr(res, "n_events_in_split") <- in_split
+  attr(res, "w_before") <- sum(w_old); attr(res, "w_after") <- sum(res[[w_col]])
+  attr(res, "n_split_with_collapsed") <- sum(split$n_collapsed > 0L)
+  attr(res, "groups") <- g
+  res
+}
+
+## ---- stage-2 event groups (dual typology stage b, PI-approved spec 2026-10-27; joiner definition revised by PI decision the same day) -----
+## Three groups from two existing columns of events.rds: the coalition flag of the event's D8 group (coal_incl by default, the column
+## named in `coal_col`) and the INITIATOR's COW originator flag orig1 (1 = originator, 0 = the initiator entered the dispute after its
+## onset; after the direction rule of D1 orig1 always describes the initiator; a key collapsed from several disputes takes the max, so
+## an initiator that originated any of them is an originator). The joiner role is the initiator's own (PI decision 2026-10-27, item 6),
+## NOT the pair-level is_joiner_pair (either side a joiner), which remains the flag of the `pairs` switch and of the stage-(a) role block.
+## Role decides: a joiner initiator is a joiner whatever the coalition flag says.
+##   0 bilateral        : coal == FALSE and orig1 == 1   (the reference group of the M1c model)
+##   1 coalition leader : coal == TRUE  and orig1 == 1
+##   2 joiner           : orig1 == 0
+## Every event is in exactly one group (asserted: the three indicator columns sum to 1 on every row, no NA). The definition of the joiner
+## indicator is the one line `g_jn <- ...` below.
+STAGE2_GROUPS <- c("bilateral", "leader", "joiner")
+stage2_groups <- function(ev, coal_col = "coal_incl") {
+  stopifnot(is.data.frame(ev), all(c("orig1", coal_col) %in% names(ev)), !anyNA(ev$orig1), !anyNA(ev[[coal_col]]),
+            all(ev$orig1 %in% c(0L, 1L)), is.logical(ev[[coal_col]]))
+  g_jn <- ev$orig1 == 0L                                   # the initiator joined after the onset (initiator-role-only, PI 2026-10-27)
+  g_bi <- !ev[[coal_col]] & !g_jn
+  g_ld <- ev[[coal_col]] & !g_jn
+  stopifnot(all(as.integer(g_bi) + as.integer(g_ld) + as.integer(g_jn) == 1L))
+  grp <- ifelse(g_jn, 2L, ifelse(g_ld, 1L, 0L))
+  stopifnot(!anyNA(grp), all(grp %in% 0:2), length(grp) == nrow(ev))
+  grp
+}
+
+## ---- stage-2 role groups "aprime" (PI decision 2026-10-31; switch roles = aprime, G = 4) ----------------------------------------------------
+## aprime_roles(pairs, dd): pairs = the PRE-collapse non-escalation event rows AFTER the direction rule (apply_direction()): dispnum, initiator,
+## target, year (pair onset year), orig1 / orig2 (the initiator's / target's COW originator flags after the flip), sidea1 (the INITIATOR's COW
+## Side A flag after the flip: 0 for a flipped initiator, whose own side is COW Side B). dd = COW directed dispute-years (dispnum, ccode1, year,
+## sidea1, orig1). Groups (no date or tie logic):
+##   3 target joined late : orig1 == 1 and orig2 == 0, PER EVENT (target pair); takes precedence over 0 / 1; NOT required constant in a D8 group
+##   2 joiner             : orig1 == 0
+##   1 co-originator      : orig1 == 1 and at least one OTHER participant of the dispute with COW orig == 1 is on the initiator's own side
+##   0 alone originator   : orig1 == 1, no other originator on the initiator's own side, not group 3 (the reference group)
+## Side of a partner c: its COW sidea1 in the pair's onset year when c has a dispute-year row in that year, else in c's FIRST dispute year. A
+## partner with two sides within that year (a within-year side switch, dispute 258) counts as on the initiator's side when either side matches;
+## the events where that decides the group are counted (attr "n_switch_decides"). The initiator's own side is the event's sidea1; it is
+## checked against dd in the onset year (asserted equal wherever the initiator has one side that year; within-year switchers are counted).
+## Groups 0 / 1 / 2 are a property of (initiator, dispute, year) and asserted constant within every D8 group (dispnum, initiator, year) over
+## the events not in group 3. Returns pairs with grp_aprime, n_co_orig (other same-side originators), and flags; attr "diagnostics".
+APRIME_GROUPS <- c("alone", "co_originator", "joiner", "target_late")
+aprime_roles <- function(pairs, dd) {
+  stopifnot(is.data.frame(pairs), all(c("dispnum", "initiator", "target", "year", "orig1", "orig2", "sidea1") %in% names(pairs)),
+            all(c("dispnum", "ccode1", "year", "sidea1", "orig1") %in% names(dd)), !anyNA(pairs[, c("dispnum", "initiator", "target", "year", "orig1", "orig2", "sidea1")]),
+            all(pairs$orig1 %in% c(0L, 1L)), all(pairs$orig2 %in% c(0L, 1L)), all(pairs$sidea1 %in% c(0L, 1L)))
+  assert_no_dup_keys(pairs, c("dispnum", "initiator", "target"), "aprime_roles: pairs")
+  part <- dd |> transmute(dispnum = as.integer(dispnum), ccode = as.integer(ccode1), year = as.integer(year), side = as.integer(sidea1), orig = as.integer(orig1)) |> distinct()
+  ## originator status is constant per participant (as in build_pair_table / participant_spell_dates)
+  po <- part |> group_by(dispnum, ccode) |> summarise(n_o = n_distinct(orig), orig = first(orig), first_year = min(year), .groups = "drop")
+  if (any(po$n_o != 1L)) stop("aprime_roles: originator status differs across a participant's dispute-years")
+  side_y <- part |> group_by(dispnum, ccode, year) |> summarise(side_set = list(sort(unique(side))), n_side = n_distinct(side), .groups = "drop")
+  side_first <- part |> inner_join(po |> select(dispnum, ccode, first_year), by = c("dispnum", "ccode")) |> filter(year == first_year) |>
+    group_by(dispnum, ccode) |> summarise(side_first = list(sort(unique(side))), .groups = "drop")
+  pr <- pairs |> mutate(.e = row_number())
+  ## the initiator's own side: the event's sidea1, checked against dd in the onset year
+  ini <- pr |> select(.e, dispnum, ccode = initiator, year, sidea1) |> left_join(side_y, by = c("dispnum", "ccode", "year"))
+  if (anyNA(ini$n_side)) stop(sprintf("aprime_roles: %d initiators have no dispute-year row in their pair's onset year", sum(is.na(ini$n_side))))
+  ok1 <- ini$n_side == 1L
+  if (any(vapply(ini$side_set[ok1], `[`, 1L, 1L) != ini$sidea1[ok1])) stop("aprime_roles: the event's (post-flip) sidea1 disagrees with the initiator's COW side in the onset year")
+  n_init_switch <- sum(!ok1)
+  ## candidate partners: every other ORIGINATOR of the dispute
+  cand <- pr |> select(.e, dispnum, initiator, target, year, sidea1) |>
+    inner_join(po |> filter(orig == 1L) |> select(dispnum, ccode), by = "dispnum", relationship = "many-to-many") |> filter(ccode != initiator, ccode != target) |>   # audit 2026-10-31 (2): the target is never a partner
+    left_join(side_y |> select(dispnum, ccode, year, side_set, n_side), by = c("dispnum", "ccode", "year")) |>
+    left_join(side_first, by = c("dispnum", "ccode"))
+  cand$fallback <- is.na(cand$n_side)
+  cand$sides <- ifelse(cand$fallback, cand$side_first, cand$side_set)
+  stopifnot(!any(vapply(cand$sides, is.null, TRUE)))
+  cand$match <- mapply(function(s, a) a %in% s, cand$sides, cand$sidea1)
+  cand$match_unique <- mapply(function(s, a) length(s) == 1L && s[1] == a, cand$sides, cand$sidea1)
+  agg <- cand |> group_by(.e) |> summarise(n_co_orig = n_distinct(ccode[match]), n_co_orig_unique = n_distinct(ccode[match_unique]),
+                                          n_fallback = n_distinct(ccode[match & fallback]), .groups = "drop")
+  pr <- pr |> left_join(agg, by = ".e") |> mutate(across(c(n_co_orig, n_co_orig_unique, n_fallback), ~ coalesce(.x, 0L)))
+  pr <- pr |> mutate(late_target = orig1 == 1L & orig2 == 0L,
+                     grp_aprime = case_when(orig1 == 0L ~ 2L, late_target ~ 3L, n_co_orig >= 1L ~ 1L, TRUE ~ 0L),
+                     grp_unique = case_when(orig1 == 0L ~ 2L, late_target ~ 3L, n_co_orig_unique >= 1L ~ 1L, TRUE ~ 0L))
+  stopifnot(!anyNA(pr$grp_aprime), all(pr$grp_aprime %in% 0:3), all((pr$grp_aprime == 2L) == (pr$orig1 == 0L)), all((pr$grp_aprime == 3L) == pr$late_target))
+  ## groups 0 / 1 / 2 are constant within every D8 group (dispnum, initiator, year) over the events outside group 3
+  chk <- pr |> filter(grp_aprime != 3L) |> group_by(dispnum, initiator, year) |> summarise(n = n_distinct(grp_aprime), .groups = "drop")
+  if (any(chk$n != 1L)) stop(sprintf("aprime_roles: groups 0 / 1 / 2 not constant within %d D8 groups (dispnum, initiator, year)", sum(chk$n != 1L)))
+  diag <- list(n_events = nrow(pr), n_init_switch = n_init_switch, n_switch_decides = sum(pr$grp_aprime != pr$grp_unique),
+               n_fallback_side = sum(pr$n_fallback > 0L), n_mixed_groups_with_3 = sum((pr |> group_by(dispnum, initiator, year) |> summarise(m = any(grp_aprime == 3L) & !all(grp_aprime == 3L), .groups = "drop"))$m))
+  attr(pr, "diagnostics") <- diag
+  pr |> select(-.e, -grp_unique)
+}
+## ---- joiner choice sets (PI-approved 2026-11-04; switch joiner_set = opposing) -------------------------------------------------------------
+## joiner_opposing_sets(pairs, dd): pairs = the PRE-collapse non-escalation event rows after the direction rule WITH their aprime group (the output
+## of aprime_roles(): dispnum, initiator, target, year, sidea1, grp_aprime); dd = COW directed dispute-years (dispnum, ccode1, year, sidea1). For every
+## JOINER event (grp_aprime == 2) the set of states that (i) take part in the event's dispute in its onset year (a dispute-year row in that year) and
+## (ii) are on the side OPPOSITE to the joiner's own side. The joiner's own side is the event's (post-flip) sidea1, as in aprime_roles(). A state with
+## two sides within the onset year (a within-year switcher, dispute 258) is opposite when EITHER of its sides differs from the joiner's (so a switching
+## target stays in its own pair's set); such members are flagged (opp_two_sides) and counted. The initiator is never in its own set. The chosen target
+## must be in its set: the function stops and lists the offending events otherwise.
+## Returns one row per (event, opposing state): dispnum, initiator, target, year, opp_ccode, opp_two_sides; attr "diagnostics" (counts, sizes).
+joiner_opposing_sets <- function(pairs, dd) {
+  stopifnot(is.data.frame(pairs), all(c("dispnum", "initiator", "target", "year", "sidea1", "grp_aprime") %in% names(pairs)),
+            all(c("dispnum", "ccode1", "year", "sidea1") %in% names(dd)), !anyNA(pairs[, c("dispnum", "initiator", "target", "year", "sidea1", "grp_aprime")]),
+            all(pairs$sidea1 %in% c(0L, 1L)), all(pairs$grp_aprime %in% 0:3))
+  assert_no_dup_keys(pairs, c("dispnum", "initiator", "target"), "joiner_opposing_sets: pairs")
+  jn <- pairs |> filter(grp_aprime == 2L) |> transmute(dispnum = as.integer(dispnum), initiator = as.integer(initiator), target = as.integer(target),
+                                                        year = as.integer(year), own = as.integer(sidea1))
+  if (nrow(jn) == 0L) stop("joiner_opposing_sets: no joiner event (grp_aprime == 2)")
+  part <- dd |> transmute(dispnum = as.integer(dispnum), ccode = as.integer(ccode1), year = as.integer(year), side = as.integer(sidea1)) |> distinct()
+  sides <- part |> group_by(dispnum, ccode, year) |> summarise(n_side = n_distinct(side), has1 = any(side == 1L), has0 = any(side == 0L), .groups = "drop")
+  cand <- jn |> inner_join(sides, by = c("dispnum", "year"), relationship = "many-to-many") |> filter(ccode != initiator) |>
+    mutate(opposite = (own == 1L & has0) | (own == 0L & has1))
+  out <- cand |> filter(opposite) |> transmute(dispnum, initiator, target, year, opp_ccode = ccode, opp_two_sides = n_side > 1L) |>
+    arrange(dispnum, initiator, target, year, opp_ccode)
+  ## the chosen target is in its own set, for every joiner event (loud failure with the list)
+  miss <- jn |> anti_join(out |> filter(opp_ccode == target), by = c("dispnum", "initiator", "target", "year"))
+  if (nrow(miss) > 0L) stop(sprintf("joiner_opposing_sets: %d joiner events have a chosen target that is not on the opposite side of the dispute in the onset year: %s", nrow(miss),
+                                    paste(sprintf("%d->%d %d (dispute %d)", miss$initiator, miss$target, miss$year, miss$dispnum), collapse = "; ")))
+  sz <- out |> count(dispnum, initiator, target, year, name = "n_opp")
+  stopifnot(nrow(sz) == nrow(jn), all(sz$n_opp >= 1L), !anyDuplicated(out[, c("dispnum", "initiator", "target", "year", "opp_ccode")]))
+  attr(out, "diagnostics") <- list(n_events = nrow(jn), size_min = min(sz$n_opp), size_median = stats::median(sz$n_opp), size_max = max(sz$n_opp),
+                                   n_singleton = sum(sz$n_opp == 1L), n_rows = nrow(out), n_two_sided_members = sum(out$opp_two_sides),
+                                   n_events_with_two_sided = n_distinct(paste(out$dispnum, out$initiator, out$target)[out$opp_two_sides]))
+  out
+}
+## ---- role codings bc / bcj (PI decision 2026-11-04; need entry = later, where no late-target event exists): derived from the aprime groups ------
+## bc  (G = 2): 0 bilateral = aprime 0 (alone originator; the reference group), 1 coalition = aprime 1 (co-originator) or 2 (joiner)
+## bcj (G = 3): 0 bilateral = aprime 0 (reference), 1 coalition originator = aprime 1, 2 joiner = aprime 2
+## ROLE_FROM_APRIME[[roles]][a + 1] is the group of aprime group a (NA for aprime 3, which must not occur under entry = later).
+BC_GROUPS  <- c("bilateral", "coalition")
+BCJ_GROUPS <- c("bilateral", "coalition_originator", "joiner")
+ROLE_FROM_APRIME <- list(bc = c(0L, 1L, 1L, NA_integer_), bcj = c(0L, 1L, 2L, NA_integer_))
+## stage2_group_labels(roles): the labels of ev_grp 0..G-1 under the roles switch ("stageb" = the 3-group stage-b coding, "aprime" = the 4 groups above,
+## "bc" / "bcj" = the codings of 2026-11-04)
+stage2_group_labels <- function(roles = "stageb") {
+  stopifnot(roles %in% c("stageb", "aprime", "bc", "bcj"))
+  switch(roles, stageb = STAGE2_GROUPS, aprime = APRIME_GROUPS, bc = BC_GROUPS, bcj = BCJ_GROUPS)
+}
+
+## ---- the lag-3 MID-history choice set (2026-11-10; variant = mid3, README section 13) --------------------------------------------------------------
+## mid3_history(events, window): the (ccode1, ccode2, year) keys, in BOTH directions, of every state-year pair (i, j, t) with a MID onset between i and j
+## (either direction) in a year y with t - window <= y <= t - 1. `events` is the build's events.rds: one row per (initiator, target, onset year) after the
+## collapse, every hostility level, escalations INCLUDED (an escalation row is a new MID onset of a pair already fighting in another dispute), whatever the
+## sample flags. Under events = pairs these are the COW Side A x Side B pairs (so two states of the same dispute that never interacted count as a MID
+## pair, as everywhere in that foundation); under events = dymid the interacting dyads' onsets. The onset year itself is NEVER a history year of t = y
+## (leakage: the row of year t would carry the outcome); asserted on the result.
+mid3_history <- function(events, window = 3L) {
+  stopifnot(is.data.frame(events), all(c("initiator", "target", "year") %in% names(events)), !anyNA(events$initiator), !anyNA(events$target), !anyNA(events$year),
+            length(window) == 1L, is.finite(window), window >= 1L, all(events$initiator != events$target))
+  window <- as.integer(window)
+  on <- distinct(tibble(a = pmin(events$initiator, events$target), b = pmax(events$initiator, events$target), onset = as.integer(events$year)))
+  out <- bind_rows(lapply(seq_len(window), function(k) on |> mutate(year = onset + k)))          # k = 1..window: t = onset + k, never onset + 0
+  stopifnot(all(out$year > out$onset), all(out$year - out$onset <= window), all(out$onset >= out$year - window), all(out$onset <= out$year - 1L))
+  out <- distinct(out, a, b, year)
+  res <- distinct(bind_rows(transmute(out, ccode1 = a, ccode2 = b, year), transmute(out, ccode1 = b, ccode2 = a, year)))
+  stopifnot(!anyDuplicated(res), nrow(res) == 2L * nrow(out))
+  res
+}
+
+## ---- initiator direction for war-level disputes (PI decision 2026-10-25; README "Initiator direction") -------------
+## COW-MID Side A is the side that took the FIRST codable action, not the aggressor. In dispute 258 (the Second World War)
+## Side A is Poland and the Allies, so the Side A rule gives Poland -> Germany and never Germany -> Poland. For disputes at
+## war level (hostlev_disp == 5) that can be linked to a COW inter-state war the direction follows COW's war-INITIATING
+## side instead (cow_war_inter: sidea1 / sidea2 are the war sides 1 / 2, initiator1 / initiator2 the state-level initiator
+## flags; in every COW war exactly one side has initiators, asserted below).
+## build_pair_table(dd, disp): one row per directed (dispnum, ccode1, ccode2) with the pair's onset year, the sides and
+## originator flags of the EARLIEST year the pair appears (sidea can change when a state switches sides, e.g. France and the
+## USSR in dispute 258 are opposed in 1939 and again, with the sides reversed, in 1941; the P3 fix replaces first() by the
+## earliest year's value and reports the pairs where it differs), the max fatality / hostility over the pair's years and
+## the dispute-level codings. attr(, "side_changes") lists the directed pairs whose sidea differs across their years.
+build_pair_table <- function(dd, disp) {
+  stopifnot(all(c("dispnum", "ccode1", "ccode2", "year", "sidea1", "sidea2", "orig1", "orig2", "fatality1", "fatality2", "hostlev1", "hostlev2") %in% names(dd)),
+            all(c("dispnum", "fatality_disp", "hostlev_disp") %in% names(disp)))
+  assert_no_dup_keys(disp, "dispnum", "dispute-level table")
+  chg <- dd |> group_by(dispnum, ccode1, ccode2) |> summarise(n_side = n_distinct(sidea1), n_orig = n_distinct(orig1), .groups = "drop")
+  if (any(chg$n_orig != 1L)) stop("build_pair_table: originator status of a pair differs across its dispute-years")
+  pair <- dd |> arrange(dispnum, ccode1, ccode2, year) |> group_by(dispnum, ccode1, ccode2) |>
+    summarise(year = min(year), sidea1 = sidea1[1], sidea2 = sidea2[1],            # arranged by year: the EARLIEST year's sides
+              orig1 = orig1[1], orig2 = orig2[1],
+              fatality1 = max(fatality1), fatality2 = max(fatality2),
+              hostlev1 = max(hostlev1), hostlev2 = max(hostlev2), .groups = "drop") |>
+    left_join(disp |> select(dispnum, fatality_disp, hostlev_disp), by = "dispnum")
+  stopifnot(!anyNA(pair$hostlev_disp), all(pair$sidea1 %in% 0:1), all(pair$sidea2 %in% 0:1))
+  attr(pair, "side_changes") <- chg |> filter(n_side > 1L) |> select(dispnum, ccode1, ccode2)
+  pair
+}
+## war_dyad_years(war_inter): distinct COW inter-state war dyad-years with, per row, whether the side of ccode1 (side1_init)
+## and of ccode2 (side2_init) is the war's initiating side. Exactly one side per war has initiators (asserted), so
+## side2_init == !side1_init on every row.
+war_dyad_years <- function(war_inter) {
+  stopifnot(all(c("warnum", "ccode1", "ccode2", "year", "sidea1", "sidea2", "initiator1", "initiator2", "cowinteronset") %in% names(war_inter)))
+  w <- war_inter |> transmute(warnum = as.integer(warnum), ccode1 = as.integer(ccode1), ccode2 = as.integer(ccode2), year = as.integer(year),
+                              sidea1 = as.integer(sidea1), sidea2 = as.integer(sidea2), initiator1 = as.integer(initiator1),
+                              initiator2 = as.integer(initiator2), cowinteronset = as.integer(cowinteronset)) |> distinct()
+  stopifnot(!anyNA(w), all(w$sidea1 %in% 1:2), all(w$sidea2 %in% 1:2), all(w$sidea1 != w$sidea2), all(w$initiator1 %in% 0:1), all(w$initiator2 %in% 0:1))
+  side_init <- w |> group_by(warnum, side = sidea1) |> summarise(side_has_init = any(initiator1 == 1L), .groups = "drop")
+  chk <- side_init |> group_by(warnum) |> summarise(n = sum(side_has_init), .groups = "drop")
+  if (any(chk$n != 1L)) stop("war_dyad_years: COW wars without exactly one initiating side: ", paste(chk$warnum[chk$n != 1L], collapse = ", "))
+  out <- w |> left_join(side_init |> rename(side1_init = side_has_init), by = c("warnum", "sidea1" = "side")) |>
+    left_join(side_init |> rename(side2_init = side_has_init), by = c("warnum", "sidea2" = "side"))
+  stopifnot(!anyNA(out$side1_init), !anyNA(out$side2_init), all(out$side1_init != out$side2_init))
+  out
+}
+## cow_war_direction(ev, wd, window, min_link): the direction decision for every event row of the pair table.
+## ev needs dispnum, initiator, target, year, hostlev_disp; wd is war_dyad_years(). Rules (in this order):
+##   pair level     : the pair (i, j) is a COW war dyad-year with year in [t, t + window] (t = the pair's MID onset year; MID
+##                    onsets precede war onsets, so the window allows the war to begin in the following year). Every matched
+##                    row votes: flip when j's war side initiated, keep when i's did. Unanimous -> decided, dir_source
+##                    "cow_war_pair" (flipped or confirmed); mixed votes (two wars with opposite initiators) -> ambiguous,
+##                    Side A kept.
+##   dispute level  : for the remaining pairs of a war-level dispute the dispute is linked to the COW war most of its
+##                    pair-decided events matched (strict majority, at least min_link events); the MID Side A state of every
+##                    pair-decided event linked to that war is on war side sidea1, and the majority war side of MID Side A
+##                    (again at least min_link events and a strict majority) is the mapping. If that side is the war's
+##                    non-initiating side the unmatched pairs are flipped, else kept; dir_source "cow_war_dispute". No link,
+##                    too few linked events or a split mapping -> ambiguous, Side A kept.
+##   everything else: non-war disputes and unlinked war-level disputes keep Side A, dir_source "sideA".
+## Returns ev with dir_flipped (logical), dir_source ("cow_war_pair" / "cow_war_dispute" / "sideA"), dir_rule (the reason),
+## war_link (the COW war number behind the decision, NA otherwise), n_war_match (matched dyad-year rows), and the
+## attributes "pair_matches" (every matched (event, war dyad-year) row) and "dispute_links" (one row per war-level dispute).
+cow_war_direction <- function(ev, wd, window = 1L, min_link = 2L) {
+  stopifnot(all(c("dispnum", "initiator", "target", "year", "hostlev_disp") %in% names(ev)), window >= 0, min_link >= 1)
+  assert_no_dup_keys(ev, c("dispnum", "initiator", "target"), "cow_war_direction: events")
+  key <- c("dispnum", "initiator", "target", "year")
+  cand <- ev |> filter(hostlev_disp == 5L) |> select(all_of(key))
+  m <- cand |> inner_join(wd |> rename(initiator = ccode1, target = ccode2, wyear = year), by = c("initiator", "target"), relationship = "many-to-many") |>
+    filter(wyear >= year, wyear <= year + window) |>
+    mutate(vote = ifelse(side2_init, "flip", "keep"))            # exactly one side initiated: j's side -> flip, i's side -> keep
+  modal <- function(v) as.integer(names(which.max(table(v))))                # the most frequent value (ties: the smallest)
+  dec <- if (nrow(m) > 0) m |> group_by(across(all_of(key))) |>
+    summarise(n_war_match = n(), n_flip = sum(vote == "flip"), n_keep = sum(vote == "keep"),
+              match_t = any(wyear == year), match_t1 = any(wyear > year), onset_in_window = any(cowinteronset == 1L),
+              war_link = modal(warnum), n_wars = n_distinct(warnum), .groups = "drop") else
+    tibble(dispnum = integer(0), initiator = integer(0), target = integer(0), year = integer(0), n_war_match = integer(0), n_flip = integer(0), n_keep = integer(0),
+           match_t = logical(0), match_t1 = logical(0), onset_in_window = logical(0), war_link = integer(0), n_wars = integer(0))
+  dec <- dec |> mutate(pair_dec = case_when(n_flip == n_war_match ~ "flip", n_keep == n_war_match ~ "keep", TRUE ~ "ambiguous"))
+  stopifnot(all(dec$n_flip + dec$n_keep == dec$n_war_match))
+  ## dispute link: modal war among the pair-decided events, strict majority and at least min_link of them
+  decided <- dec |> filter(pair_dec != "ambiguous")
+  if (nrow(decided) > 0) {
+    link <- decided |> group_by(dispnum) |>
+      summarise(n_pair_decided = n(), n_link = max(table(war_link)), war_link = modal(war_link), .groups = "drop") |>   # n_link BEFORE war_link is redefined
+      mutate(link_ok = n_link >= min_link & 2L * n_link > n_pair_decided)
+    ## side mapping: war side of the MID Side A state over the pair-decided events linked to war_link
+    mp <- m |> semi_join(decided, by = key) |> inner_join(link |> select(dispnum, war_link), by = "dispnum") |> filter(warnum == war_link) |>
+      distinct(across(all_of(key)), sidea1, side1_init) |> group_by(dispnum) |>
+      summarise(n_map = n(), sideA_war_side = modal(sidea1), n_map_modal = max(table(sidea1)),
+                sideA_war_side_init = any(side1_init[sidea1 == sideA_war_side]), .groups = "drop")
+    stopifnot(all(mp$n_map_modal >= 1L), nrow(mp) == nrow(link))
+  } else {
+    link <- tibble(dispnum = integer(0), n_pair_decided = integer(0), n_link = integer(0), war_link = integer(0), link_ok = logical(0))
+    mp <- tibble(dispnum = integer(0), n_map = integer(0), sideA_war_side = integer(0), n_map_modal = integer(0), sideA_war_side_init = logical(0))
+  }
+  link <- link |> left_join(mp, by = "dispnum") |>
+    mutate(map_ok = link_ok & n_map_modal >= min_link & 2L * n_map_modal > n_map,
+           dispute_dec = case_when(!link_ok ~ "no_majority_link", !map_ok ~ "split_side_mapping", !sideA_war_side_init ~ "flip", TRUE ~ "keep"))
+  all_war <- cand |> distinct(dispnum) |> left_join(link, by = "dispnum") |>
+    mutate(across(c(n_pair_decided, n_link, n_map, n_map_modal), ~ coalesce(.x, 0L)), link_ok = coalesce(link_ok, FALSE), map_ok = coalesce(map_ok, FALSE),
+           dispute_dec = coalesce(dispute_dec, "no_pair_match"))
+  out <- ev |> left_join(dec |> select(all_of(key), n_war_match, pair_dec, pair_war = war_link), by = key) |>
+    left_join(all_war |> select(dispnum, dispute_dec, disp_war = war_link), by = "dispnum") |>
+    mutate(n_war_match = coalesce(n_war_match, 0L),
+           dir_rule = case_when(hostlev_disp != 5L ~ "non_war_dispute",
+                                pair_dec %in% c("flip", "keep") ~ "pair_match",
+                                pair_dec == "ambiguous" ~ "pair_ambiguous",
+                                dispute_dec %in% c("flip", "keep") ~ "dispute_mapping",
+                                TRUE ~ paste0("dispute_", dispute_dec)),
+           dir_source = case_when(dir_rule == "pair_match" ~ "cow_war_pair", dir_rule == "dispute_mapping" ~ "cow_war_dispute", TRUE ~ "sideA"),
+           dir_flipped = (dir_rule == "pair_match" & pair_dec == "flip") | (dir_rule == "dispute_mapping" & dispute_dec == "flip"),
+           war_link = case_when(dir_rule == "pair_match" ~ pair_war, dir_rule == "dispute_mapping" ~ disp_war, TRUE ~ NA_integer_)) |>
+    select(-pair_dec, -dispute_dec, -pair_war, -disp_war)
+  stopifnot(nrow(out) == nrow(ev), !anyNA(out$dir_flipped), !anyNA(out$dir_source), all(out$dir_source %in% c("cow_war_pair", "cow_war_dispute", "sideA")),
+            !any(out$dir_flipped & out$dir_source == "sideA"), all(!is.na(out$war_link) == (out$dir_source != "sideA")),
+            !any(out$dir_source != "sideA" & out$hostlev_disp != 5L))
+  attr(out, "pair_matches") <- m
+  attr(out, "dispute_links") <- all_war
+  out
+}
+## apply_direction(pair_ev): reverse the flipped rows of the pair table (initiator <-> target, and every per-participant
+## column with it: the MID side flags, originator status, fatality and hostility), so that the originator status moves with
+## the state. After this sidea1 = 1 on every unflipped row and 0 on every flipped row.
+apply_direction <- function(pair_ev) {
+  stopifnot(all(c("initiator", "target", "sidea1", "sidea2", "orig1", "orig2", "fatality1", "fatality2", "hostlev1", "hostlev2", "dir_flipped") %in% names(pair_ev)),
+            all(pair_ev$sidea1 == 1L), all(pair_ev$sidea2 == 0L))
+  f <- pair_ev$dir_flipped
+  out <- pair_ev
+  swap <- function(a, b) { tmp <- out[[a]][f]; out[[a]][f] <<- out[[b]][f]; out[[b]][f] <<- tmp }
+  swap("initiator", "target"); swap("sidea1", "sidea2"); swap("orig1", "orig2"); swap("fatality1", "fatality2"); swap("hostlev1", "hostlev2")
+  stopifnot(all(out$initiator[f] == pair_ev$target[f]), all(out$target[f] == pair_ev$initiator[f]), all(out$sidea1[f] == 0L), all(out$sidea2[f] == 1L),
+            all(out$orig1[f] == pair_ev$orig2[f]), all(out$initiator[!f] == pair_ev$initiator[!f]), all(out$initiator != out$target),
+            all((out$sidea1 == 0L) == out$dir_flipped))
+  assert_no_dup_keys(out, c("dispnum", "initiator", "target"), "events after the direction rule")
+  out
+}
+## ---- joiner entry direction (PI decision 2026-11-04; build variant V2_ENTRY=later / --entry=later -> v2/data_entry) -------------------------
+## entry_later_direction(ev, psd): ev = the directed events AFTER apply_direction() (initiator, target, dispnum, year = pair onset year, sidea1 /
+## sidea2, orig1 / orig2, fatality1 / 2, hostlev1 / 2); psd = participant_spell_dates(). For every pair of opposing participants:
+##   both COW originators       -> the current direction (Side A after the D1 war flips), unchanged;
+##   exactly one joiner (orig 0) -> the JOINER initiates and the originator is the target (an originator -> late-entrant pair is reversed);
+##   both joiners                -> the LATER entrant initiates, entry = the participant's entry date of its spell covering the pair onset year
+##                                  (participant_spell_dates(): GML day / month where known, else the dispute bounds; compared at the coarser of
+##                                  the two resolutions, date_cmp(), the D5 convention); an exact tie keeps the current direction.
+## A reversed event swaps every *1 / *2 column (as apply_direction() does) and carries entry_reversed = TRUE and entry_rule (orig_orig, joiner_orig,
+## joiner_joiner_later, joiner_joiner_tie). After the rule no event has orig1 == 1 and orig2 == 0 (no "late target" event), asserted.
+## attr "diagnostics": counts per rule, reversals, ties, spells found by fallback.
+entry_later_direction <- function(ev, psd) {
+  stopifnot(all(c("dispnum", "initiator", "target", "year", "sidea1", "sidea2", "orig1", "orig2", "fatality1", "fatality2", "hostlev1", "hostlev2") %in% names(ev)),
+            all(c("dispnum", "ccode", "spell_first", "spell_last", "entry_res", "entry_y", "entry_mkey", "entry_dkey") %in% names(psd)),
+            all(ev$orig1 %in% 0:1), all(ev$orig2 %in% 0:1), all(ev$sidea1 + ev$sidea2 == 1L))
+  assert_no_dup_keys(ev, c("dispnum", "initiator", "target"), "entry_later_direction: events")
+  ## the entry date of each participant's spell covering the pair onset year (else its latest spell starting before; counted)
+  ent <- function(cc) {
+    q <- data.frame(.e = seq_len(nrow(ev)), dispnum = as.integer(ev$dispnum), ccode = as.integer(ev[[cc]]), year = as.integer(ev$year))
+    m <- q |> inner_join(psd |> select(dispnum, ccode, spell_first, spell_last, entry_res, entry_y, entry_mkey, entry_dkey), by = c("dispnum", "ccode"), relationship = "many-to-many") |>
+      mutate(cover = spell_first <= year & spell_last >= year, before = spell_first <= year) |> group_by(.e) |>
+      arrange(desc(cover), desc(before & !cover), desc(spell_first), .by_group = TRUE) |> slice(1) |> ungroup()
+    if (nrow(m) != nrow(q)) stop(sprintf("entry_later_direction: %d events have a participant without a spell in its dispute", nrow(q) - nrow(m)))
+    m <- m[order(m$.e), ]
+    list(res = m$entry_res, y = m$entry_y, mkey = m$entry_mkey, dkey = m$entry_dkey, fallback = !m$cover)
+  }
+  a <- ent("initiator"); b <- ent("target")
+  both_j <- ev$orig1 == 0L & ev$orig2 == 0L
+  cc <- rep(0L, nrow(ev))
+  if (any(both_j)) cc[both_j] <- date_cmp(lapply(a[c("res", "y", "mkey", "dkey")], `[`, both_j), lapply(b[c("res", "y", "mkey", "dkey")], `[`, both_j))$cmp
+  rule <- ifelse(ev$orig1 == 1L & ev$orig2 == 1L, "orig_orig", ifelse(!both_j, "joiner_orig", ifelse(cc == 0L, "joiner_joiner_tie", "joiner_joiner_later")))
+  ## reverse: an originator initiator facing a joiner target; or two joiners where the TARGET entered later (cc < 0: the initiator entered earlier)
+  rev <- (ev$orig1 == 1L & ev$orig2 == 0L) | (both_j & cc < 0L)
+  out <- ev
+  swap <- function(x, y) { tmp <- out[[x]][rev]; out[[x]][rev] <<- out[[y]][rev]; out[[y]][rev] <<- tmp }
+  swap("initiator", "target"); swap("sidea1", "sidea2"); swap("orig1", "orig2"); swap("fatality1", "fatality2"); swap("hostlev1", "hostlev2")
+  out$entry_reversed <- rev; out$entry_rule <- rule
+  stopifnot(!any(out$orig1 == 1L & out$orig2 == 0L), all(out$initiator != out$target), all(out$sidea1 + out$sidea2 == 1L),
+            all(out$initiator[rev] == ev$target[rev]), all(out$initiator[!rev] == ev$initiator[!rev]), all(out$orig1[rule == "joiner_orig"] == 0L))
+  assert_no_dup_keys(out, c("dispnum", "initiator", "target"), "events after the entry rule")
+  attr(out, "diagnostics") <- list(n = nrow(ev), n_rule = table(factor(rule, levels = c("orig_orig", "joiner_orig", "joiner_joiner_later", "joiner_joiner_tie"))),
+                                   n_reversed = sum(rev), n_reversed_joiner_orig = sum(rev & rule == "joiner_orig"), n_reversed_jj = sum(rev & rule == "joiner_joiner_later"),
+                                   n_spell_fallback = sum(a$fallback | b$fallback))
+  out
+}
+## COW inter-state war names for the build log (hand-entered from the COW Inter-State War Data v4.0 list; logging only,
+## nothing is computed from them; a war number absent here is logged without a name)
+COW_WAR_NAMES <- c(`1` = "Franco-Spanish 1823", `4` = "First Russo-Turkish 1828", `7` = "Mexican-American 1846", `10` = "Austro-Sardinian 1848",
+                   `13` = "First Schleswig-Holstein 1848", `16` = "Roman Republic 1849", `19` = "La Plata 1851", `22` = "Crimean 1853",
+                   `25` = "Anglo-Persian 1856", `28` = "Italian Unification 1859", `31` = "First Spanish-Moroccan 1859", `34` = "Italo-Roman 1860",
+                   `37` = "Italo-Sicilian 1860", `40` = "Franco-Mexican 1862", `43` = "Ecuadorian-Colombian 1863", `46` = "Second Schleswig-Holstein 1864",
+                   `49` = "Lopez (Paraguayan) 1864", `52` = "Naval War 1865", `55` = "Seven Weeks 1866", `58` = "Franco-Prussian 1870",
+                   `60` = "First Central American 1876", `61` = "Second Russo-Turkish 1877", `64` = "Pacific 1879", `65` = "Anglo-Egyptian 1882",
+                   `67` = "Sino-French 1884", `70` = "Second Central American 1885", `73` = "First Sino-Japanese 1894", `76` = "Greco-Turkish 1897",
+                   `79` = "Spanish-American 1898", `82` = "Boxer Rebellion 1900", `83` = "Sino-Russian 1900", `85` = "Russo-Japanese 1904",
+                   `88` = "Third Central American 1906", `91` = "Fourth Central American 1907", `94` = "Second Spanish-Moroccan 1909", `97` = "Italian-Turkish 1911",
+                   `100` = "First Balkan 1912", `103` = "Second Balkan 1913", `106` = "World War I 1914", `107` = "Estonian Liberation 1918",
+                   `108` = "Latvian Liberation 1918", `109` = "Russo-Polish 1919", `112` = "Hungarian Adversaries 1919", `115` = "Second Greco-Turkish 1919",
+                   `116` = "Franco-Turkish 1919", `117` = "Lithuanian-Polish 1920", `118` = "Manchurian (Sino-Soviet) 1929", `121` = "Second Sino-Japanese 1931",
+                   `124` = "Chaco 1932", `125` = "Saudi-Yemeni 1934", `127` = "Conquest of Ethiopia 1935", `130` = "Third Sino-Japanese 1937",
+                   `133` = "Changkufeng 1938", `136` = "Nomonhan 1939", `139` = "World War II 1939", `142` = "Russo-Finnish 1939",
+                   `145` = "Franco-Thai 1940", `147` = "First Kashmir 1947", `148` = "Arab-Israeli 1948", `151` = "Korean 1950",
+                   `153` = "Off-shore Islands 1954", `155` = "Sinai 1956", `156` = "Soviet Invasion of Hungary 1956", `158` = "Ifni 1957",
+                   `159` = "Taiwan Straits 1958", `160` = "Assam 1962", `163` = "Vietnam War Phase 2 1965", `166` = "Second Kashmir 1965",
+                   `169` = "Six Day 1967", `170` = "Second Laotian Phase 2 1968", `172` = "War of Attrition 1969", `175` = "Football 1969",
+                   `176` = "Communist Coalition 1970", `178` = "Bangladesh 1971", `181` = "Yom Kippur 1973", `184` = "Turco-Cypriot 1974",
+                   `186` = "War over Angola 1975", `187` = "Second Ogaden Phase 2 1977", `189` = "Vietnamese-Cambodian 1977", `190` = "Ugandan-Tanzanian 1978",
+                   `193` = "Sino-Vietnamese Punitive 1979", `199` = "Iran-Iraq 1980", `202` = "Falklands 1982", `205` = "War over Lebanon 1982",
+                   `207` = "War over the Aouzou Strip 1986", `208` = "Sino-Vietnamese Border 1987", `211` = "Gulf War 1990", `215` = "Bosnian Independence 1992",
+                   `216` = "Azeri-Armenian 1993", `217` = "Cenepa Valley 1995", `219` = "Badme Border 1998", `221` = "War for Kosovo 1999",
+                   `223` = "Kargil 1999", `225` = "Invasion of Afghanistan 2001", `227` = "Invasion of Iraq 2003")
+cow_war_name <- function(warnum) ifelse(is.na(warnum), NA_character_, coalesce(COW_WAR_NAMES[as.character(warnum)], "(name not in COW_WAR_NAMES)"))
+
+## ---- WWII disputes (PI-approved appendix option --drop_ww2, 2026-10-24) -----------------------------------------
+## COW-MID 5.0 codes the Second World War as dispute 258 (1939-03 to 1945-09, 26 states). Several other war-level
+## (hostlev 5) disputes of 1939-1945 are the run-ups to a state's ENTRY into that war (Germany vs Norway, Italy vs
+## Greece, Germany vs the USSR, the United States vs Japan and Germany, the USSR vs Japan in 1945, ...). COW closes
+## each of them with highest action 21 ("join interstate war") and codes the same dyad as a WWII war dyad-year in
+## the COW inter-state war data (warnum 139). The rule applied here, derived from the data and logged by the build:
+##   WWII = 258, plus every hostlev-5 dispute that (a) starts between 1939-09 and 1945-09, (b) has dispute-level
+##   highest action 21 (join interstate war) and (c) has at least one of its dyad-years in COW inter-state war 139.
+## Excluded on purpose, with the reason the build logs: 157 (Third Sino-Japanese War, COW war 130, began 1937-07,
+## before the window), 179 (Russo-Finnish Winter War, COW war 142), 183 (Nomonhan, COW war 136) and 613
+## (Franco-Thai War, COW war 145); these begin a war of their own (highest action 20) and share no dyad-year with
+## war 139. The list is asserted against WW2_DISPNUMS so a data update changes it loudly, not silently.
+WW2_DISPNUMS <- c(235L, 258L, 339L, 414L, 418L, 518L, 2725L, 3701L, 3705L, 3717L, 3724L, 3813L, 3820L, 3822L, 3826L, 3827L)
+WW2_HIACT_JOIN_WAR <- 21L
+ww2_disputes <- function(disp, dd, war_inter) {
+  stopifnot(all(c("dispnum", "styear", "stmon", "hiact", "hostlev") %in% names(disp)),
+            all(c("warnum", "ccode1", "ccode2", "year") %in% names(war_inter)))
+  ww_dyads <- war_inter |> filter(warnum == 139) |> transmute(ccode1 = as.integer(ccode1), ccode2 = as.integer(ccode2), year = as.integer(year)) |> distinct()
+  stopifnot(nrow(ww_dyads) > 0)
+  yrs <- dd |> group_by(dispnum) |> summarise(y0 = min(year), y1 = max(year), n_states = n_distinct(c(ccode1, ccode2)), .groups = "drop")
+  in_ww <- dd |> distinct(dispnum, ccode1, ccode2, year) |> semi_join(ww_dyads, by = c("ccode1", "ccode2", "year")) |> count(dispnum, name = "n_dyadyears_in_war139")
+  cand <- disp |> filter(hostlev == 5L) |> inner_join(yrs, by = "dispnum") |> filter(y0 <= 1945L, y1 >= 1939L) |>
+    left_join(in_ww, by = "dispnum") |> mutate(n_dyadyears_in_war139 = coalesce(n_dyadyears_in_war139, 0L),
+                                              start = styear * 100L + stmon,
+                                              in_window = start >= 193909L & start <= 194509L,
+                                              joins_war = hiact == WW2_HIACT_JOIN_WAR,
+                                              is_ww2 = dispnum == 258L | (in_window & joins_war & n_dyadyears_in_war139 > 0L),
+                                              reason = case_when(dispnum == 258L ~ "COW-MID dispute of the Second World War",
+                                                                 is_ww2 ~ "starts 1939-09..1945-09, highest action 21 (join interstate war), dyad-years in COW war 139",
+                                                                 !in_window ~ "starts before 1939-09 (a war of its own)",
+                                                                 !joins_war ~ "highest action 20 (begins a war of its own), not a WWII entry",
+                                                                 TRUE ~ "no dyad-year in COW inter-state war 139")) |>
+    arrange(dispnum)
+  got <- sort(cand$dispnum[cand$is_ww2])
+  if (!identical(got, sort(WW2_DISPNUMS)))
+    stop(sprintf("WWII dispute list derived from the data (%s) differs from WW2_DISPNUMS (%s); review and update helpers_data.R",
+                 paste(got, collapse = ","), paste(sort(WW2_DISPNUMS), collapse = ",")))
+  cand |> select(dispnum, styear, stmon, y0, y1, n_states, hiact, hostlev, n_dyadyears_in_war139, is_ww2, reason)
+}
+
+## ---- coalition context (dual typology stage a, PI-approved spec 2026-10-25; the `context` switch) ----------------------------
+## Is a stage-2 event a BILATERAL or a COALITION decision? Context = the dispute has more than one state on either side at the
+## onset. The unit is the D8 weight group (initiator, dispute, onset year): the flag is evaluated ONCE per group at the GROUP ONSET,
+## the earliest pair onset among the initiator's pairs of that dispute-year (the date the initiator first faced an opponent in that
+## dispute-year), so it is constant within the group by construction (asserted) and a group is kept or dropped whole by the
+## `context` switch. Evaluating at every pair's own onset instead gives different flags inside 72 (inclusive) / 96 (strict) of the
+## 2874 groups of the COW data (Germany in dispute 258, 1939: the Poland pair starts 1939-03-25 with no third state, the UK and
+## France pairs 1939-03-31 with Poland present); the build logs that per-event heterogeneity as a diagnostic, it does not use it.
+## Dates have three resolutions, res 1 = day, 2 = month, 3 = year, and two dates are compared at the COARSER of the two (date_cmp();
+## a day-dated entry against a month-dated onset in the same month is a tie), so the tie conventions below act at whatever resolution
+## the pair of dates has. Participant dates come from gml_part (D5) where the dispnum and the participant match and the GML years
+## agree with the COW years (participant_spell_dates(), the participant-level analogue of pair_dispute_intervals()); otherwise the
+## dispute-level bounds (dispute start month for a first-year originator, else the year). Membership is COW's (cow_mid_dirdisps).
+## Two tie conventions (both stored, the `coal_ties` switch selects): INCLUSIVE counts a state entering on the same date as the
+## onset as present; STRICT counts only strictly earlier entrants. A state whose spell ended before the onset for sure is absent.
+## coal_incl   : at least one state besides the initiator and ONE onset-defining target is present (entry <= onset, not exited)
+## coal_strict : the same with entry < onset; an onset-defining target that itself entered strictly before the onset (the initiator
+##               joined an existing pair) is the pair and does not count
+## date_cmp(a, b): a and b are lists / data.frames with res, y, mkey (ym_index, NA at year resolution), dkey (as.integer(Date), NA
+## below day resolution); returns cmp in {-1, 0, 1} (a before / same / after b at the coarser resolution) and the resolution used.
+date_keys <- function(res, y, m, d) {
+  stopifnot(all(res %in% 1:3), !anyNA(y), all(!is.na(m[res <= 2L])), all(!is.na(d[res == 1L])))
+  mkey <- ifelse(res <= 2L, ym_index(y, ifelse(res <= 2L, m, 1L)), NA_integer_)
+  dstr <- sprintf("%d-%02d-%02d", y, ifelse(res <= 2L, m, 1L), ifelse(res == 1L, d, 1L))
+  dkey <- ifelse(res == 1L, as.integer(as.Date(dstr, optional = TRUE)), NA_integer_)
+  if (any(res == 1L & is.na(dkey))) stop("date_keys: invalid calendar day in ", paste(dstr[res == 1L & is.na(dkey)], collapse = ", "))
+  data.frame(res = as.integer(res), y = as.integer(y), mkey = as.integer(mkey), dkey = as.integer(dkey))
+}
+date_cmp <- function(a, b) {
+  n <- length(a$res); stopifnot(length(b$res) == n)
+  r <- pmax(a$res, b$res)
+  ka <- ifelse(r == 1L, a$dkey, ifelse(r == 2L, a$mkey, a$y)); kb <- ifelse(r == 1L, b$dkey, ifelse(r == 2L, b$mkey, b$y))
+  stopifnot(!anyNA(ka), !anyNA(kb))
+  list(cmp = as.integer(sign(ka - kb)), res = as.integer(r))
+}
+## date_later(a, b): the later of two dates; a tie at the coarser resolution returns that date at the coarser resolution
+date_later <- function(a, b) {
+  cc <- date_cmp(a, b)
+  tie <- cc$cmp == 0L
+  data.frame(res = ifelse(cc$cmp > 0L, a$res, ifelse(cc$cmp < 0L, b$res, cc$res)),
+             y = ifelse(cc$cmp >= 0L, a$y, b$y),
+             mkey = ifelse(cc$cmp > 0L, a$mkey, ifelse(cc$cmp < 0L, b$mkey, ifelse(cc$res <= 2L, a$mkey, NA_integer_))),
+             dkey = ifelse(cc$cmp > 0L, a$dkey, ifelse(cc$cmp < 0L, b$dkey, ifelse(cc$res == 1L, a$dkey, NA_integer_))))
+}
+## date_earliest_by(d, g): the earliest date within each group g, with ties resolved at the coarsest tied resolution (the group's
+## minimum year; if any date of that year is year-dated the result is that year, else the minimum month; if any date of that month is
+## month-dated the result is that month, else the minimum day). One row per group, in the order of sort(unique(g)).
+date_earliest_by <- function(d, g) {
+  stopifnot(length(g) == length(d$res))
+  tb <- tibble(g = g, res = d$res, y = d$y, mkey = d$mkey, dkey = d$dkey) |> group_by(g) |> filter(y == min(y)) |>
+    mutate(.yr = any(res == 3L)) |> filter(.yr | mkey == min(mkey)) |> mutate(.mo = .yr | any(res == 2L)) |>
+    filter(.mo | dkey == min(dkey)) |>
+    summarise(res = if (first(.yr)) 3L else if (first(.mo)) 2L else 1L, y = first(y),
+              mkey = if (first(.yr)) NA_integer_ else first(mkey), dkey = if (first(.yr) || first(.mo)) NA_integer_ else first(dkey), .groups = "drop") |>
+    arrange(g)
+  stopifnot(nrow(tb) == length(unique(g)), !anyNA(tb$y), all(!is.na(tb$mkey[tb$res <= 2L])), all(!is.na(tb$dkey[tb$res == 1L])))
+  tb
+}
+## date_latest_by(d, g): the latest date within each group g, by date_later() folded over the group's rows, so a tie at the coarser
+## resolution keeps that resolution (a month-dated date against a day-dated date in the same month gives the month; review 2026-10-26, P2).
+## One row per group (res, y, mkey, dkey), in the order of sort(unique(g)).
+date_latest_by <- function(d, g) {
+  stopifnot(length(g) == length(d$res), length(g) >= 1)
+  dd <- data.frame(res = as.integer(d$res), y = as.integer(d$y), mkey = as.integer(d$mkey), dkey = as.integer(d$dkey))
+  idx <- split(seq_along(g), g)
+  out <- bind_rows(lapply(idx, function(i) Reduce(date_later, lapply(i, function(k) dd[k, , drop = FALSE]))))
+  out$g <- sort(unique(g))
+  stopifnot(nrow(out) == length(idx), !anyNA(out$res), all(out$res %in% 1:3), all(!is.na(out$mkey[out$res <= 2L])), all(!is.na(out$dkey[out$res == 1L])))
+  out[, c("g", "res", "y", "mkey", "dkey")]
+}
+## participant_spell_dates(dd, db, part): one row per (dispnum, ccode, spell), a spell being a run of consecutive COW years of the
+## participant in the dispute, with the entry date (entry_res / entry_y / entry_m / entry_d and the keys) and the exit date. GML
+## (part = gml_part) is used for a spell when the participant has at least one gml_part spell overlapping the COW spell's years: the entry
+## is the EARLIEST GML start (several overlapping GML spells, e.g. France in dispute 258 switching sides in 1940, are one COW spell) when
+## its year does not exceed the COW spell's first year (a GML start before the first COW year is clamped to January of it, at month
+## resolution, as in D5); the exit is the LATEST GML end when its year is not before the last COW year (a later end is clamped to December).
+## Day resolution needs a known day (stday / endday > 0). Fallback entry: the dispute start month for an originator whose spell begins
+## in the dispute's first year (start month known), else the spell's first year; fallback exit: the dispute's end month when the spell
+## ends in the dispute's last year and that end is an exact month, else the spell's last year. attr(, "membership") lists the
+## (dispnum, ccode) where COW and GML disagree on who took part (part = NULL: no GML dates at all).
+participant_spell_dates <- function(dd, db, part = NULL) {
+  stopifnot(all(c("dispnum", "ccode1", "year", "orig1") %in% names(dd)), all(c("dispnum", "y0", "y1", "start_month_known", "stmon", "end_lo", "end_hi") %in% names(db)))
+  sp <- dd |> distinct(dispnum, ccode = ccode1, year, orig1) |> arrange(dispnum, ccode, year) |> group_by(dispnum, ccode) |>
+    mutate(spell = cumsum(c(1L, diff(year) != 1L))) |> group_by(dispnum, ccode, spell) |>
+    summarise(spell_first = min(year), spell_last = max(year), orig = as.integer(orig1[1]), n_orig = n_distinct(orig1), .groups = "drop") |>
+    inner_join(db |> select(dispnum, y0, y1, start_month_known, stmon, end_lo, end_hi), by = "dispnum")
+  if (any(sp$n_orig != 1L)) stop("participant_spell_dates: originator status differs across a participant's dispute-years")
+  g_entry <- g_exit <- NULL
+  if (!is.null(part)) {
+    stopifnot(all(c("dispnum", "ccode", "styear", "stmon", "stday", "endyear", "endmon", "endday") %in% names(part)))
+    ps <- part |> transmute(dispnum = as.integer(dispnum), ccode = as.integer(ccode), g_sy = as.integer(styear), g_sm = as.integer(stmon), g_sd = as.integer(stday),
+                            g_ey = as.integer(endyear), g_em = as.integer(endmon), g_ed = as.integer(endday))
+    stopifnot(!anyNA(ps), all(ps$g_sm %in% 1:12), all(ps$g_em %in% 1:12))
+    ov <- sp |> mutate(.id = row_number()) |> select(.id, dispnum, ccode, spell_first, spell_last) |>
+      inner_join(ps, by = c("dispnum", "ccode"), relationship = "many-to-many") |> filter(g_ey >= spell_first, g_sy <= spell_last)
+    ## the latest GML end as ONE date (audit fix 18, 2026-10-26: all three fields from the same spell), chosen with the resolution-aware
+    ## comparison of date_later() (review 2026-10-26, P2): a spell ending in the latest month with an UNKNOWN day against one ending in
+    ## that month on a known day is a tie at month resolution and keeps month resolution; before, the sort key pmax(g_ed, 1) put the unknown
+    ## day at day 1, selected the day-dated spell and reported day resolution. g_ed = -9 marks an unknown day (GML's code) in the result.
+    latest <- data.frame(.id = integer(0), g_ey = integer(0), g_em = integer(0), g_ed = integer(0))
+    if (nrow(ov) > 0) {
+      xk <- date_keys(ifelse(ov$g_ed > 0L, 1L, 2L), ov$g_ey, ov$g_em, ifelse(ov$g_ed > 0L, ov$g_ed, NA_integer_))
+      lt <- date_latest_by(xk, ov$.id)
+      latest <- data.frame(.id = lt$g, g_ey = lt$y, g_em = lt$mkey %% 12L + 1L,
+                           g_ed = ifelse(lt$res == 1L, as.integer(format(as.Date(lt$dkey, origin = "1970-01-01"), "%d")), -9L))
+      stopifnot(all(ym_year(lt$mkey) == latest$g_ey), all(latest$g_ed == -9L | latest$g_ed >= 1L))
+    }
+    ov <- ov |> group_by(.id) |> arrange(g_sy, g_sm, pmax(g_sd, 1L), .by_group = TRUE) |>
+      summarise(n_gml = n(), g_sy = first(g_sy), g_sm = first(g_sm), g_sd = first(g_sd), .groups = "drop") |>
+      inner_join(latest, by = ".id")
+    stopifnot(all(ov$g_em %in% 1:12), !anyNA(ov$g_ey), !anyNA(ov$g_ed))
+    sp <- sp |> mutate(.id = row_number()) |> left_join(ov, by = ".id") |> mutate(n_gml = coalesce(n_gml, 0L), in_gml_disp = dispnum %in% ps$dispnum)
+    cow_part <- sp |> distinct(dispnum, ccode); gml_part_tbl <- ps |> distinct(dispnum, ccode) |> filter(dispnum %in% cow_part$dispnum)
+    membership <- bind_rows(cow_part |> filter(dispnum %in% ps$dispnum) |> anti_join(gml_part_tbl, by = c("dispnum", "ccode")) |> mutate(issue = "COW participant absent from gml_part"),
+                            gml_part_tbl |> anti_join(cow_part, by = c("dispnum", "ccode")) |> mutate(issue = "gml_part participant absent from COW"))
+  } else {
+    sp <- sp |> mutate(.id = row_number(), n_gml = 0L, g_sy = NA_integer_, g_sm = NA_integer_, g_sd = NA_integer_, g_ey = NA_integer_, g_em = NA_integer_, g_ed = NA_integer_, in_gml_disp = FALSE)
+    membership <- tibble(dispnum = integer(0), ccode = integer(0), issue = character(0))
+  }
+  sp <- sp |> mutate(
+    entry_src = case_when(n_gml >= 1L & g_sy == spell_first ~ "participant", n_gml >= 1L & g_sy < spell_first ~ "participant (entry clamped to January)",
+                          !in_gml_disp ~ "dispute (not in gml_part)", n_gml == 0L ~ "dispute (participant has no overlapping gml_part spell)",
+                          TRUE ~ "dispute (GML entry after the first COW year)"),
+    entry_res = case_when(entry_src == "participant" & g_sd > 0L ~ 1L, startsWith(entry_src, "participant") ~ 2L,
+                          spell_first == y0 & orig == 1L & start_month_known ~ 2L, TRUE ~ 3L),
+    entry_y = spell_first,
+    entry_m = case_when(entry_src == "participant" ~ g_sm, startsWith(entry_src, "participant") ~ 1L, entry_res == 2L ~ stmon, TRUE ~ NA_integer_),
+    entry_d = ifelse(entry_res == 1L, g_sd, NA_integer_),
+    exit_src = case_when(n_gml >= 1L & g_ey == spell_last ~ "participant", n_gml >= 1L & g_ey > spell_last ~ "participant (exit clamped to December)",
+                         !in_gml_disp ~ "dispute (not in gml_part)", n_gml == 0L ~ "dispute (participant has no overlapping gml_part spell)",
+                         TRUE ~ "dispute (GML exit before the last COW year)"),
+    exit_res = case_when(exit_src == "participant" & g_ed > 0L ~ 1L, startsWith(exit_src, "participant") ~ 2L,
+                         spell_last == y1 & end_lo == end_hi ~ 2L, TRUE ~ 3L),
+    exit_y = spell_last,
+    exit_m = case_when(exit_src == "participant" ~ g_em, startsWith(exit_src, "participant") ~ 12L, exit_res == 2L ~ end_lo %% 12L + 1L, TRUE ~ NA_integer_),
+    exit_d = ifelse(exit_res == 1L, g_ed, NA_integer_))
+  ek <- date_keys(sp$entry_res, sp$entry_y, sp$entry_m, sp$entry_d); xk <- date_keys(sp$exit_res, sp$exit_y, sp$exit_m, sp$exit_d)
+  sp <- sp |> mutate(entry_mkey = ek$mkey, entry_dkey = ek$dkey, exit_mkey = xk$mkey, exit_dkey = xk$dkey)
+  ## the entry never lies after the exit at the coarser resolution
+  cx <- date_cmp(list(res = sp$entry_res, y = sp$entry_y, mkey = sp$entry_mkey, dkey = sp$entry_dkey), list(res = sp$exit_res, y = sp$exit_y, mkey = sp$exit_mkey, dkey = sp$exit_dkey))
+  bad <- cx$cmp > 0L
+  if (any(bad)) {
+    ## a GML spell ending before it started within the COW years cannot be used: year resolution for both
+    sp$entry_res[bad] <- 3L; sp$entry_m[bad] <- NA_integer_; sp$entry_d[bad] <- NA_integer_; sp$entry_mkey[bad] <- NA_integer_; sp$entry_dkey[bad] <- NA_integer_
+    sp$exit_res[bad] <- 3L; sp$exit_m[bad] <- NA_integer_; sp$exit_d[bad] <- NA_integer_; sp$exit_mkey[bad] <- NA_integer_; sp$exit_dkey[bad] <- NA_integer_
+    sp$entry_src[bad] <- "dispute (GML entry after exit)"; sp$exit_src[bad] <- "dispute (GML entry after exit)"
+  }
+  ## gml_start_mkey: the unclamped GML start month of the spell (NA without a GML spell); kept for the entry-timing table (GPT review 2026-11-17:
+  ## recover the known pre-clamp date instead of treating a January-clamped entry as exact). Not used by the event machinery.
+  sp <- sp |> mutate(gml_start_mkey = ifelse(n_gml >= 1L, as.integer(g_sy) * 12L + as.integer(g_sm) - 1L, NA_integer_))   # = ym_index(), NA-safe
+  out <- sp |> select(dispnum, ccode, spell, spell_first, spell_last, orig, entry_src, entry_res, entry_y, entry_m, entry_d, entry_mkey, entry_dkey,
+                      exit_src, exit_res, exit_y, exit_m, exit_d, exit_mkey, exit_dkey, gml_start_mkey)
+  stopifnot(all(out$entry_y == out$spell_first), all(out$exit_y == out$spell_last), !anyNA(out$entry_res), !anyNA(out$exit_res))
+  assert_no_dup_keys(out, c("dispnum", "ccode", "spell"), "participant spell dates")
+  attr(out, "membership") <- membership
+  attr(out, "n_entry_after_exit_fixed") <- sum(bad)
+  out
+}
+## context_present(onsets, psd): for every onset row (dispnum, initiator, onset date keys, .g) the participants p != initiator whose
+## spell is present at the onset. Returns one row per (onset row, participant spell) with cmp_entry, cmp_exit, the comparison
+## resolution and the presence flags under both conventions.
+context_present <- function(onsets, psd) {
+  stopifnot(all(c(".g", "dispnum", "initiator", "res", "y", "mkey", "dkey") %in% names(onsets)))
+  cand <- onsets |> select(.g, dispnum, initiator, o_res = res, o_y = y, o_mkey = mkey, o_dkey = dkey) |>
+    inner_join(psd |> select(dispnum, ccode, spell, entry_res, entry_y, entry_mkey, entry_dkey, exit_res, exit_y, exit_mkey, exit_dkey), by = "dispnum", relationship = "many-to-many") |>
+    filter(ccode != initiator)
+  ce <- date_cmp(list(res = cand$entry_res, y = cand$entry_y, mkey = cand$entry_mkey, dkey = cand$entry_dkey), list(res = cand$o_res, y = cand$o_y, mkey = cand$o_mkey, dkey = cand$o_dkey))
+  cx <- date_cmp(list(res = cand$exit_res, y = cand$exit_y, mkey = cand$exit_mkey, dkey = cand$exit_dkey), list(res = cand$o_res, y = cand$o_y, mkey = cand$o_mkey, dkey = cand$o_dkey))
+  cand |> mutate(cmp_entry = ce$cmp, cmp_res = ce$res, cmp_exit = cx$cmp, exited = cmp_exit < 0L,
+                 present_incl = cmp_entry <= 0L & !exited, present_strict = cmp_entry < 0L & !exited)
+}
+## context_flags(onsets, targets, psd): the flags of every onset row. onsets: .g, dispnum, initiator, res, y, mkey, dkey; targets: the
+## onset-defining targets (.g, ccode), which ARE the pair and are present by construction whatever their GML exit says (two COW pairs of
+## the data have the target's GML exit a few days before the initiator's GML entry in the same month; counted in n_target_exit_before_onset);
+## their entry must not be after the onset (asserted). A participant with several spells is present when ANY spell is. Per onset row:
+## n_incl / n_strict = the participants other than the initiator present under each convention, target_strict = an onset-defining target
+## entered strictly before the onset (the initiator joined an existing pair, so that target does not make a coalition), n_onset_defining =
+## the distinct onset-defining targets, coal_incl = n_incl >= 2, coal_strict = n_strict - target_strict >= 1 OR n_onset_defining >= 2 (an
+## initiator facing two or more targets from the first moment is multilateral under the spec's definition whatever the tie convention;
+## audit fix 19, 2026-10-26: 124 groups, e.g. Yugoslavia against 37 NATO states in 4343, Iraq against Kuwait and Saudi Arabia in 1990,
+## were strict-bilateral before), coal_res = the resolution of the entry comparisons (day / month / year / mixed).
+context_flags <- function(onsets, targets, psd) {
+  stopifnot(all(c(".g", "ccode") %in% names(targets)), !anyDuplicated(onsets$.g))
+  pres <- context_present(onsets, psd)
+  jt <- targets |> inner_join(pres |> group_by(.g, ccode) |> summarise(entry_ok = any(cmp_entry <= 0L), present_incl = any(present_incl), entered_before = any(cmp_entry < 0L), .groups = "drop"),
+                              by = c(".g", "ccode"))
+  if (nrow(jt) != nrow(targets) || !all(jt$entry_ok)) stop(sprintf("context_flags: %d onset-defining targets entered after their own onset or have no spell", nrow(targets) - sum(jt$entry_ok)))
+  pres <- pres |> left_join(jt |> transmute(.g, ccode, .force = TRUE), by = c(".g", "ccode")) |>
+    mutate(.force = coalesce(.force, FALSE), present_incl = present_incl | .force, present_strict = present_strict | (.force & cmp_entry < 0L))
+  agg <- pres |> group_by(.g) |>
+    summarise(n_incl = n_distinct(ccode[present_incl]), n_strict = n_distinct(ccode[present_strict]), res_set = paste(sort(unique(cmp_res)), collapse = ""), .groups = "drop") |>
+    left_join(jt |> group_by(.g) |> summarise(target_strict = any(entered_before), n_target_exit_before_onset = sum(!present_incl), n_onset_defining = n_distinct(ccode), .groups = "drop"), by = ".g")
+  out <- onsets |> select(.g) |> left_join(agg, by = ".g") |>
+    mutate(n_incl = coalesce(n_incl, 0L), n_strict = coalesce(n_strict, 0L), target_strict = coalesce(target_strict, FALSE), n_target_exit_before_onset = coalesce(n_target_exit_before_onset, 0L),
+           n_onset_defining = coalesce(n_onset_defining, 0L),
+           coal_incl = n_incl >= 2L, coal_strict = (n_strict - as.integer(target_strict)) >= 1L | n_onset_defining >= 2L,
+           coal_res = case_when(res_set == "1" ~ "day", res_set == "2" ~ "month", res_set == "3" ~ "year", TRUE ~ "mixed"))
+  stopifnot(nrow(out) == nrow(onsets), all(out$n_incl >= 1L), all(out$n_onset_defining >= 1L), all(out$n_incl >= out$n_onset_defining),
+            !anyNA(out$coal_incl), !anyNA(out$coal_strict), all(out$coal_incl >= out$coal_strict))
+  out |> select(.g, n_incl, n_strict, target_strict, n_onset_defining, n_target_exit_before_onset, coal_incl, coal_strict, coal_res)
+}
+## coalition_context(pairs, psd): pairs = the PRE-collapse non-escalation event rows (dispnum, initiator, target, year, ev_start_lo,
+## ev_start_hi, the pair's month-level entry interval from flag_escalations_month()); psd = participant_spell_dates(). Returns pairs with
+##   coal_incl, coal_strict      : the group's flag (constant within (dispnum, initiator, year), asserted)
+##   coal_onset_ambiguous        : the pair onset derived from the two participants' entries (the later of the two, within their spells
+##                                 containing the onset year) lies in an EARLIER year than the pair's COW onset year (both states were in the
+##                                 dispute before they were opposed: a side switch), so the onset is ambiguous across a year boundary and the
+##                                 COW onset year is used at year resolution; ev_start_lo / ev_start_hi (the escalation rule's month interval)
+##                                 enter only the logged diagnostic onset_vs_pdi (attr "events")
+##   coal_res                    : the resolution of the group's entry comparisons: "day" / "month" / "year" / "mixed"
+## attr(, "groups") is the group table (onset, counts, flags, resolution, n_events, and the per-event heterogeneity diagnostic
+## n_event_flags_incl / n_event_flags_strict = the number of distinct per-event flags when every pair is evaluated at its own onset).
+coalition_context <- function(pairs, psd) {
+  stopifnot(all(c("dispnum", "initiator", "target", "year", "ev_start_lo", "ev_start_hi") %in% names(pairs)))
+  assert_no_dup_keys(pairs, c("dispnum", "initiator", "target"), "coalition_context: pairs")
+  n_in <- nrow(pairs)
+  pr <- pairs |> mutate(.e = row_number())
+  spell_at <- function(code_col, pre) {
+    pr |> select(.e, dispnum, ccode = all_of(code_col), year) |>
+      inner_join(psd |> select(dispnum, ccode, spell_first, spell_last, entry_res, entry_y, entry_mkey, entry_dkey), by = c("dispnum", "ccode"), relationship = "many-to-many") |>
+      filter(year >= spell_first, year <= spell_last) |> select(.e, entry_res, entry_y, entry_mkey, entry_dkey) |> rename_with(~ paste0(pre, .x), -.e)
+  }
+  si <- spell_at("initiator", "i_"); sj <- spell_at("target", "j_")
+  if (nrow(si) != n_in || nrow(sj) != n_in) stop("coalition_context: a pair's initiator or target has no participant spell containing the onset year (or several)")
+  pr <- pr |> inner_join(si, by = ".e") |> inner_join(sj, by = ".e")
+  on <- date_later(list(res = pr$i_entry_res, y = pr$i_entry_y, mkey = pr$i_entry_mkey, dkey = pr$i_entry_dkey),
+                   list(res = pr$j_entry_res, y = pr$j_entry_y, mkey = pr$j_entry_mkey, dkey = pr$j_entry_dkey))
+  ## the participants' entries are dated within the spells containing the onset year, so the later entry is in year t or EARLIER; earlier
+  ## means both were in the dispute before they were opposed (a side switch, e.g. France and the USSR in dispute 258) and the pair's
+  ## onset date is ambiguous: the COW onset year at year resolution is used
+  stopifnot(all(on$y <= pr$year))
+  amb <- on$y != pr$year
+  on$res[amb] <- 3L; on$y[amb] <- pr$year[amb]; on$mkey[amb] <- NA_integer_; on$dkey[amb] <- NA_integer_
+  stopifnot(all(on$y == pr$year), all(!is.na(on$mkey[on$res <= 2L])), all(!is.na(on$dkey[on$res == 1L])))
+  ## diagnostic only: does the participant-derived onset month agree with the pair's month interval of flag_escalations_month()?
+  onset_vs_pdi <- case_when(amb ~ "ambiguous (year fallback)", on$res == 3L ~ "year resolution",
+                            on$mkey >= pr$ev_start_lo & on$mkey <= pr$ev_start_hi ~ "inside the pair interval", TRUE ~ "outside the pair interval")
+  pr <- pr |> mutate(o_res = on$res, o_y = on$y, o_mkey = on$mkey, o_dkey = on$dkey, coal_onset_ambiguous = amb, onset_vs_pdi = onset_vs_pdi)
+  ## group onsets: the earliest pair onset of (dispnum, initiator, year), ties at the coarsest tied resolution
+  pr <- pr |> mutate(.g = as.integer(factor(paste(dispnum, initiator, year))))
+  gon <- date_earliest_by(list(res = pr$o_res, y = pr$o_y, mkey = pr$o_mkey, dkey = pr$o_dkey), pr$.g) |> rename(.g = g)
+  grp <- pr |> group_by(.g, dispnum, initiator, year) |> summarise(n_events = n(), .groups = "drop") |> inner_join(gon, by = ".g")
+  stopifnot(nrow(grp) == n_distinct(pr$.g), all(grp$y == grp$year))
+  ## the pair onsets that define the group onset (ties at the coarser resolution)
+  pg <- pr |> inner_join(grp |> select(.g, g_res = res, g_y = y, g_mkey = mkey, g_dkey = dkey), by = ".g")
+  cg <- date_cmp(list(res = pg$o_res, y = pg$o_y, mkey = pg$o_mkey, dkey = pg$o_dkey), list(res = pg$g_res, y = pg$g_y, mkey = pg$g_mkey, dkey = pg$g_dkey))
+  stopifnot(all(cg$cmp >= 0L))                                     # no pair starts before its group
+  pr$onset_defining <- cg$cmp == 0L
+  ## presence of every other participant at the group onset; the onset-defining targets are the pair (context_flags())
+  fl <- context_flags(grp, pr |> filter(onset_defining) |> select(.g, ccode = target), psd)
+  grp <- grp |> inner_join(fl, by = ".g")
+  stopifnot(nrow(grp) == n_distinct(pr$.g), all(grp$n_incl >= 1L), all(grp$n_strict <= grp$n_incl), !anyNA(grp$coal_incl), !anyNA(grp$coal_strict), all(grp$coal_incl >= grp$coal_strict))
+  ## diagnostic: the flag at every pair's OWN onset (not used); how many groups would carry different flags
+  fl_e <- context_flags(pr |> transmute(.g = .e, dispnum, initiator, res = o_res, y = o_y, mkey = o_mkey, dkey = o_dkey), pr |> select(.g = .e, ccode = target), psd)
+  pr <- pr |> left_join(fl_e |> select(.e = .g, ev_incl = coal_incl, ev_strict = coal_strict), by = ".e")
+  stopifnot(!anyNA(pr$ev_incl), !anyNA(pr$ev_strict))
+  het <- pr |> group_by(.g) |> summarise(n_event_flags_incl = n_distinct(ev_incl), n_event_flags_strict = n_distinct(ev_strict), .groups = "drop")
+  grp <- grp |> left_join(het, by = ".g")
+  out <- pr |> inner_join(grp |> select(.g, coal_incl, coal_strict, coal_res), by = ".g")
+  stopifnot(nrow(out) == n_in, !anyNA(out$coal_incl), !anyNA(out$coal_strict))
+  ## constant within every (dispnum, initiator, year) group: by construction, asserted on the output
+  chk <- out |> group_by(dispnum, initiator, year) |> summarise(a = n_distinct(coal_incl), b = n_distinct(coal_strict), .groups = "drop")
+  if (any(chk$a != 1L) || any(chk$b != 1L)) stop("coalition_context: the coalition flag is not constant within an (initiator, dispute, year) group")
+  res <- pairs |> left_join(out |> select(dispnum, initiator, target, coal_incl, coal_strict, coal_onset_ambiguous, coal_res), by = c("dispnum", "initiator", "target"))
+  stopifnot(nrow(res) == n_in, !anyNA(res$coal_incl))
+  attr(res, "groups") <- grp |> select(dispnum, initiator, year, n_events, onset_res = res, onset_y = y, onset_mkey = mkey, onset_dkey = dkey, n_incl, n_strict, target_strict,
+                                       n_onset_defining, n_target_exit_before_onset, coal_incl, coal_strict, coal_res, n_event_flags_incl, n_event_flags_strict)
+  attr(res, "events") <- out |> select(dispnum, initiator, target, year, o_res, o_mkey, o_dkey, onset_defining, onset_vs_pdi, ev_incl, ev_strict)
+  res
+}
+
+## ---- multilateral MID open at January of t (dual typology stage b, 2026-10-27; the M1c stage-1 control multi_mid_jan) -------------------
+## multilateral_jan_flags(sy, psd, dd): for every state-year (ccode, year = t) of `sy`, multi_mid_jan = 1 when a multilateral MID that the
+## state is NOT YET a participant in is active at January of t. Dates follow the coalition flag (participant_spell_dates(), date_cmp());
+## the reference date is 1 January of t at day resolution. ENTRY BEFORE THE REFERENCE (audit fixes 1-2, 2026-10-27; the column must be
+## outcome-blind, so nothing dated inside year t may count): a spell has entered by 1 January of t when its entry year is BEFORE t (at any
+## resolution; a month-resolution entry before January of t is in an earlier year), or when it is day-dated on or before 1 January of t.
+## An entry at year resolution in t, or at month resolution in January of t, is NOT entered (the pre-fix code counted both as present
+## through the coarse-resolution tie of date_cmp(); 334 spell-years, 30 of the 263 multilateral dispute-years existed only through them).
+## A spell is PRESENT when it has entered and its exit is not strictly before the reference (cmp >= 0 at the coarser resolution). The side
+## of a present participant is COW's sidea1 in year t (`dd`; a spell containing t has a dispute-year row in t; asserted constant within the
+## year). A dispute is ACTIVE at the reference when at least one participant is present on each side, and MULTILATERAL when a side has two
+## or more present participants (the same definition as the coalition flag: more than one state on a side at that date). The state is
+## "ALREADY IN" the dispute when ANY of its spells in that dispute (whatever its end) has entered before the reference; otherwise it is
+## "not yet a participant" and the dispute counts toward its flag. A state that entered earlier and already left is therefore a FORMER
+## participant and does not count as "not yet" (the pre-fix code built this from the spell-YEAR rows, so a spell ended before t was
+## forgotten: 252 (dispute, state, year) triples); a state entering during t does count as "not yet" (its own entry during t is an
+## outcome of t and must not zero the flag). Returns `sy` with multi_mid_jan (0/1) and n_multi_jan (the number of such disputes);
+## attr(, "disputes") is the per-(dispnum, year) table of the active multilateral disputes with the present counts per side;
+## attr(, "changed_vs_prefix") counts the flags that differ from the pre-fix rule (legacy), from fix 1 alone (coarse entries in t), and
+## from fix 1 to the final rule (fix 2, former participants), for the build log. Outcome-blind: nothing dated in t enters any count.
+multilateral_jan_flags <- function(sy, psd, dd) {
+  stopifnot(all(c("ccode", "year") %in% names(sy)), !anyNA(sy$ccode), !anyNA(sy$year),
+            all(c("dispnum", "ccode", "spell", "spell_first", "spell_last", "entry_res", "entry_y", "entry_mkey", "entry_dkey", "exit_res", "exit_y", "exit_mkey", "exit_dkey") %in% names(psd)),
+            all(c("dispnum", "ccode1", "year", "sidea1") %in% names(dd)))
+  assert_no_dup_keys(sy, c("ccode", "year"), "multilateral_jan_flags: state-years")
+  ## entered_by_jan(entry_res, entry_y, entry_dkey, t): the entry lies before 1 January of t (year < t) or is day-dated on or before it
+  entered_by_jan <- function(entry_res, entry_y, entry_dkey, t) {
+    stopifnot(length(entry_res) == length(t), !anyNA(entry_y), !anyNA(t), all(!is.na(entry_dkey[entry_res == 1L])))
+    ref_dkey <- date_keys(rep(1L, length(t)), t, rep(1L, length(t)), rep(1L, length(t)))$dkey
+    entry_y < t | (entry_res == 1L & entry_dkey <= ref_dkey)
+  }
+  ## one row per (spell, year t inside the spell): the only spells that can be present at 1 January of t
+  sp <- psd |> mutate(.id = row_number()) |> select(.id, dispnum, ccode, spell_first, spell_last, entry_res, entry_y, entry_mkey, entry_dkey, exit_res, exit_y, exit_mkey, exit_dkey)
+  ex <- sp |> mutate(year = purrr_free_seq(spell_first, spell_last)) |> tidyr::unnest(year) |> mutate(year = as.integer(year))
+  stopifnot(nrow(ex) == sum(sp$spell_last - sp$spell_first + 1L))
+  ref <- date_keys(rep(1L, nrow(ex)), ex$year, rep(1L, nrow(ex)), rep(1L, nrow(ex)))
+  ce <- date_cmp(list(res = ex$entry_res, y = ex$entry_y, mkey = ex$entry_mkey, dkey = ex$entry_dkey), ref)
+  cx <- date_cmp(list(res = ex$exit_res, y = ex$exit_y, mkey = ex$exit_mkey, dkey = ex$exit_dkey), ref)
+  ## entered_legacy: the pre-fix rule (cmp <= 0 at the coarser resolution; a coarse-dated entry in t counts), kept for the change counts only
+  ex <- ex |> mutate(entered_legacy = ce$cmp <= 0L, entered = entered_by_jan(entry_res, entry_y, entry_dkey, year), exited = cx$cmp < 0L, present = entered & !exited)
+  ## a spell that starts before t has entered; one that starts in t has entered only when day-dated on 1 January; one that ends after t has
+  ## not exited (sanity of the date keys); the new rule never admits a spell the legacy rule refused
+  stopifnot(all(ex$entered[ex$spell_first < ex$year]), all(!ex$entered[ex$spell_first == ex$year & ex$entry_res != 1L]), all(!ex$exited[ex$spell_last > ex$year]),
+            all(ex$entered_legacy[ex$entered]))
+  n_coarse_in_t <- sum(ex$entered_legacy & !ex$entered)
+  ## the side in year t (COW). A participant listed on BOTH sides within one dispute-year switched sides during t (five cases, all in
+  ## dispute 258: France 1940, Italy 1943, Bulgaria / Romania / Finland 1944); at 1 January of t it still held its side of year t - 1 in the
+  ## same dispute, which is used; a switcher without a row in t - 1 is an error (none in the data).
+  side <- dd |> distinct(dispnum, ccode = ccode1, year, sidea1) |> mutate(sidea1 = as.integer(sidea1))
+  dup <- side |> count(dispnum, ccode, year) |> filter(n > 1L)
+  if (nrow(dup) > 0) {
+    prev <- side |> anti_join(dup, by = c("dispnum", "ccode", "year")) |> transmute(dispnum, ccode, year = year + 1L, side_prev = sidea1)
+    fix <- dup |> left_join(prev, by = c("dispnum", "ccode", "year"))
+    if (anyNA(fix$side_prev)) stop(sprintf("multilateral_jan_flags: %d (dispute, participant, year) rows have more than one side and no single side in the year before", sum(is.na(fix$side_prev))))
+    side <- bind_rows(side |> anti_join(dup, by = c("dispnum", "ccode", "year")), fix |> transmute(dispnum, ccode, year, sidea1 = side_prev))
+  }
+  assert_no_dup_keys(side, c("dispnum", "ccode", "year"), "multilateral_jan_flags: participant sides")
+  n_side_switch <- nrow(dup)
+  ## the active / multilateral dispute-years from a presence column; multi = (dispnum, year, n_side_a, n_side_b)
+  dispute_table <- function(present_col) {
+    pres <- ex |> filter(.data[[present_col]]) |> inner_join(side, by = c("dispnum", "ccode", "year"))
+    if (nrow(pres) != sum(ex[[present_col]])) stop("multilateral_jan_flags: a present participant spell has no dispute-year row (side unknown) in its year")
+    stopifnot(all(pres$sidea1 %in% 0:1))
+    pres |> group_by(dispnum, year) |> summarise(n_side_a = n_distinct(ccode[sidea1 == 1L]), n_side_b = n_distinct(ccode[sidea1 == 0L]), .groups = "drop") |>
+      mutate(active = n_side_a >= 1L & n_side_b >= 1L, multilateral = active & pmax(n_side_a, n_side_b) >= 2L)
+  }
+  ## the state-year flags from a multilateral table and an "already in" table (dispnum, ccode, year); returns sy + n_multi_jan, multi_mid_jan
+  flags_from <- function(multi, already_in) {
+    n_multi_year <- multi |> count(year, name = "n_multi_year")
+    n_in <- already_in |> distinct(dispnum, ccode, year) |> semi_join(multi, by = c("dispnum", "year")) |> count(ccode, year, name = "n_in")
+    out <- sy |> left_join(n_multi_year, by = "year") |> left_join(n_in, by = c("ccode", "year")) |>
+      mutate(n_multi_year = coalesce(n_multi_year, 0L), n_in = coalesce(n_in, 0L), n_multi_jan = n_multi_year - n_in, multi_mid_jan = as.integer(n_multi_jan > 0L))
+    stopifnot(nrow(out) == nrow(sy), all(out$n_multi_jan >= 0L), all(out$n_in <= out$n_multi_year), !anyNA(out$multi_mid_jan), all(out$multi_mid_jan %in% 0:1))
+    out |> select(-n_multi_year, -n_in)
+  }
+  disputes <- dispute_table("present")
+  multi <- disputes |> filter(multilateral) |> select(dispnum, year, n_side_a, n_side_b)
+  ## "already in": ANY spell of the state in the dispute entered before 1 January of t, whatever its end (present or former participant);
+  ## evaluated on every spell against every multilateral dispute-year of its dispute, not on the spell-year rows (fix 2)
+  cand <- multi |> select(dispnum, year) |> inner_join(sp |> select(dispnum, ccode, entry_res, entry_y, entry_dkey), by = "dispnum", relationship = "many-to-many")
+  already_in <- cand |> filter(entered_by_jan(entry_res, entry_y, entry_dkey, year)) |> distinct(dispnum, ccode, year)
+  ## every present participant of a multilateral dispute-year is already in it (consistency of the two rules)
+  stopifnot(nrow(anti_join(ex |> filter(present) |> distinct(dispnum, ccode, year) |> semi_join(multi, by = c("dispnum", "year")), already_in, by = c("dispnum", "ccode", "year"))) == 0L)
+  res <- flags_from(multi, already_in)
+  ## change counts against the pre-fix rules (diagnostics for the build log): legacy = coarse entries in t present AND "already in" from
+  ## the spell-year rows (former participants forgotten); fix1 = the new presence with the spell-year "already in"
+  ex <- ex |> mutate(present_legacy = entered_legacy & !exited)
+  disputes_legacy <- dispute_table("present_legacy")
+  multi_legacy <- disputes_legacy |> filter(multilateral) |> select(dispnum, year, n_side_a, n_side_b)
+  flag_legacy <- flags_from(multi_legacy, ex |> filter(entered_legacy) |> distinct(dispnum, ccode, year))
+  flag_fix1 <- flags_from(multi, ex |> filter(entered) |> distinct(dispnum, ccode, year))
+  stopifnot(identical(flag_legacy$ccode, res$ccode), identical(flag_fix1$year, res$year))
+  attr(res, "disputes") <- multi |> arrange(year, dispnum)
+  attr(res, "n_active_dispute_years") <- sum(disputes$active)
+  attr(res, "n_side_switch_years") <- n_side_switch
+  attr(res, "changed_vs_prefix") <- c(n_spell_years_coarse_entry_in_t = n_coarse_in_t,
+                                      n_multi_dispute_years_legacy = nrow(multi_legacy), n_multi_dispute_years = nrow(multi),
+                                      n_multi_dispute_years_lost = nrow(anti_join(multi_legacy, multi, by = c("dispnum", "year"))),
+                                      n_multi_dispute_years_gained = nrow(anti_join(multi, multi_legacy, by = c("dispnum", "year"))),
+                                      n_former_participant_triples = nrow(anti_join(already_in, ex |> filter(entered) |> distinct(dispnum, ccode, year) |> semi_join(multi, by = c("dispnum", "year")), by = c("dispnum", "ccode", "year"))),
+                                      n_flags_changed_fix1 = sum(flag_legacy$multi_mid_jan != flag_fix1$multi_mid_jan),
+                                      n_flags_changed_fix2 = sum(flag_fix1$multi_mid_jan != res$multi_mid_jan),
+                                      n_flags_changed_total = sum(flag_legacy$multi_mid_jan != res$multi_mid_jan),
+                                      n_flags_legacy = sum(flag_legacy$multi_mid_jan), n_flags = sum(res$multi_mid_jan))
+  res
+}
+## seq per row without purrr: a list column of spell_first:spell_last
+purrr_free_seq <- function(a, b) { stopifnot(length(a) == length(b), all(b >= a)); mapply(function(x, y) x:y, a, b, SIMPLIFY = FALSE) }
+
+## ---- gap scale (PI decision 2026-10-23): SD of the within-year gap v_i - v_j over all ordered pairs i != j ----
+## Exact, without forming the pairs. Per year with n values and SS = sum((v - mean(v))^2), sum over ordered pairs of
+## (v_i - v_j)^2 = 2 n SS and there are n (n - 1) pairs; the pairs' mean is exactly 0. Years with one state add nothing.
+gap_scale <- function(v, yr) {
+  stopifnot(length(v) == length(yr), !anyNA(v), all(is.finite(v)))
+  ss <- tapply(v, yr, function(z) sum((z - mean(z))^2)); n <- tapply(v, yr, length)
+  out <- sqrt(sum(2 * n * ss) / sum(n * (n - 1)))
+  stopifnot(is.finite(out), out > 0)
+  out
+}
+
+
+## ---- manifest / digests ------------------------------------------------------------
+file_digest <- function(path) digest::digest(path, algo = "sha256", file = TRUE)
+write_manifest <- function(entries, path) {
+  ## entries: list of data.frames with file, nrow, ncol, sha256, note
+  man <- bind_rows(entries) |> mutate(built = format(Sys.time(), "%Y-%m-%d %H:%M:%S"))
+  write.csv(man, path, row.names = FALSE)
+  invisible(man)
+}
+## manifest may be the path of manifest.csv or a data.frame already read from it (a SNAPSHOT taken earlier; Codex review
+## P2-5: 02_fit_model.R passes the manifest it read at load so that a rebuild between the snapshot and the load is caught)
+## The file is read ONCE into memory; the digest and the returned object both come from those same bytes (Codex re-check
+## P2, 2026-10-24: a separate readRDS() and file_digest() could see two different files if the file were replaced in
+## between). .after_read is a test hook only: it is called after the bytes are captured, so a test can replace the file at
+## that moment and confirm the returned object is the one that was hashed.
+assert_matches_manifest <- function(path, manifest, .after_read = NULL) {
+  man <- if (is.data.frame(manifest)) manifest else read.csv(manifest, stringsAsFactors = FALSE)
+  stopifnot(all(c("file", "nrow", "sha256") %in% names(man)))
+  row <- man[man$file == basename(path), , drop = FALSE]
+  if (nrow(row) != 1) stop("file not in manifest: ", basename(path))
+  n_bytes <- file.info(path)$size
+  if (is.na(n_bytes)) stop("file not found: ", path)
+  bytes <- readBin(path, what = "raw", n = n_bytes)
+  if (length(bytes) != n_bytes) stop(sprintf("%s: read %d of %d bytes", basename(path), length(bytes), n_bytes))
+  if (!is.null(.after_read)) .after_read()
+  tmp <- tempfile(fileext = ".rds"); on.exit(unlink(tmp), add = TRUE)
+  writeBin(bytes, tmp)
+  obj <- readRDS(tmp)
+  if (nrow(obj) != row$nrow) stop(sprintf("%s: nrow %d != manifest %d", basename(path), nrow(obj), row$nrow))
+  if (digest::digest(bytes, algo = "sha256", serialize = FALSE) != row$sha256)
+    stop(sprintf("%s: sha256 digest does not match the manifest%s", basename(path),
+                 if (is.data.frame(manifest)) " snapshot taken at load (data rebuilt in between?)" else ""))
+  obj
+}

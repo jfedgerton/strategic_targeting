@@ -1,0 +1,191 @@
+## ============================================================================
+## 20_build_layers.R  --  Part 1 of the relational-measure sweep
+## Builds ONE undirected dyad-year panel (ccode1 < ccode2, COW system members, 1816-2014) with one column
+## per cooperative layer, plus contiguity and capital distance for later residualisation.
+##   igo   : shared COW IGO memberships (peacesciencer cow_igo_ndy). Raw; years with no IGO data stay NA.
+##   ally  : any ATOP obligation (defense/offense/neutral/nonagg/consul), binary (peacesciencer atop_alliance; descriptive only)
+##   def, off, neu, nonagg, consul : the five ATOP obligation types, each binary (PI 2026-11-18: nine-layer grid)
+##   un    : UN General Assembly voting agreement, Cohen's kappa (Hage 2011 via peacesciencer dyadic_fp_similarity, kappavv),
+##           1946+; before 1946 a STRUCTURAL zero (no UN); in UN years a dyad without a kappa (non-member, not voting) -> NA
+##   dipl  : COW diplomatic exchange DE (both sides represented), binary; 5-year waves carried forward
+##           to the year before the next wave (1816 takes the 1817 wave)
+##   pta   : count of DESTA base treaties per dyad from entry into force (signing year when DESTA has no entry-into-force year)
+##   pta_inforce : the same, counting ONLY treaties with an entry-into-force year (PI 2026-11-18: run PTAs both ways)
+##   dca   : Kinne DCAD dcaAnyV1 (any DCA in force), binary; STRUCTURAL zeros before 1980; 2010 carried forward to 2014
+##   trade : COW trade, built but NOT in the grid (PI 2026-11-18: skipped for missingness)
+## *_src columns record the source year used, so staleness is auditable.
+## Usage: Rscript v2/R/20_build_layers.R <netdata_dir> <out_rds>
+## ============================================================================
+suppressMessages({ library(dplyr); library(tidyr); library(peacesciencer); library(countrycode) })
+set.seed(123)
+args <- commandArgs(trailingOnly = TRUE)
+stopifnot(length(args) == 2)
+NETDIR <- args[1]; OUT <- args[2]
+FIRST_YEAR <- 1816L; LAST_YEAR <- 2014L
+logf <- function(...) cat(sprintf(...), "\n")
+logf("R %s | peacesciencer %s | countrycode %s", getRversion(), packageVersion("peacesciencer"), packageVersion("countrycode"))
+
+## ---- 0. dyad-year frame with contiguity and capital distance ----------------
+dy <- create_dyadyears(system = "cow", directed = FALSE, mry = FALSE, subset_years = FIRST_YEAR:LAST_YEAR) |>
+  add_contiguity() |> add_capital_distance() |>
+  transmute(ccode1 = as.integer(ccode1), ccode2 = as.integer(ccode2), year = as.integer(year),
+            contig_land = as.integer(conttype == 1), conttype = as.integer(conttype), capdist = capdist)
+stopifnot(all(dy$ccode1 < dy$ccode2), !anyDuplicated(dy[, c("ccode1", "ccode2", "year")]))
+logf("frame: %d dyad-years, %d-%d; capdist NA %d; conttype NA %d", nrow(dy), min(dy$year), max(dy$year),
+     sum(is.na(dy$capdist)), sum(is.na(dy$conttype)))
+
+## ---- 1. IGO -------------------------------------------------------------------
+igo <- peacesciencer::cow_igo_ndy |>
+  mutate(a_ = pmin(ccode1, ccode2), b_ = pmax(ccode1, ccode2)) |>   # GPT review P1-1: both ends from the ORIGINAL columns
+  transmute(ccode1 = as.integer(a_), ccode2 = as.integer(b_), year = as.integer(year),
+            igo = ifelse(dyadigos < 0, NA_real_, as.numeric(dyadigos))) |>
+  distinct(ccode1, ccode2, year, .keep_all = TRUE)
+dy <- dy |> left_join(igo, by = c("ccode1", "ccode2", "year"))
+igo_years <- dy |> group_by(year) |> summarise(ok = any(!is.na(igo)), .groups = "drop")
+logf("IGO: years with any data %d of %d; all-missing years: %s", sum(igo_years$ok), nrow(igo_years),
+     paste(igo_years$year[!igo_years$ok], collapse = " "))
+## within an IGO-data year, a missing dyad has no recorded shared membership -> 0 (matches 01_build_data.R)
+dy <- dy |> left_join(igo_years, by = "year") |> mutate(igo = ifelse(ok & is.na(igo), 0, igo)) |> select(-ok)
+
+## ---- 2. ATOP ------------------------------------------------------------------
+atop <- peacesciencer::atop_alliance |>
+  mutate(a_ = pmin(ccode1, ccode2), b_ = pmax(ccode1, ccode2)) |>   # GPT review P1-1: both ends from the ORIGINAL columns
+  transmute(ccode1 = as.integer(a_), ccode2 = as.integer(b_), year = as.integer(year),
+            ally = as.integer((atop_defense + atop_offense + atop_neutral + atop_nonagg + atop_consul) > 0),
+            def = as.integer(atop_defense > 0), off = as.integer(atop_offense > 0), neu = as.integer(atop_neutral > 0),
+            nonagg = as.integer(atop_nonagg > 0), consul = as.integer(atop_consul > 0)) |>
+  group_by(ccode1, ccode2, year) |>
+  summarise(across(c(ally, def, off, neu, nonagg, consul), max), .groups = "drop")
+dy <- dy |> left_join(atop, by = c("ccode1", "ccode2", "year")) |>
+  mutate(across(c(ally, def, off, neu, nonagg, consul), ~ coalesce(.x, 0L)))
+stopifnot(all(dy$ally == pmax(dy$def, dy$off, dy$neu, dy$nonagg, dy$consul)))
+## GPT review P1-1 regression check: an obligation recorded in ONE direction only must survive (France -> Belgium 1832 defense)
+stopifnot(all(atop$ccode1 < atop$ccode2), dy$def[dy$ccode1 == 211 & dy$ccode2 == 220 & dy$year == 1832] == 1L)
+
+## ---- 2b. UN voting agreement (kappa), 1946+ ---------------------------------------
+fp <- readRDS(file.path(system.file("extdata", package = "peacesciencer"), "dyadic_fp_similarity.rds")) |>
+  mutate(a_ = pmin(ccode1, ccode2), b_ = pmax(ccode1, ccode2)) |>   # GPT review P1-1: both ends from the ORIGINAL columns
+  transmute(ccode1 = as.integer(a_), ccode2 = as.integer(b_), year = as.integer(year), un = kappavv) |>
+  filter(!is.na(un)) |> group_by(ccode1, ccode2, year) |> summarise(un = mean(un), .groups = "drop")
+un_first <- min(fp$year)
+stopifnot(un_first >= 1945L, all(fp$un >= -1 - 1e-9 & fp$un <= 1 + 1e-9))
+dy <- dy |> left_join(fp, by = c("ccode1", "ccode2", "year")) |> mutate(un = ifelse(year < un_first, 0, un))
+logf("UN kappa: first year %d (structural 0 before); NA share in UN years %.3f", un_first, mean(is.na(dy$un[dy$year >= un_first])))
+
+## ---- 3. Diplomatic exchange (5-year waves, carried forward) -------------------
+dip <- read.csv(file.path(NETDIR, "dipl_dyad.csv")) |>
+  mutate(a_ = pmin(ccode1, ccode2), b_ = pmax(ccode1, ccode2)) |>   # GPT review P1-1: both ends from the ORIGINAL columns
+  transmute(ccode1 = as.integer(a_), ccode2 = as.integer(b_), year = as.integer(year),
+            dipl = as.integer(DE == 1)) |>
+  group_by(ccode1, ccode2, year) |> summarise(dipl = max(dipl), .groups = "drop")
+waves <- sort(unique(dip$year))
+stopifnot(all(dip$dipl %in% 0:1))
+## PI 2026-11-19 (GPT full audit P1-4): NO future information. A dyad-year takes the latest wave AT OR BEFORE its year; years before the
+## first wave have no source (structural 0, like DCA before 1980), and a dyad with an endpoint absent from its source wave (a state that
+## entered after that wave) is 0 until the next wave is observed. The earlier next-wave fill and the 1816 -> 1817 assignment are removed.
+wave_of <- function(y) { i <- findInterval(y, waves); ifelse(i >= 1L, waves[pmax(i, 1L)], NA_integer_) }
+dy <- dy |> mutate(dipl_src = wave_of(year))
+stopifnot(all(is.na(dy$dipl_src) | dy$dipl_src <= dy$year), all(is.na(dy$dipl_src) == (dy$year < min(waves))))
+in_wave <- bind_rows(dy |> distinct(ccode = ccode1, year), dy |> distinct(ccode = ccode2, year)) |> distinct() |> mutate(k = paste(ccode, year))
+absent <- !is.na(dy$dipl_src) & (!(paste(dy$ccode1, dy$dipl_src) %in% in_wave$k) | !(paste(dy$ccode2, dy$dipl_src) %in% in_wave$k))
+logf("dipl: dyad-years before the first wave (structural 0) %d; with an endpoint absent from its source wave (0 until observed, no future fill) %d",
+     sum(is.na(dy$dipl_src)), sum(absent))
+dy <- dy |>
+  left_join(dip |> rename(dipl_src = year), by = c("ccode1", "ccode2", "dipl_src")) |>
+  mutate(dipl = coalesce(dipl, 0L))
+dy$dipl[absent] <- 0L
+stopifnot(!anyNA(dy$dipl))
+logf("dipl: waves %s; source wave up to %d years before the dyad-year; never after", paste(range(waves), collapse = "-"), max(dy$year - dy$dipl_src, na.rm = TRUE))
+dy$dipl_src <- NULL
+
+## ---- 4. DESTA PTAs in force ---------------------------------------------------
+load(file.path(NETDIR, "destaRaw.rda"))   # object `desta`
+pt <- desta |> mutate(c1 = countrycode(iso1, "iso3n", "cown", warn = FALSE),
+                      c2 = countrycode(iso2, "iso3n", "cown", warn = FALSE),
+                      start = as.integer(ifelse(is.na(entryforceyear), year, entryforceyear)), inforce = !is.na(entryforceyear)) |>
+  mutate(c1 = ifelse(country1 == "Serbia", 345L, ifelse(country1 == "Kosovo", 347L, c1)),     # COW Yugoslavia/Serbia, Kosovo
+         c2 = ifelse(country2 == "Serbia", 345L, ifelse(country2 == "Kosovo", 347L, c2)))
+unm <- pt |> filter(is.na(c1) | is.na(c2))
+logf("DESTA rows %d; rows with an unmatched country (dropped) %d; unmatched names: %s", nrow(pt), nrow(unm),
+     paste(sort(unique(c(unm$country1[is.na(unm$c1)], unm$country2[is.na(unm$c2)]))), collapse = "; "))
+## Review fix (2026-11-18, P1-3): countrycode maps today's Germany / Czechia / Yemen to 255 / 316 / 679, which are not COW members
+## before 1990 / 1993 / 1990, so West Germany (260), Czechoslovakia (315) and North Yemen (678) lost every PTA. Each such row is
+## duplicated onto the predecessor code; the join to the system dyad-years keeps only the code that exists in each year.
+succ <- c(`255` = 260L, `316` = 315L, `679` = 678L)
+pt <- pt |> filter(!is.na(c1), !is.na(c2))
+dup1 <- pt |> filter(as.character(c1) %in% names(succ)) |> mutate(c1 = succ[as.character(c1)])
+dup2 <- pt |> filter(as.character(c2) %in% names(succ)) |> mutate(c2 = succ[as.character(c2)])
+dup12 <- dup1 |> filter(as.character(c2) %in% names(succ)) |> mutate(c2 = succ[as.character(c2)])
+pt <- bind_rows(pt, dup1, dup2, dup12) |> filter(c1 != c2)
+## Review fix (P2-9): count distinct BASE treaties per dyad (accessions and consolidated versions share the base treaty number),
+## so a consolidated text does not double-count the dyads it already covers; start = earliest in-force year for the dyad.
+pt_all <- pt
+pt <- pt_all |> transmute(ccode1 = as.integer(pmin(c1, c2)), ccode2 = as.integer(pmax(c1, c2)), base_treaty, start) |>
+  group_by(ccode1, ccode2, base_treaty) |> summarise(start = min(start), .groups = "drop")
+pt_if <- pt_all |> filter(inforce) |> transmute(ccode1 = as.integer(pmin(c1, c2)), ccode2 = as.integer(pmax(c1, c2)), base_treaty, start) |>
+  group_by(ccode1, ccode2, base_treaty) |> summarise(start = min(start), .groups = "drop")
+pta <- dy |> distinct(ccode1, ccode2, year) |> inner_join(pt, by = c("ccode1", "ccode2"), relationship = "many-to-many") |>
+  filter(start <= year) |> count(ccode1, ccode2, year, name = "pta")
+dy <- dy |> left_join(pta, by = c("ccode1", "ccode2", "year")) |> mutate(pta = coalesce(pta, 0L))
+pta_if <- dy |> distinct(ccode1, ccode2, year) |> inner_join(pt_if, by = c("ccode1", "ccode2"), relationship = "many-to-many") |>
+  filter(start <= year) |> count(ccode1, ccode2, year, name = "pta_inforce")
+dy <- dy |> left_join(pta_if, by = c("ccode1", "ccode2", "year")) |> mutate(pta_inforce = coalesce(pta_inforce, 0L))
+stopifnot(all(dy$pta_inforce <= dy$pta))
+logf("PTA: dyad-years with any PTA %d (signed or in force) vs %d (in force only)", sum(dy$pta > 0), sum(dy$pta_inforce > 0))
+chk_pta <- dy |> filter(year %in% c(1960, 1985), (ccode1 == 220 & ccode2 == 260) | (ccode1 == 260 & ccode2 == 325) | (ccode1 == 290 & ccode2 == 315))
+logf("PTA predecessor check (France-W.Germany, W.Germany-Italy, Poland-Czechoslovakia in 1960/1985): %s",
+     paste(sprintf("%d-%d %d: %d", chk_pta$ccode1, chk_pta$ccode2, chk_pta$year, chk_pta$pta), collapse = "; "))
+stopifnot(any(chk_pta$ccode1 == 220 & chk_pta$ccode2 == 260 & chk_pta$year == 1985 & chk_pta$pta > 0))
+
+## ---- 5. DCA ---------------------------------------------------------------------
+dca <- read.csv(file.path(NETDIR, "dca_dyad.csv")) |>
+  mutate(a_ = pmin(ccode1, ccode2), b_ = pmax(ccode1, ccode2)) |>   # GPT review P1-1: both ends from the ORIGINAL columns
+  transmute(ccode1 = as.integer(a_), ccode2 = as.integer(b_), year = as.integer(year),
+            dca = as.integer(dcaAnyV1 > 0)) |>
+  group_by(ccode1, ccode2, year) |> summarise(dca = max(dca), .groups = "drop")
+dca_rng <- range(dca$year)
+stopifnot(dca_rng[1] == 1980L, dca_rng[2] == 2010L)
+## PI decision 2026-11-18: pre-1980 zeros are STRUCTURAL (no DCAs existed); 2011-2014 carry the 2010 value forward
+dca_last <- dca |> filter(year == dca_rng[2]) |> select(ccode1, ccode2, dca_last = dca)
+dy <- dy |> left_join(dca, by = c("ccode1", "ccode2", "year")) |>
+  left_join(dca_last, by = c("ccode1", "ccode2")) |>
+  mutate(dca_src = ifelse(year < dca_rng[1], NA_integer_, pmin(year, dca_rng[2])),
+         dca = ifelse(year < dca_rng[1], 0L, ifelse(year <= dca_rng[2], coalesce(dca, 0L), coalesce(dca_last, 0L)))) |>
+  select(-dca_last)
+logf("DCA: structural zeros before %d; %d carried forward to %d", dca_rng[1], dca_rng[2], LAST_YEAR)
+
+## ---- 5b. COW bilateral trade (1870-2014; NA before 1870 = true missingness) -------------------
+## log(1 + smoothflow1 + smoothflow2), millions current USD. Missing flows (NA in COW, or dyad absent) stay NA.
+## COW itself records some implausible zeros (e.g. USSR-Poland 1960); those are kept as reported.
+## PI decision 2026-11-18: any spec that uses the trade layer is subset to 1870+.
+trd <- readRDS(file.path(system.file("extdata", package = "peacesciencer"), "cow_trade_ddy.rds")) |>
+  mutate(a_ = pmin(ccode1, ccode2), b_ = pmax(ccode1, ccode2)) |>   # GPT review P1-1: both ends from the ORIGINAL columns
+  transmute(ccode1 = as.integer(a_), ccode2 = as.integer(b_), year = as.integer(year),
+            flow = ifelse(is.na(smoothflow1) & is.na(smoothflow2), NA_real_,
+                          pmax(coalesce(smoothflow1, 0), 0) + pmax(coalesce(smoothflow2, 0), 0))) |>
+  group_by(ccode1, ccode2, year) |> summarise(flow = max(flow), .groups = "drop")
+trd_rng <- range(trd$year)
+stopifnot(trd_rng[1] == 1870L)
+dy <- dy |> left_join(trd, by = c("ccode1", "ccode2", "year")) |>
+  mutate(trade = ifelse(year < trd_rng[1], NA_real_, log1p(flow))) |> select(-flow)   # missing flows stay NA (no fabricated zeros)
+logf("trade: 1870+ dyad-years with NA trade (missing in COW or absent): %d (%.3f)", sum(is.na(dy$trade) & dy$year >= trd_rng[1]),
+     mean(is.na(dy$trade[dy$year >= trd_rng[1]])))
+logf("trade: %d-%d, NA before %d; share of 1870+ dyad-years with positive trade %.3f", trd_rng[1], trd_rng[2], trd_rng[1],
+     mean(dy$trade[dy$year >= trd_rng[1]] > 0, na.rm = TRUE))
+
+## ---- 6. checks -------------------------------------------------------------------
+stopifnot(!anyDuplicated(dy[, c("ccode1", "ccode2", "year")]))
+for (src in list(igo, atop, fp, dip, dca, trd)) stopifnot(all(src$ccode1 < src$ccode2))   # no self-pairs from any import
+era <- cut(dy$year, c(1815, 1870, 1914, 1945, 1979, 1990, 2014), labels = c("1816-70", "1871-1914", "1915-45", "1946-79", "1980-90", "1991-2014"))
+dens <- dy |> mutate(era = era) |> group_by(era) |>
+  summarise(dyad_years = n(), igo_mean = mean(igo, na.rm = TRUE), igo_na = mean(is.na(igo)), ally = mean(ally), def = mean(def),
+            off = mean(off), neu = mean(neu), nonagg = mean(nonagg), consul = mean(consul), un_mean = mean(un, na.rm = TRUE), un_na = mean(is.na(un)),
+            dipl = mean(dipl), pta_any = mean(pta > 0), dca = mean(dca), trade_pos = mean(trade > 0, na.rm = TRUE), .groups = "drop")
+print(as.data.frame(dens), digits = 3, width = 200)
+chk <- function(a, b, y) dy |> filter(ccode1 == min(a, b), ccode2 == max(a, b), year == y) |>
+  transmute(pair = sprintf("%d-%d", a, b), year, igo, def, off, neu, nonagg, consul, un = round(un, 2), dipl, pta, dca)
+face <- bind_rows(chk(2, 200, 1955), chk(2, 365, 1925), chk(2, 365, 1960), chk(365, 290, 1960), chk(200, 255, 1960),
+                  chk(220, 255, 1995), chk(2, 840, 1995), chk(2, 70, 2000), chk(2, 365, 1935), chk(200, 220, 1880), chk(2, 840, 2012), chk(2, 20, 1990))
+print(as.data.frame(face))
+saveRDS(dy, OUT)
+logf("saved %s (%d rows, %d cols)", OUT, nrow(dy), ncol(dy))
