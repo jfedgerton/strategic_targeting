@@ -12,7 +12,7 @@ args <- commandArgs(trailingOnly = TRUE); stopifnot(length(args) == 4)
 SW <- args[1]; VAL <- args[2]; MAIN <- args[3]; OUT <- args[4]; dir.create(OUT, showWarnings = FALSE, recursive = TRUE)
 V <- fread(VAL)[, .(spec_id, plausible)]
 files <- list.files(SW, pattern = "^sweep_.*\\.csv$", recursive = TRUE, full.names = TRUE); stopifnot(length(files) > 0)
-tag_of <- function(f) sub("_(positions|phaseA|pick|noatop).*$", "", sub("^sweep_", "", basename(f)))
+tag_of <- function(f) sub("_(fmid|mid)_.*$", "_\\1", sub("\\.csv$", "", sub("^sweep_", "", basename(f))))   # drop the positions-file stem after the sample
 grp_of <- function(f) basename(dirname(f))
 X <- rbindlist(lapply(files, function(f) { d <- fread(f); d[, `:=`(run = tag_of(f), group = grp_of(f))]; d }), fill = TRUE)
 X <- X[!grepl("^BASELINE", spec_id)]

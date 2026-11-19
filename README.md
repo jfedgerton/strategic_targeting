@@ -1,0 +1,81 @@
+# Coalitions and the targeting of isolated states — multiverse loop
+
+One question, one main model, every robustness check in one run.
+
+**Question.** Do states that attack as part of a coalition choose relationally isolated targets, while bilateral initiators and states joining to defend do not? Is that a selection effect, or do disputes with isolated states just fail more often (failed bargains), or are isolated states pariahs that get punished?
+
+**Main model.** Conditional logit of target choice in fatal militarized disputes, 1816–2014. One stratum per initiation event; the alternatives are every system member that year. Utility = a type-specific surface in the material gap (log CINC share) and the relational gap (network position at t−1, scaled within year): dM, dM², dR, dR², dM×dR, plus dyadic controls. Gaps are initiator minus target, so a positive dR means the target is less central.
+
+| Setting | Main choice | Appendix |
+|---|---|---|
+| Initiator types | 3: bilateral / initiating-side coalition (coalition originators + attack-side joiners) / target-side joiners | 4 types (originators separate) |
+| Who is an originator | Present within **1 month** of the dispute's first originator (definite date bound) | 0–6 months |
+| Coalition status | At onset (`--bilateral=onset`) | — |
+| Joiner side | Relative to the dispute's initiating side (case-reviewed; see `docs/decisions.md`) | Drop the 2 hard / 13 reviewed disputes |
+| Sample | Fatal MIDs | All MID onsets (failed-bargain step A) |
+| Relational measure | `W2contig_ptaall|igo+def+off+neu+nonagg+consul+dca+un|pr` | All 7,686 measures |
+| Inference | Two-way cluster-robust (initiator × dispute) | Pigeonhole two-way bootstrap; permutation tests |
+
+## How to run
+
+```bash
+# 1. edit the paths at the top of config.sh (data_entry, network files, positions to reuse)
+# 2. run everything (resumable: rerun the same command after a stop and finished steps are skipped)
+bash run_all.sh
+# mechanics check only (2 windows, main measure, tiny B):
+TEST=1 bash run_all.sh
+```
+
+Everything is written to `output/`. The log is `output/logs/run_<time>.log`. The run ends with `LOOP_DONE`.
+
+## What each step answers
+
+| Step | Script | Output | Question |
+|---|---|---|---|
+| 1 positions | `R/01_build_layers.R`, `R/02_build_positions.R` | `output/positions/` | The 7,686 relational measures: layer combinations × 4 weightings × PageRank/degree × PTA coding, plus the IGO arm. Diplomacy uses no future waves. |
+| 2 validation | `R/03_validate_measures.R` | `output/validation/` | Does a measure put the powerful states where they belong? Plausibility rules, correlation with CINC, major-power rank, year-to-year stability, top-10 states by era. Outcome-blind. |
+| 3 measure sets | `R/04_subset_positions.R` | `output/sets/` | Phase A (main + 200 random plausible), main only, no-ATOP measures, 25 random plausible measures |
+| 4 event frames | `R/05_dump_events.R` | `output/dumps/` | One frame per type scheme × window × sample |
+| 5 multiverse | `R/07_fit_sweep.R` | `output/sweep/multiverse_*` | Every measure × every window, fatal MIDs and all MID onsets; failed-bargain step B on every measure; four types on Phase A |
+| 6 robustness | `R/06_make_variants.R`, `R/07_fit_sweep.R` | `output/sweep/robustness/` | Every check below, on the 201 Phase A measures |
+| 7 influence | `R/09_influence.R` | `output/influence/` | Leave-one-dispute-out and leave-one-initiator-out; then drop the top 5 / top 10 disputes |
+| 8 resampling | `R/08_resample.R` | `output/resample/` | Pigeonhole bootstrap (main measure at every window, all-MID, 25 random measures); permutation of dR within events and of type labels |
+| 9 event study | `R/10_event_study.R` | `output/eventstudy/` | Do chosen targets lose ties before the dispute (pariah dynamics) or after it (punishment)? |
+| 10 summary | `R/11_summarize.R` | `output/summary/` | Appendix tables: main-measure estimate, % of measures whose 95% CI excludes 0, Wald tests, census |
+
+### Robustness checks (step 6)
+
+| Group | Run name(s) | What it rules in or out |
+|---|---|---|
+| Rival: target aggression | `aggr` | Isolation proxies the target's own recent aggression |
+| Rival: defensibility | `expdef` (dispute onset), `expdefentry` (year before entry) | Isolation proxies having no defense partners |
+| Rival: ATOP inside the measure | `noatop_base`, `noatop_expdef` | The defense control works only because ATOP is in the measure |
+| Timing | `lag5/10_*`, `samp5/10_*` (year scale and pooled scale), `decomp10_linear/full`, `decomp5_full` | Long-standing isolation vs recent tie loss |
+| Reverse timing | `lead_t`, `lead_t1`, `lead_t1_sample_tm1` | Ties lost because of the conflict |
+| Failed bargains | `stepA` (all MID onsets), `stepB` (which onsets turn fatal) | Isolation shapes whom states confront vs whether the dispute fails |
+| Coding | `dropside_hard`, `dropside_reviewed`, `drop_top5`, `drop_top10` | Side coding; a few great-power coalitions |
+| Weighting and scale | `unit_weights`, `yscale_tm1`, `pooledscale` | Event weights; scale year |
+| Measurement error | `merror_def_*`, `merror_contig_*`, `merror_random_*` | Error that mimics alliance or contiguity confounding; pure noise |
+
+## Script map (for anyone coming from the main repo)
+
+| Here | Main repo (`strategic_targeting`, branch `clogit-roles`) |
+|---|---|
+| `R/01_build_layers.R` | `v2/R/20_build_layers.R` |
+| `R/02_build_positions.R` | `v2/R/21_rel_measures.R` |
+| `R/03_validate_measures.R` | `v2/R/23_rel_validate.R` |
+| `R/04_subset_positions.R` | `v2/R/26_rel_subset_positions.R` |
+| `R/05_dump_events.R` | `v2/R/10_clogit_roles.R` (dump mode only is used here) |
+| `R/06_make_variants.R` | `v2/R/24_rel_variants.R` |
+| `R/07_fit_sweep.R` | `v2/R/22_rel_sweep.R` |
+| `R/08_resample.R` | `v2/R/25_rel_boot.R` |
+| `R/09_influence.R` | `v2/R/29_rel_influence.R` |
+| `R/10_event_study.R` | `v2/R/27_rel_eventstudy.R` |
+| `R/11_summarize.R` | `v2/R/30_summarize_loop.R` |
+| `R/lib/*` | `v2/R/{spec,helpers_data,helpers_model,assemble_cell,opp_weights}.R` |
+
+Comments inside the scripts still use the main-repo names. The event data (`data_entry/`) is built by `v2/R/01_build_data.R --entry=later` in the main repo and linked here.
+
+## Conventions
+
+Seed 123 everywhere. 95% intervals. A fit with separation or non-convergence warnings is recorded as INVALID, per model, and has no estimates. Bootstrap intervals and permutation p-values are reported only when B ≥ 200 and ≥ 90% of draws are usable.
