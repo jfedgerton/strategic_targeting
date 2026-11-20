@@ -75,5 +75,5 @@ A[, plausible := USA_cw >= 0.5 & USSR_cw >= 0.5 & CHN_rise > 0 & WEU >= 0.5 & PR
 stopifnot(!anyDuplicated(A$spec_id), !anyNA(A$plausible))
 cc <- countrycode::countrycode
 TP <- rbindlist(tops)[, state := cc(ccode, "cown", "country.name", warn = FALSE)]
-fwrite(A, file.path(OUT, "measure_validation.csv")); fwrite(TP, file.path(OUT, "top10_by_era.csv"))
+fwrite(TP, file.path(OUT, "top10_by_era.csv")); fwrite(A, file.path(OUT, "measure_validation.csv.tmp")); stopifnot(file.rename(file.path(OUT, "measure_validation.csv.tmp"), file.path(OUT, "measure_validation.csv")))   # atomic
 logf("wrote %s: %d measures, %d plausible (%.1f%%)", file.path(OUT, "measure_validation.csv"), nrow(A), sum(A$plausible), 100 * mean(A$plausible))

@@ -19,6 +19,10 @@ args <- commandArgs(trailingOnly = TRUE); stopifnot(length(args) >= 4)
 DUMP <- args[1]; POSF <- args[2]; SPEC <- args[3]; OUTP <- args[4]
 opt <- function(name, default) { a <- grep(paste0("^--", name, "="), args, value = TRUE); if (length(a)) sub(paste0("^--", name, "="), "", a) else default }
 PRE <- as.integer(opt("pre", "10")); POST <- as.integer(opt("post", "5")); BAL <- as.logical(opt("balanced", "TRUE")); B <- as.integer(opt("B", "1000"))
+## loop review P2-7: --align=entry (default; k = 0 is the event year, i.e. the pair's entry year) or onset (k = 0 is the primary dispute's start
+## year, GML dispute table). A joiner entering in 1995 a dispute begun in 1990 has k = -3 = 1992 under entry, which is already inside the dispute.
+ALIGN <- opt("align", "entry"); stopifnot(ALIGN %in% c("entry", "onset"))
+fl <- sub("^--([A-Za-z_]+)=.*$", "\\1", grep("^--", args, value = TRUE)); if (any(!fl %in% c("pre", "post", "balanced", "B", "align"))) stop("unknown option(s)")
 stopifnot(PRE >= 1L, POST >= 0L, !is.na(BAL), B >= 0L)
 logf <- function(...) cat(sprintf("[%s] ", format(Sys.time(), "%H:%M:%S")), sprintf(...), "\n", sep = "")
 KS <- -PRE:POST
@@ -33,7 +37,14 @@ if (anyNA(pos$z)) stop(sprintf("measure %s is constant in year(s) %s", SPEC, pas
 logf("dump %s (%s; %d strata) | measure %s | window k = %d..%d | balanced %s", basename(DUMP), dump$types, uniqueN(D$ev_id), SPEC, -PRE, POST, BAL)
 
 ## ---- 2. long panel: every (event row, k) with the alternative's z at t+k ----
-L <- D[, .(ev_id, chosen, type, w, init, disp, c2, yr)][, .(k = KS), by = .(ev_id, chosen, type, w, init, disp, c2, yr)]
+if (ALIGN == "onset") {
+  st <- as.data.table(peacesciencer::gml_mid_disps)[, .(disp = as.integer(dispnum), st = as.integer(styear))]
+  D[, yr_ref := st$st[match(as.integer(disp), st$disp)]]
+  n_miss <- uniqueN(D[is.na(yr_ref), ev_id]); D[is.na(yr_ref), yr_ref := yr]; D[yr_ref > yr, yr_ref := yr]
+  logf("align = onset: k = 0 is the dispute start year; %d events without a GML start use the event year; median entry lag %.1f years (max %d)",
+       n_miss, median(D[chosen == 1L, yr - yr_ref]), max(D[chosen == 1L, yr - yr_ref]))
+} else D[, yr_ref := yr]
+L <- D[, .(ev_id, chosen, type, w, init, disp, c2, yr = yr_ref)][, .(k = KS), by = .(ev_id, chosen, type, w, init, disp, c2, yr)]
 L[, y := yr + k]
 L <- merge(L, pos[, .(c2 = ccode, y = year, z)], by = c("c2", "y"), all.x = TRUE, sort = FALSE)
 stopifnot(nrow(L) == nrow(D) * length(KS))
@@ -87,20 +98,21 @@ if (B > 0L) {
   if (!rep_ok) { logf("bootstrap below reporting rule (B >= 200 and >= 90%% usable): intervals set to NA"); q[, (setdiff(names(q), c("type", "k"))) := NA_real_] }
   out <- merge(out, q, by = c("type", "k"))
 }
-out[, role := ROLES[type + 1L]]; out[, `:=`(spec_id = SPEC, scheme = dump$types, balanced = BAL, n_events = length(ok_ev))]
-fwrite(out[order(type, k)], paste0(OUTP, ".csv"))
+out[, role := ROLES[type + 1L]]; out[, `:=`(spec_id = SPEC, scheme = dump$types, balanced = BAL, align = ALIGN, n_events = length(ok_ev), n_events_all = n_ev0)]
+fwrite(data.table(ev_id = setdiff(unique(D$ev_id), ok_ev)), paste0(OUTP, "_excluded_events.csv"))   # P2-7: excluded cases published
+fwrite(out[order(type, k)], paste0(OUTP, ".csv.tmp")); stopifnot(file.rename(paste0(OUTP, ".csv.tmp"), paste0(OUTP, ".csv")))   # atomic
 logf("wrote %s.csv", OUTP)
 print(out[k %in% c(-PRE, -5L, -1L, 0L, POST), .(role, k, gap = round(gap, 2), gap_n = round(gap_n, 2), diff_vs_ref = round(diff, 2))], row.names = FALSE)
 
 ## ---- 5. figure: gap(k) and gap(k) - gap(-1) by type ----
 if (requireNamespace("ggplot2", quietly = TRUE)) {
   library(ggplot2)
-  pl <- rbind(out[, .(role, k, panel = "Level: target minus alternatives (within-year z)", est = gap, lo = if ("gap_lo" %in% names(out)) gap_lo else NA_real_, hi = if ("gap_hi" %in% names(out)) gap_hi else NA_real_)],
+  pl <- rbind(out[, .(role, k, panel = "Level: target minus alternatives (within-year z of the position, not a count of ties)", est = gap, lo = if ("gap_lo" %in% names(out)) gap_lo else NA_real_, hi = if ("gap_hi" %in% names(out)) gap_hi else NA_real_)],
               out[, .(role, k, panel = "Change: relative to k = -1", est = gap_n, lo = if ("gapn_lo" %in% names(out)) gapn_lo else NA_real_, hi = if ("gapn_hi" %in% names(out)) gapn_hi else NA_real_)])
   pl[, role := factor(role, levels = ROLES)]
   g <- ggplot(pl, aes(k, est)) + geom_hline(yintercept = 0, linewidth = 0.3, colour = "grey50") + geom_vline(xintercept = -0.5, linetype = 2, linewidth = 0.3, colour = "grey50") +
     geom_ribbon(aes(ymin = lo, ymax = hi), alpha = 0.2) + geom_line() + geom_point(size = 1) +
-    facet_grid(panel ~ role, scales = "free_y") + labs(x = "Years relative to the dispute year", y = NULL, title = SPEC) + theme_bw(base_size = 10)
+    facet_grid(panel ~ role, scales = "free_y") + labs(x = if (ALIGN == "onset") "Years relative to the dispute's start year" else "Years relative to the pair's entry year (event year)", y = NULL, title = SPEC) + theme_bw(base_size = 10)
   ggsave(paste0(OUTP, ".png"), g, width = 2.6 * G + 1, height = 5.5, dpi = 200)
   logf("wrote %s.png", OUTP)
 }

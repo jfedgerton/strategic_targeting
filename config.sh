@@ -30,4 +30,5 @@ B_PERM=1000               # permutation draws
 N_RANDOM_BOOT=25          # random plausible measures bootstrapped at the main window (seed 123)
 
 ## ---- robustness grid (run on the 201 Phase A measures at the main window) ----
-MERROR_K="0.25 0.5 1"     # measurement-error strengths (x within-year SD of the position)
+MERROR_K="0.25 0.5 1"     # measurement-error strengths (x within-year SD of the position); def/contig run with both signs
+N_NOISE_DRAWS=5           # independent random-noise draws per strength (seeds 123..127)

@@ -51,8 +51,17 @@ DECOMP_TERMS <- opt("decomp_terms", "linear"); stopifnot(DECOMP_TERMS %in% c("li
 MERROR <- opt("merror", "none"); stopifnot(MERROR %in% c("none", "def", "contig", "random")); MERROR_K <- as.numeric(opt("merror_k", "0"))
 if (MERROR != "none") stopifnot(is.finite(MERROR_K), MERROR_K > 0)
 if (MERROR %in% c("def", "contig")) stopifnot(file.exists(opt("layers", "")))
+## loop review C: both signs and several independent noise draws; P3: refuse options that would be silently ignored
+MERROR_SIGN <- as.integer(opt("merror_sign", "1")); MERROR_DRAW <- as.integer(opt("merror_draw", "1")); stopifnot(MERROR_SIGN %in% c(-1L, 1L), MERROR_DRAW >= 1L)
+given <- function(nm) any(grepl(paste0("^--", nm, "="), args))
+if (given("decomp_terms") && DECOMP == 0L) stop("--decomp_terms needs --decomp")
+if ((given("merror_k") || given("merror_sign") || given("merror_draw")) && MERROR == "none") stop("--merror_k / --merror_sign / --merror_draw need --merror")
+if (given("merror_draw") && MERROR != "random") stop("--merror_draw only applies to --merror=random")
+if (given("layers") && !(MERROR %in% c("def", "contig"))) stop("--layers is only used by --merror=def|contig")
 STEPB <- as.logical(opt("stepB", "FALSE")); stopifnot(!is.na(STEPB))
-KNOWN <- c("cores", "max_specs", "yscale", "pos_lag", "decomp", "sample_lag", "bilateral", "scale", "decomp_terms", "merror", "merror_k", "layers", "stepB")
+STEPB_UNIT <- opt("stepB_unit", "orig"); STEPB_OUTCOME <- opt("stepB_outcome", "disp"); stopifnot(STEPB_UNIT %in% c("orig", "all"), STEPB_OUTCOME %in% c("disp", "pair"))
+if ((given("stepB_unit") || given("stepB_outcome")) && !STEPB) stop("--stepB_unit / --stepB_outcome need --stepB=TRUE")
+KNOWN <- c("cores", "max_specs", "yscale", "pos_lag", "decomp", "sample_lag", "bilateral", "scale", "decomp_terms", "merror", "merror_k", "merror_sign", "merror_draw", "layers", "stepB", "stepB_unit", "stepB_outcome")
 fl <- sub("^--([A-Za-z_]+)=.*$", "\\1", grep("^--", args, value = TRUE)); if (any(!fl %in% KNOWN)) stop("unknown option(s): ", paste(setdiff(fl, KNOWN), collapse = ", "))
 dir.create(OUT_DIR, showWarnings = FALSE, recursive = TRUE)
 logf <- function(...) cat(sprintf("[%s] ", format(Sys.time(), "%H:%M:%S")), sprintf(...), "\n", sep = "")
@@ -76,12 +85,12 @@ stopifnot(all(c("ev_id", "chosen", "type", "w", "init", "disp", "init_disp", "dM
 BILAT_ARG <- opt("bilateral", "")
 if (is.null(dump$bilateral_rule) || !(dump$bilateral_rule %in% c("onset", "ever"))) stop("dump has no bilateral_rule (rebuild it with 10_clogit_roles.R)")
 if (nzchar(BILAT_ARG) && BILAT_ARG != dump$bilateral_rule) stop(sprintf("--bilateral=%s but the dump was built with %s", BILAT_ARG, dump$bilateral_rule))
-SCHEME <- paste0(dump$types, if (dump$bilateral_rule == "onset") "_bon" else "_ever", if (SAMPLE_LAG != 0L) paste0("_samp", if (SAMPLE_LAG < 0L) paste0("lead", -SAMPLE_LAG) else SAMPLE_LAG) else "", if (POS_LAG != 1L) (if (POS_LAG < 0L) paste0("_lead", -POS_LAG) else paste0("_lag", POS_LAG)) else "", if (DECOMP > 0L) paste0("_decomp", DECOMP, if (DECOMP_TERMS == "full") "full" else "") else "", if (SCALE == "pooled") "_pooled" else "", if (MERROR != "none") paste0("_me", MERROR, MERROR_K) else "", if (STEPB) "_stepB" else "",
+SCHEME <- paste0(dump$types, if (dump$bilateral_rule == "onset") "_bon" else "_ever", if (SAMPLE_LAG != 0L) paste0("_samp", if (SAMPLE_LAG < 0L) paste0("lead", -SAMPLE_LAG) else SAMPLE_LAG) else "", if (POS_LAG != 1L) (if (POS_LAG < 0L) paste0("_lead", -POS_LAG) else paste0("_lag", POS_LAG)) else "", if (DECOMP > 0L) paste0("_decomp", DECOMP, if (DECOMP_TERMS == "full") "full" else "") else "", if (SCALE == "pooled") "_pooled" else "", if (MERROR != "none") paste0("_me", MERROR, if (MERROR_SIGN < 0L) "neg" else "", MERROR_K, if (MERROR == "random") paste0("d", MERROR_DRAW) else "") else "", if (STEPB) paste0("_stepB", STEPB_UNIT, STEPB_OUTCOME) else "",
                  if (!is.null(dump$coorig_months) && dump$coorig_months > 0L) paste0("_w", dump$coorig_months) else "", if (dump$rel_scale == "year") paste0("_relyear", if (YSCALE == "tm1") "tm1" else "") else "", if (isTRUE(dump$unit_weights)) "_uw" else "", "_", dump$sample)
 if (YSCALE == "tm1" && dump$rel_scale != "year") stop("--yscale=tm1 needs a dump with rel_scale = year")
 logf("dump %s: scheme %s, %d rows, %d strata, types %s, rel_scale %s, commit %s", basename(DUMP), SCHEME, nrow(D), length(unique(D$ev_id)),
      paste(ROLES, collapse = "/"), dump$rel_scale, dump$git_commit)
-if (STEPB) { stopifnot(dump$sample == "mid", "ev_fatal" %in% names(D), DECOMP == 0L); logf("step B: %d of %d events fatal", sum(D$ev_fatal[D$chosen == 1L]), sum(D$chosen == 1L)) }
+if (STEPB) { stopifnot(dump$sample == "mid", all(c("ev_fatal", "disp_fatal", "orig_joiner") %in% names(D)), DECOMP == 0L); logf("step B: %d of %d events fatal", sum(D$ev_fatal[D$chosen == 1L]), sum(D$chosen == 1L)) }
 if (DECOMP > 0L && SCALE == "pooled") stop("--decomp with --scale=pooled is not supported")
 P <- readRDS(POSF); key <- P$key; Rm <- P$R; specs <- P$specs
 stopifnot(identical(colnames(Rm), specs$spec_id), nrow(key) == nrow(Rm), !anyDuplicated(key[, c("ccode", "year")]))
@@ -130,9 +139,10 @@ if (DECOMP > 0L) {
   Z_cols <- c(Z_cols, "decomp_short")
   logf("decomp = %d: rows whose target has a short baseline window %.3f", DECOMP, mean(short_key[j_row]))
 }
+nalt <- table(D$ev_id)   # alternatives per stratum after every sample restriction (P2-10 weights)
 ## measurement-error confounder per key row (z within year), built once
 if (MERROR != "none") {
-  if (MERROR == "random") { set.seed(123); mvar <- rnorm(nrow(key)) } else {
+  if (MERROR == "random") { set.seed(122L + MERROR_DRAW); mvar <- rnorm(nrow(key)) } else {   # draw 1 = seed 123
     LY <- readRDS(opt("layers", "")); stopifnot(all(c("ccode1", "ccode2", "year") %in% names(LY)))
     e <- if (MERROR == "def") LY[LY$def == 1L, c("ccode1", "ccode2", "year")] else LY[LY$contig_land == 1L, c("ccode1", "ccode2", "year")]   # both from the layers panel (20_build_layers.R)
     e2 <- rbind(data.frame(a = e$ccode1, y = e$year), data.frame(a = e$ccode2, y = e$year))
@@ -141,7 +151,9 @@ if (MERROR != "none") {
   mz <- mvar; for (ix in key_years) { s_ <- sd(mvar[ix]); mz[ix] <- if (s_ > 0) (mvar[ix] - mean(mvar[ix])) / s_ else 0 }
   logf("merror %s, k = %.2f: confounder z built for %d state-years", MERROR, MERROR_K, length(mz))
 }
-add_merror <- function(R) { if (MERROR == "none") return(R); out <- R; for (ix in key_years) out[ix] <- R[ix] + MERROR_K * sd(R[ix]) * mz[ix]; out }
+add_merror <- function(R) { if (MERROR == "none") return(R); out <- R; for (ix in key_years) out[ix] <- R[ix] + MERROR_SIGN * MERROR_K * sd(R[ix]) * mz[ix]; out }
+## rank diagnostic: mean within-year Spearman correlation between a measure and its perturbed version (written as a row per spec)
+me_rank <- function(R) { if (MERROR == "none") return(NA_real_); P2 <- add_merror(R); mean(vapply(key_years, function(ix) if (length(ix) > 3 && sd(R[ix]) > 0) suppressWarnings(cor(R[ix], P2[ix], method = "spearman")) else NA_real_, 0), na.rm = TRUE) }
 wsd <- function(x, w) { m <- sum(w * x) / sum(w); sqrt(sum(w * (x - m)^2) / sum(w)) }
 make_dR <- function(R) {                                          # R: position per key row
   R <- add_merror(R)
@@ -155,7 +167,7 @@ make_dR <- function(R) {                                          # R: position 
     stopifnot(all(ys > 1e-8))
     sc <- ys[sc_yr]
   } else sc <- gap_scale(R, key$year)
-  if (DECOMP > 0L) { dRc <- numc / sc; list(dR = num / sc, dRc = dRc / wsd(dRc, D$w)) } else num / sc   # dRc per event-weighted SD of the change gap (audit P2-8)
+  if (DECOMP > 0L) { dRc <- numc / sc; list(dR = num / sc, dRc = dRc / wsd(dRc, D$w / nalt[as.character(D$ev_id)])) } else num / sc   # loop review P2-10: rows weighted w / n alternatives (each event's choice set counts by its weight)
 }
 
 ## ---- 1. model machinery (as 10_clogit_roles.R section 4) ----------------------------------------------------------
@@ -199,31 +211,46 @@ axis_rows <- function(spec, model, b, V, sfx, lab, minus_sfx = NULL) {
   do.call(rbind, out)
 }
 
-## ---- step B (2026-11-19): conditional on a recorded MID onset, is the dispute fatal? One row per event (the chosen target). Weighted logit
-## (quasibinomial, event weights w) of ev_fatal on type intercepts, type-specific gap terms of the CHOSEN target and its Z; two-way CR0
-## (initiator x dispute, sandwich multiway). B0 = pooled gap terms, B1 = type-specific. Quantities as axis_rows (log-odds scale).
+## ---- step B (2026-11-19; rebuilt after the loop review P2-5/P2-6) ----
+## At-risk unit (--stepB_unit): orig (default) = events whose initiator was an ORIGINATOR of the dispute before any window promotion (the
+## decisions taken at dispute onset, before any fatality); all = every event (the old membership version, kept for comparison only).
+## Outcome (--stepB_outcome): disp (default) = the primary dispute has fatality > 0 (GML dispute table; unknown fatality dropped and counted);
+## pair = the event is in the fatal-MID sample (old version). Predictors: the chosen target's type-specific gaps at t-1, type intercepts, Z.
+## Weighted logit (quasibinomial, event weights), two-way CR0 (initiator x dispute). Only types with events in the risk set enter.
+## Reported: per-type axis rows (log-odds), pairwise contrasts, type-intercept contrasts, surfaces_differ (gap terms only), and all_differ (gap
+## terms AND intercepts jointly: does type predict fatality at all).
 run_stepB <- function(spec, d, zc) {
   dd <- d[d$chosen == 1L, ]; stopifnot(!anyDuplicated(dd$ev_id))
-  for (g in 1:(G - 1L)) dd[[paste0("ty_", ROLES[g + 1])]] <- as.numeric(dd$type == g)
-  TY <- paste0("ty_", ROLES[-1])
-  fitB <- function(terms) { f <- as.formula(paste("ev_fatal ~", paste(c(TY, terms, zc), collapse = " + ")))
-    w_ <- character(0); m <- withCallingHandlers(glm(f, data = dd, weights = w, family = quasibinomial()), warning = function(e) { w_ <<- c(w_, conditionMessage(e)); invokeRestart("muffleWarning") })
-    bad <- !m$converged || any(!is.finite(coef(m))) || any(grepl("fitted probabilities numerically 0 or 1", w_))
-    V <- if (bad) NULL else { v <- sandwich::vcovCL(m, cluster = ~ init + disp, type = "HC0", cadjust = FALSE, multi0 = FALSE, fix = TRUE); v }
+  if (STEPB_UNIT == "orig") dd <- dd[!dd$orig_joiner, ]
+  yv <- if (STEPB_OUTCOME == "disp") "disp_fatal" else "ev_fatal"; n_na <- sum(is.na(dd[[yv]])); dd <- dd[!is.na(dd[[yv]]), ]; dd$y_ <- dd[[yv]]
+  RP <- ROLES[sort(unique(dd$type)) + 1L]; stopifnot(length(RP) >= 2L)
+  for (k in RP[-1]) dd[[paste0("ty_", k)]] <- as.numeric(dd$type == match(k, ROLES) - 1L)
+  TY <- paste0("ty_", RP[-1]); GP <- as.vector(outer(GAP, RP, paste, sep = "_"))
+  fitB <- function(terms) { f <- as.formula(paste("y_ ~", paste(c(TY, terms, zc), collapse = " + ")))
+    w_ <- character(0); m <- tryCatch(withCallingHandlers(glm(f, data = dd, weights = w, family = quasibinomial()), warning = function(e) { w_ <<- c(w_, conditionMessage(e)); invokeRestart("muffleWarning") }),
+                                      error = function(e) { w_ <<- c(w_, paste("error:", conditionMessage(e))); NULL })
+    bad <- is.null(m) || !m$converged || any(!is.finite(coef(m))) || any(grepl("fitted probabilities numerically 0 or 1|error", w_))
+    V <- if (bad) NULL else sandwich::vcovCL(m, cluster = ~ init + disp, type = "HC0", cadjust = FALSE, multi0 = FALSE, fix = TRUE)
     list(m = m, V = V, bad = bad, wrn = w_) }
   out <- list()
-  for (mm in list(list("B0", GAP), list("B1", GAP_G))) {
+  for (mm in list(list("B0", GAP), list("B1", GP))) {
     f <- fitB(mm[[2]])
-    if (f$bad) { out[[length(out) + 1]] <- row_out(spec, "INVALID", paste0(mm[[1]], " fit invalid: ", paste(unique(c(f$wrn, if (!f$m$converged) "not converged")), collapse = " | "))); next }
+    if (f$bad) { out[[length(out) + 1]] <- row_out(spec, "INVALID", paste0(mm[[1]], " fit invalid: ", paste(unique(c(f$wrn, if (!is.null(f$m) && !f$m$converged) "not converged")), collapse = " | "))); next }
     b <- coef(f$m); b <- b[names(b) != "(Intercept)"]; V <- f$V[names(b), names(b)]
     if (mm[[1]] == "B0") out[[length(out) + 1]] <- axis_rows(spec, "B0", b, V, "", "") else {
-      for (k in ROLES) out[[length(out) + 1]] <- axis_rows(spec, "B1", b, V, paste0("_", k), paste0(k, ":"))
-      for (pr in lapply(combn(ROLES, 2, simplify = FALSE), rev))
+      for (k in RP) out[[length(out) + 1]] <- axis_rows(spec, "B1", b, V, paste0("_", k), paste0(k, ":"))
+      for (pr in lapply(combn(RP, 2, simplify = FALSE), rev))
         out[[length(out) + 1]] <- axis_rows(spec, "B1", b, V, paste0("_", pr[1]), paste0(pr[1], "-", pr[2], ":"), minus_sfx = paste0("_", pr[2]))
-      w <- wald(b, V, Rsel(names(b), unlist(lapply(ROLES[-1], function(o) paste0(GAP, "_", o))), rep(paste0(GAP, "_", ROLES[1]), G - 1L)))
+      w <- wald(b, V, Rsel(names(b), unlist(lapply(RP[-1], function(o) paste0(GAP, "_", o))), rep(paste0(GAP, "_", RP[1]), length(RP) - 1L)))
       out[[length(out) + 1]] <- row_out(spec, "B1", "surfaces_differ", w[["chi2"]], NA, w[["p"]], as.integer(w[["df"]]))
+      ## P2-6: intercepts AND gap terms jointly
+      Ra <- rbind(Rsel(names(b), unlist(lapply(RP[-1], function(o) paste0(GAP, "_", o))), rep(paste0(GAP, "_", RP[1]), length(RP) - 1L)), Rsel(names(b), TY))
+      w2 <- wald(b, V, Ra); out[[length(out) + 1]] <- row_out(spec, "B1", "all_differ", w2[["chi2"]], NA, w2[["p"]], as.integer(w2[["df"]]))
     }
-    out[[length(out) + 1]] <- row_out(spec, mm[[1]], "n_events", nrow(dd)); out[[length(out) + 1]] <- row_out(spec, mm[[1]], "n_fatal", sum(dd$ev_fatal))
+    for (t in TY) { a <- setNames(rep(0, length(b)), names(b)); a[t] <- 1; l <- lin(b, V, a)   # type intercept vs the first present type (log-odds at zero gaps)
+      out[[length(out) + 1]] <- row_out(spec, mm[[1]], paste0("intercept:", sub("^ty_", "", t), "-", RP[1]), l[["est"]], l[["se"]]) }
+    out[[length(out) + 1]] <- row_out(spec, mm[[1]], "n_events", nrow(dd)); out[[length(out) + 1]] <- row_out(spec, mm[[1]], "n_fatal", sum(dd$y_))
+    out[[length(out) + 1]] <- row_out(spec, mm[[1]], "n_outcome_unknown", n_na)
   }
   out[[length(out) + 1]] <- row_out(spec, "B1", "max_abs_dR", max(abs(dd$dR)))
   do.call(rbind, out)
@@ -255,7 +282,10 @@ run_spec <- function(spec, dR) {
   ts_groups <- ts_groups[vapply(ts_groups, length, 0L) == G]
   for (pre in names(ts_groups)) { pc <- paste0(pre, "_pooled"); d[[pc]] <- Reduce(`+`, lapply(ts_groups[[pre]], function(z) d[[z]])); zc0 <- c(setdiff(zc0, ts_groups[[pre]]), pc) }
   ## GPT review P1-3 + full audit P2-11: each model has its own validity; an invalid M1 no longer removes a usable M0 (and vice versa)
-  fit_w <- function(gap, z) { w_ <- character(0); m <- withCallingHandlers(fit_cl(d, gap, z), warning = function(w) { w_ <<- c(w_, conditionMessage(w)); invokeRestart("muffleWarning") })
+  fit_w <- function(gap, z) { w_ <- character(0)   # loop review P2-9: a thrown error invalidates only this model
+    m <- tryCatch(withCallingHandlers(fit_cl(d, gap, z), warning = function(w) { w_ <<- c(w_, conditionMessage(w)); invokeRestart("muffleWarning") }),
+                  error = function(e) { w_ <<- c(w_, paste("error:", conditionMessage(e))); NULL })
+    if (is.null(m)) return(list(m = list(iter = NA_integer_), wrn = w_, bad = TRUE))
     bad <- any(grepl("converge|infinite|singular", w_, ignore.case = TRUE)) || !all(is.finite(coef(m))) || m$iter >= 20L
     list(m = m, wrn = w_, bad = bad) }
   fits <- list(M0 = fit_w(GAP, zc0), M1 = fit_w(GAP_G, zc))
@@ -325,7 +355,7 @@ todo <- seq_len(ncol(Rm)); if (MAX_SPECS > 0) todo <- todo[seq_len(min(MAX_SPECS
 ok_id <- rep(TRUE, length(todo))
 logf("positions %s: %d specs (%d constant in >= 5%% of all years, metadata only; eligibility checked on the years each fit uses)", basename(POSF), length(todo), sum(!specs$identified[todo]))
 t0 <- Sys.time()
-one <- function(k) tryCatch(run_spec(colnames(Rm)[k], make_dR(Rm[, k])),
+one <- function(k) tryCatch({ r <- run_spec(colnames(Rm)[k], make_dR(Rm[, k])); if (MERROR != "none") r <- rbind(r, row_out(colnames(Rm)[k], "M1", "merror_rank_cor", me_rank(Rm[, k]))); r },
                             error = function(e) row_out(colnames(Rm)[k], if (grepl("^position constant", conditionMessage(e))) "SKIPPED" else "ERROR", conditionMessage(e)))
 res <- if (CORES > 1) mclapply(todo[ok_id], one, mc.cores = CORES, mc.preschedule = FALSE) else lapply(todo[ok_id], one)
 res <- c(if (!is.null(base_rows)) list(base_rows), res)
@@ -335,7 +365,8 @@ out <- do.call(rbind, res)
 stopifnot(setequal(unique(out$spec_id), c(if (BASE_RUN) "BASELINE|igo_pagerank_build|pr", colnames(Rm)[todo])))   # review P2-8: no spec may vanish
 n_err <- sum(out$model == "ERROR")
 f_out <- file.path(OUT_DIR, sprintf("sweep_%s_%s.csv", SCHEME, sub("\\.rds$", "", basename(POSF))))
-write.csv(out, f_out, row.names = FALSE)
+write.csv(out, paste0(f_out, ".tmp"), row.names = FALSE); stopifnot(file.rename(paste0(f_out, ".tmp"), f_out))   # atomic (loop review P1-3)
+cat(sprintf("WROTE %s\n", f_out))
 ## census per model (full audit P2-11): valid = the model's estimate rows exist; candidate specs only (BASELINE excluded)
 cand <- out[out$spec_id != "BASELINE|igo_pagerank_build|pr", ]
 nv <- function(m) { m2 <- if (STEPB) c(M0 = "B0", M1 = "B1")[[m]] else m; length(unique(cand$spec_id[cand$model == m2 & cand$quantity %in% c("u_R_less", paste0(ROLES[1], ":u_R_less"))])) }

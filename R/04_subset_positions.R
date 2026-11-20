@@ -43,5 +43,5 @@ miss <- setdiff(want, names(cols)); if (length(miss)) stop(sprintf("measures not
 R <- do.call(cbind, cols[want]); colnames(R) <- want
 sp <- rbindlist(specs[want], fill = TRUE); sp$plausible <- sp$spec_id %in% plaus
 stopifnot(identical(sp$spec_id, colnames(R)), nrow(R) == nrow(key), !anyNA(R))
-saveRDS(list(key = as.data.frame(key), R = R, specs = as.data.frame(sp)), OUT)
+saveRDS(list(key = as.data.frame(key), R = R, specs = as.data.frame(sp)), paste0(OUT, ".tmp")); stopifnot(file.rename(paste0(OUT, ".tmp"), OUT))   # atomic
 logf("wrote %s: %d measures x %d country-years", OUT, ncol(R), nrow(R))

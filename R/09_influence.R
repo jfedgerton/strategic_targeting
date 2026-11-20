@@ -37,22 +37,38 @@ cvec <- function(q, nm) { parts <- strsplit(q, ":")[[1]]; ty <- strsplit(parts[1
   for (t in seq_along(ty)) { a[paste0("d", ax, "_", ty[t])] <- a[paste0("d", ax, "_", ty[t])] + s[t] * r; a[paste0("d", ax, "2_", ty[t])] <- a[paste0("d", ax, "2_", ty[t])] + s[t] }
   a }
 vc_cl <- function(m, g) { Dd <- rowsum(residuals(m, type = "dfbeta", weighted = TRUE), g, reorder = FALSE); crossprod(Dd) }
+## loop review P2-8: the sweep's validity policy -- a refit with a convergence / infinite / singular warning, an error, non-finite coefficients or
+## the iteration limit is INVALID (recorded with its reason, never used for ranking)
 fitq <- function(d) {
   d$one_ <- 1; fml <- as.formula(paste("Surv(one_, chosen) ~", paste(c(GAP_G, Z_cols), collapse = " + "), "+ strata(ev_id)"))
-  m <- tryCatch(suppressWarnings(coxph(fml, data = d, weights = w, method = "breslow")), error = function(e) NULL)
-  if (is.null(m) || any(!is.finite(coef(m)))) return(NULL)
+  w_ <- character(0)
+  m <- tryCatch(withCallingHandlers(coxph(fml, data = d, weights = w, method = "breslow"), warning = function(e) { w_ <<- c(w_, conditionMessage(e)); invokeRestart("muffleWarning") }),
+                error = function(e) { w_ <<- c(w_, paste("error:", conditionMessage(e))); NULL })
+  if (is.null(m)) return(structure(list(), reason = paste(w_, collapse = " | ")))
+  if (any(grepl("converge|infinite|singular", w_, ignore.case = TRUE)) || any(!is.finite(coef(m))) || m$iter >= 20L)
+    return(structure(list(), reason = if (length(w_)) paste(unique(w_), collapse = " | ") else "non-finite coefficients or iteration limit"))
   b <- coef(m); V <- vc_cl(m, d$init) + vc_cl(m, d$disp) - vc_cl(m, d$init_disp); e <- eigen(V, symmetric = TRUE); V <- e$vectors %*% diag(pmax(e$values, 0)) %*% t(e$vectors)
   unlist(lapply(Q, function(q) { a <- cvec(q, names(b)); est <- sum(a * b); se <- sqrt(drop(t(a) %*% V %*% a)); setNames(c(est, est - 1.96 * se, est + 1.96 * se), paste0(q, c("", "_lo", "_hi"))) })) }
-full <- fitq(D); stopifnot(!is.null(full))
+## validate the requested contrasts: every named type must exist, and the quantity must be one of the four endpoints
+for (q in Q) { pq <- strsplit(q, ":")[[1]]; stopifnot(length(pq) == 2L, all(strsplit(pq[1], "-")[[1]] %in% ROLES), pq[2] %in% c("u_R_less", "u_R_more", "u_M_weaker", "u_M_stronger")) }
+full <- fitq(D); if (!length(full)) stop("the full-sample fit is invalid: ", attr(full, "reason"))
 ev <- unique(D[, c("ev_id", "init", "disp", if ("dispnums" %in% names(D)) "dispnums")])
 units <- if (UNIT == "init") sort(unique(ev$init)) else sort(unique(if ("dispnums" %in% names(ev)) as.integer(unlist(strsplit(ev$dispnums, ";"))) else ev$disp))
 drop_ev <- function(u) if (UNIT == "init") ev$ev_id[ev$init == u] else if ("dispnums" %in% names(ev)) ev$ev_id[vapply(strsplit(ev$dispnums, ";"), function(x) as.character(u) %in% x, TRUE)] else ev$ev_id[ev$disp == u]
 logf("LOO by %s: %d units; full-sample %s", UNIT, length(units), paste(sprintf("%s %.2f", Q, full[Q]), collapse = "; "))
-res <- mclapply(units, function(u) { de <- drop_ev(u); if (!length(de)) return(NULL); d <- D[!(D$ev_id %in% de), ]
-  if (any(tabulate(d$type[d$chosen == 1L] + 1L, nbins = G) == 0L)) return(NULL)
-  r <- fitq(d); if (is.null(r)) return(NULL); c(unit = u, n_removed = length(de), r) }, mc.cores = CORES)
-ok <- !vapply(res, is.null, TRUE); L <- as.data.table(do.call(rbind, res[ok]))
+res <- mclapply(units, function(u) { de <- drop_ev(u)
+  if (!length(de)) return(data.table(unit = u, n_removed = 0L, status = "no events"))
+  d <- D[!(D$ev_id %in% de), ]
+  if (any(tabulate(d$type[d$chosen == 1L] + 1L, nbins = G) == 0L)) return(data.table(unit = u, n_removed = length(de), status = "a type vanishes"))
+  r <- fitq(d); if (!length(r)) return(data.table(unit = u, n_removed = length(de), status = paste("invalid:", attr(r, "reason"))))
+  cbind(data.table(unit = u, n_removed = length(de), status = "ok"), as.data.table(as.list(r))) }, mc.cores = CORES)
+bad <- !vapply(res, is.data.frame, TRUE); if (any(bad)) stop(sprintf("%d worker failures", sum(bad)))
+L <- rbindlist(res, fill = TRUE); stopifnot(nrow(L) == length(units))     # every attempted unit, with its status
 for (q in Q) L[[paste0(q, "_change")]] <- L[[q]] - full[[q]]
-setorderv(L, paste0(RQ, "_change"))
-fwrite(L, paste0(OUTP, "_loo.csv")); writeLines(as.character(head(L$unit, 10)), paste0(OUTP, "_top.txt"))
-logf("%d of %d refits usable; largest drops in %s: %s", sum(ok), length(units), RQ, paste(sprintf("%d (%.2f)", as.integer(head(L$unit, 5)), head(L[[paste0(RQ, "_change")]], 5)), collapse = ", "))
+setorderv(L, paste0(RQ, "_change"), na.last = TRUE)
+top <- head(L[status == "ok", unit], 10)
+f1 <- paste0(OUTP, "_loo.csv"); f2 <- paste0(OUTP, "_top.txt")
+fwrite(L, paste0(f1, ".tmp")); writeLines(as.character(top), paste0(f2, ".tmp"))
+stopifnot(file.rename(paste0(f2, ".tmp"), f2), file.rename(paste0(f1, ".tmp"), f1))   # top first, so an existing _loo.csv implies a complete pair
+logf("%d of %d refits valid (%s); largest drops in %s: %s", sum(L$status == "ok"), length(units), paste(names(table(L$status[L$status != "ok"])), table(L$status[L$status != "ok"]), collapse = "; "),
+     RQ, paste(sprintf("%d (%.2f)", as.integer(head(top, 5)), head(L[status == "ok"][[paste0(RQ, "_change")]], 5)), collapse = ", "))

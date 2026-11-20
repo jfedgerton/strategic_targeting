@@ -65,7 +65,7 @@ B <- as.integer(get_arg(args, "boot", 1000))
 TYPES <- get_arg(args, "types", "bc"); BOOT_UNIT <- get_arg(args, "boot_unit", "pigeonhole"); LOO <- get_arg(args, "loo", FALSE)
 REL_SCALE <- get_arg(args, "rel_scale", "pooled"); ERA <- get_arg(args, "era", "all")
 COORIG_W <- as.integer(get_arg(args, "coorig_months", 0)); ENTRY_MOD <- get_arg(args, "entry_mod", FALSE)   # PI request 2026-11-17 (robustness; see section 1b)
-stopifnot(COORIG_W %in% c(0L, 1L, 2L, 3L), is.logical(ENTRY_MOD), !(ENTRY_MOD && COORIG_W > 0L))
+stopifnot(COORIG_W %in% 0:6, is.logical(ENTRY_MOD), !(ENTRY_MOD && COORIG_W > 0L))   # loop review P1-1: windows 0-6 months
 stopifnot(REL_SCALE %in% c("pooled", "year"), ERA %in% c("all", "pre1946", "from1946"))
 stopifnot(SAMPLE %in% ALL_SAMPLES, LAG == 3L, MODEL == "M1c", B >= 0, TYPES %in% c("bc", "bc_nocoorig", "bcj", "bcjs", "bcd", "s22"), BOOT_UNIT %in% c("pigeonhole", "dispute", "initiator"), is.logical(LOO))
 spec <- parse_spec(args)
@@ -239,7 +239,9 @@ if (COORIG_W > 0L || ENTRY_MOD || BILAT == "ever" || TYPES %in% c("bcjs", "bcd",
     if (any(g8 > 1L)) stop(sprintf("coorig window: roles not constant within %d (initiator, dispute, year) groups", sum(g8 > 1L)))
     ## regression checks (independent review 2026-11-17)
     gp <- which(k_all$initiator == 255L & k_all$target == 290L & k_all$year == 1939L)
-    if (length(gp) && BILAT == "onset") { stopifnot(ev$grp[gp] == 0L); logf("check: Germany -> Poland 1939 stays bilateral (onset rule; first partner after the window)") }
+    ## the check was set for windows of at most 3 months; with longer windows a later same-side entrant can legitimately fall inside the window
+    if (length(gp) && BILAT == "onset" && W <= 3L) { stopifnot(ev$grp[gp] == 0L); logf("check: Germany -> Poland 1939 stays bilateral (onset rule; first partner after the window)") }
+    if (length(gp) && BILAT == "onset" && W > 3L) logf("note: Germany -> Poland 1939 coded %d with a %d-month window", ev$grp[gp][1], W)
     for (chk in list(c(2L, 645L, 1997L), c(2L, 731L, 1950L))) { r <- which(k_all$initiator == chk[1] & k_all$target == chk[2] & k_all$year == chk[3])
       if (length(r)) logf("check: %d -> %d %d coded %d (was %d)", chk[1], chk[2], chk[3], ev$grp[r[1]], grp_old[r[1]]) }
   }
@@ -280,19 +282,28 @@ if (TYPES == "bcj") {
   ## rule; 1379, 2150, 3131 by Side A. Hard cases flagged for the sensitivity check (side_case = "hard"): 200 (Suez 1956, COW puts the US on
   ## Israel's side) and 1379 (Korean DMZ, the USSR on the US / South Korea side in 1969; North Korea arguably initiated).
   po <- unique(P[, c("dispnum", "ccode", "orig")])
-  oe <- ev_rds[!ev_rds$escalation, c("dispnum", "initiator", "target", "sidea1", "war_link")]
+  oe <- ev_rds[!ev_rds$escalation, c("dispnum", "initiator", "target", "sidea1", "war_link", "n_disputes")]
+  ## GPT loop review 2026-11-19 P1-4: a collapsed event (several source disputes) carries sidea1 = all(source sidea1 == 1) and war_link = max over
+  ## sources, which need not describe its primary dispute. The side is therefore taken from the participant table: the initiator's INITIAL COW
+  ## side (earliest spell) in the event's primary dispute; the collapsed flag is kept only for the count of changed events.
+  ps0 <- P[order(P$dispnum, P$ccode, P$spell_first), c("dispnum", "ccode", "side_entry")]; ps0 <- ps0[!duplicated(ps0[, c("dispnum", "ccode")]), ]
+  oe$side_init <- ps0$side_entry[match(paste(oe$dispnum, oe$initiator), paste(ps0$dispnum, ps0$ccode))]
+  stopifnot(!anyNA(oe$side_init))
+  logf("types %s: initiator side from the participant table differs from the collapsed event flag on %d of %d events (%d of them mixed-source)",
+       TYPES, sum(oe$side_init != oe$sidea1), nrow(oe), sum(oe$side_init != oe$sidea1 & oe$n_disputes > 1L))
   oe$pi <- po$orig[match(paste(oe$dispnum, oe$initiator), paste(po$dispnum, po$ccode))]
   oe$pt <- po$orig[match(paste(oe$dispnum, oe$target), paste(po$dispnum, po$ccode))]
   stopifnot(!anyNA(oe$pi), !anyNA(oe$pt))
   o1 <- oe[oe$pi == 1L & oe$pt == 1L, ]
-  isd1 <- tapply(o1$sidea1, o1$dispnum, function(s) if (length(unique(s)) == 1L) as.integer(s[1]) else NA_integer_)
+  isd1 <- tapply(o1$side_init, o1$dispnum, function(s) if (length(unique(s)) == 1L) as.integer(s[1]) else NA_integer_)
   ## rule 2 (direction rule) for every dispute of the fitted events
   wi <- as.data.frame(peacesciencer::cow_war_inter)
   ## war rule: the MID side of the war's INITIATOR states that take part in the dispute; if none does, of the states on the initiators' war side
   war_init_states <- function(w, side_members = FALSE) { x <- wi[wi$warnum == w, ]; side <- unique(c(x$sidea1[x$initiator1 == 1], x$sidea2[x$initiator2 == 1])); stopifnot(length(side) == 1L)
     if (!side_members) unique(c(x$ccode1[x$initiator1 == 1], x$ccode2[x$initiator2 == 1])) else unique(c(x$ccode1[x$sidea1 == side], x$ccode2[x$sidea2 == side])) }
   side_dir <- function(d) {
-    wl <- unique(na.omit(oe$war_link[oe$dispnum == d]))
+    rows <- oe$dispnum == d; if (any(rows & oe$n_disputes == 1L)) rows <- rows & oe$n_disputes == 1L   # P1-4: single-source rows describe d itself
+    wl <- unique(na.omit(oe$war_link[rows]))
     if (!length(wl)) return(c(side = 1L, rule = 2L))                                              # not war-linked: Side A
     st <- unique(unlist(lapply(wl, war_init_states)))
     if (!any(P$ccode[P$dispnum == d] %in% st)) st <- unique(unlist(lapply(wl, war_init_states, side_members = TRUE)))
@@ -312,7 +323,10 @@ if (TYPES == "bcj") {
     logf("types %s: coorig window promotions undone for %d early TARGET-side joiners (kept %d initiating-side promotions)", TYPES, sum(back), sum(rc$early_j & !back))
   }
   SIDE_REVIEWED <- c(112L, 200L, 362L, 611L, 1035L, 1046L, 1293L, 1363L, 1379L, 2150L, 3098L, 3131L, 3826L); SIDE_HARD <- c(200L, 1379L)
-  side_case <- ifelse(ev$grp == 2L & k_all$dispnum %in% SIDE_HARD, "hard", ifelse(ev$grp == 2L & k_all$dispnum %in% SIDE_REVIEWED, "reviewed", ""))
+  ## loop review P2-12: tag every ORIGINAL joiner (including those promoted to coalition originator by the window, whose promotion depended on
+  ## the side map), not only the joiners left after promotion
+  orig_joiner <- ev$grp == 2L | (if (COORIG_W > 0L && exists("rc")) rc$early_j else FALSE)
+  side_case <- ifelse(orig_joiner & k_all$dispnum %in% SIDE_HARD, "hard", ifelse(orig_joiner & k_all$dispnum %in% SIDE_REVIEWED, "reviewed", ""))
   side_unresolved <- ev$grp == 2L & side_rule == 4L
   jr <- ev$grp == 2L
   logf("types %s: initiating side of joiners' disputes by rule 1 (originator events) %d joiner events, war rule %d, Side A (non-war) %d, war mapping ambiguous (Side A) %d; reviewed cases %d (hard %d)",
@@ -440,6 +454,7 @@ if (DUMP_LONG) {
   ## originators and joiners can be separated in any scheme; side_unresolved = joiner whose initiating side could not be resolved (P1-2; FALSE
   ## outside bcd / bcjs); dispnums = every source dispute of a collapsed event (P2-13; disp is only the primary one).
   D$grp <- as.integer(ev$grp[L$ev_id])
+  D$orig_joiner <- if (exists("orig_joiner")) orig_joiner[L$ev_id] else (ev$grp[L$ev_id] == 2L)   # joiner before any window promotion
   D$side_unresolved <- if (exists("side_unresolved")) side_unresolved[L$ev_id] else FALSE
   D$side_case <- if (exists("side_case")) side_case[L$ev_id] else ""        # "" / "reviewed" / "hard" (joiner events of the case-reviewed disputes)
   src <- ev_rds[!ev_rds$escalation, c("initiator", "target", "year", "dispnums")]
@@ -456,6 +471,13 @@ if (DUMP_LONG) {
   stopifnot(!anyNA(fk)); D$ev_fatal <- as.integer(fk)
   if (SAMPLE == "fmid") stopifnot(all(D$ev_fatal == 1L))
   logf("dump_long: events in the fatal-MID sample %d of %d", sum(D$ev_fatal[D$chosen == 1L]), sum(D$chosen == 1L))
+  ## loop review P2-5: a DISPUTE-level outcome for step B -- the event's primary dispute has fatality > 0 in the GML dispute table
+  ## (peacesciencer gml_mid_disps; -9 = unknown -> NA). The pair-level ev_fatal above is kept for the old membership version.
+  gd <- as.data.frame(peacesciencer::gml_mid_disps)[, c("dispnum", "fatality")]
+  fz <- gd$fatality[match(D$disp, gd$dispnum)]
+  D$disp_fatal <- ifelse(is.na(fz) | fz < 0, NA_integer_, as.integer(fz > 0))
+  logf("dump_long: events whose primary dispute is fatal (GML) %d, nonfatal %d, unknown %d", sum(D$disp_fatal[D$chosen == 1L] == 1L, na.rm = TRUE),
+       sum(D$disp_fatal[D$chosen == 1L] == 0L, na.rm = TRUE), sum(is.na(D$disp_fatal[D$chosen == 1L])))
   gc_hash <- tryCatch(system2("git", c("-C", v2_root(), "rev-parse", "HEAD"), stdout = TRUE, stderr = FALSE)[1], error = function(e) NA_character_)
   gc_dirty <- tryCatch(length(system2("git", c("-C", v2_root(), "status", "--porcelain", "--untracked-files=no"), stdout = TRUE, stderr = FALSE)) > 0, error = function(e) NA)
   if (isTRUE(gc_dirty)) gc_hash <- paste0(gc_hash, "-dirty")   # review P3-21

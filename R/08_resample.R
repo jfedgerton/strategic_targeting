@@ -5,7 +5,8 @@
 ##   --mode=perm_dR   within-event permutation of the relational gap: in every stratum the alternatives' dR values are shuffled (dR2, dM x dR
 ##                    recomputed), which breaks the link between the chosen target and its relational position and keeps everything else.
 ##   --mode=perm_type permutation of the type labels across events (each event keeps its alternatives, weights and gaps).
-##   Permutation p-value = share of permuted |statistic| >= observed |statistic| (two-sided), with (1 + count) / (1 + n_ok).
+##   Permutation diagnostic p (p_diag) = (1 + #permuted |stat| >= observed |stat|) / (1 + n_ok). The permutations are artificial-assignment
+##   DIAGNOSTICS (loop review B), not randomization tests of the scientific null.
 ## Quantities: M0 (fully pooled) u_R_less / u_R_more / u_M_weaker / u_M_stronger; M1 the same per type and for every pair of types.
 ## A draw is dropped when its fit errors, warns (separation / non-convergence) or a type vanishes; every dropped draw is listed with its reason.
 ## Intervals / p-values are reported only when B >= 200 and >= 90% of draws are usable (otherwise NA, and share_pos is NA too).
@@ -30,6 +31,8 @@ P <- readRDS(POSF); j <- match(SPEC, colnames(P$R)); stopifnot(!is.na(j)); R <- 
 kidx <- setNames(seq_len(nrow(key)), paste(key$ccode, key$year))
 i_row <- kidx[paste(D$c1, D$yr - 1L)]; j_row <- kidx[paste(D$c2, D$yr - 1L)]; stopifnot(!anyNA(i_row), !anyNA(j_row))
 ys <- vapply(split(seq_len(nrow(key)), key$year), function(ix) gap_scale(R[ix]), 0)
+## loop review P2-9: as the sweep -- the scale year (t) AND the positions year (t-1) must both vary
+y_sd <- vapply(split(R, key$year), sd, 0); stopifnot(all(y_sd[as.character(unique(D$yr - 1L))] > 1e-8))
 stopifnot(all(ys[as.character(unique(D$yr))] > 1e-8)); D$dR <- (R[i_row] - R[j_row]) / ys[as.character(D$yr)]; stopifnot(all(is.finite(D$dR)))
 GAP <- c("dM", "dM2", "dR", "dR2", "dMR"); GAP_G <- as.vector(outer(GAP, ROLES, paste, sep = "_"))
 build <- function(d) { d$dM2 <- d$dM^2; d$dR2 <- d$dR^2; d$dMR <- d$dM * d$dR
@@ -41,21 +44,27 @@ tsg <- tsg[vapply(tsg, length, 0L) == G]
 for (pre in names(tsg)) { D[[paste0(pre, "_pooled")]] <- Reduce(`+`, lapply(tsg[[pre]], function(z) D[[z]])); zc0 <- c(setdiff(zc0, tsg[[pre]]), paste0(pre, "_pooled")) }
 fit <- function(d, terms, zc) { msg <- NULL
   d$one_ <- 1; fml <- as.formula(paste("Surv(one_, chosen) ~", paste(c(terms, zc), collapse = " + "), "+ strata(ev_id)"))
-  cf <- tryCatch(withCallingHandlers(coef(coxph(fml, data = d, weights = w, method = "breslow")),
-                                     warning = function(w) { msg <<- conditionMessage(w); invokeRestart("muffleWarning") }), error = function(e) { msg <<- paste("error:", conditionMessage(e)); NULL })
-  if (!is.null(msg) || is.null(cf) || any(!is.finite(cf))) structure(list(), reason = if (is.null(msg)) "non-finite coefficients" else msg) else cf }
+  m <- tryCatch(withCallingHandlers(coxph(fml, data = d, weights = w, method = "breslow"),
+                                    warning = function(w) { msg <<- c(msg, conditionMessage(w)); invokeRestart("muffleWarning") }), error = function(e) { msg <<- paste("error:", conditionMessage(e)); NULL })
+  bad <- is.null(m) || any(grepl("converge|infinite|singular|error", msg, ignore.case = TRUE)) || any(!is.finite(coef(m))) || m$iter >= 20L   # the sweep's validity policy
+  if (bad) structure(list(), reason = if (length(msg)) paste(unique(msg), collapse = " | ") else "non-finite coefficients or iteration limit") else coef(m) }
 u4 <- function(cf, s, r = 1) c(R_less = r * (cf[[paste0("dR", s)]] + cf[[paste0("dR2", s)]]), R_more = r * (-cf[[paste0("dR", s)]] + cf[[paste0("dR2", s)]]),
                                M_weaker = r * (cf[[paste0("dM", s)]] + cf[[paste0("dM2", s)]]), M_stronger = r * (-cf[[paste0("dM", s)]] + cf[[paste0("dM2", s)]]))
 pairs <- lapply(combn(ROLES, 2, simplify = FALSE), rev)          # same orientation and labels as 22_rel_sweep.R
+## per-model validity (loop review P2-9): an invalid M1 leaves the M0 quantities in place (M1 quantities NA), and vice versa
+QN <- c(paste0("M0:u_", c("R_less", "R_more", "M_weaker", "M_stronger")),
+        unlist(lapply(ROLES, function(k) paste0("M1:", k, ":u_", c("R_less", "R_more", "M_weaker", "M_stronger")))),
+        unlist(lapply(pairs, function(pp) paste0("M1:", pp[1], "-", pp[2], ":u_", c("R_less", "R_more", "M_weaker", "M_stronger")))))
 derive <- function(c0, c1) {
-  out <- setNames(u4(c0, ""), paste0("M0:u_", names(u4(c0, ""))))
-  for (k in ROLES) { v <- u4(c1, paste0("_", k)); out <- c(out, setNames(v, paste0("M1:", k, ":u_", names(v)))) }
-  for (pp in pairs) { v <- u4(c1, paste0("_", pp[1])) - u4(c1, paste0("_", pp[2])); out <- c(out, setNames(v, paste0("M1:", pp[1], "-", pp[2], ":u_", names(v)))) }
-  out }
+  out <- setNames(rep(NA_real_, length(QN)), QN)
+  if (length(c0)) out[paste0("M0:u_", names(u4(c0, "")))] <- u4(c0, "")
+  if (length(c1)) { for (k in ROLES) { v <- u4(c1, paste0("_", k)); out[paste0("M1:", k, ":u_", names(v))] <- v }
+    for (pp in pairs) { v <- u4(c1, paste0("_", pp[1])) - u4(c1, paste0("_", pp[2])); out[paste0("M1:", pp[1], "-", pp[2], ":u_", names(v))] <- v } }
+  structure(out, reason = paste(c(if (!length(c0)) paste("M0:", attr(c0, "reason")), if (!length(c1)) paste("M1:", attr(c1, "reason"))), collapse = " || ")) }
 D <- build(D)
 c0 <- fit(D, GAP, zc0); c1 <- fit(D, GAP_G, Z_cols)
-if (!length(c0) || !length(c1)) stop("the full-sample fit fails: ", attr(c0, "reason"), " ", attr(c1, "reason"))
-est <- derive(c0, c1)
+if (!length(c0) && !length(c1)) stop("both full-sample fits fail: ", attr(c0, "reason"), " ", attr(c1, "reason"))
+est <- derive(c0, c1); if (anyNA(est)) logf("full-sample fit invalid for part of the quantities: %s", attr(est, "reason"))
 logf("%s on %s (%s, window %s): %d strata; spec %s", MODE, basename(DUMP), dump$types, if (is.null(dump$coorig_months)) 0 else dump$coorig_months, length(unique(D$ev_id)), SPEC)
 
 ## ---- draws (all random numbers drawn up front: reproducible under forking) ----
@@ -68,35 +77,40 @@ if (MODE == "boot") {
 } else if (MODE == "perm_dR") {
   grp <- split(seq_len(nrow(D)), D$ev_id)
   draws <- lapply(seq_len(B), function(b) { o <- seq_len(nrow(D)); for (g in grp) o[g] <- g[sample.int(length(g))]; o })
-} else draws <- lapply(seq_len(B), function(b) setNames(sample(ev$type), ev$ev_id))
+} else {
+  ## loop review P2-9: typed controls (x_<role>) would keep the original labels after relabelling, so variant dumps are refused
+  if (length(tsg)) stop("--mode=perm_type is not supported on dumps with type-specific controls (", paste(names(tsg), collapse = ", "), ")")
+  draws <- lapply(seq_len(B), function(b) setNames(sample(ev$type), ev$ev_id))
+}
 one <- function(b) {
   x <- draws[[b]]
   if (MODE == "boot") { k <- x[as.character(D$ev_id)]; Db <- D[k > 0L, ]; Db$w <- Db$w * k[k > 0L] }
   else if (MODE == "perm_dR") { Db <- D; Db$dR <- D$dR[x]; Db <- build(Db) }
   else { Db <- D; Db$type <- unname(x[as.character(D$ev_id)]); Db <- build(Db) }
-  if (any(tabulate(Db$type[Db$chosen == 1L] + 1L, nbins = G) == 0L)) return(structure(list(), reason = "a type has no event in this draw"))
+  if (any(tabulate(Db$type[Db$chosen == 1L] + 1L, nbins = G) == 0L)) return(structure(setNames(rep(NA_real_, length(QN)), QN), reason = "a type has no event in this draw"))
   if (MODE == "boot" && length(tsg)) for (pre in names(tsg)) Db[[paste0(pre, "_pooled")]] <- Reduce(`+`, lapply(tsg[[pre]], function(z) Db[[z]]))
-  a <- fit(Db, GAP, zc0); if (!length(a)) return(a)
-  b1 <- fit(Db, GAP_G, Z_cols); if (!length(b1)) return(b1)
-  derive(a, b1) }
+  derive(fit(Db, GAP, zc0), fit(Db, GAP_G, Z_cols)) }
 res <- mclapply(seq_len(B), one, mc.cores = CORES, mc.preschedule = TRUE)
-ok <- vapply(res, function(z) is.numeric(z) && length(z) == length(est), TRUE)
-reasons <- vapply(res[!ok], function(z) if (is.null(attr(z, "reason"))) "worker failure" else attr(z, "reason"), "")
-if (sum(ok) == 0L) stop("no usable draw")
-BS <- do.call(rbind, res[ok])
-report <- B >= 200L && mean(ok) >= 0.90
-logf("%d of %d draws usable; dropped: %s", sum(ok), B, if (length(reasons)) paste(names(table(reasons)), table(reasons), sep = " x", collapse = "; ") else "none")
+wk <- vapply(res, function(z) is.numeric(z) && length(z) == length(QN), TRUE)
+if (any(!wk)) stop(sprintf("%d worker failures", sum(!wk)))
+BS <- do.call(rbind, res); colnames(BS) <- QN
+okq <- colSums(!is.na(BS))                                         # usable draws per quantity (per model)
+rs <- vapply(res, function(z) { r <- attr(z, "reason"); if (is.null(r)) "" else r }, "")
+drops <- data.frame(draw = which(nzchar(rs)), reason = rs[nzchar(rs)])
+reportq <- B >= 200L & okq / B >= 0.90
+logf("usable draws: M0 %d, M1 %d of %d; draws with a dropped model %d", okq[[QN[1]]], okq[[QN[5]]], B, nrow(drops))
+qf <- function(p) ifelse(reportq, apply(BS, 2, quantile, p, na.rm = TRUE), NA_real_)
 if (MODE == "boot") {
-  out <- data.frame(spec_id = SPEC, scheme = dump$types, mode = MODE, quantity = names(est), est = est,
-                    lo = if (report) apply(BS, 2, quantile, 0.025) else NA_real_, hi = if (report) apply(BS, 2, quantile, 0.975) else NA_real_,
-                    share_pos = if (report) colMeans(BS > 0) else NA_real_, n_ok = sum(ok), B = B, row.names = NULL)
+  out <- data.frame(spec_id = SPEC, scheme = dump$types, mode = MODE, quantity = QN, est = unname(est[QN]), lo = qf(0.025), hi = qf(0.975),
+                    share_pos = ifelse(reportq, colMeans(BS > 0, na.rm = TRUE), NA_real_), n_ok = okq, B = B, row.names = NULL)
 } else {
-  pv <- (1 + colSums(abs(BS) >= matrix(abs(est), nrow(BS), length(est), byrow = TRUE))) / (1 + nrow(BS))
-  out <- data.frame(spec_id = SPEC, scheme = dump$types, mode = MODE, quantity = names(est), est = est,
-                    null_lo = if (report) apply(BS, 2, quantile, 0.025) else NA_real_, null_hi = if (report) apply(BS, 2, quantile, 0.975) else NA_real_,
-                    p_perm = if (report) pv else NA_real_, n_ok = sum(ok), B = B, row.names = NULL)
+  ## artificial-assignment DIAGNOSTIC (loop review B): not a randomization test of "no isolation mechanism"
+  pv <- (1 + colSums(abs(BS) >= matrix(abs(est[QN]), nrow(BS), length(QN), byrow = TRUE), na.rm = TRUE)) / (1 + okq)
+  out <- data.frame(spec_id = SPEC, scheme = dump$types, mode = MODE, quantity = QN, est = unname(est[QN]), null_lo = qf(0.025), null_hi = qf(0.975),
+                    p_diag = ifelse(reportq, pv, NA_real_), n_ok = okq, B = B, row.names = NULL)
 }
 out$coorig_months <- if (is.null(dump$coorig_months)) 0L else dump$coorig_months
-write.csv(out, OUT, row.names = FALSE)
-if (length(reasons)) writeLines(sprintf("draw dropped: %s", reasons), sub("\\.csv$", "_dropped.txt", OUT))
+write.csv(out, paste0(OUT, ".tmp"), row.names = FALSE)
+write.csv(drops, sub("\\.csv$", "_dropped.csv", OUT), row.names = FALSE)   # draw id and reason for every draw with a dropped model
+stopifnot(file.rename(paste0(OUT, ".tmp"), OUT))                                # atomic: OUT exists only when complete
 print(format(out[grepl("u_R_less|u_M_stronger", out$quantity), setdiff(names(out), c("spec_id", "scheme", "mode", "B", "coorig_months"))], digits = 2), row.names = FALSE)

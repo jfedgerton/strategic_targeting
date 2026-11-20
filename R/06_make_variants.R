@@ -114,8 +114,13 @@ if (VAR == "drop") {
 if (VAR == "dropside") {
   ## PI 2026-11-19 sensitivity: drop the joiner events whose initiating side needed case review (side_case from 10_clogit_roles.R).
   ## --level=hard drops disputes 200 and 1379 (joiner events); --level=reviewed drops all 13 reviewed disputes (joiner events).
-  LEV <- opt("level", "hard"); stopifnot(LEV %in% c("hard", "reviewed"), "side_case" %in% names(D))
-  drop_ev <- unique(D[chosen == 1L & side_case %in% (if (LEV == "hard") "hard" else c("hard", "reviewed")), ev_id])
+  ## --level=hard|reviewed: joiner strata only (incl. joiners promoted by the window, loop review P2-12);
+  ## --level=hard_disp|reviewed_disp: EVERY event any of whose source disputes is one of the listed disputes
+  LEV <- opt("level", "hard"); stopifnot(LEV %in% c("hard", "reviewed", "hard_disp", "reviewed_disp"), "side_case" %in% names(D))
+  SIDE_HARD <- c("200", "1379"); SIDE_REVIEWED <- c("112", "200", "362", "611", "1035", "1046", "1293", "1363", "1379", "2150", "3098", "3131", "3826")
+  drop_ev <- if (LEV %in% c("hard", "reviewed")) unique(D[chosen == 1L & side_case %in% (if (LEV == "hard") "hard" else c("hard", "reviewed")), ev_id]) else {
+    dl <- if (LEV == "hard_disp") SIDE_HARD else SIDE_REVIEWED
+    unique(D[chosen == 1L & vapply(strsplit(dispnums, ";"), function(x) any(x %in% dl), TRUE), ev_id]) }
   D <- D[!(ev_id %in% drop_ev)]
   logf("dropside (%s): removed %d joiner strata; types left %s", LEV, length(drop_ev), paste(tabulate(D[chosen == 1L, type] + 1L, length(d$roles)), collapse = "/"))
   d$types <- paste0(d$types, "_dropside", LEV)
@@ -124,5 +129,5 @@ if (VAR == "dropside") {
 stopifnot(all(D[, sum(chosen), by = ev_id]$V1 == 1L))
 setorder(D, ev_id, -chosen)
 d$D <- as.data.frame(D); d$variant <- VAR
-saveRDS(d, OUT)
+saveRDS(d, paste0(OUT, ".tmp")); stopifnot(file.rename(paste0(OUT, ".tmp"), OUT))   # atomic
 logf("wrote %s: %d rows, %d strata (was %d / %d); types %s; Z %s", OUT, nrow(D), uniqueN(D$ev_id), n0, s0, paste(d$roles, collapse = "/"), paste(d$Z_cols, collapse = ","))
