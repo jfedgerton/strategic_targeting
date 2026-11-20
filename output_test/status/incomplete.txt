@@ -1,2 +1,0 @@
-history drop un: list not approved
-history drop punitive: list not approved

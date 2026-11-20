@@ -28,7 +28,7 @@ TEST=1 bash run_all.sh
 ```
 
 Everything is written to `output/`; the log is `output/logs/run_<time>.log`.
-- **Provenance.** At start the run fingerprints the code commit, `config.sh`, the event-data manifest and the sha256 of every positions file. An output folder belongs to one fingerprint; if anything changed, the run stops (use `OUT=<new folder>`). Production refuses uncommitted code.
+- **Provenance.** At start the run fingerprints the code (contents of `run_all.sh` and every R script; doc edits do not count), `config.sh`, the event-data manifest and the sha256 of every positions file. An output folder belongs to one fingerprint; if anything changed, the run stops (use `OUT=<new folder>`). Production refuses uncommitted code.
 - **Restarts.** Rerun the same command after a stop: finished steps (atomically written outputs; sweeps without ERROR rows) are skipped.
 - **Ending.** `LOOP_DONE` means every step finished. `LOOP_FINISHED_WITH_GAPS` (exit code 2) lists what is incomplete in `output/status/incomplete.txt`. Until the history-chosen exclusion lists are approved, that file lists them.
 
