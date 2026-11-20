@@ -7,6 +7,8 @@ These lists are chosen on historical grounds, separately from the influence-chos
 2. **Main justification.** A qualifying rationale counts only if it was the main public justification at the time. Territorial, colonial, succession, debt-collection and alliance-war aims as the main aim exclude the case.
 3. **Three states using force.** At least three states on the coalition side have a use-of-force action (COW-MID highest action ≥ 14) in the dispute, by MID participant dates. Threats, displays and support do not count.
 4. **Both sides screened.** Every fatal-sample dispute with three or more distinct initiators on the initiating side, or three or more target-side joiners, was screened (fmid dump, 1-month window).
+4a. **Ruling A (PI, 2026-11-20, after the second coder).** Collective defense of an attacked state counts under trigger (a) only when the coalition framed it as enforcing a multilateral norm (UN collective security: Korea, Gulf). Assistance under an alliance or at the attacked government's request is an alliance aim and excludes the case (Second Congo War 4339, Chincha Islands War 1482, Vietnam 611; Shaba I 2150 stays in the expanded list only).
+4b. **Ruling B (PI, 2026-11-20, after the second coder).** The three-states-using-force count comes from the COW-MID participant data (highest action ≥ 14), as fixed in rule 3, not from case histories. Where the histories suggest a lower count (Nanking 145, Iraq no-fly zones 3552, Shaba I 2150, Mexico 135), the case keeps its MID-based classification and the discrepancy is reported below.
 5. **UN-authorized subset.** The Security Council authorized or recommended the use of force for that operation (Korea: Res. 83/84 recommend assistance; Gulf: Res. 678 authorizes force). Recognition of self-defense (Res. 1368) or demands without a force mandate do not count.
 
 ## Ledger (screened coalition disputes)
@@ -42,5 +44,22 @@ Force = states on the coalition side with a use-of-force action (GML participant
 | `exclusions_strict.txt` | 51, 3957, 31, 145, 146, 3552, 4137, 4283, 3058 | Main history-chosen check |
 | `exclusions_strict_noborder.txt` | strict minus 146, 3058 | Borderline cases kept in |
 | `exclusions_expanded.txt` | strict + 4273, 4251, 2150 | Open-trigger / mixed-episode check |
+
+## Second coder (independent agent, blind; `docs/coding/coder2_claude_agent.md`) and resolutions
+Agreement on 15 of 23 cases. Disagreements and how they were resolved:
+
+| Dispute | Ledger | Coder 2 | Resolution |
+|---|---|---|---|
+| 4339, 1482, 611 | out (alliance / regional war) | qualify (a) | Ruling A: out |
+| 2150 Shaba I | expanded only | qualifies (a or e) | Ruling A: expanded only |
+| 4273 Iraq 1997–2003 | expanded (two episodes in one MID) | qualifies (d) | kept in expanded (the MID mixes a two-state operation and a separate 2003 coalition) |
+| 145 Nanking | strict (MID: 4 states used force) | qualifies; histories show UK and US firing only | Ruling B: strict |
+| 3552 Iraq no-fly zones | MID: 4 states | 3 (Saudi Arabia hosted) | Ruling B: strict (meets the threshold either way) |
+| 2208 China 1926 | out (MID: 0) | out (histories: Japan, UK fired) | out either way |
+| 135 Mexico 1861 | out (debt collection; MID: 3) | out (only France fought) | out either way |
+
+Coder 2 also flagged that its sheet omitted Chile from the Chincha Islands War; the case is out under Ruling A regardless.
+
+**Third coder:** GPT, blind (`docs/coding/coder3_gpt.md`, pending). The rulings above stand unless the PI revisits them.
 
 **Before treating these as final:** a second coder should review this ledger without seeing any estimates (GPT delta review §3). Changing a list later reruns only its variant and sweep (the variant is stamped with the list).
