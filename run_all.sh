@@ -27,16 +27,19 @@ die() { say "STOP: $*"; exit 1; }
 ## run an R step: full output to the log, selected lines to the screen; returns the R exit status (delta review N3/N5: never inferred from files)
 runR() { local PAT=$1; shift; local T; T=$(mktemp); local rc=0; Rscript "$@" > "$T" 2>&1 || rc=$?; cat "$T" >> "$LOG"; grep -E "$PAT" "$T" | cut -c1-250 || true; rm -f "$T"; return $rc; }
 ## content hashes, memoized per invocation
-## content hashes, cached in files keyed by path + size + mtime (GPT review D2: portable to macOS bash 3.2, no associative arrays;
-## the cache also survives restarts). hm is kept as a no-op alias for readability at call sites.
-HC=$O/status/hcache
-h() { local f sz mt k c; f=$(readlink -f "$1"); sz=$(wc -c < "$f" | tr -d ' '); mt=$(date -r "$f" +%s); k=$(printf '%s' "$f" | shasum | cut -c1-16)
+## content hashes (GPT review E1): memoized only WITHIN this invocation, in a fresh temporary folder (portable to macOS bash 3.2, no associative
+## arrays). Nothing is reused across restarts, so a replaced file is always re-hashed by content. Within the invocation an entry is keyed by
+## path + size + mtime AND explicitly invalidated (hinv) whenever this runner writes the file, so a rewrite in the same second cannot reuse it.
+HC=$(mktemp -d "${TMPDIR:-/tmp}/run_all_hcache.XXXXXX"); trap 'rm -rf "$HC"' EXIT
+hk() { printf '%s' "$(readlink -f "$1")" | shasum | cut -c1-16; }
+h() { local f sz mt k c; f=$(readlink -f "$1"); sz=$(wc -c < "$f" | tr -d ' '); mt=$(date -r "$f" +%s); k=$(hk "$f")
   if [ -s "$HC/$k" ]; then read -r c < "$HC/$k"; if [ "${c% *}" = "$sz $mt" ]; then echo "${c##* }"; return 0; fi; fi
-  c=$(shasum -a 256 "$f" | cut -c1-16); mkdir -p "$HC"; echo "$sz $mt $c" > "$HC/$k.tmp$$" && mv "$HC/$k.tmp$$" "$HC/$k"; echo "$c"; }
+  c=$(shasum -a 256 "$f" | cut -c1-16); echo "$sz $mt $c" > "$HC/$k.tmp" && mv "$HC/$k.tmp" "$HC/$k"; echo "$c"; }
 hm() { h "$1" > /dev/null; }
+hinv() { local f; for f in "$@"; do rm -f "$HC/$(hk "$f")"; done; }
 ## stamps: an artifact built from supplied inputs is reused only if its .stamp matches the inputs now (delta review N2)
 fresh() { [ -s "$1" ] && [ -s "$1.stamp" ] && [ "$(cat "$1.stamp")" = "$2" ]; }
-stamp() { echo "$2" > "$1.stamp.tmp" && mv "$1.stamp.tmp" "$1.stamp"; }
+stamp() { hinv "$1"; echo "$2" > "$1.stamp.tmp" && mv "$1.stamp.tmp" "$1.stamp"; }   # every stamped artifact was just (re)written
 
 ## ---- 0. preflight (P1-1) ----
 for W in $WINDOWS; do [[ "$W" =~ ^[0-6]$ ]] || die "window $W outside 0-6"; done
@@ -57,6 +60,8 @@ if [ "$REUSE_POSITIONS" = "1" ]; then
   for F in "$REUSE_CORE_IGO"/positions_core_*.rds "$REUSE_CORE_IGO"/positions_igo_arm.rds "$REUSE_DIPL"/positions_dipl_*.rds; do link_pos "$F"; done
 fi
 NETSHA=$( (for f in dipl_dyad.csv destaRaw.rda dca_dyad.csv; do [ -s "$NETDATA/$f" ] || die "missing $NETDATA/$f"; h "$NETDATA/$f"; done; h R/01_build_layers.R) | shasum -a 256 | cut -c1-16 )
+## GPT review E1: an existing run folder records its network-input hash; a different input stops the run BEFORE layers are rebuilt in it
+if [ -s $O/NETSHA ] && [ "$(cat $O/NETSHA)" != "$NETSHA" ]; then die "network inputs changed since $O was built (was $(cat $O/NETSHA), now $NETSHA); use OUT=<new folder>"; fi
 if ! fresh $O/layers_dy.rds "$NETSHA"; then rm -f $O/layers_dy.rds; runR "Error|wrote" R/01_build_layers.R "$NETDATA" $O/layers_dy.rds.tmp.rds || die "layers build failed"; mv $O/layers_dy.rds.tmp.rds $O/layers_dy.rds; stamp $O/layers_dy.rds "$NETSHA"; fi
 if [ "$REUSE_POSITIONS" != "1" ]; then
   ## GPT review D5: each arm is stamped with the layers file and builder hashes; an arm whose stamp differs (or is missing) is rebuilt, so an
@@ -66,7 +71,7 @@ if [ "$REUSE_POSITIONS" != "1" ]; then
     if [ $ok = 1 ] && [ "$(cat $O/positions/.arm_$NM.stamp 2>/dev/null)" = "$AST" ]; then return 0; fi
     for f in $FILES; do rm -f $O/positions/$f.rds; done
     runR "Error|wrote" R/02_build_positions.R $O/layers_dy.rds $O/positions "$@" || die "positions arm $NM failed"
-    for f in $FILES; do [ -s $O/positions/$f.rds ] || die "positions arm $NM did not write $f.rds"; done
+    for f in $FILES; do [ -s $O/positions/$f.rds ] || die "positions arm $NM did not write $f.rds"; hinv $O/positions/$f.rds; done
     echo "$AST" > $O/positions/.arm_$NM.stamp.tmp && mv $O/positions/.arm_$NM.stamp.tmp $O/positions/.arm_$NM.stamp; }
   arm core_all "positions_core_W1raw_ptaall positions_core_W2contig_ptaall positions_core_W3dist_ptaall positions_core_W4fe_ptaall" --arm=core --pta=all --cores=$CORES
   arm core_inforce "positions_core_W1raw_ptainforce positions_core_W2contig_ptainforce positions_core_W3dist_ptainforce positions_core_W4fe_ptainforce" --arm=core --pta=inforce --cores=$CORES
@@ -80,7 +85,7 @@ ENV=$ENVQ
 ## code identity = the content of the scripts and this runner (doc-only commits do not invalidate outputs); the commit is logged
 FP=$( { cat run_all.sh R/*.R R/lib/*.R | shasum -a 256; cat config.sh; echo "TEST=$TEST WINDOWS=$WINDOWS B=$B_BOOT/$B_PERM N=$N_RANDOM_BOOT K=$MERROR_K"; shasum -a 256 data_entry/manifest.csv; echo "$SHA"; echo "layers $(h $O/layers_dy.rds) net $NETSHA"; echo "$ENV"; } | shasum -a 256 | cut -c1-16 )
 if [ -s $O/FINGERPRINT ]; then [ "$(cat $O/FINGERPRINT)" = "$FP" ] || die "$O was built from different code/config/inputs (fingerprint $(cat $O/FINGERPRINT), now $FP); use OUT=<new folder> or remove $O"
-else echo "$FP" > $O/FINGERPRINT; fi
+else echo "$FP" > $O/FINGERPRINT; echo "$NETSHA" > $O/NETSHA; fi
 say "fingerprint $FP | commit $(git rev-parse --short HEAD) | positions sha $SHA | cores $CORES | types $TYPES | main window $WINDOW_MAIN | test $TEST"
 say "environment: $ENV"
 MAN=$O/status/manifest_sweeps.tsv
@@ -128,6 +133,7 @@ dump() {  # dump <types> <window> <sample> [--unit_weights=TRUE]
     --rel_scale=year --bilateral=onset $WF --sample=$SM --boot=0 --dump_long=TRUE --dump_out=$F "$@" || { rm -f $F; die "dump failed: $F"; }
   Rscript -e 'a <- commandArgs(TRUE); d <- readRDS(a[1]); stopifnot(is.data.frame(d$D), nrow(d$D) > 0, d$types == a[2], d$sample == a[3], as.integer(d$coorig_months) == as.integer(a[4]), d$bilateral_rule == "onset")' \
     $F $T $SM $W || { rm -f $F; die "dump $F is not the requested frame"; }
+  hinv $F
 }
 for W in $WINDOWS; do dump $TYPES $W fmid; dump $TYPES $W mid; dump bcjs $W fmid; done
 dump $TYPES $WINDOW_MAIN fmid --unit_weights=TRUE

@@ -3,3 +3,4 @@ data_entry
 .DS_Store
 output_test/
 logs/
+output_test*/
