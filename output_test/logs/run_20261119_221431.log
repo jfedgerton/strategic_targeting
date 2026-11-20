@@ -1,0 +1,958 @@
+R 4.3.3 | peacesciencer 1.2.0 | countrycode 1.9.0 
+Joining with `by = join_by(ccode1, ccode2, year)`
+frame: 918315 dyad-years, 1816-2014; capdist NA 0; conttype NA 0 
+IGO: years with any data 199 of 199; all-missing years:  
+UN kappa: first year 1946 (structural 0 before); NA share in UN years 0.075 
+dipl: dyad-years before the first wave (structural 0) 253; with an endpoint absent from its source wave (0 until observed, no future fill) 48601 
+dipl: waves 1817-2005; source wave up to 9 years before the dyad-year; never after 
+Warning message:
+In load(file.path(NETDIR, "destaRaw.rda")) :
+  strings not representable in native encoding will be translated to UTF-8
+DESTA rows 18086; rows with an unmatched country (dropped) 490; unmatched names: Anguilla; Aruba; British Indian Ocean Territory; British Virgin Islands; Cayman Islands; Cook Islands; Falkland Islands; Faroe Islands; French Polynesia; French Southern Territories; Greenland; Hong Kong SAR China; Macau SAR China; Mayotte; Montserrat; Netherlands Antilles; New Caledonia; Niue; Palestinian Territories; Pitcairn Islands; South Georgia & South Sandwich Islands; St. Helena; St. Pierre & Miquelon; Turks & Caicos Islands; Wallis & Futuna; Western Sahara 
+PTA: dyad-years with any PTA 149143 (signed or in force) vs 134216 (in force only) 
+PTA predecessor check (France-W.Germany, W.Germany-Italy, Poland-Czechoslovakia in 1960/1985): 220-260 1960: 2; 220-260 1985: 2; 260-325 1960: 2; 260-325 1985: 2; 290-315 1960: 0; 290-315 1985: 0 
+DCA: structural zeros before 1980; 2010 carried forward to 2014 
+trade: 1870+ dyad-years with NA trade (missing in COW or absent): 213699 (0.241) 
+trade: 1870-2014, NA before 1870; share of 1870+ dyad-years with positive trade 0.501 
+        era dyad_years igo_mean igo_na   ally     def      off      neu  nonagg consul un_mean  un_na  dipl pta_any     dca trade_pos
+1   1816-70      31633    0.135      0 0.0704 0.06692 0.007713 0.001201 0.05848 0.0659   0.000 0.0000 0.342  0.0000 0.00000     0.973
+2 1871-1914      33498    3.735      0 0.0164 0.00878 0.004209 0.006209 0.00373 0.0123   0.000 0.0000 0.427  0.0000 0.00000     0.915
+3   1915-45      55044    9.991      0 0.0575 0.04317 0.033628 0.007176 0.01344 0.0149   0.000 0.0000 0.381  0.0000 0.00000     0.502
+4   1946-79     224912   16.656      0 0.0863 0.06994 0.001458 0.000605 0.08150 0.0734   0.209 0.1846 0.332  0.0434 0.00000     0.415
+5   1980-90     140734   22.524      0 0.1044 0.06841 0.000149 0.000426 0.10267 0.0657   0.124 0.0538 0.354  0.1304 0.00159     0.481
+6 1991-2014     432494   29.900      0 0.1776 0.07164 0.000000 0.002819 0.17684 0.0694   0.161 0.0248 0.243  0.2798 0.02261     0.545
+      pair year igo def off neu nonagg consul    un dipl pta dca
+1    2-200 1955  42   1   0   0      1      1  0.62    1   0   0
+2    2-365 1925   9   0   0   0      0      0  0.00    0   0   0
+3    2-365 1960  21   0   0   0      0      0 -0.58    1   0   0
+4  365-290 1960  27   1   1   0      1      1  1.00    1   0   0
+5  220-255 1995 100   1   0   0      1      1  0.66    1   3   0
+6    2-840 1995  43   1   0   0      1      1 -0.05    1   0   0
+7     2-70 2000  54   1   0   0      1      1 -0.05    1   1   0
+8    2-365 1935  11   0   0   0      0      0  0.00    1   0   0
+9  200-220 1880   6   0   0   0      0      0  0.00    1   0   0
+10   2-840 2012  43   1   0   0      1      1 -0.04    1   0   0
+11    2-20 1990  67   1   0   0      1      1  0.30    1   2   0
+saved output_test/layers_dy.rds.tmp.rds (918315 rows, 20 cols) 
+[22:15:47] fingerprint 0fd64b3b711a2dd6 | commit 8fcccec | positions sha 1c15f35b8b4d9034 | cores 2 | types bcd | main window 1 | test 1
+R version 4.3.3 (2024-02-29) 
+survival 3.5.8 
+data.table 1.14.10 
+dplyr 1.1.4 
+igraph 1.6.0 
+peacesciencer 1.2.0 
+countrycode 1.9.0 
+sandwich 3.1.0 
+ggplot2 3.4.4 
+Joining with `by = join_by(ccode, year)`
+[22:16:42] positions_core_W2contig_ptaall.rds: 768 measures in 0.9 min
+[22:16:42] wrote output_test/validation/measure_validation.csv: 768 measures, 411 plausible (53.5%)
+[22:16:42] set ids: 201 measures (21 plausible under measure_validation.csv)
+[22:16:52] wrote output_test/sets/phaseA.rds: 201 measures x 15561 country-years
+[22:16:52] set ids: 1 measures (1 plausible under measure_validation.csv)
+[22:16:59] wrote output_test/sets/main.rds: 1 measures x 15561 country-years
+[22:17:00] set noatop: 1 measures (0 plausible; analogue plausible = FALSE)
+[22:17:07] wrote output_test/sets/noatop.rds: 1 measures x 15561 country-years
+[22:17:08] set ids: 2 measures (2 plausible under measure_validation.csv)
+[22:17:15] wrote output_test/sets/random.rds: 2 measures x 15561 country-years
+[22:17:28] types bcd: initiator side from the participant table differs from the collapsed event flag on 17 of 3424 events (9 of them mixed-source)
+[22:17:29] types bcd: initiating side of joiners' disputes by rule 1 (originator events) 491 joiner events, war rule 30, Side A (non-war) 20, war mapping ambiguous (Side A) 0; reviewed cases 58 (hard 8)
+[22:17:29] types bcd (P1-2 side fix): joiners on the initiating side 322, on the target side 219; joiners whose label changed from the Side-A rule 150 (weight 71.6; side-B->initiating 91, side-A->target 59); war-mapping-ambiguous joiners (Side A) 0 in disputes ; side-conflicted joiners 0
+[22:17:29] check: initiating side matches the case review for 13 reviewed disputes in the sample
+[22:17:29] types bcd: changed joiner events (initiator->target year, dispute): 2->230 1941 (258); 2->310 1941 (258); 2->325 1941 (258); 2->360 1941 (258); 2->365 1956 (200); 2->375 1941 (258); 2->651 1956 (200); 20->220 1940 (258); 20->255 1939 (258); 90->93 1907 (1202); 92->93 1907 (1202); 140->255 1944 (258); 140->310 1944 (258); 140->355 1944 (258); 140->360 1944 (258); 140->375 1944 (258); 140->740 1944 (258); 200->255 1939 (258); 200->325 1935 (111); 200->365 1853 (57); 200->651 1956 (200); 211->255 1939 (258); 220->255 1939 (258); 220->365 1853 (57); 220->651 1956 (200); 230->20 1941 (258); 230->200 1941 (258); 230->325 1943 (258); 230->365 1941 (258); 230->560 1941 (258); 230->900 1941 (258); 230->920 1941 (258); 240->255 1866 (261); 240->325 1866 (261); 245->255 1866 (261); 245->325 1866 (261); 255->325 1914 (320); 255->360 1944 (3826); 267->255 1866 (261); 267->325 1866 (261); 269->255 1866 (261); 271->255 1866 (261); 271->325 1866 (261); 273->255 1866 (261); 273->325 1866 (261); 275->255 1866 (261); 275->325 1866 (261); 280->240 1866 (261); 280->245 1866 (261); 280->267 1866 (261); 280->269 1866 (261); 280->271 1866 (261); 280->273 1866 (261); 280->275 1866 (261); 280->300 1866 (261); 300->365 1854 (57); 310->20 1941 (258); 310->200 1941 (258); 310->325 1943 (258); 310->360 1944 (258); 310->365 1941 (258); 310->375 1944 (258); 310->560 1941 (258); 310->900 1941 (258); 310->920 1941 (258); 325->20 1940 (258); 325->220 1940 (258); 325->255 1943 (258); 325->269 1866 (261); 325->300 1866 (261); 325->365 1855 (57); 325->560 1940 (258); 325->900 1940 (258); 325->920 1940 (258); 332->300 1848 (19); 337->300 1848 (19); 345->220 1941 (258); 345->325 1941 (258); 350->220 1940 (258); 350->255 1940 (258); 355->2 1941 (258); 355->20 1941 (258); 355->200 1941 (258); 355->255 1944 (258); 355->310 1944 (258); 355->325 1943 (258); 355->365 1941 (258); 355->375 1944 (258); 355->560 1941 (258); 355->710 1941 (258); 355->740 1944 (258); 355->900 1941 (258); 355->920 1941 (258); 360->20 1941 (258); 360->200 1941 (258); 360->255 1944 (258); 360->325 1943 (258); 360->560 1941 (258); 360->900 1941 (258); 360->920 1941 (258); 365->20 1939 (258); 365->200 1939 (258); 365->200 1956 (200); 365->211 1939 (258); 365->220 1939 (258); 365->220 1956 (200); 365->325 1941 (258); 365->560 1939 (258); 365->666 1956 (200); 365->740 1939 (183); 365->900 1939 (258); 365->920 1939 (258); 375->20 1941 (258); 375->200 1941 (258); 375->255 1944 (258); 375->325 1943 (258); 375->360 1944 (258); 375->365 1941 (258); 375->560 1941 (258); 375->900 1941 (258); 375->920 1941 (258); 560->220 1940 (258); 560->255 1939 (258); 640->325 1915 (320); 645->666 1967 (1035); 651->666 1967 (1035); 663->666 1967 (1035); 670->666 1967 (1035); 690->666 1967 (1035); 710->230 1941 (258); 710->255 1941 (258); 710->310 1941 (258); 710->325 1941 (258); 710->360 1941 (258); 710->375 1941 (258); 712->740 1945 (258); 730->365 1903 (180); 740->20 1941 (258); 740->200 1941 (258); 740->325 1943 (258); 740->360 1944 (258); 740->365 1941 (258); 740->375 1944 (258); 740->560 1941 (258); 740->900 1941 (258); 740->920 1941 (258); 900->220 1940 (258); 900->255 1939 (258); 920->220 1940 (258); 920->255 1939 (258)
+[22:17:29] check: 67 joiner events on Germany's side of dispute 258 are on the initiating side
+[22:17:29] types bcd: bil 503 (weights 490.1); chooser 358 (weights 217.8); defender 219 (weights 162.0); events kept 1080 of 1080 (dropped 0)
+[22:17:32] dump_long: events in the fatal-MID sample 1080 of 1080
+[22:17:32] dump_long: events whose primary dispute is fatal (GML) 904, nonfatal 62, unknown 114
+[22:17:32] dump_long: wrote /home/claude/targeting_multiverse/output/rel_sweep/long_bcd_bon_relyear_fmid.rds (114577 rows, 1080 strata); no fits run
+[22:17:46] types bcd: initiator side from the participant table differs from the collapsed event flag on 17 of 3424 events (9 of them mixed-source)
+[22:17:46] types bcd: initiating side of joiners' disputes by rule 1 (originator events) 786 joiner events, war rule 30, Side A (non-war) 30, war mapping ambiguous (Side A) 0; reviewed cases 67 (hard 8)
+[22:17:46] types bcd (P1-2 side fix): joiners on the initiating side 498, on the target side 348; joiners whose label changed from the Side-A rule 150 (weight 71.6; side-B->initiating 91, side-A->target 59); war-mapping-ambiguous joiners (Side A) 0 in disputes ; side-conflicted joiners 0
+[22:17:46] check: initiating side matches the case review for 13 reviewed disputes in the sample
+[22:17:46] types bcd: changed joiner events (initiator->target year, dispute): 2->230 1941 (258); 2->310 1941 (258); 2->325 1941 (258); 2->360 1941 (258); 2->365 1956 (200); 2->375 1941 (258); 2->651 1956 (200); 20->220 1940 (258); 20->255 1939 (258); 90->93 1907 (1202); 92->93 1907 (1202); 140->255 1944 (258); 140->310 1944 (258); 140->355 1944 (258); 140->360 1944 (258); 140->375 1944 (258); 140->740 1944 (258); 200->255 1939 (258); 200->325 1935 (111); 200->365 1853 (57); 200->651 1956 (200); 211->255 1939 (258); 220->255 1939 (258); 220->365 1853 (57); 220->651 1956 (200); 230->20 1941 (258); 230->200 1941 (258); 230->325 1943 (258); 230->365 1941 (258); 230->560 1941 (258); 230->900 1941 (258); 230->920 1941 (258); 240->255 1866 (261); 240->325 1866 (261); 245->255 1866 (261); 245->325 1866 (261); 255->325 1914 (320); 255->360 1944 (3826); 267->255 1866 (261); 267->325 1866 (261); 269->255 1866 (261); 271->255 1866 (261); 271->325 1866 (261); 273->255 1866 (261); 273->325 1866 (261); 275->255 1866 (261); 275->325 1866 (261); 280->240 1866 (261); 280->245 1866 (261); 280->267 1866 (261); 280->269 1866 (261); 280->271 1866 (261); 280->273 1866 (261); 280->275 1866 (261); 280->300 1866 (261); 300->365 1854 (57); 310->20 1941 (258); 310->200 1941 (258); 310->325 1943 (258); 310->360 1944 (258); 310->365 1941 (258); 310->375 1944 (258); 310->560 1941 (258); 310->900 1941 (258); 310->920 1941 (258); 325->20 1940 (258); 325->220 1940 (258); 325->255 1943 (258); 325->269 1866 (261); 325->300 1866 (261); 325->365 1855 (57); 325->560 1940 (258); 325->900 1940 (258); 325->920 1940 (258); 332->300 1848 (19); 337->300 1848 (19); 345->220 1941 (258); 345->325 1941 (258); 350->220 1940 (258); 350->255 1940 (258); 355->2 1941 (258); 355->20 1941 (258); 355->200 1941 (258); 355->255 1944 (258); 355->310 1944 (258); 355->325 1943 (258); 355->365 1941 (258); 355->375 1944 (258); 355->560 1941 (258); 355->710 1941 (258); 355->740 1944 (258); 355->900 1941 (258); 355->920 1941 (258); 360->20 1941 (258); 360->200 1941 (258); 360->255 1944 (258); 360->325 1943 (258); 360->560 1941 (258); 360->900 1941 (258); 360->920 1941 (258); 365->20 1939 (258); 365->200 1939 (258); 365->200 1956 (200); 365->211 1939 (258); 365->220 1939 (258); 365->220 1956 (200); 365->325 1941 (258); 365->560 1939 (258); 365->666 1956 (200); 365->740 1939 (183); 365->900 1939 (258); 365->920 1939 (258); 375->20 1941 (258); 375->200 1941 (258); 375->255 1944 (258); 375->325 1943 (258); 375->360 1944 (258); 375->365 1941 (258); 375->560 1941 (258); 375->900 1941 (258); 375->920 1941 (258); 560->220 1940 (258); 560->255 1939 (258); 640->325 1915 (320); 645->666 1967 (1035); 651->666 1967 (1035); 663->666 1967 (1035); 670->666 1967 (1035); 690->666 1967 (1035); 710->230 1941 (258); 710->255 1941 (258); 710->310 1941 (258); 710->325 1941 (258); 710->360 1941 (258); 710->375 1941 (258); 712->740 1945 (258); 730->365 1903 (180); 740->20 1941 (258); 740->200 1941 (258); 740->325 1943 (258); 740->360 1944 (258); 740->365 1941 (258); 740->375 1944 (258); 740->560 1941 (258); 740->900 1941 (258); 740->920 1941 (258); 900->220 1940 (258); 900->255 1939 (258); 920->220 1940 (258); 920->255 1939 (258)
+[22:17:46] check: 67 joiner events on Germany's side of dispute 258 are on the initiating side
+[22:17:46] types bcd: bil 2198 (weights 2070.2); chooser 730 (weights 562.8); defender 348 (weights 274.0); events kept 3276 of 3276 (dropped 0)
+[22:17:56] dump_long: events in the fatal-MID sample 1080 of 3276
+[22:17:56] dump_long: events whose primary dispute is fatal (GML) 1007, nonfatal 1837, unknown 432
+[22:17:57] dump_long: wrote /home/claude/targeting_multiverse/output/rel_sweep/long_bcd_bon_relyear_mid.rds (382765 rows, 3276 strata); no fits run
+[22:18:11] types bcjs: initiator side from the participant table differs from the collapsed event flag on 17 of 3424 events (9 of them mixed-source)
+[22:18:11] types bcjs: initiating side of joiners' disputes by rule 1 (originator events) 491 joiner events, war rule 30, Side A (non-war) 20, war mapping ambiguous (Side A) 0; reviewed cases 58 (hard 8)
+[22:18:11] types bcjs (P1-2 side fix): joiners on the initiating side 322, on the target side 219; joiners whose label changed from the Side-A rule 150 (weight 71.6; side-B->initiating 91, side-A->target 59); war-mapping-ambiguous joiners (Side A) 0 in disputes ; side-conflicted joiners 0
+[22:18:11] check: initiating side matches the case review for 13 reviewed disputes in the sample
+[22:18:11] types bcjs: changed joiner events (initiator->target year, dispute): 2->230 1941 (258); 2->310 1941 (258); 2->325 1941 (258); 2->360 1941 (258); 2->365 1956 (200); 2->375 1941 (258); 2->651 1956 (200); 20->220 1940 (258); 20->255 1939 (258); 90->93 1907 (1202); 92->93 1907 (1202); 140->255 1944 (258); 140->310 1944 (258); 140->355 1944 (258); 140->360 1944 (258); 140->375 1944 (258); 140->740 1944 (258); 200->255 1939 (258); 200->325 1935 (111); 200->365 1853 (57); 200->651 1956 (200); 211->255 1939 (258); 220->255 1939 (258); 220->365 1853 (57); 220->651 1956 (200); 230->20 1941 (258); 230->200 1941 (258); 230->325 1943 (258); 230->365 1941 (258); 230->560 1941 (258); 230->900 1941 (258); 230->920 1941 (258); 240->255 1866 (261); 240->325 1866 (261); 245->255 1866 (261); 245->325 1866 (261); 255->325 1914 (320); 255->360 1944 (3826); 267->255 1866 (261); 267->325 1866 (261); 269->255 1866 (261); 271->255 1866 (261); 271->325 1866 (261); 273->255 1866 (261); 273->325 1866 (261); 275->255 1866 (261); 275->325 1866 (261); 280->240 1866 (261); 280->245 1866 (261); 280->267 1866 (261); 280->269 1866 (261); 280->271 1866 (261); 280->273 1866 (261); 280->275 1866 (261); 280->300 1866 (261); 300->365 1854 (57); 310->20 1941 (258); 310->200 1941 (258); 310->325 1943 (258); 310->360 1944 (258); 310->365 1941 (258); 310->375 1944 (258); 310->560 1941 (258); 310->900 1941 (258); 310->920 1941 (258); 325->20 1940 (258); 325->220 1940 (258); 325->255 1943 (258); 325->269 1866 (261); 325->300 1866 (261); 325->365 1855 (57); 325->560 1940 (258); 325->900 1940 (258); 325->920 1940 (258); 332->300 1848 (19); 337->300 1848 (19); 345->220 1941 (258); 345->325 1941 (258); 350->220 1940 (258); 350->255 1940 (258); 355->2 1941 (258); 355->20 1941 (258); 355->200 1941 (258); 355->255 1944 (258); 355->310 1944 (258); 355->325 1943 (258); 355->365 1941 (258); 355->375 1944 (258); 355->560 1941 (258); 355->710 1941 (258); 355->740 1944 (258); 355->900 1941 (258); 355->920 1941 (258); 360->20 1941 (258); 360->200 1941 (258); 360->255 1944 (258); 360->325 1943 (258); 360->560 1941 (258); 360->900 1941 (258); 360->920 1941 (258); 365->20 1939 (258); 365->200 1939 (258); 365->200 1956 (200); 365->211 1939 (258); 365->220 1939 (258); 365->220 1956 (200); 365->325 1941 (258); 365->560 1939 (258); 365->666 1956 (200); 365->740 1939 (183); 365->900 1939 (258); 365->920 1939 (258); 375->20 1941 (258); 375->200 1941 (258); 375->255 1944 (258); 375->325 1943 (258); 375->360 1944 (258); 375->365 1941 (258); 375->560 1941 (258); 375->900 1941 (258); 375->920 1941 (258); 560->220 1940 (258); 560->255 1939 (258); 640->325 1915 (320); 645->666 1967 (1035); 651->666 1967 (1035); 663->666 1967 (1035); 670->666 1967 (1035); 690->666 1967 (1035); 710->230 1941 (258); 710->255 1941 (258); 710->310 1941 (258); 710->325 1941 (258); 710->360 1941 (258); 710->375 1941 (258); 712->740 1945 (258); 730->365 1903 (180); 740->20 1941 (258); 740->200 1941 (258); 740->325 1943 (258); 740->360 1944 (258); 740->365 1941 (258); 740->375 1944 (258); 740->560 1941 (258); 740->900 1941 (258); 740->920 1941 (258); 900->220 1940 (258); 900->255 1939 (258); 920->220 1940 (258); 920->255 1939 (258)
+[22:18:11] check: 67 joiner events on Germany's side of dispute 258 are on the initiating side
+[22:18:11] types bcjs: bil 503 (weights 490.1); coal 36 (weights 36.0); joinA 322 (weights 181.8); joinB 219 (weights 162.0); events kept 1080 of 1080 (dropped 0)
+[22:18:14] dump_long: events in the fatal-MID sample 1080 of 1080
+[22:18:14] dump_long: events whose primary dispute is fatal (GML) 904, nonfatal 62, unknown 114
+[22:18:15] dump_long: wrote /home/claude/targeting_multiverse/output/rel_sweep/long_bcjs_bon_relyear_fmid.rds (114577 rows, 1080 strata); no fits run
+[22:18:31] check: Germany -> Poland 1939 stays bilateral (onset rule; first partner after the window)
+[22:18:31] check: 2 -> 645 1997 coded 1 (was 0)
+[22:18:31] check: 2 -> 731 1950 coded 1 (was 2)
+[22:18:31] types bcd: initiator side from the participant table differs from the collapsed event flag on 17 of 3424 events (9 of them mixed-source)
+[22:18:32] types bcd: coorig window promotions undone for 50 early TARGET-side joiners (kept 80 initiating-side promotions)
+[22:18:32] types bcd: initiating side of joiners' disputes by rule 1 (originator events) 419 joiner events, war rule 25, Side A (non-war) 17, war mapping ambiguous (Side A) 0; reviewed cases 58 (hard 8)
+[22:18:32] types bcd (P1-2 side fix): joiners on the initiating side 242, on the target side 219; joiners whose label changed from the Side-A rule 147 (weight 68.6; side-B->initiating 88, side-A->target 59); war-mapping-ambiguous joiners (Side A) 0 in disputes ; side-conflicted joiners 0
+[22:18:32] check: initiating side matches the case review for 13 reviewed disputes in the sample
+[22:18:32] types bcd: changed joiner events (initiator->target year, dispute): 2->230 1941 (258); 2->310 1941 (258); 2->325 1941 (258); 2->360 1941 (258); 2->365 1956 (200); 2->375 1941 (258); 2->651 1956 (200); 20->220 1940 (258); 20->255 1939 (258); 90->93 1907 (1202); 92->93 1907 (1202); 140->255 1944 (258); 140->310 1944 (258); 140->355 1944 (258); 140->360 1944 (258); 140->375 1944 (258); 140->740 1944 (258); 200->255 1939 (258); 200->325 1935 (111); 200->651 1956 (200); 211->255 1939 (258); 220->255 1939 (258); 220->651 1956 (200); 230->20 1941 (258); 230->200 1941 (258); 230->325 1943 (258); 230->365 1941 (258); 230->560 1941 (258); 230->900 1941 (258); 230->920 1941 (258); 240->255 1866 (261); 240->325 1866 (261); 245->255 1866 (261); 245->325 1866 (261); 255->325 1914 (320); 267->255 1866 (261); 267->325 1866 (261); 269->255 1866 (261); 271->255 1866 (261); 271->325 1866 (261); 273->255 1866 (261); 273->325 1866 (261); 275->255 1866 (261); 275->325 1866 (261); 280->240 1866 (261); 280->245 1866 (261); 280->267 1866 (261); 280->269 1866 (261); 280->271 1866 (261); 280->273 1866 (261); 280->275 1866 (261); 280->300 1866 (261); 300->365 1854 (57); 310->20 1941 (258); 310->200 1941 (258); 310->325 1943 (258); 310->360 1944 (258); 310->365 1941 (258); 310->375 1944 (258); 310->560 1941 (258); 310->900 1941 (258); 310->920 1941 (258); 325->20 1940 (258); 325->220 1940 (258); 325->255 1943 (258); 325->269 1866 (261); 325->300 1866 (261); 325->365 1855 (57); 325->560 1940 (258); 325->900 1940 (258); 325->920 1940 (258); 332->300 1848 (19); 337->300 1848 (19); 345->220 1941 (258); 345->325 1941 (258); 350->220 1940 (258); 350->255 1940 (258); 355->2 1941 (258); 355->20 1941 (258); 355->200 1941 (258); 355->255 1944 (258); 355->310 1944 (258); 355->325 1943 (258); 355->365 1941 (258); 355->375 1944 (258); 355->560 1941 (258); 355->710 1941 (258); 355->740 1944 (258); 355->900 1941 (258); 355->920 1941 (258); 360->20 1941 (258); 360->200 1941 (258); 360->255 1944 (258); 360->325 1943 (258); 360->560 1941 (258); 360->900 1941 (258); 360->920 1941 (258); 365->20 1939 (258); 365->200 1939 (258); 365->200 1956 (200); 365->211 1939 (258); 365->220 1939 (258); 365->220 1956 (200); 365->325 1941 (258); 365->560 1939 (258); 365->666 1956 (200); 365->740 1939 (183); 365->900 1939 (258); 365->920 1939 (258); 375->20 1941 (258); 375->200 1941 (258); 375->255 1944 (258); 375->325 1943 (258); 375->360 1944 (258); 375->365 1941 (258); 375->560 1941 (258); 375->900 1941 (258); 375->920 1941 (258); 560->220 1940 (258); 560->255 1939 (258); 640->325 1915 (320); 645->666 1967 (1035); 651->666 1967 (1035); 663->666 1967 (1035); 670->666 1967 (1035); 690->666 1967 (1035); 710->230 1941 (258); 710->255 1941 (258); 710->310 1941 (258); 710->325 1941 (258); 710->360 1941 (258); 710->375 1941 (258); 712->740 1945 (258); 730->365 1903 (180); 740->20 1941 (258); 740->200 1941 (258); 740->325 1943 (258); 740->360 1944 (258); 740->365 1941 (258); 740->375 1944 (258); 740->560 1941 (258); 740->900 1941 (258); 740->920 1941 (258); 900->220 1940 (258); 900->255 1939 (258); 920->220 1940 (258); 920->255 1939 (258)
+[22:18:32] check: 67 joiner events on Germany's side of dispute 258 are on the initiating side
+[22:18:32] types bcd: bil 478 (weights 467.1); chooser 383 (weights 240.8); defender 219 (weights 162.0); events kept 1080 of 1080 (dropped 0)
+[22:18:35] dump_long: events in the fatal-MID sample 1080 of 1080
+[22:18:35] dump_long: events whose primary dispute is fatal (GML) 904, nonfatal 62, unknown 114
+[22:18:35] dump_long: wrote /home/claude/targeting_multiverse/output/rel_sweep/long_bcd_bon_w1d_relyear_fmid.rds (114577 rows, 1080 strata); no fits run
+[22:18:49] check: Germany -> Poland 1939 stays bilateral (onset rule; first partner after the window)
+[22:18:49] check: 2 -> 645 1997 coded 1 (was 0)
+[22:18:49] check: 2 -> 731 1950 coded 1 (was 2)
+[22:18:49] types bcd: initiator side from the participant table differs from the collapsed event flag on 17 of 3424 events (9 of them mixed-source)
+[22:18:49] types bcd: coorig window promotions undone for 115 early TARGET-side joiners (kept 123 initiating-side promotions)
+[22:18:49] types bcd: initiating side of joiners' disputes by rule 1 (originator events) 672 joiner events, war rule 25, Side A (non-war) 26, war mapping ambiguous (Side A) 0; reviewed cases 67 (hard 8)
+[22:18:49] types bcd (P1-2 side fix): joiners on the initiating side 375, on the target side 348; joiners whose label changed from the Side-A rule 147 (weight 68.6; side-B->initiating 88, side-A->target 59); war-mapping-ambiguous joiners (Side A) 0 in disputes ; side-conflicted joiners 0
+[22:18:49] check: initiating side matches the case review for 13 reviewed disputes in the sample
+[22:18:49] types bcd: changed joiner events (initiator->target year, dispute): 2->230 1941 (258); 2->310 1941 (258); 2->325 1941 (258); 2->360 1941 (258); 2->365 1956 (200); 2->375 1941 (258); 2->651 1956 (200); 20->220 1940 (258); 20->255 1939 (258); 90->93 1907 (1202); 92->93 1907 (1202); 140->255 1944 (258); 140->310 1944 (258); 140->355 1944 (258); 140->360 1944 (258); 140->375 1944 (258); 140->740 1944 (258); 200->255 1939 (258); 200->325 1935 (111); 200->651 1956 (200); 211->255 1939 (258); 220->255 1939 (258); 220->651 1956 (200); 230->20 1941 (258); 230->200 1941 (258); 230->325 1943 (258); 230->365 1941 (258); 230->560 1941 (258); 230->900 1941 (258); 230->920 1941 (258); 240->255 1866 (261); 240->325 1866 (261); 245->255 1866 (261); 245->325 1866 (261); 255->325 1914 (320); 267->255 1866 (261); 267->325 1866 (261); 269->255 1866 (261); 271->255 1866 (261); 271->325 1866 (261); 273->255 1866 (261); 273->325 1866 (261); 275->255 1866 (261); 275->325 1866 (261); 280->240 1866 (261); 280->245 1866 (261); 280->267 1866 (261); 280->269 1866 (261); 280->271 1866 (261); 280->273 1866 (261); 280->275 1866 (261); 280->300 1866 (261); 300->365 1854 (57); 310->20 1941 (258); 310->200 1941 (258); 310->325 1943 (258); 310->360 1944 (258); 310->365 1941 (258); 310->375 1944 (258); 310->560 1941 (258); 310->900 1941 (258); 310->920 1941 (258); 325->20 1940 (258); 325->220 1940 (258); 325->255 1943 (258); 325->269 1866 (261); 325->300 1866 (261); 325->365 1855 (57); 325->560 1940 (258); 325->900 1940 (258); 325->920 1940 (258); 332->300 1848 (19); 337->300 1848 (19); 345->220 1941 (258); 345->325 1941 (258); 350->220 1940 (258); 350->255 1940 (258); 355->2 1941 (258); 355->20 1941 (258); 355->200 1941 (258); 355->255 1944 (258); 355->310 1944 (258); 355->325 1943 (258); 355->365 1941 (258); 355->375 1944 (258); 355->560 1941 (258); 355->710 1941 (258); 355->740 1944 (258); 355->900 1941 (258); 355->920 1941 (258); 360->20 1941 (258); 360->200 1941 (258); 360->255 1944 (258); 360->325 1943 (258); 360->560 1941 (258); 360->900 1941 (258); 360->920 1941 (258); 365->20 1939 (258); 365->200 1939 (258); 365->200 1956 (200); 365->211 1939 (258); 365->220 1939 (258); 365->220 1956 (200); 365->325 1941 (258); 365->560 1939 (258); 365->666 1956 (200); 365->740 1939 (183); 365->900 1939 (258); 365->920 1939 (258); 375->20 1941 (258); 375->200 1941 (258); 375->255 1944 (258); 375->325 1943 (258); 375->360 1944 (258); 375->365 1941 (258); 375->560 1941 (258); 375->900 1941 (258); 375->920 1941 (258); 560->220 1940 (258); 560->255 1939 (258); 640->325 1915 (320); 645->666 1967 (1035); 651->666 1967 (1035); 663->666 1967 (1035); 670->666 1967 (1035); 690->666 1967 (1035); 710->230 1941 (258); 710->255 1941 (258); 710->310 1941 (258); 710->325 1941 (258); 710->360 1941 (258); 710->375 1941 (258); 712->740 1945 (258); 730->365 1903 (180); 740->20 1941 (258); 740->200 1941 (258); 740->325 1943 (258); 740->360 1944 (258); 740->365 1941 (258); 740->375 1944 (258); 740->560 1941 (258); 740->900 1941 (258); 740->920 1941 (258); 900->220 1940 (258); 900->255 1939 (258); 920->220 1940 (258); 920->255 1939 (258)
+[22:18:49] check: 67 joiner events on Germany's side of dispute 258 are on the initiating side
+[22:18:49] types bcd: bil 2159 (weights 2033.2); chooser 769 (weights 599.8); defender 348 (weights 274.0); events kept 3276 of 3276 (dropped 0)
+[22:18:59] dump_long: events in the fatal-MID sample 1080 of 3276
+[22:18:59] dump_long: events whose primary dispute is fatal (GML) 1007, nonfatal 1837, unknown 432
+[22:19:00] dump_long: wrote /home/claude/targeting_multiverse/output/rel_sweep/long_bcd_bon_w1d_relyear_mid.rds (382765 rows, 3276 strata); no fits run
+[22:19:14] check: Germany -> Poland 1939 stays bilateral (onset rule; first partner after the window)
+[22:19:14] check: 2 -> 645 1997 coded 1 (was 0)
+[22:19:14] check: 2 -> 731 1950 coded 1 (was 2)
+[22:19:14] types bcjs: initiator side from the participant table differs from the collapsed event flag on 17 of 3424 events (9 of them mixed-source)
+[22:19:14] types bcjs: coorig window promotions undone for 50 early TARGET-side joiners (kept 80 initiating-side promotions)
+[22:19:14] types bcjs: initiating side of joiners' disputes by rule 1 (originator events) 419 joiner events, war rule 25, Side A (non-war) 17, war mapping ambiguous (Side A) 0; reviewed cases 58 (hard 8)
+[22:19:14] types bcjs (P1-2 side fix): joiners on the initiating side 242, on the target side 219; joiners whose label changed from the Side-A rule 147 (weight 68.6; side-B->initiating 88, side-A->target 59); war-mapping-ambiguous joiners (Side A) 0 in disputes ; side-conflicted joiners 0
+[22:19:14] check: initiating side matches the case review for 13 reviewed disputes in the sample
+[22:19:14] types bcjs: changed joiner events (initiator->target year, dispute): 2->230 1941 (258); 2->310 1941 (258); 2->325 1941 (258); 2->360 1941 (258); 2->365 1956 (200); 2->375 1941 (258); 2->651 1956 (200); 20->220 1940 (258); 20->255 1939 (258); 90->93 1907 (1202); 92->93 1907 (1202); 140->255 1944 (258); 140->310 1944 (258); 140->355 1944 (258); 140->360 1944 (258); 140->375 1944 (258); 140->740 1944 (258); 200->255 1939 (258); 200->325 1935 (111); 200->651 1956 (200); 211->255 1939 (258); 220->255 1939 (258); 220->651 1956 (200); 230->20 1941 (258); 230->200 1941 (258); 230->325 1943 (258); 230->365 1941 (258); 230->560 1941 (258); 230->900 1941 (258); 230->920 1941 (258); 240->255 1866 (261); 240->325 1866 (261); 245->255 1866 (261); 245->325 1866 (261); 255->325 1914 (320); 267->255 1866 (261); 267->325 1866 (261); 269->255 1866 (261); 271->255 1866 (261); 271->325 1866 (261); 273->255 1866 (261); 273->325 1866 (261); 275->255 1866 (261); 275->325 1866 (261); 280->240 1866 (261); 280->245 1866 (261); 280->267 1866 (261); 280->269 1866 (261); 280->271 1866 (261); 280->273 1866 (261); 280->275 1866 (261); 280->300 1866 (261); 300->365 1854 (57); 310->20 1941 (258); 310->200 1941 (258); 310->325 1943 (258); 310->360 1944 (258); 310->365 1941 (258); 310->375 1944 (258); 310->560 1941 (258); 310->900 1941 (258); 310->920 1941 (258); 325->20 1940 (258); 325->220 1940 (258); 325->255 1943 (258); 325->269 1866 (261); 325->300 1866 (261); 325->365 1855 (57); 325->560 1940 (258); 325->900 1940 (258); 325->920 1940 (258); 332->300 1848 (19); 337->300 1848 (19); 345->220 1941 (258); 345->325 1941 (258); 350->220 1940 (258); 350->255 1940 (258); 355->2 1941 (258); 355->20 1941 (258); 355->200 1941 (258); 355->255 1944 (258); 355->310 1944 (258); 355->325 1943 (258); 355->365 1941 (258); 355->375 1944 (258); 355->560 1941 (258); 355->710 1941 (258); 355->740 1944 (258); 355->900 1941 (258); 355->920 1941 (258); 360->20 1941 (258); 360->200 1941 (258); 360->255 1944 (258); 360->325 1943 (258); 360->560 1941 (258); 360->900 1941 (258); 360->920 1941 (258); 365->20 1939 (258); 365->200 1939 (258); 365->200 1956 (200); 365->211 1939 (258); 365->220 1939 (258); 365->220 1956 (200); 365->325 1941 (258); 365->560 1939 (258); 365->666 1956 (200); 365->740 1939 (183); 365->900 1939 (258); 365->920 1939 (258); 375->20 1941 (258); 375->200 1941 (258); 375->255 1944 (258); 375->325 1943 (258); 375->360 1944 (258); 375->365 1941 (258); 375->560 1941 (258); 375->900 1941 (258); 375->920 1941 (258); 560->220 1940 (258); 560->255 1939 (258); 640->325 1915 (320); 645->666 1967 (1035); 651->666 1967 (1035); 663->666 1967 (1035); 670->666 1967 (1035); 690->666 1967 (1035); 710->230 1941 (258); 710->255 1941 (258); 710->310 1941 (258); 710->325 1941 (258); 710->360 1941 (258); 710->375 1941 (258); 712->740 1945 (258); 730->365 1903 (180); 740->20 1941 (258); 740->200 1941 (258); 740->325 1943 (258); 740->360 1944 (258); 740->365 1941 (258); 740->375 1944 (258); 740->560 1941 (258); 740->900 1941 (258); 740->920 1941 (258); 900->220 1940 (258); 900->255 1939 (258); 920->220 1940 (258); 920->255 1939 (258)
+[22:19:14] check: 67 joiner events on Germany's side of dispute 258 are on the initiating side
+[22:19:14] types bcjs: bil 478 (weights 467.1); coal 141 (weights 117.0); joinA 242 (weights 123.8); joinB 219 (weights 162.0); events kept 1080 of 1080 (dropped 0)
+[22:19:17] dump_long: events in the fatal-MID sample 1080 of 1080
+[22:19:17] dump_long: events whose primary dispute is fatal (GML) 904, nonfatal 62, unknown 114
+[22:19:17] dump_long: wrote /home/claude/targeting_multiverse/output/rel_sweep/long_bcjs_bon_w1d_relyear_fmid.rds (114577 rows, 1080 strata); no fits run
+[22:19:30] check: Germany -> Poland 1939 stays bilateral (onset rule; first partner after the window)
+[22:19:30] check: 2 -> 645 1997 coded 1 (was 0)
+[22:19:30] check: 2 -> 731 1950 coded 1 (was 2)
+[22:19:31] types bcd: initiator side from the participant table differs from the collapsed event flag on 17 of 3424 events (9 of them mixed-source)
+[22:19:31] types bcd: coorig window promotions undone for 50 early TARGET-side joiners (kept 80 initiating-side promotions)
+[22:19:31] types bcd: initiating side of joiners' disputes by rule 1 (originator events) 419 joiner events, war rule 25, Side A (non-war) 17, war mapping ambiguous (Side A) 0; reviewed cases 58 (hard 8)
+[22:19:31] types bcd (P1-2 side fix): joiners on the initiating side 242, on the target side 219; joiners whose label changed from the Side-A rule 147 (weight 147.0; side-B->initiating 88, side-A->target 59); war-mapping-ambiguous joiners (Side A) 0 in disputes ; side-conflicted joiners 0
+[22:19:31] check: initiating side matches the case review for 13 reviewed disputes in the sample
+[22:19:31] types bcd: changed joiner events (initiator->target year, dispute): 2->230 1941 (258); 2->310 1941 (258); 2->325 1941 (258); 2->360 1941 (258); 2->365 1956 (200); 2->375 1941 (258); 2->651 1956 (200); 20->220 1940 (258); 20->255 1939 (258); 90->93 1907 (1202); 92->93 1907 (1202); 140->255 1944 (258); 140->310 1944 (258); 140->355 1944 (258); 140->360 1944 (258); 140->375 1944 (258); 140->740 1944 (258); 200->255 1939 (258); 200->325 1935 (111); 200->651 1956 (200); 211->255 1939 (258); 220->255 1939 (258); 220->651 1956 (200); 230->20 1941 (258); 230->200 1941 (258); 230->325 1943 (258); 230->365 1941 (258); 230->560 1941 (258); 230->900 1941 (258); 230->920 1941 (258); 240->255 1866 (261); 240->325 1866 (261); 245->255 1866 (261); 245->325 1866 (261); 255->325 1914 (320); 267->255 1866 (261); 267->325 1866 (261); 269->255 1866 (261); 271->255 1866 (261); 271->325 1866 (261); 273->255 1866 (261); 273->325 1866 (261); 275->255 1866 (261); 275->325 1866 (261); 280->240 1866 (261); 280->245 1866 (261); 280->267 1866 (261); 280->269 1866 (261); 280->271 1866 (261); 280->273 1866 (261); 280->275 1866 (261); 280->300 1866 (261); 300->365 1854 (57); 310->20 1941 (258); 310->200 1941 (258); 310->325 1943 (258); 310->360 1944 (258); 310->365 1941 (258); 310->375 1944 (258); 310->560 1941 (258); 310->900 1941 (258); 310->920 1941 (258); 325->20 1940 (258); 325->220 1940 (258); 325->255 1943 (258); 325->269 1866 (261); 325->300 1866 (261); 325->365 1855 (57); 325->560 1940 (258); 325->900 1940 (258); 325->920 1940 (258); 332->300 1848 (19); 337->300 1848 (19); 345->220 1941 (258); 345->325 1941 (258); 350->220 1940 (258); 350->255 1940 (258); 355->2 1941 (258); 355->20 1941 (258); 355->200 1941 (258); 355->255 1944 (258); 355->310 1944 (258); 355->325 1943 (258); 355->365 1941 (258); 355->375 1944 (258); 355->560 1941 (258); 355->710 1941 (258); 355->740 1944 (258); 355->900 1941 (258); 355->920 1941 (258); 360->20 1941 (258); 360->200 1941 (258); 360->255 1944 (258); 360->325 1943 (258); 360->560 1941 (258); 360->900 1941 (258); 360->920 1941 (258); 365->20 1939 (258); 365->200 1939 (258); 365->200 1956 (200); 365->211 1939 (258); 365->220 1939 (258); 365->220 1956 (200); 365->325 1941 (258); 365->560 1939 (258); 365->666 1956 (200); 365->740 1939 (183); 365->900 1939 (258); 365->920 1939 (258); 375->20 1941 (258); 375->200 1941 (258); 375->255 1944 (258); 375->325 1943 (258); 375->360 1944 (258); 375->365 1941 (258); 375->560 1941 (258); 375->900 1941 (258); 375->920 1941 (258); 560->220 1940 (258); 560->255 1939 (258); 640->325 1915 (320); 645->666 1967 (1035); 651->666 1967 (1035); 663->666 1967 (1035); 670->666 1967 (1035); 690->666 1967 (1035); 710->230 1941 (258); 710->255 1941 (258); 710->310 1941 (258); 710->325 1941 (258); 710->360 1941 (258); 710->375 1941 (258); 712->740 1945 (258); 730->365 1903 (180); 740->20 1941 (258); 740->200 1941 (258); 740->325 1943 (258); 740->360 1944 (258); 740->365 1941 (258); 740->375 1944 (258); 740->560 1941 (258); 740->900 1941 (258); 740->920 1941 (258); 900->220 1940 (258); 900->255 1939 (258); 920->220 1940 (258); 920->255 1939 (258)
+[22:19:31] check: 67 joiner events on Germany's side of dispute 258 are on the initiating side
+[22:19:31] types bcd: bil 478 (weights 478.0); chooser 383 (weights 383.0); defender 219 (weights 219.0); events kept 1080 of 1080 (dropped 0)
+[22:19:34] dump_long: events in the fatal-MID sample 1080 of 1080
+[22:19:34] dump_long: events whose primary dispute is fatal (GML) 904, nonfatal 62, unknown 114
+[22:19:35] dump_long: wrote /home/claude/targeting_multiverse/output/rel_sweep/long_bcd_bon_w1d_relyear_uw_fmid.rds (114577 rows, 1080 strata); no fits run
+[22:19:36] R 4.3.3 | survival 3.5.8 | cores 2
+[22:19:36] dump long_bcd_bon_relyear_fmid.rds: scheme bcd_bon_relyear_fmid, 114577 rows, 1080 strata, types bil/chooser/defender, rel_scale year, commit 8fcccecd9cb2f0d92e85d5d0e3aded40ffa49747-dirty
+[22:19:36] validation: rebuilt baseline dR vs dumped dR, max abs diff 8.88e-16
+[22:19:36] state-years in the measure key but not in sy_positions 0; in sy_positions but not in the key 0 (year scales use each measure's own key)
+[22:19:41] positions main.rds: 1 specs (0 constant in >= 5% of all years, metadata only; eligibility checked on the years each fit uses)
+WROTE output_test/sweep/multiverse_fmid_w0/sweep_bcd_bon_relyear_fmid_main.csv
+[22:19:46] CENSUS output_test/sweep/multiverse_fmid_w0/sweep_bcd_bon_relyear_fmid_main.csv: specs 1 | valid M0 1, M1 1 | skipped (constant in a used year) 0 | invalid fits M0 0, M1 0 | errors 0 | valid fits with a Wald test not computable 0 | in 0.1 min
+[22:19:47] R 4.3.3 | survival 3.5.8 | cores 2
+[22:19:47] dump long_bcd_bon_relyear_mid.rds: scheme bcd_bon_relyear_mid, 382765 rows, 3276 strata, types bil/chooser/defender, rel_scale year, commit 8fcccecd9cb2f0d92e85d5d0e3aded40ffa49747-dirty
+[22:19:48] validation: rebuilt baseline dR vs dumped dR, max abs diff 8.88e-16
+[22:19:48] state-years in the measure key but not in sy_positions 0; in sy_positions but not in the key 0 (year scales use each measure's own key)
+[22:20:04] positions main.rds: 1 specs (0 constant in >= 5% of all years, metadata only; eligibility checked on the years each fit uses)
+WROTE output_test/sweep/multiverse_mid_w0/sweep_bcd_bon_relyear_mid_main.csv
+[22:20:20] CENSUS output_test/sweep/multiverse_mid_w0/sweep_bcd_bon_relyear_mid_main.csv: specs 1 | valid M0 1, M1 1 | skipped (constant in a used year) 0 | invalid fits M0 0, M1 0 | errors 0 | valid fits with a Wald test not computable 0 | in 0.3 min
+[22:20:21] R 4.3.3 | survival 3.5.8 | cores 2
+[22:20:21] dump long_bcd_bon_w1d_relyear_fmid.rds: scheme bcd_bon_w1_relyear_fmid, 114577 rows, 1080 strata, types bil/chooser/defender, rel_scale year, commit 8fcccecd9cb2f0d92e85d5d0e3aded40ffa49747-dirty
+[22:20:22] validation: rebuilt baseline dR vs dumped dR, max abs diff 8.88e-16
+[22:20:22] state-years in the measure key but not in sy_positions 0; in sy_positions but not in the key 0 (year scales use each measure's own key)
+[22:20:27] positions main.rds: 1 specs (0 constant in >= 5% of all years, metadata only; eligibility checked on the years each fit uses)
+WROTE output_test/sweep/multiverse_fmid_w1/sweep_bcd_bon_w1_relyear_fmid_main.csv
+[22:20:31] CENSUS output_test/sweep/multiverse_fmid_w1/sweep_bcd_bon_w1_relyear_fmid_main.csv: specs 1 | valid M0 1, M1 1 | skipped (constant in a used year) 0 | invalid fits M0 0, M1 0 | errors 0 | valid fits with a Wald test not computable 0 | in 0.1 min
+[22:20:32] R 4.3.3 | survival 3.5.8 | cores 2
+[22:20:33] dump long_bcd_bon_w1d_relyear_mid.rds: scheme bcd_bon_w1_relyear_mid, 382765 rows, 3276 strata, types bil/chooser/defender, rel_scale year, commit 8fcccecd9cb2f0d92e85d5d0e3aded40ffa49747-dirty
+[22:20:34] validation: rebuilt baseline dR vs dumped dR, max abs diff 8.88e-16
+[22:20:34] state-years in the measure key but not in sy_positions 0; in sy_positions but not in the key 0 (year scales use each measure's own key)
+[22:20:50] positions main.rds: 1 specs (0 constant in >= 5% of all years, metadata only; eligibility checked on the years each fit uses)
+WROTE output_test/sweep/multiverse_mid_w1/sweep_bcd_bon_w1_relyear_mid_main.csv
+[22:21:05] CENSUS output_test/sweep/multiverse_mid_w1/sweep_bcd_bon_w1_relyear_mid_main.csv: specs 1 | valid M0 1, M1 1 | skipped (constant in a used year) 0 | invalid fits M0 0, M1 0 | errors 0 | valid fits with a Wald test not computable 0 | in 0.3 min
+[22:21:06] R 4.3.3 | survival 3.5.8 | cores 2
+[22:21:07] dump long_bcd_bon_w1d_relyear_mid.rds: scheme bcd_bon_stepBorigdisp_w1_relyear_mid, 382765 rows, 3276 strata, types bil/chooser/defender, rel_scale year, commit 8fcccecd9cb2f0d92e85d5d0e3aded40ffa49747-dirty
+[22:21:07] step B: 1080 of 3276 events fatal
+[22:21:08] validation: rebuilt baseline dR vs dumped dR, max abs diff 8.88e-16
+[22:21:08] state-years in the measure key but not in sy_positions 0; in sy_positions but not in the key 0 (year scales use each measure's own key)
+[22:21:09] positions main.rds: 1 specs (0 constant in >= 5% of all years, metadata only; eligibility checked on the years each fit uses)
+WROTE output_test/sweep/multiverse_stepB_w1/sweep_bcd_bon_stepBorigdisp_w1_relyear_mid_main.csv
+[22:21:09] CENSUS output_test/sweep/multiverse_stepB_w1/sweep_bcd_bon_stepBorigdisp_w1_relyear_mid_main.csv: specs 1 | valid M0 1, M1 1 | skipped (constant in a used year) 0 | invalid fits M0 0, M1 0 | errors 0 | valid fits with a Wald test not computable 0 | in 0.0 min
+[22:21:10] R 4.3.3 | survival 3.5.8 | cores 2
+[22:21:10] dump long_bcjs_bon_relyear_fmid.rds: scheme bcjs_bon_relyear_fmid, 114577 rows, 1080 strata, types bil/coal/joinA/joinB, rel_scale year, commit 8fcccecd9cb2f0d92e85d5d0e3aded40ffa49747-dirty
+[22:21:11] validation: rebuilt baseline dR vs dumped dR, max abs diff 8.88e-16
+[22:21:11] state-years in the measure key but not in sy_positions 0; in sy_positions but not in the key 0 (year scales use each measure's own key)
+[22:21:17] positions main.rds: 1 specs (0 constant in >= 5% of all years, metadata only; eligibility checked on the years each fit uses)
+WROTE output_test/sweep/fourtypes_w0/sweep_bcjs_bon_relyear_fmid_main.csv
+[22:21:22] CENSUS output_test/sweep/fourtypes_w0/sweep_bcjs_bon_relyear_fmid_main.csv: specs 1 | valid M0 1, M1 1 | skipped (constant in a used year) 0 | invalid fits M0 0, M1 0 | errors 0 | valid fits with a Wald test not computable 0 | in 0.1 min
+[22:21:23] R 4.3.3 | survival 3.5.8 | cores 2
+[22:21:23] dump long_bcjs_bon_w1d_relyear_fmid.rds: scheme bcjs_bon_w1_relyear_fmid, 114577 rows, 1080 strata, types bil/coal/joinA/joinB, rel_scale year, commit 8fcccecd9cb2f0d92e85d5d0e3aded40ffa49747-dirty
+[22:21:23] validation: rebuilt baseline dR vs dumped dR, max abs diff 8.88e-16
+[22:21:23] state-years in the measure key but not in sy_positions 0; in sy_positions but not in the key 0 (year scales use each measure's own key)
+[22:21:29] positions main.rds: 1 specs (0 constant in >= 5% of all years, metadata only; eligibility checked on the years each fit uses)
+WROTE output_test/sweep/fourtypes_w1/sweep_bcjs_bon_w1_relyear_fmid_main.csv
+[22:21:34] CENSUS output_test/sweep/fourtypes_w1/sweep_bcjs_bon_w1_relyear_fmid_main.csv: specs 1 | valid M0 1, M1 1 | skipped (constant in a used year) 0 | invalid fits M0 0, M1 0 | errors 0 | valid fits with a Wald test not computable 0 | in 0.1 min
+[22:21:36] dispute start: GML styear for 1046 of 1080 events; events.rds fallback 34; none (event year) 0; GML and the build's earliest event disagree on 13 events (GML used)
+[22:21:36] dispute start: collapsed events 33; whose source disputes start in different years 9 (anchored on the primary dispute)
+[22:21:36] dispute start: 4 events whose dispute start is after the event year (set to the event year): disp 139 st 1935 yr 1934; disp 623 st 1965 yr 1964; disp 3540 st 1984 yr 1983; disp 3813 st 1941 yr 1940
+[22:22:11] aggr: strata whose window passes the end of GML (2010; flagged aggr_censored, counts are a lower bound) 9
+[22:22:11] aggr: type bil, mean originated MIDs chosen 1.84 vs alternatives 0.76
+[22:22:11] aggr: type chooser, mean originated MIDs chosen 1.90 vs alternatives 0.83
+[22:22:11] aggr: type defender, mean originated MIDs chosen 4.39 vs alternatives 0.77
+[22:22:11] wrote output_test/dumps/var_aggr.rds: 114577 rows, 1080 strata (was 114577 / 1080); types bil/chooser/defender; Z contig_land,log_capdist,tgt_dem,tgt_dem_x_init_dem,alliance_def_off,tgt_major,tgt_major_x_init_major,dy_mid_tm1,log_dy_prior_mids,aggr_bil,aggr_chooser,aggr_defender
+[22:22:15] dispute start: GML styear for 1046 of 1080 events; events.rds fallback 34; none (event year) 0; GML and the build's earliest event disagree on 13 events (GML used)
+[22:22:15] dispute start: collapsed events 33; whose source disputes start in different years 9 (anchored on the primary dispute)
+[22:22:15] dispute start: 4 events whose dispute start is after the event year (set to the event year): disp 139 st 1935 yr 1934; disp 623 st 1965 yr 1964; disp 3540 st 1984 yr 1983; disp 3813 st 1941 yr 1940
+[22:22:15] expdef: anchor = dispute start - 1; events where it differs from event year - 1: 249 of 1080
+[22:22:15] expdef: alternatives with >= 1 defense partner at t-1 0.584; chosen targets 0.531; mean n_def chosen 5.85 vs alternatives 8.80
+[22:22:15] wrote output_test/dumps/var_expdef.rds: 114577 rows, 1080 strata (was 114577 / 1080); types bil/chooser/defender; Z contig_land,log_capdist,tgt_dem,tgt_dem_x_init_dem,alliance_def_off,tgt_major,tgt_major_x_init_major,dy_mid_tm1,log_dy_prior_mids,def_bil,def_chooser,def_defender
+[22:22:19] expdef: alternatives with >= 1 defense partner at t-1 0.592; chosen targets 0.542; mean n_def chosen 5.81 vs alternatives 8.91
+[22:22:19] wrote output_test/dumps/var_expdefentry.rds: 114577 rows, 1080 strata (was 114577 / 1080); types bil/chooser/defender; Z contig_land,log_capdist,tgt_dem,tgt_dem_x_init_dem,alliance_def_off,tgt_major,tgt_major_x_init_major,dy_mid_tm1,log_dy_prior_mids,def_bil,def_chooser,def_defender
+[22:22:22] dropside (hard): removed 8 joiner strata; types left 478/378/216
+[22:22:22] wrote output_test/dumps/var_ds_hard.rds: 113871 rows, 1072 strata (was 114577 / 1080); types bil/chooser/defender; Z contig_land,log_capdist,tgt_dem,tgt_dem_x_init_dem,alliance_def_off,tgt_major,tgt_major_x_init_major,dy_mid_tm1,log_dy_prior_mids
+[22:22:25] dropside (reviewed): removed 58 joiner strata; types left 478/349/195
+[22:22:25] wrote output_test/dumps/var_ds_reviewed.rds: 107303 rows, 1022 strata (was 114577 / 1080); types bil/chooser/defender; Z contig_land,log_capdist,tgt_dem,tgt_dem_x_init_dem,alliance_def_off,tgt_major,tgt_major_x_init_major,dy_mid_tm1,log_dy_prior_mids
+[22:22:28] dropside (hard_disp): removed 8 joiner strata; types left 478/378/216
+[22:22:28] wrote output_test/dumps/var_ds_hard_disp.rds: 113871 rows, 1072 strata (was 114577 / 1080); types bil/chooser/defender; Z contig_land,log_capdist,tgt_dem,tgt_dem_x_init_dem,alliance_def_off,tgt_major,tgt_major_x_init_major,dy_mid_tm1,log_dy_prior_mids
+[22:22:31] dropside (reviewed_disp): removed 64 joiner strata; types left 473/348/195
+[22:22:31] wrote output_test/dumps/var_ds_reviewed_disp.rds: 106653 rows, 1016 strata (was 114577 / 1080); types bil/chooser/defender; Z contig_land,log_capdist,tgt_dem,tgt_dem_x_init_dem,alliance_def_off,tgt_major,tgt_major_x_init_major,dy_mid_tm1,log_dy_prior_mids
+[22:22:32] R 4.3.3 | survival 3.5.8 | cores 2
+[22:22:33] dump long_bcd_bon_w1d_relyear_fmid.rds: scheme bcd_bon_w1_relyear_fmid, 114577 rows, 1080 strata, types bil/chooser/defender, rel_scale year, commit 8fcccecd9cb2f0d92e85d5d0e3aded40ffa49747-dirty
+[22:22:33] validation: rebuilt baseline dR vs dumped dR, max abs diff 8.88e-16
+[22:22:33] state-years in the measure key but not in sy_positions 0; in sy_positions but not in the key 0 (year scales use each measure's own key)
+[22:22:38] positions main.rds: 1 specs (0 constant in >= 5% of all years, metadata only; eligibility checked on the years each fit uses)
+WROTE output_test/sweep/rob_base/sweep_bcd_bon_w1_relyear_fmid_main.csv
+[22:22:42] CENSUS output_test/sweep/rob_base/sweep_bcd_bon_w1_relyear_fmid_main.csv: specs 1 | valid M0 1, M1 1 | skipped (constant in a used year) 0 | invalid fits M0 0, M1 0 | errors 0 | valid fits with a Wald test not computable 0 | in 0.1 min
+[22:22:43] R 4.3.3 | survival 3.5.8 | cores 2
+[22:22:43] dump var_aggr.rds: scheme bcd_aggr_bon_w1_relyear_fmid, 114577 rows, 1080 strata, types bil/chooser/defender, rel_scale year, commit 8fcccecd9cb2f0d92e85d5d0e3aded40ffa49747-dirty
+[22:22:44] validation: rebuilt baseline dR vs dumped dR, max abs diff 8.88e-16
+[22:22:44] state-years in the measure key but not in sy_positions 0; in sy_positions but not in the key 0 (year scales use each measure's own key)
+[22:22:51] positions main.rds: 1 specs (0 constant in >= 5% of all years, metadata only; eligibility checked on the years each fit uses)
+WROTE output_test/sweep/rob_aggr/sweep_bcd_aggr_bon_w1_relyear_fmid_main.csv
+[22:22:57] CENSUS output_test/sweep/rob_aggr/sweep_bcd_aggr_bon_w1_relyear_fmid_main.csv: specs 1 | valid M0 1, M1 1 | skipped (constant in a used year) 0 | invalid fits M0 0, M1 0 | errors 0 | valid fits with a Wald test not computable 0 | in 0.1 min
+[22:22:58] R 4.3.3 | survival 3.5.8 | cores 2
+[22:22:58] dump var_expdef.rds: scheme bcd_expdef_bon_w1_relyear_fmid, 114577 rows, 1080 strata, types bil/chooser/defender, rel_scale year, commit 8fcccecd9cb2f0d92e85d5d0e3aded40ffa49747-dirty
+[22:22:58] validation: rebuilt baseline dR vs dumped dR, max abs diff 8.88e-16
+[22:22:58] state-years in the measure key but not in sy_positions 0; in sy_positions but not in the key 0 (year scales use each measure's own key)
+[22:23:06] positions main.rds: 1 specs (0 constant in >= 5% of all years, metadata only; eligibility checked on the years each fit uses)
+WROTE output_test/sweep/rob_expdef/sweep_bcd_expdef_bon_w1_relyear_fmid_main.csv
+[22:23:12] CENSUS output_test/sweep/rob_expdef/sweep_bcd_expdef_bon_w1_relyear_fmid_main.csv: specs 1 | valid M0 1, M1 1 | skipped (constant in a used year) 0 | invalid fits M0 0, M1 0 | errors 0 | valid fits with a Wald test not computable 0 | in 0.1 min
+[22:23:13] R 4.3.3 | survival 3.5.8 | cores 2
+[22:23:13] dump var_expdefentry.rds: scheme bcd_expdefentry_bon_w1_relyear_fmid, 114577 rows, 1080 strata, types bil/chooser/defender, rel_scale year, commit 8fcccecd9cb2f0d92e85d5d0e3aded40ffa49747-dirty
+[22:23:14] validation: rebuilt baseline dR vs dumped dR, max abs diff 8.88e-16
+[22:23:14] state-years in the measure key but not in sy_positions 0; in sy_positions but not in the key 0 (year scales use each measure's own key)
+[22:23:21] positions main.rds: 1 specs (0 constant in >= 5% of all years, metadata only; eligibility checked on the years each fit uses)
+WROTE output_test/sweep/rob_expdefentry/sweep_bcd_expdefentry_bon_w1_relyear_fmid_main.csv
+[22:23:28] CENSUS output_test/sweep/rob_expdefentry/sweep_bcd_expdefentry_bon_w1_relyear_fmid_main.csv: specs 1 | valid M0 1, M1 1 | skipped (constant in a used year) 0 | invalid fits M0 0, M1 0 | errors 0 | valid fits with a Wald test not computable 0 | in 0.1 min
+[22:23:29] R 4.3.3 | survival 3.5.8 | cores 2
+[22:23:29] dump var_ds_hard.rds: scheme bcd_dropsidehard_bon_w1_relyear_fmid, 113871 rows, 1072 strata, types bil/chooser/defender, rel_scale year, commit 8fcccecd9cb2f0d92e85d5d0e3aded40ffa49747-dirty
+[22:23:29] validation: rebuilt baseline dR vs dumped dR, max abs diff 8.88e-16
+[22:23:29] state-years in the measure key but not in sy_positions 0; in sy_positions but not in the key 0 (year scales use each measure's own key)
+[22:23:34] positions main.rds: 1 specs (0 constant in >= 5% of all years, metadata only; eligibility checked on the years each fit uses)
+WROTE output_test/sweep/rob_dropside_hard/sweep_bcd_dropsidehard_bon_w1_relyear_fmid_main.csv
+[22:23:38] CENSUS output_test/sweep/rob_dropside_hard/sweep_bcd_dropsidehard_bon_w1_relyear_fmid_main.csv: specs 1 | valid M0 1, M1 1 | skipped (constant in a used year) 0 | invalid fits M0 0, M1 0 | errors 0 | valid fits with a Wald test not computable 0 | in 0.1 min
+[22:23:39] R 4.3.3 | survival 3.5.8 | cores 2
+[22:23:40] dump var_ds_reviewed.rds: scheme bcd_dropsidereviewed_bon_w1_relyear_fmid, 107303 rows, 1022 strata, types bil/chooser/defender, rel_scale year, commit 8fcccecd9cb2f0d92e85d5d0e3aded40ffa49747-dirty
+[22:23:40] validation: rebuilt baseline dR vs dumped dR, max abs diff 8.88e-16
+[22:23:40] state-years in the measure key but not in sy_positions 0; in sy_positions but not in the key 0 (year scales use each measure's own key)
+[22:23:45] positions main.rds: 1 specs (0 constant in >= 5% of all years, metadata only; eligibility checked on the years each fit uses)
+WROTE output_test/sweep/rob_dropside_reviewed/sweep_bcd_dropsidereviewed_bon_w1_relyear_fmid_main.csv
+[22:23:49] CENSUS output_test/sweep/rob_dropside_reviewed/sweep_bcd_dropsidereviewed_bon_w1_relyear_fmid_main.csv: specs 1 | valid M0 1, M1 1 | skipped (constant in a used year) 0 | invalid fits M0 0, M1 0 | errors 0 | valid fits with a Wald test not computable 0 | in 0.1 min
+[22:23:50] R 4.3.3 | survival 3.5.8 | cores 2
+[22:23:50] dump var_ds_hard_disp.rds: scheme bcd_dropsidehard_disp_bon_w1_relyear_fmid, 113871 rows, 1072 strata, types bil/chooser/defender, rel_scale year, commit 8fcccecd9cb2f0d92e85d5d0e3aded40ffa49747-dirty
+[22:23:50] validation: rebuilt baseline dR vs dumped dR, max abs diff 8.88e-16
+[22:23:50] state-years in the measure key but not in sy_positions 0; in sy_positions but not in the key 0 (year scales use each measure's own key)
+[22:23:55] positions main.rds: 1 specs (0 constant in >= 5% of all years, metadata only; eligibility checked on the years each fit uses)
+WROTE output_test/sweep/rob_dropside_hard_disp/sweep_bcd_dropsidehard_disp_bon_w1_relyear_fmid_main.csv
+[22:23:59] CENSUS output_test/sweep/rob_dropside_hard_disp/sweep_bcd_dropsidehard_disp_bon_w1_relyear_fmid_main.csv: specs 1 | valid M0 1, M1 1 | skipped (constant in a used year) 0 | invalid fits M0 0, M1 0 | errors 0 | valid fits with a Wald test not computable 0 | in 0.1 min
+[22:24:01] R 4.3.3 | survival 3.5.8 | cores 2
+[22:24:01] dump var_ds_reviewed_disp.rds: scheme bcd_dropsidereviewed_disp_bon_w1_relyear_fmid, 106653 rows, 1016 strata, types bil/chooser/defender, rel_scale year, commit 8fcccecd9cb2f0d92e85d5d0e3aded40ffa49747-dirty
+[22:24:01] validation: rebuilt baseline dR vs dumped dR, max abs diff 8.88e-16
+[22:24:01] state-years in the measure key but not in sy_positions 0; in sy_positions but not in the key 0 (year scales use each measure's own key)
+[22:24:06] positions main.rds: 1 specs (0 constant in >= 5% of all years, metadata only; eligibility checked on the years each fit uses)
+WROTE output_test/sweep/rob_dropside_reviewed_disp/sweep_bcd_dropsidereviewed_disp_bon_w1_relyear_fmid_main.csv
+[22:24:10] CENSUS output_test/sweep/rob_dropside_reviewed_disp/sweep_bcd_dropsidereviewed_disp_bon_w1_relyear_fmid_main.csv: specs 1 | valid M0 1, M1 1 | skipped (constant in a used year) 0 | invalid fits M0 0, M1 0 | errors 0 | valid fits with a Wald test not computable 0 | in 0.1 min
+[22:24:11] R 4.3.3 | survival 3.5.8 | cores 2
+[22:24:12] dump long_bcd_bon_w1d_relyear_fmid.rds: scheme bcd_bon_lag5_w1_relyear_fmid, 114577 rows, 1080 strata, types bil/chooser/defender, rel_scale year, commit 8fcccecd9cb2f0d92e85d5d0e3aded40ffa49747-dirty
+[22:24:12] pos_lag = 5: dropped 68 strata (chosen target or initiator without a position at t-5) and 5568 other alternatives
+[22:24:12] pos_lag = 5: event weight kept by type bil 434.6 of 467.1; chooser 230.1 of 240.8; defender 149.3 of 162.0 (old weights retained, not renormalised)
+[22:24:12] validation: rebuilt baseline dR vs dumped dR, max abs diff 4.81e+00
+[22:24:12] validation skipped (pos_lag 5, decomp 0): the BASELINE row uses the build positions at t-5 without decomposition
+[22:24:12] state-years in the measure key but not in sy_positions 0; in sy_positions but not in the key 0 (year scales use each measure's own key)
+[22:24:12] BASELINE rebuilt with the positions-year scale (correlation with the dumped gap 0.9313)
+[22:24:17] positions main.rds: 1 specs (0 constant in >= 5% of all years, metadata only; eligibility checked on the years each fit uses)
+WROTE output_test/sweep/rob_lag5_yearscale/sweep_bcd_bon_lag5_w1_relyear_fmid_main.csv
+[22:24:20] CENSUS output_test/sweep/rob_lag5_yearscale/sweep_bcd_bon_lag5_w1_relyear_fmid_main.csv: specs 1 | valid M0 1, M1 1 | skipped (constant in a used year) 0 | invalid fits M0 0, M1 0 | errors 0 | valid fits with a Wald test not computable 0 | in 0.1 min
+[22:24:22] R 4.3.3 | survival 3.5.8 | cores 2
+[22:24:22] dump long_bcd_bon_w1d_relyear_fmid.rds: scheme bcd_bon_samp5_w1_relyear_fmid, 114577 rows, 1080 strata, types bil/chooser/defender, rel_scale year, commit 8fcccecd9cb2f0d92e85d5d0e3aded40ffa49747-dirty
+[22:24:22] sample_lag = 5: restricted to the t-5 sample (dropped 68 strata, 5568 other alternatives); positions at t-1
+[22:24:22] validation: rebuilt baseline dR vs dumped dR, max abs diff 8.88e-16
+[22:24:22] state-years in the measure key but not in sy_positions 0; in sy_positions but not in the key 0 (year scales use each measure's own key)
+[22:24:27] positions main.rds: 1 specs (0 constant in >= 5% of all years, metadata only; eligibility checked on the years each fit uses)
+WROTE output_test/sweep/rob_samp5_yearscale/sweep_bcd_bon_samp5_w1_relyear_fmid_main.csv
+[22:24:32] CENSUS output_test/sweep/rob_samp5_yearscale/sweep_bcd_bon_samp5_w1_relyear_fmid_main.csv: specs 1 | valid M0 1, M1 1 | skipped (constant in a used year) 0 | invalid fits M0 0, M1 0 | errors 0 | valid fits with a Wald test not computable 0 | in 0.1 min
+[22:24:33] R 4.3.3 | survival 3.5.8 | cores 2
+[22:24:33] dump long_bcd_bon_w1d_relyear_fmid.rds: scheme bcd_bon_lag5_pooled_w1_relyear_fmid, 114577 rows, 1080 strata, types bil/chooser/defender, rel_scale year, commit 8fcccecd9cb2f0d92e85d5d0e3aded40ffa49747-dirty
+[22:24:33] pos_lag = 5: dropped 68 strata (chosen target or initiator without a position at t-5) and 5568 other alternatives
+[22:24:33] pos_lag = 5: event weight kept by type bil 434.6 of 467.1; chooser 230.1 of 240.8; defender 149.3 of 162.0 (old weights retained, not renormalised)
+[22:24:34] validation: rebuilt baseline dR vs dumped dR, max abs diff 4.81e+00
+[22:24:34] validation skipped (pos_lag 5, decomp 0): the BASELINE row uses the build positions at t-5 without decomposition
+[22:24:34] state-years in the measure key but not in sy_positions 0; in sy_positions but not in the key 0 (year scales use each measure's own key)
+[22:24:34] BASELINE rebuilt with the positions-year scale (correlation with the dumped gap 0.9313)
+[22:24:34] BASELINE row skipped (decomp / merror / pooled scale apply to candidate measures only)
+[22:24:34] positions main.rds: 1 specs (0 constant in >= 5% of all years, metadata only; eligibility checked on the years each fit uses)
+WROTE output_test/sweep/rob_lag5_pooled/sweep_bcd_bon_lag5_pooled_w1_relyear_fmid_main.csv
+[22:24:38] CENSUS output_test/sweep/rob_lag5_pooled/sweep_bcd_bon_lag5_pooled_w1_relyear_fmid_main.csv: specs 1 | valid M0 1, M1 1 | skipped (constant in a used year) 0 | invalid fits M0 0, M1 0 | errors 0 | valid fits with a Wald test not computable 0 | in 0.1 min
+[22:24:39] R 4.3.3 | survival 3.5.8 | cores 2
+[22:24:39] dump long_bcd_bon_w1d_relyear_fmid.rds: scheme bcd_bon_samp5_pooled_w1_relyear_fmid, 114577 rows, 1080 strata, types bil/chooser/defender, rel_scale year, commit 8fcccecd9cb2f0d92e85d5d0e3aded40ffa49747-dirty
+[22:24:39] sample_lag = 5: restricted to the t-5 sample (dropped 68 strata, 5568 other alternatives); positions at t-1
+[22:24:40] validation: rebuilt baseline dR vs dumped dR, max abs diff 8.88e-16
+[22:24:40] state-years in the measure key but not in sy_positions 0; in sy_positions but not in the key 0 (year scales use each measure's own key)
+[22:24:40] BASELINE row skipped (decomp / merror / pooled scale apply to candidate measures only)
+[22:24:40] positions main.rds: 1 specs (0 constant in >= 5% of all years, metadata only; eligibility checked on the years each fit uses)
+WROTE output_test/sweep/rob_samp5_pooled/sweep_bcd_bon_samp5_pooled_w1_relyear_fmid_main.csv
+[22:24:44] CENSUS output_test/sweep/rob_samp5_pooled/sweep_bcd_bon_samp5_pooled_w1_relyear_fmid_main.csv: specs 1 | valid M0 1, M1 1 | skipped (constant in a used year) 0 | invalid fits M0 0, M1 0 | errors 0 | valid fits with a Wald test not computable 0 | in 0.1 min
+[22:24:46] R 4.3.3 | survival 3.5.8 | cores 2
+[22:24:46] dump long_bcd_bon_w1d_relyear_fmid.rds: scheme bcd_bon_lag10_w1_relyear_fmid, 114577 rows, 1080 strata, types bil/chooser/defender, rel_scale year, commit 8fcccecd9cb2f0d92e85d5d0e3aded40ffa49747-dirty
+[22:24:46] pos_lag = 10: dropped 179 strata (chosen target or initiator without a position at t-10) and 11891 other alternatives
+[22:24:46] pos_lag = 10: event weight kept by type bil 390.1 of 467.1; chooser 202.6 of 240.8; defender 127.1 of 162.0 (old weights retained, not renormalised)
+[22:24:46] validation: rebuilt baseline dR vs dumped dR, max abs diff 5.12e+00
+[22:24:46] validation skipped (pos_lag 10, decomp 0): the BASELINE row uses the build positions at t-10 without decomposition
+[22:24:46] state-years in the measure key but not in sy_positions 0; in sy_positions but not in the key 0 (year scales use each measure's own key)
+[22:24:46] BASELINE rebuilt with the positions-year scale (correlation with the dumped gap 0.8780)
+[22:24:50] positions main.rds: 1 specs (0 constant in >= 5% of all years, metadata only; eligibility checked on the years each fit uses)
+WROTE output_test/sweep/rob_lag10_yearscale/sweep_bcd_bon_lag10_w1_relyear_fmid_main.csv
+[22:24:53] CENSUS output_test/sweep/rob_lag10_yearscale/sweep_bcd_bon_lag10_w1_relyear_fmid_main.csv: specs 1 | valid M0 1, M1 1 | skipped (constant in a used year) 0 | invalid fits M0 0, M1 0 | errors 0 | valid fits with a Wald test not computable 0 | in 0.1 min
+[22:24:54] R 4.3.3 | survival 3.5.8 | cores 2
+[22:24:54] dump long_bcd_bon_w1d_relyear_fmid.rds: scheme bcd_bon_samp10_w1_relyear_fmid, 114577 rows, 1080 strata, types bil/chooser/defender, rel_scale year, commit 8fcccecd9cb2f0d92e85d5d0e3aded40ffa49747-dirty
+[22:24:54] sample_lag = 10: restricted to the t-10 sample (dropped 179 strata, 11891 other alternatives); positions at t-1
+[22:24:55] validation: rebuilt baseline dR vs dumped dR, max abs diff 8.88e-16
+[22:24:55] state-years in the measure key but not in sy_positions 0; in sy_positions but not in the key 0 (year scales use each measure's own key)
+[22:24:59] positions main.rds: 1 specs (0 constant in >= 5% of all years, metadata only; eligibility checked on the years each fit uses)
+WROTE output_test/sweep/rob_samp10_yearscale/sweep_bcd_bon_samp10_w1_relyear_fmid_main.csv
+[22:25:02] CENSUS output_test/sweep/rob_samp10_yearscale/sweep_bcd_bon_samp10_w1_relyear_fmid_main.csv: specs 1 | valid M0 1, M1 1 | skipped (constant in a used year) 0 | invalid fits M0 0, M1 0 | errors 0 | valid fits with a Wald test not computable 0 | in 0.1 min
+[22:25:03] R 4.3.3 | survival 3.5.8 | cores 2
+[22:25:04] dump long_bcd_bon_w1d_relyear_fmid.rds: scheme bcd_bon_lag10_pooled_w1_relyear_fmid, 114577 rows, 1080 strata, types bil/chooser/defender, rel_scale year, commit 8fcccecd9cb2f0d92e85d5d0e3aded40ffa49747-dirty
+[22:25:04] pos_lag = 10: dropped 179 strata (chosen target or initiator without a position at t-10) and 11891 other alternatives
+[22:25:04] pos_lag = 10: event weight kept by type bil 390.1 of 467.1; chooser 202.6 of 240.8; defender 127.1 of 162.0 (old weights retained, not renormalised)
+[22:25:04] validation: rebuilt baseline dR vs dumped dR, max abs diff 5.12e+00
+[22:25:04] validation skipped (pos_lag 10, decomp 0): the BASELINE row uses the build positions at t-10 without decomposition
+[22:25:04] state-years in the measure key but not in sy_positions 0; in sy_positions but not in the key 0 (year scales use each measure's own key)
+[22:25:04] BASELINE rebuilt with the positions-year scale (correlation with the dumped gap 0.8780)
+[22:25:04] BASELINE row skipped (decomp / merror / pooled scale apply to candidate measures only)
+[22:25:04] positions main.rds: 1 specs (0 constant in >= 5% of all years, metadata only; eligibility checked on the years each fit uses)
+WROTE output_test/sweep/rob_lag10_pooled/sweep_bcd_bon_lag10_pooled_w1_relyear_fmid_main.csv
+[22:25:08] CENSUS output_test/sweep/rob_lag10_pooled/sweep_bcd_bon_lag10_pooled_w1_relyear_fmid_main.csv: specs 1 | valid M0 1, M1 1 | skipped (constant in a used year) 0 | invalid fits M0 0, M1 0 | errors 0 | valid fits with a Wald test not computable 0 | in 0.1 min
+[22:25:09] R 4.3.3 | survival 3.5.8 | cores 2
+[22:25:09] dump long_bcd_bon_w1d_relyear_fmid.rds: scheme bcd_bon_samp10_pooled_w1_relyear_fmid, 114577 rows, 1080 strata, types bil/chooser/defender, rel_scale year, commit 8fcccecd9cb2f0d92e85d5d0e3aded40ffa49747-dirty
+[22:25:09] sample_lag = 10: restricted to the t-10 sample (dropped 179 strata, 11891 other alternatives); positions at t-1
+[22:25:10] validation: rebuilt baseline dR vs dumped dR, max abs diff 8.88e-16
+[22:25:10] state-years in the measure key but not in sy_positions 0; in sy_positions but not in the key 0 (year scales use each measure's own key)
+[22:25:10] BASELINE row skipped (decomp / merror / pooled scale apply to candidate measures only)
+[22:25:10] positions main.rds: 1 specs (0 constant in >= 5% of all years, metadata only; eligibility checked on the years each fit uses)
+WROTE output_test/sweep/rob_samp10_pooled/sweep_bcd_bon_samp10_pooled_w1_relyear_fmid_main.csv
+[22:25:14] CENSUS output_test/sweep/rob_samp10_pooled/sweep_bcd_bon_samp10_pooled_w1_relyear_fmid_main.csv: specs 1 | valid M0 1, M1 1 | skipped (constant in a used year) 0 | invalid fits M0 0, M1 0 | errors 0 | valid fits with a Wald test not computable 0 | in 0.1 min
+[22:25:15] R 4.3.3 | survival 3.5.8 | cores 2
+[22:25:15] dump long_bcd_bon_w1d_relyear_fmid.rds: scheme bcd_bon_pooled_w1_relyear_fmid, 114577 rows, 1080 strata, types bil/chooser/defender, rel_scale year, commit 8fcccecd9cb2f0d92e85d5d0e3aded40ffa49747-dirty
+[22:25:15] validation: rebuilt baseline dR vs dumped dR, max abs diff 8.88e-16
+[22:25:15] state-years in the measure key but not in sy_positions 0; in sy_positions but not in the key 0 (year scales use each measure's own key)
+[22:25:15] BASELINE row skipped (decomp / merror / pooled scale apply to candidate measures only)
+[22:25:15] positions main.rds: 1 specs (0 constant in >= 5% of all years, metadata only; eligibility checked on the years each fit uses)
+WROTE output_test/sweep/rob_pooledscale/sweep_bcd_bon_pooled_w1_relyear_fmid_main.csv
+[22:25:21] CENSUS output_test/sweep/rob_pooledscale/sweep_bcd_bon_pooled_w1_relyear_fmid_main.csv: specs 1 | valid M0 1, M1 1 | skipped (constant in a used year) 0 | invalid fits M0 0, M1 0 | errors 0 | valid fits with a Wald test not computable 0 | in 0.1 min
+[22:25:22] R 4.3.3 | survival 3.5.8 | cores 2
+[22:25:22] dump long_bcd_bon_w1d_relyear_fmid.rds: scheme bcd_bon_decomp10_w1_relyear_fmid, 114577 rows, 1080 strata, types bil/chooser/defender, rel_scale year, commit 8fcccecd9cb2f0d92e85d5d0e3aded40ffa49747-dirty
+[22:25:26] decomp = 10: rows whose target has a short baseline window 0.152
+[22:25:26] validation: rebuilt baseline dR vs dumped dR, max abs diff 8.88e-16
+[22:25:26] validation skipped (pos_lag 1, decomp 10): the BASELINE row uses the build positions at t-1 without decomposition
+[22:25:26] state-years in the measure key but not in sy_positions 0; in sy_positions but not in the key 0 (year scales use each measure's own key)
+[22:25:26] BASELINE row skipped (decomp / merror / pooled scale apply to candidate measures only)
+[22:25:26] positions main.rds: 1 specs (0 constant in >= 5% of all years, metadata only; eligibility checked on the years each fit uses)
+WROTE output_test/sweep/rob_decomp10_linear/sweep_bcd_bon_decomp10_w1_relyear_fmid_main.csv
+[22:25:34] CENSUS output_test/sweep/rob_decomp10_linear/sweep_bcd_bon_decomp10_w1_relyear_fmid_main.csv: specs 1 | valid M0 1, M1 1 | skipped (constant in a used year) 0 | invalid fits M0 0, M1 0 | errors 0 | valid fits with a Wald test not computable 0 | in 0.1 min
+[22:25:35] R 4.3.3 | survival 3.5.8 | cores 2
+[22:25:35] dump long_bcd_bon_w1d_relyear_fmid.rds: scheme bcd_bon_decomp10full_w1_relyear_fmid, 114577 rows, 1080 strata, types bil/chooser/defender, rel_scale year, commit 8fcccecd9cb2f0d92e85d5d0e3aded40ffa49747-dirty
+[22:25:39] decomp = 10: rows whose target has a short baseline window 0.152
+[22:25:39] validation: rebuilt baseline dR vs dumped dR, max abs diff 8.88e-16
+[22:25:39] validation skipped (pos_lag 1, decomp 10): the BASELINE row uses the build positions at t-1 without decomposition
+[22:25:39] state-years in the measure key but not in sy_positions 0; in sy_positions but not in the key 0 (year scales use each measure's own key)
+[22:25:39] BASELINE row skipped (decomp / merror / pooled scale apply to candidate measures only)
+[22:25:39] positions main.rds: 1 specs (0 constant in >= 5% of all years, metadata only; eligibility checked on the years each fit uses)
+WROTE output_test/sweep/rob_decomp10_full/sweep_bcd_bon_decomp10full_w1_relyear_fmid_main.csv
+[22:25:49] CENSUS output_test/sweep/rob_decomp10_full/sweep_bcd_bon_decomp10full_w1_relyear_fmid_main.csv: specs 1 | valid M0 1, M1 1 | skipped (constant in a used year) 0 | invalid fits M0 0, M1 0 | errors 0 | valid fits with a Wald test not computable 0 | in 0.2 min
+[22:25:50] R 4.3.3 | survival 3.5.8 | cores 2
+[22:25:50] dump long_bcd_bon_w1d_relyear_fmid.rds: scheme bcd_bon_decomp5full_w1_relyear_fmid, 114577 rows, 1080 strata, types bil/chooser/defender, rel_scale year, commit 8fcccecd9cb2f0d92e85d5d0e3aded40ffa49747-dirty
+[22:25:55] decomp = 5: rows whose target has a short baseline window 0.070
+[22:25:55] validation: rebuilt baseline dR vs dumped dR, max abs diff 8.88e-16
+[22:25:55] validation skipped (pos_lag 1, decomp 5): the BASELINE row uses the build positions at t-1 without decomposition
+[22:25:55] state-years in the measure key but not in sy_positions 0; in sy_positions but not in the key 0 (year scales use each measure's own key)
+[22:25:55] BASELINE row skipped (decomp / merror / pooled scale apply to candidate measures only)
+[22:25:55] positions main.rds: 1 specs (0 constant in >= 5% of all years, metadata only; eligibility checked on the years each fit uses)
+WROTE output_test/sweep/rob_decomp5_full/sweep_bcd_bon_decomp5full_w1_relyear_fmid_main.csv
+[22:26:05] CENSUS output_test/sweep/rob_decomp5_full/sweep_bcd_bon_decomp5full_w1_relyear_fmid_main.csv: specs 1 | valid M0 1, M1 1 | skipped (constant in a used year) 0 | invalid fits M0 0, M1 0 | errors 0 | valid fits with a Wald test not computable 0 | in 0.2 min
+[22:26:06] R 4.3.3 | survival 3.5.8 | cores 2
+[22:26:06] dump long_bcd_bon_w1d_relyear_fmid.rds: scheme bcd_bon_w1_relyeartm1_fmid, 114577 rows, 1080 strata, types bil/chooser/defender, rel_scale year, commit 8fcccecd9cb2f0d92e85d5d0e3aded40ffa49747-dirty
+[22:26:06] validation: rebuilt baseline dR vs dumped dR, max abs diff 8.88e-16
+[22:26:06] state-years in the measure key but not in sy_positions 0; in sy_positions but not in the key 0 (year scales use each measure's own key)
+[22:26:06] BASELINE rebuilt with the positions-year scale (correlation with the dumped gap 0.9943)
+[22:26:12] positions main.rds: 1 specs (0 constant in >= 5% of all years, metadata only; eligibility checked on the years each fit uses)
+WROTE output_test/sweep/rob_yscale_tm1/sweep_bcd_bon_w1_relyeartm1_fmid_main.csv
+[22:26:16] CENSUS output_test/sweep/rob_yscale_tm1/sweep_bcd_bon_w1_relyeartm1_fmid_main.csv: specs 1 | valid M0 1, M1 1 | skipped (constant in a used year) 0 | invalid fits M0 0, M1 0 | errors 0 | valid fits with a Wald test not computable 0 | in 0.1 min
+[22:26:17] R 4.3.3 | survival 3.5.8 | cores 2
+[22:26:18] dump long_bcd_bon_w1d_relyear_uw_fmid.rds: scheme bcd_bon_w1_relyear_uw_fmid, 114577 rows, 1080 strata, types bil/chooser/defender, rel_scale year, commit 8fcccecd9cb2f0d92e85d5d0e3aded40ffa49747-dirty
+[22:26:18] validation: rebuilt baseline dR vs dumped dR, max abs diff 8.88e-16
+[22:26:18] state-years in the measure key but not in sy_positions 0; in sy_positions but not in the key 0 (year scales use each measure's own key)
+[22:26:23] positions main.rds: 1 specs (0 constant in >= 5% of all years, metadata only; eligibility checked on the years each fit uses)
+WROTE output_test/sweep/rob_unit_weights/sweep_bcd_bon_w1_relyear_uw_fmid_main.csv
+[22:26:28] CENSUS output_test/sweep/rob_unit_weights/sweep_bcd_bon_w1_relyear_uw_fmid_main.csv: specs 1 | valid M0 1, M1 1 | skipped (constant in a used year) 0 | invalid fits M0 0, M1 0 | errors 0 | valid fits with a Wald test not computable 0 | in 0.1 min
+[22:26:29] R 4.3.3 | survival 3.5.8 | cores 2
+[22:26:29] dump long_bcd_bon_w1d_relyear_fmid.rds: scheme bcd_bon_lag0_w1_relyear_fmid, 114577 rows, 1080 strata, types bil/chooser/defender, rel_scale year, commit 8fcccecd9cb2f0d92e85d5d0e3aded40ffa49747-dirty
+[22:26:29] pos_lag = 0: dropped 0 strata (chosen target or initiator without a position at t-0) and 0 other alternatives
+[22:26:29] pos_lag = 0: event weight kept by type bil 467.1 of 467.1; chooser 240.8 of 240.8; defender 162.0 of 162.0 (old weights retained, not renormalised)
+[22:26:29] validation: rebuilt baseline dR vs dumped dR, max abs diff 4.07e+00
+[22:26:29] validation skipped (pos_lag 0, decomp 0): the BASELINE row uses the build positions at t-0 without decomposition
+[22:26:29] state-years in the measure key but not in sy_positions 0; in sy_positions but not in the key 0 (year scales use each measure's own key)
+[22:26:29] BASELINE rebuilt with the positions-year scale (correlation with the dumped gap 0.9787)
+[22:26:35] positions main.rds: 1 specs (0 constant in >= 5% of all years, metadata only; eligibility checked on the years each fit uses)
+WROTE output_test/sweep/rob_lead_t/sweep_bcd_bon_lag0_w1_relyear_fmid_main.csv
+[22:26:38] CENSUS output_test/sweep/rob_lead_t/sweep_bcd_bon_lag0_w1_relyear_fmid_main.csv: specs 1 | valid M0 1, M1 1 | skipped (constant in a used year) 0 | invalid fits M0 0, M1 0 | errors 0 | valid fits with a Wald test not computable 0 | in 0.1 min
+[22:26:40] R 4.3.3 | survival 3.5.8 | cores 2
+[22:26:40] dump long_bcd_bon_w1d_relyear_fmid.rds: scheme bcd_bon_lead1_w1_relyear_fmid, 114577 rows, 1080 strata, types bil/chooser/defender, rel_scale year, commit 8fcccecd9cb2f0d92e85d5d0e3aded40ffa49747-dirty
+[22:26:40] pos_lag = -1: dropped 24 strata (chosen target or initiator without a position at t+1) and 652 other alternatives
+[22:26:40] pos_lag = -1: event weight kept by type bil 457.0 of 467.1; chooser 236.6 of 240.8; defender 158.0 of 162.0 (old weights retained, not renormalised)
+[22:26:40] validation: rebuilt baseline dR vs dumped dR, max abs diff 6.21e+00
+[22:26:40] validation skipped (pos_lag -1, decomp 0): the BASELINE row uses the build positions at t+1 without decomposition
+[22:26:40] state-years in the measure key but not in sy_positions 0; in sy_positions but not in the key 0 (year scales use each measure's own key)
+[22:26:40] BASELINE rebuilt with the positions-year scale (correlation with the dumped gap 0.9718)
+[22:26:45] positions main.rds: 1 specs (0 constant in >= 5% of all years, metadata only; eligibility checked on the years each fit uses)
+WROTE output_test/sweep/rob_lead_t1/sweep_bcd_bon_lead1_w1_relyear_fmid_main.csv
+[22:26:49] CENSUS output_test/sweep/rob_lead_t1/sweep_bcd_bon_lead1_w1_relyear_fmid_main.csv: specs 1 | valid M0 1, M1 1 | skipped (constant in a used year) 0 | invalid fits M0 0, M1 0 | errors 0 | valid fits with a Wald test not computable 0 | in 0.1 min
+[22:26:50] R 4.3.3 | survival 3.5.8 | cores 2
+[22:26:51] dump long_bcd_bon_w1d_relyear_fmid.rds: scheme bcd_bon_samplead1_w1_relyear_fmid, 114577 rows, 1080 strata, types bil/chooser/defender, rel_scale year, commit 8fcccecd9cb2f0d92e85d5d0e3aded40ffa49747-dirty
+[22:26:51] sample_lag = -1: restricted to the t+1 sample (dropped 24 strata, 652 other alternatives); positions at t-1
+[22:26:51] validation: rebuilt baseline dR vs dumped dR, max abs diff 8.88e-16
+[22:26:51] state-years in the measure key but not in sy_positions 0; in sy_positions but not in the key 0 (year scales use each measure's own key)
+[22:26:56] positions main.rds: 1 specs (0 constant in >= 5% of all years, metadata only; eligibility checked on the years each fit uses)
+WROTE output_test/sweep/rob_lead_t1_sample_tm1/sweep_bcd_bon_samplead1_w1_relyear_fmid_main.csv
+[22:27:01] CENSUS output_test/sweep/rob_lead_t1_sample_tm1/sweep_bcd_bon_samplead1_w1_relyear_fmid_main.csv: specs 1 | valid M0 1, M1 1 | skipped (constant in a used year) 0 | invalid fits M0 0, M1 0 | errors 0 | valid fits with a Wald test not computable 0 | in 0.1 min
+[22:27:02] R 4.3.3 | survival 3.5.8 | cores 2
+[22:27:02] dump long_bcd_bon_w1d_relyear_fmid.rds: scheme bcd_bon_medef0.5_w1_relyear_fmid, 114577 rows, 1080 strata, types bil/chooser/defender, rel_scale year, commit 8fcccecd9cb2f0d92e85d5d0e3aded40ffa49747-dirty
+[22:27:03] merror def, k = 0.50: confounder z built for 15561 state-years
+[22:27:03] validation: rebuilt baseline dR vs dumped dR, max abs diff 8.88e-16
+[22:27:03] state-years in the measure key but not in sy_positions 0; in sy_positions but not in the key 0 (year scales use each measure's own key)
+[22:27:03] BASELINE row skipped (decomp / merror / pooled scale apply to candidate measures only)
+[22:27:03] positions main.rds: 1 specs (0 constant in >= 5% of all years, metadata only; eligibility checked on the years each fit uses)
+WROTE output_test/sweep/rob_merror_def_1_0.5/sweep_bcd_bon_medef0.5_w1_relyear_fmid_main.csv
+[22:27:08] CENSUS output_test/sweep/rob_merror_def_1_0.5/sweep_bcd_bon_medef0.5_w1_relyear_fmid_main.csv: specs 1 | valid M0 1, M1 1 | skipped (constant in a used year) 0 | invalid fits M0 0, M1 0 | errors 0 | valid fits with a Wald test not computable 0 | in 0.1 min
+[22:27:09] R 4.3.3 | survival 3.5.8 | cores 2
+[22:27:09] dump long_bcd_bon_w1d_relyear_fmid.rds: scheme bcd_bon_mecontig0.5_w1_relyear_fmid, 114577 rows, 1080 strata, types bil/chooser/defender, rel_scale year, commit 8fcccecd9cb2f0d92e85d5d0e3aded40ffa49747-dirty
+[22:27:10] merror contig, k = 0.50: confounder z built for 15561 state-years
+[22:27:10] validation: rebuilt baseline dR vs dumped dR, max abs diff 8.88e-16
+[22:27:10] state-years in the measure key but not in sy_positions 0; in sy_positions but not in the key 0 (year scales use each measure's own key)
+[22:27:10] BASELINE row skipped (decomp / merror / pooled scale apply to candidate measures only)
+[22:27:10] positions main.rds: 1 specs (0 constant in >= 5% of all years, metadata only; eligibility checked on the years each fit uses)
+WROTE output_test/sweep/rob_merror_contig_1_0.5/sweep_bcd_bon_mecontig0.5_w1_relyear_fmid_main.csv
+[22:27:15] CENSUS output_test/sweep/rob_merror_contig_1_0.5/sweep_bcd_bon_mecontig0.5_w1_relyear_fmid_main.csv: specs 1 | valid M0 1, M1 1 | skipped (constant in a used year) 0 | invalid fits M0 0, M1 0 | errors 0 | valid fits with a Wald test not computable 0 | in 0.1 min
+[22:27:16] R 4.3.3 | survival 3.5.8 | cores 2
+[22:27:16] dump long_bcd_bon_w1d_relyear_fmid.rds: scheme bcd_bon_medefneg0.5_w1_relyear_fmid, 114577 rows, 1080 strata, types bil/chooser/defender, rel_scale year, commit 8fcccecd9cb2f0d92e85d5d0e3aded40ffa49747-dirty
+[22:27:17] merror def, k = 0.50: confounder z built for 15561 state-years
+[22:27:17] validation: rebuilt baseline dR vs dumped dR, max abs diff 8.88e-16
+[22:27:17] state-years in the measure key but not in sy_positions 0; in sy_positions but not in the key 0 (year scales use each measure's own key)
+[22:27:17] BASELINE row skipped (decomp / merror / pooled scale apply to candidate measures only)
+[22:27:17] positions main.rds: 1 specs (0 constant in >= 5% of all years, metadata only; eligibility checked on the years each fit uses)
+WROTE output_test/sweep/rob_merror_def_-1_0.5/sweep_bcd_bon_medefneg0.5_w1_relyear_fmid_main.csv
+[22:27:22] CENSUS output_test/sweep/rob_merror_def_-1_0.5/sweep_bcd_bon_medefneg0.5_w1_relyear_fmid_main.csv: specs 1 | valid M0 1, M1 1 | skipped (constant in a used year) 0 | invalid fits M0 0, M1 0 | errors 0 | valid fits with a Wald test not computable 0 | in 0.1 min
+[22:27:24] R 4.3.3 | survival 3.5.8 | cores 2
+[22:27:24] dump long_bcd_bon_w1d_relyear_fmid.rds: scheme bcd_bon_mecontigneg0.5_w1_relyear_fmid, 114577 rows, 1080 strata, types bil/chooser/defender, rel_scale year, commit 8fcccecd9cb2f0d92e85d5d0e3aded40ffa49747-dirty
+[22:27:25] merror contig, k = 0.50: confounder z built for 15561 state-years
+[22:27:25] validation: rebuilt baseline dR vs dumped dR, max abs diff 8.88e-16
+[22:27:25] state-years in the measure key but not in sy_positions 0; in sy_positions but not in the key 0 (year scales use each measure's own key)
+[22:27:25] BASELINE row skipped (decomp / merror / pooled scale apply to candidate measures only)
+[22:27:25] positions main.rds: 1 specs (0 constant in >= 5% of all years, metadata only; eligibility checked on the years each fit uses)
+WROTE output_test/sweep/rob_merror_contig_-1_0.5/sweep_bcd_bon_mecontigneg0.5_w1_relyear_fmid_main.csv
+[22:27:30] CENSUS output_test/sweep/rob_merror_contig_-1_0.5/sweep_bcd_bon_mecontigneg0.5_w1_relyear_fmid_main.csv: specs 1 | valid M0 1, M1 1 | skipped (constant in a used year) 0 | invalid fits M0 0, M1 0 | errors 0 | valid fits with a Wald test not computable 0 | in 0.1 min
+[22:27:31] R 4.3.3 | survival 3.5.8 | cores 2
+[22:27:31] dump long_bcd_bon_w1d_relyear_fmid.rds: scheme bcd_bon_merandom0.5d1_w1_relyear_fmid, 114577 rows, 1080 strata, types bil/chooser/defender, rel_scale year, commit 8fcccecd9cb2f0d92e85d5d0e3aded40ffa49747-dirty
+[22:27:31] merror random, k = 0.50: confounder z built for 15561 state-years
+[22:27:31] validation: rebuilt baseline dR vs dumped dR, max abs diff 8.88e-16
+[22:27:31] state-years in the measure key but not in sy_positions 0; in sy_positions but not in the key 0 (year scales use each measure's own key)
+[22:27:31] BASELINE row skipped (decomp / merror / pooled scale apply to candidate measures only)
+[22:27:31] positions main.rds: 1 specs (0 constant in >= 5% of all years, metadata only; eligibility checked on the years each fit uses)
+WROTE output_test/sweep/rob_merror_random_0.5_d1/sweep_bcd_bon_merandom0.5d1_w1_relyear_fmid_main.csv
+[22:27:37] CENSUS output_test/sweep/rob_merror_random_0.5_d1/sweep_bcd_bon_merandom0.5d1_w1_relyear_fmid_main.csv: specs 1 | valid M0 1, M1 1 | skipped (constant in a used year) 0 | invalid fits M0 0, M1 0 | errors 0 | valid fits with a Wald test not computable 0 | in 0.1 min
+[22:27:38] R 4.3.3 | survival 3.5.8 | cores 2
+[22:27:38] dump long_bcd_bon_w1d_relyear_fmid.rds: scheme bcd_bon_w1_relyear_fmid, 114577 rows, 1080 strata, types bil/chooser/defender, rel_scale year, commit 8fcccecd9cb2f0d92e85d5d0e3aded40ffa49747-dirty
+[22:27:38] validation: rebuilt baseline dR vs dumped dR, max abs diff 8.88e-16
+[22:27:38] state-years in the measure key but not in sy_positions 0; in sy_positions but not in the key 0 (year scales use each measure's own key)
+[22:27:43] positions noatop.rds: 1 specs (0 constant in >= 5% of all years, metadata only; eligibility checked on the years each fit uses)
+WROTE output_test/sweep/rob_noatop_base/sweep_bcd_bon_w1_relyear_fmid_noatop.csv
+[22:27:47] CENSUS output_test/sweep/rob_noatop_base/sweep_bcd_bon_w1_relyear_fmid_noatop.csv: specs 1 | valid M0 1, M1 1 | skipped (constant in a used year) 0 | invalid fits M0 0, M1 0 | errors 0 | valid fits with a Wald test not computable 0 | in 0.1 min
+[22:27:49] R 4.3.3 | survival 3.5.8 | cores 2
+[22:27:49] dump var_expdef.rds: scheme bcd_expdef_bon_w1_relyear_fmid, 114577 rows, 1080 strata, types bil/chooser/defender, rel_scale year, commit 8fcccecd9cb2f0d92e85d5d0e3aded40ffa49747-dirty
+[22:27:49] validation: rebuilt baseline dR vs dumped dR, max abs diff 8.88e-16
+[22:27:49] state-years in the measure key but not in sy_positions 0; in sy_positions but not in the key 0 (year scales use each measure's own key)
+[22:27:57] positions noatop.rds: 1 specs (0 constant in >= 5% of all years, metadata only; eligibility checked on the years each fit uses)
+WROTE output_test/sweep/rob_noatop_expdef/sweep_bcd_expdef_bon_w1_relyear_fmid_noatop.csv
+[22:28:03] CENSUS output_test/sweep/rob_noatop_expdef/sweep_bcd_expdef_bon_w1_relyear_fmid_noatop.csv: specs 1 | valid M0 1, M1 1 | skipped (constant in a used year) 0 | invalid fits M0 0, M1 0 | errors 0 | valid fits with a Wald test not computable 0 | in 0.1 min
+[22:28:04] R 4.3.3 | survival 3.5.8 | cores 2
+[22:28:04] dump long_bcd_bon_w1d_relyear_mid.rds: scheme bcd_bon_w1_relyear_mid, 382765 rows, 3276 strata, types bil/chooser/defender, rel_scale year, commit 8fcccecd9cb2f0d92e85d5d0e3aded40ffa49747-dirty
+[22:28:05] validation: rebuilt baseline dR vs dumped dR, max abs diff 8.88e-16
+[22:28:05] state-years in the measure key but not in sy_positions 0; in sy_positions but not in the key 0 (year scales use each measure's own key)
+[22:28:22] positions main.rds: 1 specs (0 constant in >= 5% of all years, metadata only; eligibility checked on the years each fit uses)
+WROTE output_test/sweep/rob_stepA/sweep_bcd_bon_w1_relyear_mid_main.csv
+[22:28:36] CENSUS output_test/sweep/rob_stepA/sweep_bcd_bon_w1_relyear_mid_main.csv: specs 1 | valid M0 1, M1 1 | skipped (constant in a used year) 0 | invalid fits M0 0, M1 0 | errors 0 | valid fits with a Wald test not computable 0 | in 0.2 min
+[22:28:38] R 4.3.3 | survival 3.5.8 | cores 2
+[22:28:38] dump long_bcd_bon_w1d_relyear_mid.rds: scheme bcd_bon_stepBorigdisp_w1_relyear_mid, 382765 rows, 3276 strata, types bil/chooser/defender, rel_scale year, commit 8fcccecd9cb2f0d92e85d5d0e3aded40ffa49747-dirty
+[22:28:38] step B: 1080 of 3276 events fatal
+[22:28:39] validation: rebuilt baseline dR vs dumped dR, max abs diff 8.88e-16
+[22:28:39] state-years in the measure key but not in sy_positions 0; in sy_positions but not in the key 0 (year scales use each measure's own key)
+[22:28:40] positions main.rds: 1 specs (0 constant in >= 5% of all years, metadata only; eligibility checked on the years each fit uses)
+WROTE output_test/sweep/rob_stepB_orig_disp/sweep_bcd_bon_stepBorigdisp_w1_relyear_mid_main.csv
+[22:28:40] CENSUS output_test/sweep/rob_stepB_orig_disp/sweep_bcd_bon_stepBorigdisp_w1_relyear_mid_main.csv: specs 1 | valid M0 1, M1 1 | skipped (constant in a used year) 0 | invalid fits M0 0, M1 0 | errors 0 | valid fits with a Wald test not computable 0 | in 0.0 min
+[22:28:41] R 4.3.3 | survival 3.5.8 | cores 2
+[22:28:42] dump long_bcd_bon_w1d_relyear_mid.rds: scheme bcd_bon_stepBallpair_w1_relyear_mid, 382765 rows, 3276 strata, types bil/chooser/defender, rel_scale year, commit 8fcccecd9cb2f0d92e85d5d0e3aded40ffa49747-dirty
+[22:28:42] step B: 1080 of 3276 events fatal
+[22:28:43] validation: rebuilt baseline dR vs dumped dR, max abs diff 8.88e-16
+[22:28:43] state-years in the measure key but not in sy_positions 0; in sy_positions but not in the key 0 (year scales use each measure's own key)
+[22:28:44] positions main.rds: 1 specs (0 constant in >= 5% of all years, metadata only; eligibility checked on the years each fit uses)
+WROTE output_test/sweep/rob_stepB_all_pair/sweep_bcd_bon_stepBallpair_w1_relyear_mid_main.csv
+[22:28:44] CENSUS output_test/sweep/rob_stepB_all_pair/sweep_bcd_bon_stepBallpair_w1_relyear_mid_main.csv: specs 1 | valid M0 1, M1 1 | skipped (constant in a used year) 0 | invalid fits M0 0, M1 0 | errors 0 | valid fits with a Wald test not computable 0 | in 0.0 min
+[22:28:49] LOO by disp: 548 units; full-sample chooser-bil:u_R_less 1.00; defender-chooser:u_R_less -0.82
+[22:41:19] 548 of 548 refits valid (); largest drops in chooser-bil:u_R_less: 4137 (-0.16), 31 (-0.07), 4283 (-0.05), 4273 (-0.04), 4339 (-0.03)
+[22:41:25] LOO by init: 134 units; full-sample chooser-bil:u_R_less 1.00; defender-chooser:u_R_less -0.82
+[22:44:24] 134 of 134 refits valid (); largest drops in chooser-bil:u_R_less: 811 (-0.03), 640 (-0.03), 483 (-0.02), 368 (-0.02), 255 (-0.02)
+[22:44:27] drop: removed disputes 4137,31,4283,4273,4339 (73 strata; 0 of them only through a secondary source dispute)
+[22:44:28] wrote output_test/dumps/var_droptop5.rds: 102097 rows, 1007 strata (was 114577 / 1080); types bil/chooser/defender; Z contig_land,log_capdist,tgt_dem,tgt_dem_x_init_dem,alliance_def_off,tgt_major,tgt_major_x_init_major,dy_mid_tm1,log_dy_prior_mids
+[22:44:29] R 4.3.3 | survival 3.5.8 | cores 2
+[22:44:29] dump var_droptop5.rds: scheme bcd_drop4137-31-4283-4273-4339_bon_w1_relyear_fmid, 102097 rows, 1007 strata, types bil/chooser/defender, rel_scale year, commit 8fcccecd9cb2f0d92e85d5d0e3aded40ffa49747-dirty
+[22:44:29] validation: rebuilt baseline dR vs dumped dR, max abs diff 8.88e-16
+[22:44:29] state-years in the measure key but not in sy_positions 0; in sy_positions but not in the key 0 (year scales use each measure's own key)
+[22:44:34] positions main.rds: 1 specs (0 constant in >= 5% of all years, metadata only; eligibility checked on the years each fit uses)
+WROTE output_test/sweep/rob_drop_top5/sweep_bcd_drop4137-31-4283-4273-4339_bon_w1_relyear_fmid_main.csv
+[22:44:37] CENSUS output_test/sweep/rob_drop_top5/sweep_bcd_drop4137-31-4283-4273-4339_bon_w1_relyear_fmid_main.csv: specs 1 | valid M0 1, M1 1 | skipped (constant in a used year) 0 | invalid fits M0 0, M1 0 | errors 0 | valid fits with a Wald test not computable 0 | in 0.1 min
+[22:44:40] drop: removed disputes 4137,31,4283,4273,4339,375,1610,258,2208,4280 (196 strata; 2 of them only through a secondary source dispute)
+[22:44:41] wrote output_test/dumps/var_droptop10.rds: 95473 rows, 884 strata (was 114577 / 1080); types bil/chooser/defender; Z contig_land,log_capdist,tgt_dem,tgt_dem_x_init_dem,alliance_def_off,tgt_major,tgt_major_x_init_major,dy_mid_tm1,log_dy_prior_mids
+[22:44:42] R 4.3.3 | survival 3.5.8 | cores 2
+[22:44:42] dump var_droptop10.rds: scheme bcd_drop4137-31-4283-4273-4339-375-1610-258-2208-4280_bon_w1_relyear_fmid, 95473 rows, 884 strata, types bil/chooser/defender, rel_scale year, commit 8fcccecd9cb2f0d92e85d5d0e3aded40ffa49747-dirty
+[22:44:42] validation: rebuilt baseline dR vs dumped dR, max abs diff 8.88e-16
+[22:44:42] state-years in the measure key but not in sy_positions 0; in sy_positions but not in the key 0 (year scales use each measure's own key)
+[22:44:46] positions main.rds: 1 specs (0 constant in >= 5% of all years, metadata only; eligibility checked on the years each fit uses)
+WROTE output_test/sweep/rob_drop_top10/sweep_bcd_drop4137-31-4283-4273-4339-375-1610-258-2208-4280_bon_w1_relyear_fmid_main.csv
+[22:44:50] CENSUS output_test/sweep/rob_drop_top10/sweep_bcd_drop4137-31-4283-4273-4339-375-1610-258-2208-4280_bon_w1_relyear_fmid_main.csv: specs 1 | valid M0 1, M1 1 | skipped (constant in a used year) 0 | invalid fits M0 0, M1 0 | errors 0 | valid fits with a Wald test not computable 0 | in 0.1 min
+[22:44:50] skip: inputs/exclusions_un.txt not present (list awaiting approval)
+[22:44:50] skip: inputs/exclusions_punitive.txt not present (list awaiting approval)
+[22:44:55] boot on long_bcd_bon_relyear_fmid.rds (bcd, window 0): 1080 strata; spec W2contig_ptaall|igo+def+off+neu+nonagg+consul+dca+un|pr
+[22:45:06] usable draws: M0 20, M1 20 of 20; draws with a dropped model 0
+                         quantity    est lo hi share_pos n_ok
+                      M0:u_R_less  0.497 NA NA        NA   20
+                  M0:u_M_stronger  0.821 NA NA        NA   20
+                  M1:bil:u_R_less  0.037 NA NA        NA   20
+              M1:bil:u_M_stronger  0.248 NA NA        NA   20
+              M1:chooser:u_R_less  1.118 NA NA        NA   20
+          M1:chooser:u_M_stronger  1.441 NA NA        NA   20
+             M1:defender:u_R_less  0.192 NA NA        NA   20
+         M1:defender:u_M_stronger  1.080 NA NA        NA   20
+          M1:chooser-bil:u_R_less  1.081 NA NA        NA   20
+      M1:chooser-bil:u_M_stronger  1.193 NA NA        NA   20
+         M1:defender-bil:u_R_less  0.155 NA NA        NA   20
+     M1:defender-bil:u_M_stronger  0.832 NA NA        NA   20
+     M1:defender-chooser:u_R_less -0.926 NA NA        NA   20
+ M1:defender-chooser:u_M_stronger -0.361 NA NA        NA   20
+[22:45:12] boot on long_bcd_bon_w1d_relyear_fmid.rds (bcd, window 1): 1080 strata; spec W2contig_ptaall|igo+def+off+neu+nonagg+consul+dca+un|pr
+[22:45:23] usable draws: M0 20, M1 20 of 20; draws with a dropped model 0
+                         quantity    est lo hi share_pos n_ok
+                      M0:u_R_less  0.497 NA NA        NA   20
+                  M0:u_M_stronger  0.821 NA NA        NA   20
+                  M1:bil:u_R_less  0.013 NA NA        NA   20
+              M1:bil:u_M_stronger  0.149 NA NA        NA   20
+              M1:chooser:u_R_less  1.017 NA NA        NA   20
+          M1:chooser:u_M_stronger  1.409 NA NA        NA   20
+             M1:defender:u_R_less  0.193 NA NA        NA   20
+         M1:defender:u_M_stronger  1.075 NA NA        NA   20
+          M1:chooser-bil:u_R_less  1.004 NA NA        NA   20
+      M1:chooser-bil:u_M_stronger  1.260 NA NA        NA   20
+         M1:defender-bil:u_R_less  0.180 NA NA        NA   20
+     M1:defender-bil:u_M_stronger  0.926 NA NA        NA   20
+     M1:defender-chooser:u_R_less -0.824 NA NA        NA   20
+ M1:defender-chooser:u_M_stronger -0.334 NA NA        NA   20
+[22:45:37] boot on long_bcd_bon_w1d_relyear_mid.rds (bcd, window 1): 3276 strata; spec W2contig_ptaall|igo+def+off+neu+nonagg+consul+dca+un|pr
+[22:46:16] usable draws: M0 20, M1 20 of 20; draws with a dropped model 0
+                         quantity     est lo hi share_pos n_ok
+                      M0:u_R_less  0.3735 NA NA        NA   20
+                  M0:u_M_stronger  0.8247 NA NA        NA   20
+                  M1:bil:u_R_less  0.1324 NA NA        NA   20
+              M1:bil:u_M_stronger  0.6602 NA NA        NA   20
+              M1:chooser:u_R_less  0.9426 NA NA        NA   20
+          M1:chooser:u_M_stronger  1.1183 NA NA        NA   20
+             M1:defender:u_R_less  0.1253 NA NA        NA   20
+         M1:defender:u_M_stronger  0.9699 NA NA        NA   20
+          M1:chooser-bil:u_R_less  0.8102 NA NA        NA   20
+      M1:chooser-bil:u_M_stronger  0.4580 NA NA        NA   20
+         M1:defender-bil:u_R_less -0.0071 NA NA        NA   20
+     M1:defender-bil:u_M_stronger  0.3097 NA NA        NA   20
+     M1:defender-chooser:u_R_less -0.8173 NA NA        NA   20
+ M1:defender-chooser:u_M_stronger -0.1483 NA NA        NA   20
+[22:46:21] perm_dR on long_bcd_bon_w1d_relyear_fmid.rds (bcd, window 1): 1080 strata; spec W2contig_ptaall|igo+def+off+neu+nonagg+consul+dca+un|pr
+[22:46:51] usable draws: M0 20, M1 20 of 20; draws with a dropped model 0
+                         quantity    est null_lo null_hi p_diag n_ok
+                      M0:u_R_less  0.497      NA      NA     NA   20
+                  M0:u_M_stronger  0.821      NA      NA     NA   20
+                  M1:bil:u_R_less  0.013      NA      NA     NA   20
+              M1:bil:u_M_stronger  0.149      NA      NA     NA   20
+              M1:chooser:u_R_less  1.017      NA      NA     NA   20
+          M1:chooser:u_M_stronger  1.409      NA      NA     NA   20
+             M1:defender:u_R_less  0.193      NA      NA     NA   20
+         M1:defender:u_M_stronger  1.075      NA      NA     NA   20
+          M1:chooser-bil:u_R_less  1.004      NA      NA     NA   20
+      M1:chooser-bil:u_M_stronger  1.260      NA      NA     NA   20
+         M1:defender-bil:u_R_less  0.180      NA      NA     NA   20
+     M1:defender-bil:u_M_stronger  0.926      NA      NA     NA   20
+     M1:defender-chooser:u_R_less -0.824      NA      NA     NA   20
+ M1:defender-chooser:u_M_stronger -0.334      NA      NA     NA   20
+[22:46:57] perm_type on long_bcd_bon_w1d_relyear_fmid.rds (bcd, window 1): 1080 strata; spec W2contig_ptaall|igo+def+off+neu+nonagg+consul+dca+un|pr
+[22:47:25] usable draws: M0 20, M1 20 of 20; draws with a dropped model 0
+                         quantity    est null_lo null_hi p_diag n_ok
+                      M0:u_R_less  0.497      NA      NA     NA   20
+                  M0:u_M_stronger  0.821      NA      NA     NA   20
+                  M1:bil:u_R_less  0.013      NA      NA     NA   20
+              M1:bil:u_M_stronger  0.149      NA      NA     NA   20
+              M1:chooser:u_R_less  1.017      NA      NA     NA   20
+          M1:chooser:u_M_stronger  1.409      NA      NA     NA   20
+             M1:defender:u_R_less  0.193      NA      NA     NA   20
+         M1:defender:u_M_stronger  1.075      NA      NA     NA   20
+          M1:chooser-bil:u_R_less  1.004      NA      NA     NA   20
+      M1:chooser-bil:u_M_stronger  1.260      NA      NA     NA   20
+         M1:defender-bil:u_R_less  0.180      NA      NA     NA   20
+     M1:defender-bil:u_M_stronger  0.926      NA      NA     NA   20
+     M1:defender-chooser:u_R_less -0.824      NA      NA     NA   20
+ M1:defender-chooser:u_M_stronger -0.334      NA      NA     NA   20
+[22:47:30] boot on long_bcd_bon_w1d_relyear_fmid.rds (bcd, window 1): 1080 strata; spec W2contig_ptaall|igo+off+neu+nonagg+pta+un|pr
+[22:47:42] usable draws: M0 20, M1 20 of 20; draws with a dropped model 0
+                         quantity    est lo hi share_pos n_ok
+                      M0:u_R_less  0.453 NA NA        NA   20
+                  M0:u_M_stronger  0.809 NA NA        NA   20
+                  M1:bil:u_R_less  0.030 NA NA        NA   20
+              M1:bil:u_M_stronger  0.190 NA NA        NA   20
+              M1:chooser:u_R_less  0.960 NA NA        NA   20
+          M1:chooser:u_M_stronger  1.337 NA NA        NA   20
+             M1:defender:u_R_less  0.129 NA NA        NA   20
+         M1:defender:u_M_stronger  1.112 NA NA        NA   20
+          M1:chooser-bil:u_R_less  0.931 NA NA        NA   20
+      M1:chooser-bil:u_M_stronger  1.146 NA NA        NA   20
+         M1:defender-bil:u_R_less  0.099 NA NA        NA   20
+     M1:defender-bil:u_M_stronger  0.922 NA NA        NA   20
+     M1:defender-chooser:u_R_less -0.832 NA NA        NA   20
+ M1:defender-chooser:u_M_stronger -0.225 NA NA        NA   20
+[22:47:47] boot on long_bcd_bon_w1d_relyear_fmid.rds (bcd, window 1): 1080 strata; spec W2contig_ptaall|igo+off+neu+nonagg|pr
+[22:47:59] usable draws: M0 20, M1 20 of 20; draws with a dropped model 0
+                         quantity    est lo hi share_pos n_ok
+                      M0:u_R_less  0.601 NA NA        NA   20
+                  M0:u_M_stronger  0.856 NA NA        NA   20
+                  M1:bil:u_R_less  0.052 NA NA        NA   20
+              M1:bil:u_M_stronger  0.046 NA NA        NA   20
+              M1:chooser:u_R_less  1.141 NA NA        NA   20
+          M1:chooser:u_M_stronger  1.448 NA NA        NA   20
+             M1:defender:u_R_less  0.398 NA NA        NA   20
+         M1:defender:u_M_stronger  1.157 NA NA        NA   20
+          M1:chooser-bil:u_R_less  1.089 NA NA        NA   20
+      M1:chooser-bil:u_M_stronger  1.403 NA NA        NA   20
+         M1:defender-bil:u_R_less  0.346 NA NA        NA   20
+     M1:defender-bil:u_M_stronger  1.111 NA NA        NA   20
+     M1:defender-chooser:u_R_less -0.743 NA NA        NA   20
+ M1:defender-chooser:u_M_stronger -0.292 NA NA        NA   20
+[22:47:59] dump long_bcd_bon_w1d_relyear_fmid.rds (bcd; 1080 strata) | measure W2contig_ptaall|igo+def+off+neu+nonagg+consul+dca+un|pr | window k = -10..5 | balanced TRUE
+[22:48:01] events kept 853 of 1080 (balanced window); by type: bil 365, chooser 331, defender 157
+[22:48:01] bootstrap: 20 of 20 draws usable (128 initiators, 417 disputes)
+[22:48:01] bootstrap below reporting rule (B >= 200 and >= 90% usable): intervals set to NA
+[22:48:01] wrote output_test/eventstudy/es_main_entry.csv
+     role   k   gap gap_n diff_vs_ref
+      bil -10 -0.07 -0.04        0.00
+      bil  -5 -0.05 -0.02        0.00
+      bil  -1 -0.03  0.00        0.00
+      bil   0 -0.05 -0.02        0.00
+      bil   5 -0.03 -0.01        0.00
+  chooser -10 -0.07  0.58       -0.01
+  chooser  -5 -0.40  0.25       -0.36
+  chooser  -1 -0.65  0.00       -0.63
+  chooser   0 -0.69 -0.04       -0.64
+  chooser   5 -0.50  0.15       -0.46
+ defender -10  0.34  0.02        0.41
+ defender  -5  0.27 -0.05        0.31
+ defender  -1  0.32  0.00        0.35
+ defender   0  0.24 -0.08        0.29
+ defender   5 -0.16 -0.48       -0.12
+[22:48:02] wrote output_test/eventstudy/es_main_entry.png
+Warning messages:
+1: In max(ids, na.rm = TRUE) :
+  no non-missing arguments to max; returning -Inf
+2: In max(ids, na.rm = TRUE) :
+  no non-missing arguments to max; returning -Inf
+3: In max(ids, na.rm = TRUE) :
+  no non-missing arguments to max; returning -Inf
+4: In max(ids, na.rm = TRUE) :
+  no non-missing arguments to max; returning -Inf
+5: In max(ids, na.rm = TRUE) :
+  no non-missing arguments to max; returning -Inf
+6: In max(ids, na.rm = TRUE) :
+  no non-missing arguments to max; returning -Inf
+[22:48:02] dump long_bcd_bon_w1d_relyear_fmid.rds (bcd; 1080 strata) | measure W2contig_ptaall|igo+def+off+neu+nonagg+consul+dca+un|pr | window k = -10..0 | balanced TRUE
+[22:48:04] events kept 930 of 1080 (balanced window); by type: bil 402, chooser 349, defender 179
+[22:48:04] bootstrap: 20 of 20 draws usable (131 initiators, 452 disputes)
+[22:48:04] bootstrap below reporting rule (B >= 200 and >= 90% usable): intervals set to NA
+[22:48:04] wrote output_test/eventstudy/es_main_entry_preonly.csv
+     role   k   gap gap_n diff_vs_ref
+      bil -10 -0.05 -0.04        0.00
+      bil  -5 -0.03 -0.02        0.00
+      bil  -1 -0.01  0.00        0.00
+      bil   0 -0.03 -0.02        0.00
+  chooser -10 -0.06  0.55       -0.01
+  chooser  -5 -0.36  0.25       -0.33
+  chooser  -1 -0.61  0.00       -0.61
+  chooser   0 -0.65 -0.04       -0.63
+ defender -10  0.35  0.02        0.40
+ defender  -5  0.29 -0.04        0.32
+ defender  -1  0.33  0.00        0.33
+ defender   0  0.25 -0.07        0.28
+[22:48:05] wrote output_test/eventstudy/es_main_entry_preonly.png
+Warning messages:
+1: In max(ids, na.rm = TRUE) :
+  no non-missing arguments to max; returning -Inf
+2: In max(ids, na.rm = TRUE) :
+  no non-missing arguments to max; returning -Inf
+3: In max(ids, na.rm = TRUE) :
+  no non-missing arguments to max; returning -Inf
+4: In max(ids, na.rm = TRUE) :
+  no non-missing arguments to max; returning -Inf
+5: In max(ids, na.rm = TRUE) :
+  no non-missing arguments to max; returning -Inf
+6: In max(ids, na.rm = TRUE) :
+  no non-missing arguments to max; returning -Inf
+[22:48:05] dump long_bcd_bon_w1d_relyear_fmid.rds (bcd; 1080 strata) | measure W2contig_ptaall|igo+def+off+neu+nonagg+consul+dca+un|pr | window k = -10..5 | balanced FALSE
+[22:48:06] events kept 879 of 1080 (unbalanced); by type: bil 387, chooser 335, defender 157
+[22:48:07] bootstrap: 20 of 20 draws usable (130 initiators, 439 disputes)
+[22:48:07] bootstrap below reporting rule (B >= 200 and >= 90% usable): intervals set to NA
+[22:48:07] wrote output_test/eventstudy/es_main_entry_unbalanced.csv
+     role   k   gap gap_n diff_vs_ref
+      bil -10 -0.06 -0.15        0.00
+      bil  -5  0.03 -0.06        0.00
+      bil  -1  0.09  0.00        0.00
+      bil   0  0.06 -0.03        0.00
+      bil   5  0.04 -0.05        0.00
+  chooser -10 -0.08  0.47       -0.02
+  chooser  -5 -0.34  0.22       -0.37
+  chooser  -1 -0.56  0.00       -0.65
+  chooser   0 -0.60 -0.04       -0.66
+  chooser   5 -0.41  0.14       -0.46
+ defender -10  0.30 -0.09        0.37
+ defender  -5  0.30 -0.10        0.27
+ defender  -1  0.40  0.00        0.31
+ defender   0  0.32 -0.08        0.26
+ defender   5 -0.09 -0.49       -0.13
+[22:48:08] wrote output_test/eventstudy/es_main_entry_unbalanced.png
+Warning messages:
+1: In max(ids, na.rm = TRUE) :
+  no non-missing arguments to max; returning -Inf
+2: In max(ids, na.rm = TRUE) :
+  no non-missing arguments to max; returning -Inf
+3: In max(ids, na.rm = TRUE) :
+  no non-missing arguments to max; returning -Inf
+4: In max(ids, na.rm = TRUE) :
+  no non-missing arguments to max; returning -Inf
+5: In max(ids, na.rm = TRUE) :
+  no non-missing arguments to max; returning -Inf
+6: In max(ids, na.rm = TRUE) :
+  no non-missing arguments to max; returning -Inf
+[22:48:08] dump long_bcd_bon_w1d_relyear_fmid.rds (bcd; 1080 strata) | measure W2contig_ptaall|igo+off+neu+nonagg+pta+un|pr | window k = -10..5 | balanced TRUE
+[22:48:09] events kept 853 of 1080 (balanced window); by type: bil 365, chooser 331, defender 157
+[22:48:11] bootstrap: 200 of 200 draws usable (128 initiators, 417 disputes)
+[22:48:11] wrote output_test/eventstudy/es_random_01_entry.csv
+     role   k   gap gap_n diff_vs_ref
+      bil -10 -0.07 -0.02        0.00
+      bil  -5 -0.05  0.00        0.00
+      bil  -1 -0.05  0.00        0.00
+      bil   0 -0.07 -0.02        0.00
+      bil   5 -0.05  0.00        0.00
+  chooser -10 -0.06  0.57        0.01
+  chooser  -5 -0.37  0.26       -0.32
+  chooser  -1 -0.63  0.00       -0.58
+  chooser   0 -0.64 -0.01       -0.56
+  chooser   5 -0.49  0.14       -0.44
+ defender -10  0.29  0.03        0.36
+ defender  -5  0.25 -0.02        0.30
+ defender  -1  0.26  0.00        0.31
+ defender   0  0.18 -0.09        0.25
+ defender   5 -0.27 -0.54       -0.22
+[22:48:12] wrote output_test/eventstudy/es_random_01_entry.png
+[22:48:12] dump long_bcd_bon_w1d_relyear_fmid.rds (bcd; 1080 strata) | measure W2contig_ptaall|igo+off+neu+nonagg|pr | window k = -10..5 | balanced TRUE
+[22:48:14] events kept 853 of 1080 (balanced window); by type: bil 365, chooser 331, defender 157
+[22:48:15] bootstrap: 200 of 200 draws usable (128 initiators, 417 disputes)
+[22:48:15] wrote output_test/eventstudy/es_random_02_entry.csv
+     role   k   gap gap_n diff_vs_ref
+      bil -10 -0.01  0.04        0.00
+      bil  -5 -0.03  0.02        0.00
+      bil  -1 -0.05  0.00        0.00
+      bil   0 -0.05 -0.01        0.00
+      bil   5 -0.05  0.00        0.00
+  chooser -10 -0.09  0.39       -0.08
+  chooser  -5 -0.30  0.18       -0.27
+  chooser  -1 -0.48  0.00       -0.43
+  chooser   0 -0.53 -0.05       -0.48
+  chooser   5 -0.41  0.07       -0.36
+ defender -10  0.36  0.12        0.38
+ defender  -5  0.30  0.06        0.32
+ defender  -1  0.24  0.00        0.29
+ defender   0  0.23 -0.01        0.29
+ defender   5 -0.08 -0.32       -0.03
+[22:48:16] wrote output_test/eventstudy/es_random_02_entry.png
+[22:48:17] dump long_bcd_bon_w1d_relyear_fmid.rds (bcd; 1080 strata) | measure W2contig_ptaall|igo+def+off+neu+nonagg+consul+dca+un|pr | window k = -10..5 | balanced TRUE
+[22:48:19] align = onset: k = 0 is the dispute start year; 34 events without a GML start use the event year; median entry lag 0.0 years (max 7)
+[22:48:21] events kept 863 of 1080 (balanced window); by type: bil 365, chooser 337, defender 161
+[22:48:21] bootstrap: 20 of 20 draws usable (128 initiators, 417 disputes)
+[22:48:21] bootstrap below reporting rule (B >= 200 and >= 90% usable): intervals set to NA
+[22:48:21] wrote output_test/eventstudy/es_main_onset.csv
+     role   k   gap gap_n diff_vs_ref
+      bil -10 -0.07 -0.04        0.00
+      bil  -5 -0.05 -0.02        0.00
+      bil  -1 -0.03  0.00        0.00
+      bil   0 -0.05 -0.02        0.00
+      bil   5 -0.04 -0.01        0.00
+  chooser -10 -0.04  0.52        0.03
+  chooser  -5 -0.41  0.15       -0.36
+  chooser  -1 -0.56  0.00       -0.53
+  chooser   0 -0.53  0.03       -0.48
+  chooser   5 -0.50  0.06       -0.46
+ defender -10  0.36 -0.02        0.42
+ defender  -5  0.32 -0.05        0.37
+ defender  -1  0.37  0.00        0.40
+ defender   0  0.29 -0.08        0.34
+ defender   5 -0.13 -0.50       -0.09
+[22:48:22] wrote output_test/eventstudy/es_main_onset.png
+Warning messages:
+1: In max(ids, na.rm = TRUE) :
+  no non-missing arguments to max; returning -Inf
+2: In max(ids, na.rm = TRUE) :
+  no non-missing arguments to max; returning -Inf
+3: In max(ids, na.rm = TRUE) :
+  no non-missing arguments to max; returning -Inf
+4: In max(ids, na.rm = TRUE) :
+  no non-missing arguments to max; returning -Inf
+5: In max(ids, na.rm = TRUE) :
+  no non-missing arguments to max; returning -Inf
+6: In max(ids, na.rm = TRUE) :
+  no non-missing arguments to max; returning -Inf
+[22:48:22] dump long_bcd_bon_w1d_relyear_fmid.rds (bcd; 1080 strata) | measure W2contig_ptaall|igo+def+off+neu+nonagg+consul+dca+un|pr | window k = -10..0 | balanced TRUE
+[22:48:24] align = onset: k = 0 is the dispute start year; 34 events without a GML start use the event year; median entry lag 0.0 years (max 7)
+[22:48:26] events kept 930 of 1080 (balanced window); by type: bil 402, chooser 349, defender 179
+[22:48:26] bootstrap: 20 of 20 draws usable (131 initiators, 452 disputes)
+[22:48:26] bootstrap below reporting rule (B >= 200 and >= 90% usable): intervals set to NA
+[22:48:26] wrote output_test/eventstudy/es_main_onset_preonly.csv
+     role   k   gap gap_n diff_vs_ref
+      bil -10 -0.05 -0.04        0.00
+      bil  -5 -0.03 -0.02        0.00
+      bil  -1 -0.01  0.00        0.00
+      bil   0 -0.03 -0.02        0.00
+  chooser -10 -0.03  0.50        0.02
+  chooser  -5 -0.38  0.15       -0.35
+  chooser  -1 -0.53  0.00       -0.52
+  chooser   0 -0.50  0.03       -0.47
+ defender -10  0.36 -0.02        0.41
+ defender  -5  0.33 -0.04        0.36
+ defender  -1  0.38  0.00        0.38
+ defender   0  0.32 -0.06        0.35
+[22:48:27] wrote output_test/eventstudy/es_main_onset_preonly.png
+Warning messages:
+1: In max(ids, na.rm = TRUE) :
+  no non-missing arguments to max; returning -Inf
+2: In max(ids, na.rm = TRUE) :
+  no non-missing arguments to max; returning -Inf
+3: In max(ids, na.rm = TRUE) :
+  no non-missing arguments to max; returning -Inf
+4: In max(ids, na.rm = TRUE) :
+  no non-missing arguments to max; returning -Inf
+5: In max(ids, na.rm = TRUE) :
+  no non-missing arguments to max; returning -Inf
+6: In max(ids, na.rm = TRUE) :
+  no non-missing arguments to max; returning -Inf
+[22:48:27] dump long_bcd_bon_w1d_relyear_fmid.rds (bcd; 1080 strata) | measure W2contig_ptaall|igo+def+off+neu+nonagg+consul+dca+un|pr | window k = -10..5 | balanced FALSE
+[22:48:29] align = onset: k = 0 is the dispute start year; 34 events without a GML start use the event year; median entry lag 0.0 years (max 7)
+[22:48:31] events kept 888 of 1080 (unbalanced); by type: bil 387, chooser 340, defender 161
+[22:48:31] bootstrap: 20 of 20 draws usable (130 initiators, 439 disputes)
+[22:48:31] bootstrap below reporting rule (B >= 200 and >= 90% usable): intervals set to NA
+[22:48:31] wrote output_test/eventstudy/es_main_onset_unbalanced.csv
+     role   k   gap gap_n diff_vs_ref
+      bil -10 -0.07 -0.16        0.00
+      bil  -5  0.03 -0.06        0.00
+      bil  -1  0.09  0.00        0.00
+      bil   0  0.06 -0.03        0.00
+      bil   5  0.04 -0.05        0.00
+  chooser -10 -0.04  0.43        0.03
+  chooser  -5 -0.34  0.13       -0.36
+  chooser  -1 -0.47  0.00       -0.56
+  chooser   0 -0.44  0.03       -0.50
+  chooser   5 -0.41  0.05       -0.46
+ defender -10  0.32 -0.12        0.39
+ defender  -5  0.35 -0.09        0.32
+ defender  -1  0.45  0.00        0.36
+ defender   0  0.37 -0.08        0.31
+ defender   5 -0.06 -0.51       -0.10
+[22:48:32] wrote output_test/eventstudy/es_main_onset_unbalanced.png
+Warning messages:
+1: In max(ids, na.rm = TRUE) :
+  no non-missing arguments to max; returning -Inf
+2: In max(ids, na.rm = TRUE) :
+  no non-missing arguments to max; returning -Inf
+3: In max(ids, na.rm = TRUE) :
+  no non-missing arguments to max; returning -Inf
+4: In max(ids, na.rm = TRUE) :
+  no non-missing arguments to max; returning -Inf
+5: In max(ids, na.rm = TRUE) :
+  no non-missing arguments to max; returning -Inf
+6: In max(ids, na.rm = TRUE) :
+  no non-missing arguments to max; returning -Inf
+[22:48:32] dump long_bcd_bon_w1d_relyear_fmid.rds (bcd; 1080 strata) | measure W2contig_ptaall|igo+off+neu+nonagg+pta+un|pr | window k = -10..5 | balanced TRUE
+[22:48:34] align = onset: k = 0 is the dispute start year; 34 events without a GML start use the event year; median entry lag 0.0 years (max 7)
+[22:48:36] events kept 863 of 1080 (balanced window); by type: bil 365, chooser 337, defender 161
+[22:48:38] bootstrap: 200 of 200 draws usable (128 initiators, 417 disputes)
+[22:48:38] wrote output_test/eventstudy/es_random_01_onset.csv
+     role   k   gap gap_n diff_vs_ref
+      bil -10 -0.07 -0.02        0.00
+      bil  -5 -0.05  0.00        0.00
+      bil  -1 -0.05  0.00        0.00
+      bil   0 -0.07 -0.02        0.00
+      bil   5 -0.05 -0.01        0.00
+  chooser -10 -0.04  0.54        0.04
+  chooser  -5 -0.36  0.22       -0.31
+  chooser  -1 -0.57  0.00       -0.53
+  chooser   0 -0.52  0.05       -0.45
+  chooser   5 -0.50  0.07       -0.45
+ defender -10  0.30 -0.02        0.37
+ defender  -5  0.24 -0.09        0.29
+ defender  -1  0.32  0.00        0.37
+ defender   0  0.23 -0.10        0.30
+ defender   5 -0.26 -0.58       -0.20
+[22:48:39] wrote output_test/eventstudy/es_random_01_onset.png
+[22:48:39] dump long_bcd_bon_w1d_relyear_fmid.rds (bcd; 1080 strata) | measure W2contig_ptaall|igo+off+neu+nonagg|pr | window k = -10..5 | balanced TRUE
+[22:48:41] align = onset: k = 0 is the dispute start year; 34 events without a GML start use the event year; median entry lag 0.0 years (max 7)
+[22:48:43] events kept 863 of 1080 (balanced window); by type: bil 365, chooser 337, defender 161
+[22:48:45] bootstrap: 200 of 200 draws usable (128 initiators, 417 disputes)
+[22:48:45] wrote output_test/eventstudy/es_random_02_onset.csv
+     role   k   gap gap_n diff_vs_ref
+      bil -10 -0.01  0.03        0.00
+      bil  -5 -0.03  0.02        0.00
+      bil  -1 -0.05  0.00        0.00
+      bil   0 -0.05 -0.01        0.00
+      bil   5 -0.05 -0.01        0.00
+  chooser -10 -0.10  0.30       -0.08
+  chooser  -5 -0.32  0.08       -0.29
+  chooser  -1 -0.40  0.00       -0.35
+  chooser   0 -0.43 -0.03       -0.37
+  chooser   5 -0.41 -0.02       -0.36
+ defender -10  0.36  0.14        0.38
+ defender  -5  0.33  0.10        0.35
+ defender  -1  0.23  0.00        0.27
+ defender   0  0.28  0.05        0.33
+ defender   5 -0.07 -0.30       -0.02
+[22:48:45] wrote output_test/eventstudy/es_random_02_onset.png
+summarized 44 manifest outputs (44 groups) into output_test/summary
+[22:48:48] LOOP_FINISHED_WITH_GAPS: 2 items in output_test/status/incomplete.txt
+history drop un: list not approved
+history drop punitive: list not approved

@@ -1,0 +1,2 @@
+W2contig_ptaall|igo+off+neu+nonagg+pta+un|pr
+W2contig_ptaall|igo+off+neu+nonagg|pr
