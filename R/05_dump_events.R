@@ -53,7 +53,7 @@ Sys.setenv(V2_ROOT = normalizePath(file.path(R_DIR, "..")))   # audit F5 (A1 P2-
 args <- commandArgs(trailingOnly = TRUE)
 ## joint audit B2: refuse retired options, unknown flags, bare flags and duplicated flags (get_arg would silently take the first)
 refuse_archived_options(args, "10_clogit_roles.R")
-SCRIPT_FLAGS <- c("dump_long", "bilateral", "unit_weights", "sample", "lag", "model", "boot", "types", "boot_unit", "loo", "rel_scale", "era", "coorig_months", "coorig_bound", "timing_ref", "entry_mod")
+SCRIPT_FLAGS <- c("dump_out", "dump_long", "bilateral", "unit_weights", "sample", "lag", "model", "boot", "types", "boot_unit", "loo", "rel_scale", "era", "coorig_months", "coorig_bound", "timing_ref", "entry_mod")
 KNOWN_FLAGS <- c(names(SPEC_CHOICES), "ame_K", "tag", SCRIPT_FLAGS)
 bad <- args[!grepl("^--[A-Za-z_0-9]+=.+$", args)]
 if (length(bad)) stop(sprintf("arguments must be --name=value; refused: %s", paste(bad, collapse = " ")))
@@ -302,8 +302,10 @@ if (TYPES == "bcj") {
   war_init_states <- function(w, side_members = FALSE) { x <- wi[wi$warnum == w, ]; side <- unique(c(x$sidea1[x$initiator1 == 1], x$sidea2[x$initiator2 == 1])); stopifnot(length(side) == 1L)
     if (!side_members) unique(c(x$ccode1[x$initiator1 == 1], x$ccode2[x$initiator2 == 1])) else unique(c(x$ccode1[x$sidea1 == side], x$ccode2[x$sidea2 == side])) }
   side_dir <- function(d) {
-    rows <- oe$dispnum == d; if (any(rows & oe$n_disputes == 1L)) rows <- rows & oe$n_disputes == 1L   # P1-4: single-source rows describe d itself
+    rows <- oe$dispnum == d; single <- any(rows & oe$n_disputes == 1L); if (single) rows <- rows & oe$n_disputes == 1L   # P1-4: single-source rows describe d itself
     wl <- unique(na.omit(oe$war_link[rows]))
+    ## delta review N7: a war link read only from mixed-source rows may belong to another source dispute; recorded and refused below
+    if (!single && length(wl)) mixed_fallback <<- c(mixed_fallback, d)
     if (!length(wl)) return(c(side = 1L, rule = 2L))                                              # not war-linked: Side A
     st <- unique(unlist(lapply(wl, war_init_states)))
     if (!any(P$ccode[P$dispnum == d] %in% st)) st <- unique(unlist(lapply(wl, war_init_states, side_members = TRUE)))
@@ -312,7 +314,11 @@ if (TYPES == "bcj") {
   }
   ud <- unique(k_all$dispnum)
   rule_d <- setNames(rep(1L, length(ud)), ud); isd <- setNames(unname(isd1[as.character(ud)]), ud)
+  mixed_fallback <- integer(0)
   for (d in ud[is.na(isd)]) { r <- side_dir(d); isd[as.character(d)] <- r[["side"]]; rule_d[as.character(d)] <- r[["rule"]] }
+  logf("types %s: disputes whose war link came only from mixed-source rows (delta review N7): %d%s", TYPES, length(mixed_fallback),
+       if (length(mixed_fallback)) paste0(" [", paste(mixed_fallback, collapse = ","), "]") else "")
+  if (length(mixed_fallback)) stop("war link for disputes ", paste(mixed_fallback, collapse = ","), " came only from mixed-source rows; verify the primary-dispute war mapping before fitting (delta review N7)")
   init_side <- unname(isd[as.character(k_all$dispnum)]); side_rule <- unname(rule_d[as.character(k_all$dispnum)])
   stopifnot(!anyNA(init_side), all(init_side %in% 0:1))
   ## PI 2026-11-19: with --coorig_months, only joiners on the INITIATING side can be promoted to coalition originator; an early entrant on the
@@ -476,18 +482,25 @@ if (DUMP_LONG) {
   gd <- as.data.frame(peacesciencer::gml_mid_disps)[, c("dispnum", "fatality")]
   fz <- gd$fatality[match(D$disp, gd$dispnum)]
   D$disp_fatal <- ifelse(is.na(fz) | fz < 0, NA_integer_, as.integer(fz > 0))
+  ## delta review step B 1: the primary dispute's GML start year, so step B can check that a decision is at dispute onset
+  gs <- as.data.frame(peacesciencer::gml_mid_disps)[, c("dispnum", "styear")]
+  D$disp_styear <- as.integer(gs$styear[match(D$disp, gs$dispnum)])
   logf("dump_long: events whose primary dispute is fatal (GML) %d, nonfatal %d, unknown %d", sum(D$disp_fatal[D$chosen == 1L] == 1L, na.rm = TRUE),
        sum(D$disp_fatal[D$chosen == 1L] == 0L, na.rm = TRUE), sum(is.na(D$disp_fatal[D$chosen == 1L])))
   gc_hash <- tryCatch(system2("git", c("-C", v2_root(), "rev-parse", "HEAD"), stdout = TRUE, stderr = FALSE)[1], error = function(e) NA_character_)
   gc_dirty <- tryCatch(length(system2("git", c("-C", v2_root(), "status", "--porcelain", "--untracked-files=no"), stdout = TRUE, stderr = FALSE)) > 0, error = function(e) NA)
   if (isTRUE(gc_dirty)) gc_hash <- paste0(gc_hash, "-dirty")   # review P3-21
-  od <- file.path(v2_root(), "output", "rel_sweep"); dir.create(od, showWarnings = FALSE, recursive = TRUE)
+  od <- file.path(v2_root(), "output", "rel_sweep")
   ## GPT full audit P1-1: the bilateral rule is part of the dump's identity (onset and ever can no longer overwrite each other)
   f_out <- file.path(od, paste0("long_", TYPES, "_", if (BILAT == "onset") "bon" else "ever", if (COORIG_W > 0L) paste0("_w", COORIG_W, substr(COORIG_BOUND, 1, 1)) else "",
                                if (REL_SCALE == "year") "_relyear" else "", if (UNITW) "_uw" else "", "_", SAMPLE, ".rds"))
+  ## delta review N3: the runner passes a run-specific destination (--dump_out); the frame is written to a temp file and renamed only when complete
+  DOUT <- get_arg(args, "dump_out", ""); if (nzchar(DOUT)) f_out <- DOUT
+  dir.create(dirname(f_out), showWarnings = FALSE, recursive = TRUE); f_tmp <- paste0(f_out, ".tmp", Sys.getpid())
   saveRDS(list(D = D, roles = ROLES, Z_cols = Z_cols, rel_scale = REL_SCALE, types = TYPES, sample = SAMPLE, bilateral_rule = BILAT, unit_weights = UNITW,
                coorig_months = COORIG_W, coorig_bound = if (COORIG_W > 0L) COORIG_BOUND else NA_character_,
-               data_dir = data_dir, cell = cell, git_commit = gc_hash, built = format(Sys.time())), f_out)
+               data_dir = data_dir, cell = cell, git_commit = gc_hash, built = format(Sys.time())), f_tmp)
+  stopifnot(file.rename(f_tmp, f_out))
   logf("dump_long: wrote %s (%d rows, %d strata); no fits run", f_out, nrow(D), length(unique(D$ev_id)))
   quit(save = "no", status = 0)
 }

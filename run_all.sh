@@ -8,20 +8,37 @@
 ## folder with OUT=... or remove the old one). Within one fingerprint a finished step is skipped; a step is "finished" only when its output was
 ## written atomically and, for sweeps, contains no ERROR rows. Sweeps with ERROR rows are recorded as INCOMPLETE and the run ends non-zero.
 ## Production refuses a dirty working tree (uncommitted code).
+## Delta review 2026-11-20: the fingerprint also covers the layer inputs and file, R and package versions; artifacts built from supplied inputs
+## (measure-id lists, exclusion lists, variants) carry a stamp of those inputs and are rebuilt when it differs; a sweep is keyed by the hashes of
+## its dump and positions files; every R step must exit 0 (outputs are never accepted from existence alone); dumps are written straight to this
+## run's folder (temp file + rename); the sweep manifest is rebuilt from validated per-task records; a non-empty folder this runner did not
+## create is refused.
 ## ============================================================================
 set -euo pipefail
 cd "$(dirname "$0")"; source config.sh
 TEST="${TEST:-0}"
 if [ "$TEST" = "1" ]; then O="${OUT:-output_test}"; WINDOWS="0 1"; B_BOOT=20; B_PERM=20; N_RANDOM_BOOT=2; MERROR_K="0.5"; N_NOISE_DRAWS=1; else O="${OUT:-output}"; fi
-mkdir -p $O/{positions,validation,sets,dumps,sweep,resample,influence,eventstudy,summary,logs,status} output/rel_sweep
+## delta review N2: refuse a non-empty output folder this runner did not create (it cannot be tied to a fingerprint)
+if [ -d "$O" ] && [ ! -e "$O/.created_by_run_all" ] && [ -n "$(find "$O" -type f -print -quit)" ]; then echo "STOP: $O is not empty and was not created by run_all.sh; use OUT=<new folder>"; exit 1; fi
+mkdir -p $O/{positions,validation,sets/ids,dumps,sweep,resample,influence,eventstudy,summary,logs,status}; touch $O/.created_by_run_all
 LOG=$O/logs/run_$(date +%Y%m%d_%H%M%S).log
 say() { echo "[$(date +%H:%M:%S)] $*" | tee -a "$LOG"; }
 die() { say "STOP: $*"; exit 1; }
+## run an R step: full output to the log, selected lines to the screen; returns the R exit status (delta review N3/N5: never inferred from files)
+runR() { local PAT=$1; shift; local T; T=$(mktemp); local rc=0; Rscript "$@" > "$T" 2>&1 || rc=$?; cat "$T" >> "$LOG"; grep -E "$PAT" "$T" | cut -c1-250 || true; rm -f "$T"; return $rc; }
+## content hashes, memoized per invocation
+## hm fills the memo in the CURRENT shell (call it before using h inside $(...), whose subshell cannot write the memo back)
+declare -A HMEMO; hm() { local f; f=$(readlink -f "$1"); [ -n "${HMEMO[$f]:-}" ] || HMEMO[$f]=$(shasum -a 256 "$f" | cut -c1-16); }
+h() { hm "$1"; echo "${HMEMO[$(readlink -f "$1")]}"; }
+## stamps: an artifact built from supplied inputs is reused only if its .stamp matches the inputs now (delta review N2)
+fresh() { [ -s "$1" ] && [ -s "$1.stamp" ] && [ "$(cat "$1.stamp")" = "$2" ]; }
+stamp() { echo "$2" > "$1.stamp.tmp" && mv "$1.stamp.tmp" "$1.stamp"; }
 
 ## ---- 0. preflight (P1-1) ----
 for W in $WINDOWS; do [[ "$W" =~ ^[0-6]$ ]] || die "window $W outside 0-6"; done
 [[ " $WINDOWS " == *" $WINDOW_MAIN "* ]] || die "main window $WINDOW_MAIN is not in WINDOWS"
-Rscript -e 'p <- c("survival","data.table","dplyr","igraph","peacesciencer","countrycode","sandwich","ggplot2","parallel"); m <- p[!vapply(p, requireNamespace, TRUE, quietly = TRUE)]; if (length(m)) stop("missing R packages: ", paste(m, collapse = ", "))'
+PKGS="survival data.table dplyr igraph peacesciencer countrycode sandwich ggplot2 parallel"; [ "$REUSE_POSITIONS" != "1" ] && PKGS="$PKGS fixest igoR"   # N1: rebuild needs fixest, igoR
+Rscript -e 'p <- strsplit(commandArgs(TRUE)[1], " ")[[1]]; m <- p[!vapply(p, requireNamespace, TRUE, quietly = TRUE)]; if (length(m)) stop("missing R packages: ", paste(m, collapse = ", "))' "$PKGS"
 if [ "$TEST" != "1" ] && ! git diff --quiet HEAD 2>/dev/null; then die "uncommitted changes in the repo; commit them first (production runs are tied to a commit)"; fi
 if [ -e data_entry ] && [ "$(readlink data_entry)" != "$DATA_ENTRY" ]; then die "data_entry points to $(readlink data_entry), config says $DATA_ENTRY"; fi
 [ -e data_entry ] || ln -s "$DATA_ENTRY" data_entry
@@ -34,41 +51,54 @@ link_pos() { local F=$1 D=$O/positions/$(basename "$1"); [ -s "$F" ] || die "pos
 if [ "$REUSE_POSITIONS" = "1" ]; then
   for F in "$REUSE_CORE_IGO"/positions_core_*.rds "$REUSE_CORE_IGO"/positions_igo_arm.rds "$REUSE_DIPL"/positions_dipl_*.rds; do link_pos "$F"; done
 fi
-[ -s $O/layers_dy.rds ] || { Rscript R/01_build_layers.R "$NETDATA" $O/layers_dy.rds.tmp.rds 2>&1 | tee -a "$LOG"; mv $O/layers_dy.rds.tmp.rds $O/layers_dy.rds; }
+NETSHA=$( (for f in dipl_dyad.csv destaRaw.rda dca_dyad.csv; do [ -s "$NETDATA/$f" ] || die "missing $NETDATA/$f"; h "$NETDATA/$f"; done; h R/01_build_layers.R) | shasum -a 256 | cut -c1-16 )
+if ! fresh $O/layers_dy.rds "$NETSHA"; then rm -f $O/layers_dy.rds; runR "Error|wrote" R/01_build_layers.R "$NETDATA" $O/layers_dy.rds.tmp.rds || die "layers build failed"; mv $O/layers_dy.rds.tmp.rds $O/layers_dy.rds; stamp $O/layers_dy.rds "$NETSHA"; fi
 if [ "$REUSE_POSITIONS" != "1" ]; then
-  for PT in all inforce; do for W in W1raw W2contig W3dist W4fe; do [ -s $O/positions/positions_core_${W}_pta$PT.rds ] || NEED_CORE_$PT=1; done; done
-  [ "${NEED_CORE_all:-0}" = 1 ] && Rscript R/02_build_positions.R $O/layers_dy.rds $O/positions --arm=core --pta=all --cores=$CORES 2>&1 | tee -a "$LOG"
-  [ "${NEED_CORE_inforce:-0}" = 1 ] && Rscript R/02_build_positions.R $O/layers_dy.rds $O/positions --arm=core --pta=inforce --cores=$CORES 2>&1 | tee -a "$LOG"
-  ls $O/positions/positions_dipl_W4fe_ptaall.rds >/dev/null 2>&1 || Rscript R/02_build_positions.R $O/layers_dy.rds $O/positions --arm=dipl --pta=all --cores=$CORES 2>&1 | tee -a "$LOG"
-  [ -s $O/positions/positions_igo_arm.rds ] || Rscript R/02_build_positions.R $O/layers_dy.rds $O/positions --arm=igo 2>&1 | tee -a "$LOG"
+  NEED_CORE_all=0; NEED_CORE_inforce=0; NEED_DIPL=0
+  for PT in all inforce; do for W in W1raw W2contig W3dist W4fe; do [ -s $O/positions/positions_core_${W}_pta$PT.rds ] || printf -v "NEED_CORE_$PT" '%s' 1; done; done   # N1
+  for W in W1raw W2contig W3dist W4fe; do [ -s $O/positions/positions_dipl_${W}_ptaall.rds ] || NEED_DIPL=1; done                                                  # N1: all four
+  [ "$NEED_CORE_all" = 1 ] && { runR "Error|wrote" R/02_build_positions.R $O/layers_dy.rds $O/positions --arm=core --pta=all --cores=$CORES || die "core positions (all) failed"; }
+  [ "$NEED_CORE_inforce" = 1 ] && { runR "Error|wrote" R/02_build_positions.R $O/layers_dy.rds $O/positions --arm=core --pta=inforce --cores=$CORES || die "core positions (inforce) failed"; }
+  [ "$NEED_DIPL" = 1 ] && { runR "Error|wrote" R/02_build_positions.R $O/layers_dy.rds $O/positions --arm=dipl --pta=all --cores=$CORES || die "diplomacy positions failed"; }
+  [ -s $O/positions/positions_igo_arm.rds ] || { runR "Error|wrote" R/02_build_positions.R $O/layers_dy.rds $O/positions --arm=igo || die "IGO positions failed"; }
 fi
 for e in $EXPECT; do [ -s $O/positions/$e.rds ] || die "positions file missing: $e.rds"; done
 POS=(); for e in $EXPECT; do POS+=( $O/positions/$e.rds ); done
-SHA=$( (cd $O/positions && for e in $EXPECT; do shasum -a 256 -- "$(readlink -f $e.rds)" | cut -d' ' -f1; done) | shasum -a 256 | cut -c1-16 )
+SHA=$( (for e in $EXPECT; do h $O/positions/$e.rds; done) | shasum -a 256 | cut -c1-16 )
+ENV=$(Rscript -e 'cat(R.version.string, "|"); for (p in strsplit(commandArgs(TRUE)[1], " ")[[1]]) cat(p, as.character(packageVersion(p)), "|")' "$PKGS")
 ## code identity = the content of the scripts and this runner (doc-only commits do not invalidate outputs); the commit is logged
-FP=$( { cat run_all.sh R/*.R R/lib/*.R | shasum -a 256; cat config.sh; echo "TEST=$TEST WINDOWS=$WINDOWS B=$B_BOOT/$B_PERM N=$N_RANDOM_BOOT K=$MERROR_K"; shasum -a 256 data_entry/manifest.csv; echo "$SHA"; } | shasum -a 256 | cut -c1-16 )
+FP=$( { cat run_all.sh R/*.R R/lib/*.R | shasum -a 256; cat config.sh; echo "TEST=$TEST WINDOWS=$WINDOWS B=$B_BOOT/$B_PERM N=$N_RANDOM_BOOT K=$MERROR_K"; shasum -a 256 data_entry/manifest.csv; echo "$SHA"; echo "layers $(h $O/layers_dy.rds) net $NETSHA"; echo "$ENV"; } | shasum -a 256 | cut -c1-16 )
 if [ -s $O/FINGERPRINT ]; then [ "$(cat $O/FINGERPRINT)" = "$FP" ] || die "$O was built from different code/config/inputs (fingerprint $(cat $O/FINGERPRINT), now $FP); use OUT=<new folder> or remove $O"
 else echo "$FP" > $O/FINGERPRINT; fi
 say "fingerprint $FP | commit $(git rev-parse --short HEAD) | positions sha $SHA | cores $CORES | types $TYPES | main window $WINDOW_MAIN | test $TEST"
-Rscript -e 'cat(R.version.string, "\n"); for (p in c("survival","data.table","dplyr","igraph","peacesciencer","countrycode","sandwich","ggplot2")) cat(p, as.character(packageVersion(p)), "\n")' | tee -a "$LOG"
-MAN=$O/status/manifest_sweeps.tsv; [ -s $MAN ] || printf "group\tpath\tn_requested\n" > $MAN
+say "environment: $ENV"
+MAN=$O/status/manifest_sweeps.tsv
 INC=$O/status/incomplete.txt; : > $INC
-nspec() { Rscript -e 'cat(ncol(readRDS(commandArgs(TRUE)[1])$R))' "$1"; }
 
 ## ---- 2. validation (outcome-blind) ----
 echo "$MAIN_SPEC" > $O/sets/main_id.txt
 VPOS=( "${POS[@]}" ); [ "$TEST" = "1" ] && VPOS=( $O/positions/positions_core_W2contig_ptaall.rds )
-[ -s $O/validation/measure_validation.csv ] || Rscript R/03_validate_measures.R $O/validation "${VPOS[@]}" --top=$O/sets/main_id.txt --cores=$CORES 2>&1 | tee -a "$LOG"
+[ -s $O/validation/measure_validation.csv ] || { runR "Error|wrote|plausible" R/03_validate_measures.R $O/validation "${VPOS[@]}" --top=$O/sets/main_id.txt --cores=$CORES || die "validation failed"; }
 [ -s $O/validation/measure_validation.csv ] || die "validation failed"
 
 ## ---- 3. measure sets ----
-sub_set() { [ -s $O/sets/$1.rds ] || Rscript R/04_subset_positions.R $O/positions $O/validation/measure_validation.csv $O/sets/$1.rds "${@:2}" 2>&1 | tee -a "$LOG"; [ -s $O/sets/$1.rds ] || die "set $1 failed"; }
+## a set is rebuilt when its stamp (hash of the validation file, of the id list it was asked for, and its arguments) differs (delta review N2)
+sub_set() { local NM=$1 ST="$(h $O/validation/measure_validation.csv) ${*:2}"; local A; for A in "${@:2}"; do [[ "$A" == --ids=* ]] && ST="$ST $(h "${A#--ids=}")"; done
+  fresh $O/sets/$NM.rds "$ST" && return 0; rm -f $O/sets/$NM.rds
+  runR "Error|wrote|set " R/04_subset_positions.R $O/positions $O/validation/measure_validation.csv $O/sets/$NM.rds "${@:2}" || die "set $NM failed"; stamp $O/sets/$NM.rds "$ST"; }
 sub_set phaseA --set=ids --ids=inputs/phaseA_specs.txt
 sub_set main --set=ids --ids=$O/sets/main_id.txt
 sub_set noatop --set=noatop
-[ -s $O/sets/random_ids.txt ] || Rscript -e 'set.seed(123); v <- read.csv(commandArgs(TRUE)[1]); p <- setdiff(v$spec_id[v$plausible], commandArgs(TRUE)[3]); writeLines(sort(sample(p, as.integer(commandArgs(TRUE)[4]))), commandArgs(TRUE)[2])' \
-  $O/validation/measure_validation.csv $O/sets/random_ids.txt "$MAIN_SPEC" $N_RANDOM_BOOT
+RST="$(h $O/validation/measure_validation.csv) $MAIN_SPEC $N_RANDOM_BOOT"
+fresh $O/sets/random_ids.txt "$RST" || { Rscript -e 'set.seed(123); v <- read.csv(commandArgs(TRUE)[1]); p <- setdiff(v$spec_id[v$plausible], commandArgs(TRUE)[3]); writeLines(sort(sample(p, as.integer(commandArgs(TRUE)[4]))), commandArgs(TRUE)[2])' \
+  $O/validation/measure_validation.csv $O/sets/random_ids.txt "$MAIN_SPEC" $N_RANDOM_BOOT; stamp $O/sets/random_ids.txt "$RST"; }
 sub_set random --set=ids --ids=$O/sets/random_ids.txt
+## expected spec ids of every positions file and set (N6: the summarizer checks the analysed ids against these exactly); each id file is stamped with its source's hash
+ids_of() { local F=$1 I=$O/sets/ids/$(basename "$1" .rds).txt; fresh "$I" "$(h "$F")" || { Rscript -e 'writeLines(colnames(readRDS(commandArgs(TRUE)[1])$R), commandArgs(TRUE)[2])' "$F" "$I.tmp" && mv "$I.tmp" "$I" && stamp "$I" "$(h "$F")"; }; echo "$I"; }
+for F in "${POS[@]}" $O/sets/{phaseA,main,noatop,random}.rds; do ids_of "$F" > /dev/null; done
+cmp -s <(grep -v '^$' inputs/phaseA_specs.txt) $O/sets/ids/phaseA.txt || die "sets/phaseA.rds does not hold exactly the ids in inputs/phaseA_specs.txt"
+cmp -s $O/sets/random_ids.txt $O/sets/ids/random.txt || die "sets/random.rds does not hold exactly the ids in random_ids.txt"
+[ "$(cat $O/sets/ids/main.txt)" = "$MAIN_SPEC" ] || die "sets/main.rds does not hold exactly the main measure"
 
 ## ---- 4. event frames ----
 wtag() { [ "$1" -gt 0 ] && echo "_w${1}d" || echo ""; }
@@ -77,26 +107,34 @@ dump() {  # dump <types> <window> <sample> [--unit_weights=TRUE]
   local UW=""; [[ " $* " == *"--unit_weights=TRUE"* ]] && UW="_uw"
   local F=$O/dumps/long_${T}_bon$(wtag $W)_relyear${UW}_${SM}.rds
   [ -s $F ] && return 0
-  Rscript R/05_dump_events.R --comparison=directed --roles=bcj --entry=later --types=$T --rel_scale=year --bilateral=onset $WF --sample=$SM --boot=0 --dump_long=TRUE "$@" 2>&1 \
-    | grep -E "participant table|P1-2|check:|note:|promotions undone|types $T:|fatal|dump_long: wrote|Error" | tee -a "$LOG" || true
-  [ -s output/rel_sweep/$(basename $F) ] || die "dump failed: $F"; mv output/rel_sweep/$(basename $F) $F
+  ## delta review N3: written straight to this run's folder (temp + rename inside R/05); accepted only on exit 0 and a readable frame of the requested kind
+  runR "participant table|P1-2|N7|check:|note:|promotions undone|types $T:|fatal|dump_long: wrote|Error" R/05_dump_events.R --comparison=directed --roles=bcj --entry=later --types=$T \
+    --rel_scale=year --bilateral=onset $WF --sample=$SM --boot=0 --dump_long=TRUE --dump_out=$F "$@" || { rm -f $F; die "dump failed: $F"; }
+  Rscript -e 'a <- commandArgs(TRUE); d <- readRDS(a[1]); stopifnot(is.data.frame(d$D), nrow(d$D) > 0, d$types == a[2], d$sample == a[3], as.integer(d$coorig_months) == as.integer(a[4]), d$bilateral_rule == "onset")' \
+    $F $T $SM $W || { rm -f $F; die "dump $F is not the requested frame"; }
 }
 for W in $WINDOWS; do dump $TYPES $W fmid; dump $TYPES $W mid; dump bcjs $W fmid; done
 dump $TYPES $WINDOW_MAIN fmid --unit_weights=TRUE
 MAIN_F=$O/dumps/long_${TYPES}_bon$(wtag $WINDOW_MAIN)_relyear_fmid.rds
 MAIN_MID=$O/dumps/long_${TYPES}_bon$(wtag $WINDOW_MAIN)_relyear_mid.rds
 
-## ---- sweep: one dump x one positions file. Finished = an atomically written CSV with no ERROR rows; recorded in the manifest ----
+## ---- sweep: one dump x one positions file ----
+## Task record (delta review N5): status/sweep_<key> = "group <tab> csv <tab> n ids <tab> ids file", written atomically after the CSV is validated;
+## the key includes the HASHES of the dump and positions files (N2), so a rebuilt variant or set reruns its sweeps. A record is trusted only if
+## its CSV still exists without ERROR rows. The manifest is rebuilt from the records before the summary (never appended).
 sweep() {  # sweep <group> <dump> <positions> [options]
   local G=$1 DP=$2 PS=$3; shift 3; local OD=$O/sweep/$G; mkdir -p $OD
-  local KEY=$(echo "$G $(basename $DP) $(basename $PS) $*" | shasum | cut -c1-16); local ST=$O/status/sweep_$KEY
-  if [ -s $ST ] && [ -s "$(cat $ST)" ]; then return 0; fi
-  local OUTL; OUTL=$(Rscript R/07_fit_sweep.R $DP $PS $OD --bilateral=onset --cores=$CORES "$@" 2>&1 | tee -a "$LOG" | grep -E "^WROTE |CENSUS|Error" || true)
-  echo "$OUTL" | grep -E "CENSUS|Error" | cut -c1-250
-  local F; F=$(echo "$OUTL" | sed -n 's/^WROTE //p' | tail -1)
-  if [ -z "$F" ] || [ ! -s "$F" ]; then echo "$G $(basename $PS) $*: no output" >> $INC; return 0; fi
+  hm $DP; hm $PS; local KEY; KEY=$(echo "$G $(h $DP) $(h $PS) $*" | shasum | cut -c1-16); local ST=$O/status/sweep_$KEY
+  if [ -s $ST ]; then local F0; F0=$(cut -f2 $ST); [ -s "$F0" ] && ! grep -q '"ERROR"' "$F0" && return 0; fi
+  local T; T=$(mktemp); local rc=0
+  Rscript R/07_fit_sweep.R $DP $PS $OD --bilateral=onset --cores=$CORES "$@" > "$T" 2>&1 || rc=$?
+  cat "$T" >> "$LOG"; grep -E "CENSUS|Error" "$T" | cut -c1-250 || true
+  local F; F=$(sed -n 's/^WROTE //p' "$T" | tail -1); rm -f "$T"
+  if [ "$rc" != 0 ] || [ -z "$F" ] || [ ! -s "$F" ]; then echo "$G $(basename $PS) $*: failed (exit $rc)" >> $INC; return 0; fi
   if grep -q '"ERROR"' "$F"; then echo "$G $(basename $PS) $*: ERROR rows in $F" >> $INC; return 0; fi
-  printf "%s\t%s\t%s\n" "$G" "$F" "$(nspec $PS)" >> $MAN; echo "$F" > $ST
+  local I; I=$(ids_of $PS)
+  { grep -l -F -x -- "$F" $O/status/sweep_*.path 2>/dev/null || true; } | while read -r old; do rm -f "${old%.path}" "$old"; done   # one record per CSV
+  printf "%s\t%s\t%s\t%s\n" "$G" "$F" "$(wc -l < $I | tr -d ' ')" "$I" > $ST.tmp && mv $ST.tmp $ST && echo "$F" > $ST.path
 }
 
 ## ---- 5. multiverse ----
@@ -109,13 +147,19 @@ for F in "${MV[@]}"; do sweep multiverse_stepB_w$WINDOW_MAIN $MAIN_MID $F --step
 for W in $WINDOWS; do sweep fourtypes_w$W $O/dumps/long_bcjs_bon$(wtag $W)_relyear_fmid.rds $PA; done
 
 ## ---- 6. robustness on the Phase A measures (main window) ----
-var() { local NM=$1; shift; [ -s $O/dumps/var_$NM.rds ] || Rscript R/06_make_variants.R $MAIN_F $O/dumps/var_$NM.rds "$@" 2>&1 | tee -a "$LOG" | grep -E "Error|dropside|drop:|expdef:|aggr:" || true; [ -s $O/dumps/var_$NM.rds ] || die "variant $NM failed"; }
-var aggr --variant=aggr
+## variants are stamped with the hash of their input dump and their arguments (incl. any dispute list), so a changed list rebuilds them (N2)
+var() { local NM=$1; shift; hm $MAIN_F; local F=$O/dumps/var_$NM.rds ST; ST="$(h $MAIN_F) $*"; fresh $F "$ST" && return 0; rm -f $F
+  runR "Error|dropside|drop:|expdef:|aggr" R/06_make_variants.R $MAIN_F $F "$@" || die "variant $NM failed"; [ -s $F ] || die "variant $NM wrote nothing"; stamp $F "$ST"; }
+var aggr --variant=aggr --window=complete          # delta review P2-11: complete, GML-reconciled history windows only
+var aggr_base --variant=aggr --window=complete_base  # the same strata without the control (comparator)
+var aggr_censored --variant=aggr --window=censored   # every stratum; truncated counts after 2010 (lower-bound appendix sensitivity)
 var expdef --variant=expdef --anchor=onset --layers=$O/layers_dy.rds
 var expdefentry --variant=expdef --anchor=entry --layers=$O/layers_dy.rds
 for L in hard reviewed hard_disp reviewed_disp; do var ds_$L --variant=dropside --level=$L; done
 sweep rob_base $MAIN_F $PA
 sweep rob_aggr $O/dumps/var_aggr.rds $PA
+sweep rob_aggr_base $O/dumps/var_aggr_base.rds $PA
+sweep rob_aggr_censored $O/dumps/var_aggr_censored.rds $PA
 sweep rob_expdef $O/dumps/var_expdef.rds $PA
 sweep rob_expdefentry $O/dumps/var_expdefentry.rds $PA
 for L in hard reviewed hard_disp reviewed_disp; do sweep rob_dropside_$L $O/dumps/var_ds_$L.rds $PA; done
@@ -149,18 +193,18 @@ sweep rob_stepB_all_pair $MAIN_MID $PA --stepB=TRUE --stepB_unit=all --stepB_out
 
 ## ---- 7. influence; influence-chosen and history-chosen dispute drops ----
 inf() { [ -s $O/influence/$1_loo.csv ] && [ -s $O/influence/$1_top.txt ] && return 0
-  Rscript R/09_influence.R $MAIN_F $O/sets/main.rds "$MAIN_SPEC" $O/influence/$1 --unit=$1 --cores=$CORES 2>&1 | tee -a "$LOG" | grep -E "LOO|refits|Error" || true
-  [ -s $O/influence/$1_loo.csv ] && [ -s $O/influence/$1_top.txt ] || die "influence ($1) failed"; }
+  runR "LOO|refits|Error" R/09_influence.R $MAIN_F $O/sets/main.rds "$MAIN_SPEC" $O/influence/$1 --unit=$1 --cores=$CORES || die "influence ($1) failed"
+  [ -s $O/influence/$1_loo.csv ] && [ -s $O/influence/$1_top.txt ] || die "influence ($1) wrote no output"; }
 inf disp; inf init
 for N in 5 10; do var droptop$N --variant=drop --disputes=$(head -$N $O/influence/disp_top.txt | paste -sd, -); sweep rob_drop_top$N $O/dumps/var_droptop$N.rds $PA; done
-for X in un punitive; do   # history-chosen lists (docs/historical_exclusions.md); run only once the list file exists (approved)
+for X in un strict strict_noborder expanded; do   # history-chosen lists (docs/historical_exclusions.md; PI approved 2026-11-20); run only if the list file exists
   if [ -s inputs/exclusions_$X.txt ]; then var hist_$X --variant=drop --disputes=$(grep -v '^#' inputs/exclusions_$X.txt | cut -d' ' -f1 | paste -sd, -); sweep rob_drop_hist_$X $O/dumps/var_hist_$X.rds $PA
   else say "skip: inputs/exclusions_$X.txt not present (list awaiting approval)"; echo "history drop $X: list not approved" >> $INC; fi
 done
 
 ## ---- 8. resampling ----
 rs() { local NM=$1 DP=$2 PS=$3 SP=$4; shift 4; local F=$O/resample/$NM.csv; [ -s $F ] && return 0
-  Rscript R/08_resample.R $DP $PS "$SP" $F "$@" --cores=$CORES 2>&1 | tee -a "$LOG" | grep -E "usable|Error" || true; [ -s $F ] || echo "resample $NM failed" >> $INC; }
+  runR "usable|Error" R/08_resample.R $DP $PS "$SP" $F "$@" --cores=$CORES || { rm -f $F; echo "resample $NM failed" >> $INC; return 0; }; [ -s $F ] || echo "resample $NM wrote nothing" >> $INC; }
 for W in $WINDOWS; do rs boot_main_fmid_w$W $O/dumps/long_${TYPES}_bon$(wtag $W)_relyear_fmid.rds $O/sets/main.rds "$MAIN_SPEC" --mode=boot --B=$B_BOOT; done
 rs boot_main_mid_w$WINDOW_MAIN $MAIN_MID $O/sets/main.rds "$MAIN_SPEC" --mode=boot --B=$B_BOOT
 rs diag_perm_dR_main $MAIN_F $O/sets/main.rds "$MAIN_SPEC" --mode=perm_dR --B=$B_PERM
@@ -169,15 +213,22 @@ i=0; while read -r SP; do i=$((i+1)); rs boot_random_$(printf %02d $i) $MAIN_F $
 
 ## ---- 9. event study: both alignments; balanced and pre-only ----
 es() { local NM=$1 PS=$2 SP=$3; shift 3; [ -s $O/eventstudy/$NM.csv ] && return 0
-  Rscript R/10_event_study.R $MAIN_F $PS "$SP" $O/eventstudy/$NM "$@" 2>&1 | tee -a "$LOG" | grep -E "kept|align|Error" || true; [ -s $O/eventstudy/$NM.csv ] || echo "event study $NM failed" >> $INC; }
+  runR "kept|align|Error" R/10_event_study.R $MAIN_F $PS "$SP" $O/eventstudy/$NM "$@" || { rm -f $O/eventstudy/$NM.csv; echo "event study $NM failed" >> $INC; return 0; }; [ -s $O/eventstudy/$NM.csv ] || echo "event study $NM wrote nothing" >> $INC; }
 for A in entry onset; do
   es es_main_${A} $O/sets/main.rds "$MAIN_SPEC" --align=$A --B=$B_BOOT
   es es_main_${A}_preonly $O/sets/main.rds "$MAIN_SPEC" --align=$A --post=0 --B=$B_BOOT
   es es_main_${A}_unbalanced $O/sets/main.rds "$MAIN_SPEC" --align=$A --balanced=FALSE --B=$B_BOOT
   i=0; while read -r SP; do i=$((i+1)); es es_random_$(printf %02d $i)_${A} $O/sets/random.rds "$SP" --align=$A --B=200; done < $O/sets/random_ids.txt
 done
+es es_main_onset_fallback $O/sets/main.rds "$MAIN_SPEC" --align=onset --onset_fallback=TRUE --B=$B_BOOT   # missing/conflicting starts at the event year (flagged sensitivity)
 
-## ---- 10. summary (manifest-listed sweeps only) ----
-Rscript R/11_summarize.R $MAN $O/validation/measure_validation.csv "$MAIN_SPEC" $O/summary 2>&1 | tee -a "$LOG"
+## ---- 10. summary: manifest rebuilt from the validated task records (N5), then the summarizer reads only those ----
+{ printf "group\tpath\tn_requested\tids_file\n"
+  for ST in $O/status/sweep_*; do
+    if [ ! -e "$ST" ] || [[ "$ST" == *.path ]] || [[ "$ST" == *.tmp ]]; then continue; fi
+    F0=$(cut -f2 "$ST"); if [ -s "$F0" ] && ! grep -q '"ERROR"' "$F0"; then cat "$ST"; fi
+  done; } > $MAN.tmp
+mv $MAN.tmp $MAN
+runR "summarized|Error" R/11_summarize.R $MAN $O/validation/measure_validation.csv "$MAIN_SPEC" $O/summary || { echo "summary failed" >> $INC; }
 if [ -s $INC ]; then say "LOOP_FINISHED_WITH_GAPS: $(wc -l < $INC) items in $INC"; cat $INC | tee -a "$LOG"; exit 2; fi
 say "LOOP_DONE"

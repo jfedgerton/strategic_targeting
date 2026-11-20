@@ -87,9 +87,10 @@ one <- function(b) {
   if (MODE == "boot") { k <- x[as.character(D$ev_id)]; Db <- D[k > 0L, ]; Db$w <- Db$w * k[k > 0L] }
   else if (MODE == "perm_dR") { Db <- D; Db$dR <- D$dR[x]; Db <- build(Db) }
   else { Db <- D; Db$type <- unname(x[as.character(D$ev_id)]); Db <- build(Db) }
-  if (any(tabulate(Db$type[Db$chosen == 1L] + 1L, nbins = G) == 0L)) return(structure(setNames(rep(NA_real_, length(QN)), QN), reason = "a type has no event in this draw"))
   if (MODE == "boot" && length(tsg)) for (pre in names(tsg)) Db[[paste0(pre, "_pooled")]] <- Reduce(`+`, lapply(tsg[[pre]], function(z) Db[[z]]))
-  derive(fit(Db, GAP, zc0), fit(Db, GAP_G, Z_cols)) }
+  ## delta review N4 (P2 remainder): a draw that loses a type still fits the pooled M0; only M1 is unavailable
+  c1b <- if (any(tabulate(Db$type[Db$chosen == 1L] + 1L, nbins = G) == 0L)) structure(list(), reason = "a type has no event in this draw") else fit(Db, GAP_G, Z_cols)
+  derive(fit(Db, GAP, zc0), c1b) }
 res <- mclapply(seq_len(B), one, mc.cores = CORES, mc.preschedule = TRUE)
 wk <- vapply(res, function(z) is.numeric(z) && length(z) == length(QN), TRUE)
 if (any(!wk)) stop(sprintf("%d worker failures", sum(!wk)))
@@ -97,7 +98,8 @@ BS <- do.call(rbind, res); colnames(BS) <- QN
 okq <- colSums(!is.na(BS))                                         # usable draws per quantity (per model)
 rs <- vapply(res, function(z) { r <- attr(z, "reason"); if (is.null(r)) "" else r }, "")
 drops <- data.frame(draw = which(nzchar(rs)), reason = rs[nzchar(rs)])
-reportq <- B >= 200L & okq / B >= 0.90
+## delta review N4: no interval, positivity share or diagnostic tail value without a valid (finite) observed estimate
+reportq <- B >= 200L & okq / B >= 0.90 & is.finite(est[QN])
 logf("usable draws: M0 %d, M1 %d of %d; draws with a dropped model %d", okq[[QN[1]]], okq[[QN[5]]], B, nrow(drops))
 qf <- function(p) ifelse(reportq, apply(BS, 2, quantile, p, na.rm = TRUE), NA_real_)
 if (MODE == "boot") {
@@ -109,6 +111,7 @@ if (MODE == "boot") {
   out <- data.frame(spec_id = SPEC, scheme = dump$types, mode = MODE, quantity = QN, est = unname(est[QN]), null_lo = qf(0.025), null_hi = qf(0.975),
                     p_diag = ifelse(reportq, pv, NA_real_), n_ok = okq, B = B, row.names = NULL)
 }
+out$obs_valid <- is.finite(est[QN]); out$reported <- reportq        # model-specific status of the observed fit and the reporting gate (delta review N4)
 out$coorig_months <- if (is.null(dump$coorig_months)) 0L else dump$coorig_months
 write.csv(out, paste0(OUT, ".tmp"), row.names = FALSE)
 write.csv(drops, sub("\\.csv$", "_dropped.csv", OUT), row.names = FALSE)   # draw id and reason for every draw with a dropped model

@@ -22,7 +22,10 @@ PRE <- as.integer(opt("pre", "10")); POST <- as.integer(opt("post", "5")); BAL <
 ## loop review P2-7: --align=entry (default; k = 0 is the event year, i.e. the pair's entry year) or onset (k = 0 is the primary dispute's start
 ## year, GML dispute table). A joiner entering in 1995 a dispute begun in 1990 has k = -3 = 1992 under entry, which is already inside the dispute.
 ALIGN <- opt("align", "entry"); stopifnot(ALIGN %in% c("entry", "onset"))
-fl <- sub("^--([A-Za-z_]+)=.*$", "\\1", grep("^--", args, value = TRUE)); if (any(!fl %in% c("pre", "post", "balanced", "B", "align"))) stop("unknown option(s)")
+fl <- sub("^--([A-Za-z_]+)=.*$", "\\1", grep("^--", args, value = TRUE)); if (any(!fl %in% c("pre", "post", "balanced", "B", "align", "onset_fallback"))) stop("unknown option(s)")
+## delta review: under --align=onset, events whose GML start is missing or after the event year are EXCLUDED (not set to the entry year);
+## --onset_fallback=TRUE keeps them with the event year as reference (flagged sensitivity)
+ONSET_FB <- as.logical(opt("onset_fallback", "FALSE")); stopifnot(!is.na(ONSET_FB), !(ONSET_FB && ALIGN != "onset"))
 stopifnot(PRE >= 1L, POST >= 0L, !is.na(BAL), B >= 0L)
 logf <- function(...) cat(sprintf("[%s] ", format(Sys.time(), "%H:%M:%S")), sprintf(...), "\n", sep = "")
 KS <- -PRE:POST
@@ -40,9 +43,10 @@ logf("dump %s (%s; %d strata) | measure %s | window k = %d..%d | balanced %s", b
 if (ALIGN == "onset") {
   st <- as.data.table(peacesciencer::gml_mid_disps)[, .(disp = as.integer(dispnum), st = as.integer(styear))]
   D[, yr_ref := st$st[match(as.integer(disp), st$disp)]]
-  n_miss <- uniqueN(D[is.na(yr_ref), ev_id]); D[is.na(yr_ref), yr_ref := yr]; D[yr_ref > yr, yr_ref := yr]
-  logf("align = onset: k = 0 is the dispute start year; %d events without a GML start use the event year; median entry lag %.1f years (max %d)",
-       n_miss, median(D[chosen == 1L, yr - yr_ref]), max(D[chosen == 1L, yr - yr_ref]))
+  bad_ref <- unique(D[is.na(yr_ref) | yr_ref > yr, ev_id])
+  if (ONSET_FB) { D[is.na(yr_ref) | yr_ref > yr, yr_ref := yr] } else D <- D[!ev_id %in% bad_ref]
+  logf("align = onset: k = 0 is the dispute start year; %d events with a missing or conflicting GML start %s; median entry lag %.1f years (max %d)",
+       length(bad_ref), if (ONSET_FB) "use the event year (fallback sensitivity)" else "excluded", median(D[chosen == 1L, yr - yr_ref]), max(D[chosen == 1L, yr - yr_ref]))
 } else D[, yr_ref := yr]
 L <- D[, .(ev_id, chosen, type, w, init, disp, c2, yr = yr_ref)][, .(k = KS), by = .(ev_id, chosen, type, w, init, disp, c2, yr)]
 L[, y := yr + k]
@@ -57,7 +61,7 @@ if (BAL) {
   L <- L[!is.na(z)]
   ok_ev <- L[, .(ok = any(chosen == 1L) && any(chosen == 0L)), by = .(ev_id, k)][, .(ok = all(ok)), by = ev_id][ok == TRUE, ev_id]
 }
-n_ev0 <- uniqueN(D$ev_id); L <- L[ev_id %in% ok_ev]
+n_ev0 <- uniqueN(dump$D$ev_id); L <- L[ev_id %in% ok_ev]
 logf("events kept %d of %d (%s); by type: %s", length(ok_ev), n_ev0, if (BAL) "balanced window" else "unbalanced",
      paste(sprintf("%s %d", ROLES, tabulate(unique(L[, .(ev_id, type)])$type + 1L, G)), collapse = ", "))
 if (length(ok_ev) == 0L) stop("no events survive the window")
@@ -98,8 +102,10 @@ if (B > 0L) {
   if (!rep_ok) { logf("bootstrap below reporting rule (B >= 200 and >= 90%% usable): intervals set to NA"); q[, (setdiff(names(q), c("type", "k"))) := NA_real_] }
   out <- merge(out, q, by = c("type", "k"))
 }
-out[, role := ROLES[type + 1L]]; out[, `:=`(spec_id = SPEC, scheme = dump$types, balanced = BAL, align = ALIGN, n_events = length(ok_ev), n_events_all = n_ev0)]
-fwrite(data.table(ev_id = setdiff(unique(D$ev_id), ok_ev)), paste0(OUTP, "_excluded_events.csv"))   # P2-7: excluded cases published
+out[, role := ROLES[type + 1L]]; out[, `:=`(spec_id = SPEC, scheme = dump$types, balanced = BAL, align = ALIGN, onset_fallback = ONSET_FB, n_events = length(ok_ev), n_events_all = n_ev0)]
+fwrite(data.table(ev_id = setdiff(unique(dump$D$ev_id), ok_ev)), paste0(OUTP, "_excluded_events.csv"))   # P2-7: excluded cases published (incl. onset exclusions)
+## delta review: composition by type AND k (events and total event weight contributing at each k)
+fwrite(E[, .(n_events = uniqueN(ev_id), weight = sum(w)), by = .(role = ROLES[type + 1L], k)][order(role, k)], paste0(OUTP, "_n_by_type_k.csv"))
 fwrite(out[order(type, k)], paste0(OUTP, ".csv.tmp")); stopifnot(file.rename(paste0(OUTP, ".csv.tmp"), paste0(OUTP, ".csv")))   # atomic
 logf("wrote %s.csv", OUTP)
 print(out[k %in% c(-PRE, -5L, -1L, 0L, POST), .(role, k, gap = round(gap, 2), gap_n = round(gap_n, 2), diff_vs_ref = round(diff, 2))], row.names = FALSE)

@@ -1,7 +1,7 @@
 # Design decisions (settled; with dates)
 
 ## Specification
-- **Three initiator types** (2026-11-19): bilateral / initiating-side coalition / target-side joiner. With any originator window of 1 month or more, coalition originators and attack-side joiners are statistically indistinguishable on the full utility surface (p 0.55–0.98 on the main measure), so they are pooled. The four-type model is reported in the appendix at every window.
+- **Three initiator types** (2026-11-19): bilateral / initiating-side coalition / target-side joiner. Pooling coalition originators with attack-side joiners is a substantive choice (both act on the attacking side of a coalition dispute) and an assumption. Failing to reject equal surfaces (p 0.55–0.98 on the main measure at windows of 1 month or more) is consistent with it but is not evidence of equivalence, and with 141 originator events the test has limited power. The four-type model, which drops the assumption, is reported in the appendix at every window.
 - **Originator window = 1 month** (2026-11-19), definite date bound. Rationale: entry dates are recorded at the month, often with bounds; one month is the smallest window that treats "entered the same or next month" as entering at onset, measured with date error. Windows 0–6 are in the appendix. Under three types the window only moves 25–31 bilateral initiators whose partner arrived within it.
 - **Window promotions are side-specific** (2026-11-19): only joiners on the initiating side can become coalition originators; an early entrant on the target side stays a target-side joiner.
 - **Coalition status at onset** (`--bilateral=onset`): only partners present at initiation make an initiator a coalition initiator.

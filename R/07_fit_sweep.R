@@ -90,7 +90,17 @@ SCHEME <- paste0(dump$types, if (dump$bilateral_rule == "onset") "_bon" else "_e
 if (YSCALE == "tm1" && dump$rel_scale != "year") stop("--yscale=tm1 needs a dump with rel_scale = year")
 logf("dump %s: scheme %s, %d rows, %d strata, types %s, rel_scale %s, commit %s", basename(DUMP), SCHEME, nrow(D), length(unique(D$ev_id)),
      paste(ROLES, collapse = "/"), dump$rel_scale, dump$git_commit)
-if (STEPB) { stopifnot(dump$sample == "mid", all(c("ev_fatal", "disp_fatal", "orig_joiner") %in% names(D)), DECOMP == 0L); logf("step B: %d of %d events fatal", sum(D$ev_fatal[D$chosen == 1L]), sum(D$chosen == 1L)) }
+if (STEPB) { stopifnot(dump$sample == "mid", all(c("ev_fatal", "disp_fatal", "orig_joiner", "disp_styear") %in% names(D)), DECOMP == 0L); logf("step B: %d of %d events fatal", sum(D$ev_fatal[D$chosen == 1L]), sum(D$chosen == 1L))
+  ## delta review step B 2: cross-tab of the step-B outcome (GML primary-dispute fatality) against fatal-sample membership (in_fmid), and the
+  ## unknown outcomes by type and era, on the onset risk set; spec-independent, written once per sweep next to the CSV
+  ch <- D[D$chosen == 1L, ]; rs_ <- if (STEPB_UNIT == "orig") ch[!ch$orig_joiner & !is.na(ch$disp_styear) & ch$yr == ch$disp_styear, ] else ch
+  era <- cut(rs_$yr, c(1815, 1913, 1945, 1989, 2014), labels = c("1816-1913", "1914-45", "1946-89", "1990-2014"))
+  t1 <- as.data.frame(table(a = ifelse(is.na(rs_$disp_fatal), "unknown", as.character(rs_$disp_fatal)), b = rs_$ev_fatal), stringsAsFactors = FALSE)
+  t2 <- as.data.frame(table(a = ROLES[rs_$type + 1L][is.na(rs_$disp_fatal)], b = era[is.na(rs_$disp_fatal)]), stringsAsFactors = FALSE)
+  xt <- rbind(data.frame(table_ = "gml_fatal_x_in_fmid", t1), if (nrow(t2)) data.frame(table_ = "unknown_by_type_era", t2))
+  fx <- file.path(OUT_DIR, sprintf("stepB_crosstab_%s_%s_%s.csv", SCHEME, STEPB_UNIT, STEPB_OUTCOME)); write.csv(xt, paste0(fx, ".tmp"), row.names = FALSE); stopifnot(file.rename(paste0(fx, ".tmp"), fx))
+  logf("step B risk set (%s): %d events, %d dropped as not in the dispute's start year; crosstab %s", STEPB_UNIT, nrow(rs_), if (STEPB_UNIT == "orig") sum(!ch$orig_joiner & (is.na(ch$disp_styear) | ch$yr != ch$disp_styear)) else 0L, fx)
+  if (STEPB_UNIT == "orig") logf("step B: originator events whose primary dispute has no GML start year (dropped) %d", sum(!ch$orig_joiner & is.na(ch$disp_styear))) }
 if (DECOMP > 0L && SCALE == "pooled") stop("--decomp with --scale=pooled is not supported")
 P <- readRDS(POSF); key <- P$key; Rm <- P$R; specs <- P$specs
 stopifnot(identical(colnames(Rm), specs$spec_id), nrow(key) == nrow(Rm), !anyDuplicated(key[, c("ccode", "year")]))
@@ -221,7 +231,12 @@ axis_rows <- function(spec, model, b, V, sfx, lab, minus_sfx = NULL) {
 ## terms AND intercepts jointly: does type predict fatality at all).
 run_stepB <- function(spec, d, zc) {
   dd <- d[d$chosen == 1L, ]; stopifnot(!anyDuplicated(dd$ev_id))
-  if (STEPB_UNIT == "orig") dd <- dd[!dd$orig_joiner, ]
+  n_late <- 0L
+  if (STEPB_UNIT == "orig") { dd <- dd[!dd$orig_joiner, ]
+    ## delta review step B 1: orig_joiner is a role filter, not a date check -- keep only decisions in the primary dispute's GML start year
+    ## (later re-entries or later pair events of original participants have t-1 covariates that need not precede the dispute)
+    ## a dispute without a GML start year cannot be checked for onset: dropped and counted with the later-year rows
+    n_late <- sum(is.na(dd$disp_styear) | dd$yr != dd$disp_styear); dd <- dd[!is.na(dd$disp_styear) & dd$yr == dd$disp_styear, ] }
   yv <- if (STEPB_OUTCOME == "disp") "disp_fatal" else "ev_fatal"; n_na <- sum(is.na(dd[[yv]])); dd <- dd[!is.na(dd[[yv]]), ]; dd$y_ <- dd[[yv]]
   RP <- ROLES[sort(unique(dd$type)) + 1L]; stopifnot(length(RP) >= 2L)
   for (k in RP[-1]) dd[[paste0("ty_", k)]] <- as.numeric(dd$type == match(k, ROLES) - 1L)
@@ -251,6 +266,9 @@ run_stepB <- function(spec, d, zc) {
       out[[length(out) + 1]] <- row_out(spec, mm[[1]], paste0("intercept:", sub("^ty_", "", t), "-", RP[1]), l[["est"]], l[["se"]]) }
     out[[length(out) + 1]] <- row_out(spec, mm[[1]], "n_events", nrow(dd)); out[[length(out) + 1]] <- row_out(spec, mm[[1]], "n_fatal", sum(dd$y_))
     out[[length(out) + 1]] <- row_out(spec, mm[[1]], "n_outcome_unknown", n_na)
+    out[[length(out) + 1]] <- row_out(spec, mm[[1]], "n_dropped_not_onset_year_or_no_start", n_late)
+    out[[length(out) + 1]] <- row_out(spec, mm[[1]], "n_disputes", length(unique(dd$disp)))
+    out[[length(out) + 1]] <- row_out(spec, mm[[1]], "n_decisions_init_x_disp", nrow(unique(dd[, c("init", "disp")])))
   }
   out[[length(out) + 1]] <- row_out(spec, "B1", "max_abs_dR", max(abs(dd$dR)))
   do.call(rbind, out)
@@ -371,6 +389,8 @@ cat(sprintf("WROTE %s\n", f_out))
 cand <- out[out$spec_id != "BASELINE|igo_pagerank_build|pr", ]
 nv <- function(m) { m2 <- if (STEPB) c(M0 = "B0", M1 = "B1")[[m]] else m; length(unique(cand$spec_id[cand$model == m2 & cand$quantity %in% c("u_R_less", paste0(ROLES[1], ":u_R_less"))])) }
 inv <- function(m) { m2 <- if (STEPB) c(M0 = "B0", M1 = "B1")[[m]] else m; length(unique(cand$spec_id[cand$model == "INVALID" & startsWith(cand$quantity, paste0(m2, " fit invalid"))])) }
+if (!STEPB && any(cand$model == "M0t" | startsWith(cand$quantity, "M0t fit invalid")))   # delta review N6: M0t has its own census
+  logf("CENSUS_M0t %s: valid M0t %d | invalid fits M0t %d", f_out, nv("M0t"), inv("M0t"))
 logf("CENSUS %s: specs %d | valid M0 %d, M1 %d | skipped (constant in a used year) %d | invalid fits M0 %d, M1 %d | errors %d | valid fits with a Wald test not computable %d | in %.1f min",
      f_out, length(todo), nv("M0"), nv("M1"),
      length(unique(cand$spec_id[cand$model == "SKIPPED"])), inv("M0"), inv("M1"), n_err,

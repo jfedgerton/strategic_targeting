@@ -4,7 +4,7 @@ One question, one main model, every robustness check in one run.
 
 **Question.** Do states that attack as part of a coalition choose relationally isolated targets, while bilateral initiators and states joining to defend do not? Is that a selection effect, or do disputes with isolated states just fail more often (failed bargains), or are isolated states pariahs that get punished?
 
-**Main model.** Conditional logit of target choice in fatal militarized disputes, 1816–2014. One stratum per initiation event; the alternatives are every system member that year. Utility = a type-specific surface in the material gap (log CINC share) and the relational gap (network position at t−1, scaled within year): dM, dM², dR, dR², dM×dR, plus dyadic controls. Gaps are initiator minus target, so a positive dR means the target is less central.
+**Main model.** Conditional logit of target choice in fatal militarized disputes, 1816–2014. One stratum per initiation event; the alternatives are the system members that year with a relational position, covariates and stage-2 availability (see "Choice set" below; not every system member). Utility = a type-specific surface in the material gap (log CINC share) and the relational gap (network position at t−1, scaled within year): dM, dM², dR, dR², dM×dR, plus dyadic controls. Gaps are initiator minus target, so a positive dR means the target is less central.
 
 | Setting | Main choice | Appendix |
 |---|---|---|
@@ -28,8 +28,8 @@ TEST=1 bash run_all.sh
 ```
 
 Everything is written to `output/`; the log is `output/logs/run_<time>.log`.
-- **Provenance.** At start the run fingerprints the code (contents of `run_all.sh` and every R script; doc edits do not count), `config.sh`, the event-data manifest and the sha256 of every positions file. An output folder belongs to one fingerprint; if anything changed, the run stops (use `OUT=<new folder>`). Production refuses uncommitted code.
-- **Restarts.** Rerun the same command after a stop: finished steps (atomically written outputs; sweeps without ERROR rows) are skipped.
+- **Provenance.** At start the run fingerprints the code (contents of `run_all.sh` and every R script; doc edits do not count), `config.sh`, the event-data manifest, the sha256 of every positions file, the network inputs and the layers file, and the R and package versions. An output folder belongs to one fingerprint; if anything changed, the run stops (use `OUT=<new folder>`). A non-empty folder the runner did not create is refused. Production refuses uncommitted code. Artifacts built from supplied lists (the Phase A ids, the exclusion lists, variants) carry a stamp of those inputs and are rebuilt, with their sweeps, when the inputs change; each measure set is checked against its id list.
+- **Restarts.** Rerun the same command after a stop: finished steps are skipped. A step counts as finished only if its R process exited 0 and its output was written atomically (sweeps: no ERROR rows, recorded in a per-task status file; the manifest is rebuilt from those records).
 - **Ending.** `LOOP_DONE` means every step finished. `LOOP_FINISHED_WITH_GAPS` (exit code 2) lists what is incomplete in `output/status/incomplete.txt`. Until the history-chosen exclusion lists are approved, that file lists them.
 
 ## What each step answers
@@ -44,21 +44,21 @@ Everything is written to `output/`; the log is `output/logs/run_<time>.log`.
 | 6 robustness | `R/06_make_variants.R`, `R/07_fit_sweep.R` | `output/sweep/robustness/` | Every check below, on the 201 Phase A measures |
 | 7 influence | `R/09_influence.R` | `output/influence/` | Leave-one-dispute-out and leave-one-initiator-out; then drop the top 5 / top 10 disputes |
 | 8 resampling | `R/08_resample.R` | `output/resample/` | Pigeonhole bootstrap (main measure at every window, all-MID, 25 random measures). Permutations of dR within events and of type labels are **artificial-assignment diagnostics** (`diag_*`, column `p_diag`), not randomization tests. |
-| 9 event study | `R/10_event_study.R` | `output/eventstudy/` | Relative position (within-year z, not a count of ties) of chosen targets vs the alternatives, aligned to the pair's entry year and to the dispute's start year; balanced, unbalanced and pre-only versions; excluded cases written out. Descriptive. |
+| 9 event study | `R/10_event_study.R` | `output/eventstudy/` | Relative position (within-year z, not a count of ties) of chosen targets vs the alternatives, aligned to the pair's entry year and to the dispute's start year (events with a missing or conflicting GML start are excluded from the onset version; `es_main_onset_fallback` keeps them at the event year as a flagged sensitivity); balanced, unbalanced and pre-only versions; excluded cases and events / weight by type and k written out. Descriptive. |
 | 10 summary | `R/11_summarize.R` | `output/summary/` | Appendix tables from manifest-listed outputs only: main-measure estimate first; median and IQR; plausible / failing / all; by measure family and family-balanced; grid percentages labelled as descriptive; requested / valid / invalid / error counts per model |
 
 ### Robustness checks (step 6)
 
 | Group | Run name(s) | What it rules in or out |
 |---|---|---|
-| Rival: target aggression | `aggr` | Isolation proxies the target's own recent aggression |
+| Rival: target aggression | `aggr` (complete, GML-reconciled 5-year windows only), `aggr_base` (same strata, no control: the comparator), `aggr_censored` (all strata; counts after 2010 truncated, a lower-bound sensitivity) | Isolation proxies the target's own recent aggression |
 | Rival: defensibility | `expdef` (dispute onset), `expdefentry` (year before entry) | Isolation proxies having no defense partners |
 | Rival: ATOP inside the measure | `noatop_base`, `noatop_expdef` | The defense control works only because ATOP is in the measure |
 | Timing | `lag5/10_*`, `samp5/10_*` (year scale and pooled scale), `decomp10_linear/full`, `decomp5_full` | Long-standing isolation vs recent tie loss |
 | Reverse timing | `lead_t`, `lead_t1`, `lead_t1_sample_tm1` | Ties lost because of the conflict |
-| Failed bargains | `stepA` (target choice among all MID onsets); `stepB_orig_disp` (originator decisions at dispute onset: does the dispute become fatal, GML dispute fatality); `stepB_all_pair` (old membership version, comparison only) | Isolation shapes whom states confront vs whether the dispute fails. Step B reports per-type gap terms, type-intercept contrasts and a joint test of both. Joiners are excluded from step B because first-fatality dates are not in the data, so a joiner cannot be shown to have entered before the dispute turned deadly. |
+| Failed bargains | `stepA` (target choice among all MID onsets); `stepB_orig_disp` (originator decisions at dispute onset: does the dispute become fatal, GML dispute fatality); `stepB_all_pair` (old membership version, comparison only) | Isolation shapes whom states confront vs whether the dispute fails. Step B keeps only decisions in the primary dispute's GML start year, reports per-type gap terms, type-intercept contrasts and a joint test of both, counts of disputes / initiator-dispute decisions / events, and a cross-tab of its outcome (GML dispute fatality) against fatal-sample membership with unknown outcomes by type and era (`stepB_crosstab_*.csv`). The outcome is eventual severity of the dispute from a pre-dispute reference, not a measured nonfatal-to-fatal transition. Joiners are excluded from step B because first-fatality dates are not in the data, so a joiner cannot be shown to have entered before the dispute turned deadly. |
 | Coding | `dropside_hard`, `dropside_reviewed` (joiner strata incl. window-promoted joiners), `dropside_hard_disp`, `dropside_reviewed_disp` (every event of those disputes) | Side coding |
-| Concentration | `drop_top5`, `drop_top10` (chosen by the main measure's own leave-one-out influence: adversarial diagnostics, not confirmation); `drop_hist_un`, `drop_hist_punitive` (chosen on history, `docs/historical_exclusions_DRAFT.md`) | A few great-power or punitive coalitions |
+| Concentration | `drop_top5`, `drop_top10` (chosen by the main measure's own leave-one-out influence: adversarial diagnostics, not confirmation); `drop_hist_un`, `drop_hist_strict`, `drop_hist_strict_noborder`, `drop_hist_expanded` (chosen on history under a fixed coding rule, `docs/historical_exclusions.md`) | A few great-power or punitive coalitions |
 | Weighting and scale | `unit_weights`, `yscale_tm1`, `pooledscale` | Event weights; scale year |
 | Measurement error | `merror_def_<sign>_<k>`, `merror_contig_<sign>_<k>` (both signs), `merror_random_<k>_d1..5` (5 independent draws); each writes the rank correlation between the measure and its perturbed version | Fragility to error that mimics alliance or contiguity confounding, and to noise. A fragility test, not a correction for confounding. |
 

@@ -36,6 +36,7 @@ disp_start <- function(D) {
   K <- merge(K, st, by = "disp", all.x = TRUE); K <- merge(K, ev, by = "disp", all.x = TRUE)
   logf("dispute start: GML styear for %d of %d events; events.rds fallback %d; none (event year) %d; GML and the build's earliest event disagree on %d events (GML used)",
        sum(!is.na(K$st)), nrow(K), sum(is.na(K$st) & !is.na(K$st_ev)), sum(is.na(K$st) & is.na(K$st_ev)), sum(!is.na(K$st) & !is.na(K$st_ev) & K$st != K$st_ev))
+  K[, st_fallback := is.na(st)]   # delta review: start not from GML (events.rds bound or event year), or a conflicting GML start (below)
   K[is.na(st), st := st_ev]; K[is.na(st), st := yr]
   multi <- K[grepl(";", dispnums)]
   if (nrow(multi)) {
@@ -45,8 +46,8 @@ disp_start <- function(D) {
   late <- K[st > yr]
   if (nrow(late)) logf("dispute start: %d events whose dispute start is after the event year (set to the event year): %s", nrow(late),
                        paste(sprintf("disp %d st %d yr %d", late$disp, late$st, late$yr), collapse = "; "))
-  K[st > yr, st := yr]
-  K[, .(ev_id, st, dispnums)]
+  K[st > yr, `:=`(st = yr, st_fallback = TRUE)]
+  K[, .(ev_id, st, dispnums, st_fallback)]
 }
 
 if (VAR == "aggr") {
@@ -60,14 +61,21 @@ if (VAR == "aggr") {
   K <- unique(merge(D[, .(ev_id, c2, disp = as.integer(disp))], S, by = "ev_id"))
   K[, tgt_aggr_n := mapply(function(c, s0, src) gp[ccode == c & styear >= s0 - 5L & styear <= s0 - 1L & !(dispnum %in% as.integer(strsplit(src, ";")[[1]])), uniqueN(dispnum)], c2, st, dispnums)]
   K[, aggr_censored := st - 1L > 2010L]
-  logf("aggr: strata whose window passes the end of GML (2010; flagged aggr_censored, counts are a lower bound) %d", uniqueN(K[aggr_censored == TRUE, ev_id]))
+  logf("aggr: strata whose window passes the end of GML (2010; flagged aggr_censored, counts are a lower bound) %d; strata with a fallback dispute start %d",
+       uniqueN(K[aggr_censored == TRUE, ev_id]), uniqueN(K[st_fallback == TRUE, ev_id]))
+  ## delta review P2-11: --window=complete (default) keeps only strata with a complete, GML-reconciled history window; --window=complete_base
+  ## keeps the same strata WITHOUT the control (the comparator fit on exactly the same rows); --window=censored keeps every stratum (truncated
+  ## counts after 2010 = lower bound; appendix sensitivity)
+  WIN <- opt("window", "complete"); stopifnot(WIN %in% c("complete", "complete_base", "censored"))
+  if (WIN != "censored") { drop_ev <- unique(K[aggr_censored | st_fallback, ev_id]); K <- K[!ev_id %in% drop_ev]; D <- D[!ev_id %in% drop_ev]; n0 <- nrow(D)
+    logf("aggr (%s): dropped %d strata with a censored or fallback window; %d strata kept", WIN, length(drop_ev), uniqueN(D$ev_id)) }
   D <- merge(D, K[, .(ev_id, c2, tgt_aggr_n, aggr_censored)], by = c("ev_id", "c2"), all.x = TRUE, sort = FALSE)
   stopifnot(!anyNA(D$tgt_aggr_n), nrow(D) == n0)
-  for (g in seq_along(d$roles)) D[, (paste0("aggr_", d$roles[g])) := log1p(tgt_aggr_n) * (type == g - 1L)]
   for (g in seq_along(d$roles)) logf("aggr: type %s, mean originated MIDs chosen %.2f vs alternatives %.2f", d$roles[g],
                                      mean(D[type == g - 1L & chosen == 1, tgt_aggr_n]), mean(D[type == g - 1L & chosen == 0, tgt_aggr_n]))
-  d$Z_cols <- c(d$Z_cols, paste0("aggr_", d$roles))
-  d$types <- paste0(d$types, "_aggr")
+  if (WIN != "complete_base") { for (g in seq_along(d$roles)) D[, (paste0("aggr_", d$roles[g])) := log1p(tgt_aggr_n) * (type == g - 1L)]
+    d$Z_cols <- c(d$Z_cols, paste0("aggr_", d$roles)) }
+  d$types <- paste0(d$types, c(complete = "_aggr", complete_base = "_aggrbase", censored = "_aggrcens")[[WIN]])
 }
 
 if (VAR == "expdef") {

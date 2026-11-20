@@ -50,7 +50,8 @@ fitq <- function(d) {
   b <- coef(m); V <- vc_cl(m, d$init) + vc_cl(m, d$disp) - vc_cl(m, d$init_disp); e <- eigen(V, symmetric = TRUE); V <- e$vectors %*% diag(pmax(e$values, 0)) %*% t(e$vectors)
   unlist(lapply(Q, function(q) { a <- cvec(q, names(b)); est <- sum(a * b); se <- sqrt(drop(t(a) %*% V %*% a)); setNames(c(est, est - 1.96 * se, est + 1.96 * se), paste0(q, c("", "_lo", "_hi"))) })) }
 ## validate the requested contrasts: every named type must exist, and the quantity must be one of the four endpoints
-for (q in Q) { pq <- strsplit(q, ":")[[1]]; stopifnot(length(pq) == 2L, all(strsplit(pq[1], "-")[[1]] %in% ROLES), pq[2] %in% c("u_R_less", "u_R_more", "u_M_weaker", "u_M_stronger")) }
+for (q in Q) { pq <- strsplit(q, ":")[[1]]; tq <- strsplit(pq[1], "-")[[1]]   # delta review: one type or a two-type difference only (cvec handles no more)
+  stopifnot(length(pq) == 2L, length(tq) %in% 1:2, !anyDuplicated(tq), all(tq %in% ROLES), pq[2] %in% c("u_R_less", "u_R_more", "u_M_weaker", "u_M_stronger")) }
 full <- fitq(D); if (!length(full)) stop("the full-sample fit is invalid: ", attr(full, "reason"))
 ev <- unique(D[, c("ev_id", "init", "disp", if ("dispnums" %in% names(D)) "dispnums")])
 units <- if (UNIT == "init") sort(unique(ev$init)) else sort(unique(if ("dispnums" %in% names(ev)) as.integer(unlist(strsplit(ev$dispnums, ";"))) else ev$disp))
