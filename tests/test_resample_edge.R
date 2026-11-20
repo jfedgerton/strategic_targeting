@@ -1,9 +1,20 @@
+## The synthetic fixture below additionally checks that pooled M0 survives draws that lose a type.
 ## tests/test_resample_edge.R -- delta review N4 regression test on synthetic data (seed 123).
 ## Case: a 3-type dump whose third type has ONE event, so the observed M1 fit is invalid while M0 is valid, and about a third of bootstrap
 ## draws lose that type. Required: (1) M0 quantities get intervals; (2) no M1 quantity gets an interval, share or diagnostic p (observed M1
 ## invalid); (3) draws that lose a type still contribute a pooled M0 (M0 usable draws = B).
 ## Usage: Rscript tests/test_resample_edge.R   (from the repo root)
 set.seed(123)
+## (0) direct test of the reporting gate (GPT review D6): an invalid observed estimate with FULLY usable draws must not be reported;
+## this fails if the finite-observed condition is removed from report_gate()
+source("R/lib/report_gate.R")
+stopifnot("gate: NA observed, all draws usable -> not reported" = !report_gate(1000L, c(1000L, 1000L), c(NA_real_, 0.5))[1],
+          "gate: valid observed, all draws usable -> reported" = report_gate(1000L, c(1000L, 1000L), c(NA_real_, 0.5))[2],
+          "gate: B < 200 -> not reported" = !report_gate(100L, 100L, 0.5),
+          "gate: < 90% usable -> not reported" = !report_gate(1000L, 899L, 0.5))
+## mutation check: the old gate (without the finite-observed condition) must FAIL the first assertion
+old_gate <- function(B, okq, est) B >= 200L & okq / B >= 0.90
+stopifnot("mutation: old gate would report the NA observed estimate" = old_gate(1000L, 1000L, NA_real_))
 td <- tempfile("rs_edge_"); dir.create(td)
 S <- 1:20; YRS <- 2000:2010
 key <- expand.grid(ccode = S, year = YRS); R <- rnorm(nrow(key)); P <- list(key = key, R = matrix(R, ncol = 1, dimnames = list(NULL, "SYN|x|pr")))

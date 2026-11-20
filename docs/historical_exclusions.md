@@ -44,6 +44,10 @@ Force = states on the coalition side with a use-of-force action (GML participant
 | `exclusions_strict.txt` | 51, 3957, 31, 145, 146, 3552, 4137, 4283, 3058 | Main history-chosen check |
 | `exclusions_strict_noborder.txt` | strict minus 146, 3058 | Borderline cases kept in |
 | `exclusions_expanded.txt` | strict + 4273, 4251, 2150 | Open-trigger / mixed-episode check |
+| `exclusions_noruleA.txt` | strict + 4339, 611 | Ruling A switched off (both coders coded these yes under the original sheet) |
+| `exclusions_anycoder.txt` | expanded + 4339, 611, 1482, 1286, 1703 | Broadest drop: every case any list or any coder coded yes or borderline |
+
+These lists are sensitivity checks reported side by side; none is a preferred specification, and the coding is not a highlighted part of the paper (PI, 2026-11-20).
 
 ## Second coder (independent agent, blind; `docs/coding/coder2_claude_agent.md`) and resolutions
 Agreement on 15 of 23 cases. Disagreements and how they were resolved:
@@ -60,6 +64,6 @@ Agreement on 15 of 23 cases. Disagreements and how they were resolved:
 
 Coder 2 also flagged that its sheet omitted Chile from the Chincha Islands War; the case is out under Ruling A regardless.
 
-**Third coder:** GPT, blind (`docs/coding/coder3_gpt.md`, pending). The rulings above stand unless the PI revisits them.
+**Third coder:** GPT (`docs/coding/coder3_gpt.md`; separately recorded, but its chat had seen earlier drafts, so not fully blind). Agrees with coder 2 on qualification for 20 of 23 rows and on UN authorization for all 23; differs on Shaba, Cominform–Yugoslavia and Chincha (all out of strict). Congo and Vietnam are out only under Ruling A (a PI rule amendment, not coder agreement); the `noruleA` list reports that sensitivity.
 
 **Before treating these as final:** a second coder should review this ledger without seeing any estimates (GPT delta review §3). Changing a list later reruns only its variant and sweep (the variant is stamped with the list).

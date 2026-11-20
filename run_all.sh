@@ -27,9 +27,13 @@ die() { say "STOP: $*"; exit 1; }
 ## run an R step: full output to the log, selected lines to the screen; returns the R exit status (delta review N3/N5: never inferred from files)
 runR() { local PAT=$1; shift; local T; T=$(mktemp); local rc=0; Rscript "$@" > "$T" 2>&1 || rc=$?; cat "$T" >> "$LOG"; grep -E "$PAT" "$T" | cut -c1-250 || true; rm -f "$T"; return $rc; }
 ## content hashes, memoized per invocation
-## hm fills the memo in the CURRENT shell (call it before using h inside $(...), whose subshell cannot write the memo back)
-declare -A HMEMO; hm() { local f; f=$(readlink -f "$1"); [ -n "${HMEMO[$f]:-}" ] || HMEMO[$f]=$(shasum -a 256 "$f" | cut -c1-16); }
-h() { hm "$1"; echo "${HMEMO[$(readlink -f "$1")]}"; }
+## content hashes, cached in files keyed by path + size + mtime (GPT review D2: portable to macOS bash 3.2, no associative arrays;
+## the cache also survives restarts). hm is kept as a no-op alias for readability at call sites.
+HC=$O/status/hcache
+h() { local f sz mt k c; f=$(readlink -f "$1"); sz=$(wc -c < "$f" | tr -d ' '); mt=$(date -r "$f" +%s); k=$(printf '%s' "$f" | shasum | cut -c1-16)
+  if [ -s "$HC/$k" ]; then read -r c < "$HC/$k"; if [ "${c% *}" = "$sz $mt" ]; then echo "${c##* }"; return 0; fi; fi
+  c=$(shasum -a 256 "$f" | cut -c1-16); mkdir -p "$HC"; echo "$sz $mt $c" > "$HC/$k.tmp$$" && mv "$HC/$k.tmp$$" "$HC/$k"; echo "$c"; }
+hm() { h "$1" > /dev/null; }
 ## stamps: an artifact built from supplied inputs is reused only if its .stamp matches the inputs now (delta review N2)
 fresh() { [ -s "$1" ] && [ -s "$1.stamp" ] && [ "$(cat "$1.stamp")" = "$2" ]; }
 stamp() { echo "$2" > "$1.stamp.tmp" && mv "$1.stamp.tmp" "$1.stamp"; }
@@ -39,6 +43,7 @@ for W in $WINDOWS; do [[ "$W" =~ ^[0-6]$ ]] || die "window $W outside 0-6"; done
 [[ " $WINDOWS " == *" $WINDOW_MAIN "* ]] || die "main window $WINDOW_MAIN is not in WINDOWS"
 PKGS="survival data.table dplyr igraph peacesciencer countrycode sandwich ggplot2 parallel"; [ "$REUSE_POSITIONS" != "1" ] && PKGS="$PKGS fixest igoR"   # N1: rebuild needs fixest, igoR
 Rscript -e 'p <- strsplit(commandArgs(TRUE)[1], " ")[[1]]; m <- p[!vapply(p, requireNamespace, TRUE, quietly = TRUE)]; if (length(m)) stop("missing R packages: ", paste(m, collapse = ", "))' "$PKGS"
+ENVQ=$(Rscript -e 'cat(R.version.string, "|"); for (p in strsplit(commandArgs(TRUE)[1], " ")[[1]]) cat(p, as.character(packageVersion(p)), "|")' "$PKGS")
 if [ "$TEST" != "1" ] && ! git diff --quiet HEAD 2>/dev/null; then die "uncommitted changes in the repo; commit them first (production runs are tied to a commit)"; fi
 if [ -e data_entry ] && [ "$(readlink data_entry)" != "$DATA_ENTRY" ]; then die "data_entry points to $(readlink data_entry), config says $DATA_ENTRY"; fi
 [ -e data_entry ] || ln -s "$DATA_ENTRY" data_entry
@@ -54,18 +59,24 @@ fi
 NETSHA=$( (for f in dipl_dyad.csv destaRaw.rda dca_dyad.csv; do [ -s "$NETDATA/$f" ] || die "missing $NETDATA/$f"; h "$NETDATA/$f"; done; h R/01_build_layers.R) | shasum -a 256 | cut -c1-16 )
 if ! fresh $O/layers_dy.rds "$NETSHA"; then rm -f $O/layers_dy.rds; runR "Error|wrote" R/01_build_layers.R "$NETDATA" $O/layers_dy.rds.tmp.rds || die "layers build failed"; mv $O/layers_dy.rds.tmp.rds $O/layers_dy.rds; stamp $O/layers_dy.rds "$NETSHA"; fi
 if [ "$REUSE_POSITIONS" != "1" ]; then
-  NEED_CORE_all=0; NEED_CORE_inforce=0; NEED_DIPL=0
-  for PT in all inforce; do for W in W1raw W2contig W3dist W4fe; do [ -s $O/positions/positions_core_${W}_pta$PT.rds ] || printf -v "NEED_CORE_$PT" '%s' 1; done; done   # N1
-  for W in W1raw W2contig W3dist W4fe; do [ -s $O/positions/positions_dipl_${W}_ptaall.rds ] || NEED_DIPL=1; done                                                  # N1: all four
-  [ "$NEED_CORE_all" = 1 ] && { runR "Error|wrote" R/02_build_positions.R $O/layers_dy.rds $O/positions --arm=core --pta=all --cores=$CORES || die "core positions (all) failed"; }
-  [ "$NEED_CORE_inforce" = 1 ] && { runR "Error|wrote" R/02_build_positions.R $O/layers_dy.rds $O/positions --arm=core --pta=inforce --cores=$CORES || die "core positions (inforce) failed"; }
-  [ "$NEED_DIPL" = 1 ] && { runR "Error|wrote" R/02_build_positions.R $O/layers_dy.rds $O/positions --arm=dipl --pta=all --cores=$CORES || die "diplomacy positions failed"; }
-  [ -s $O/positions/positions_igo_arm.rds ] || { runR "Error|wrote" R/02_build_positions.R $O/layers_dy.rds $O/positions --arm=igo || die "IGO positions failed"; }
+  ## GPT review D5: each arm is stamped with the layers file and builder hashes; an arm whose stamp differs (or is missing) is rebuilt, so an
+  ## interrupted first build cannot mix arms made from different layer versions
+  AST="$(h $O/layers_dy.rds) $(h R/02_build_positions.R) $ENVQ"
+  arm() { local NM=$1 FILES=$2; shift 2; local ok=1 f; for f in $FILES; do [ -s $O/positions/$f.rds ] || ok=0; done
+    if [ $ok = 1 ] && [ "$(cat $O/positions/.arm_$NM.stamp 2>/dev/null)" = "$AST" ]; then return 0; fi
+    for f in $FILES; do rm -f $O/positions/$f.rds; done
+    runR "Error|wrote" R/02_build_positions.R $O/layers_dy.rds $O/positions "$@" || die "positions arm $NM failed"
+    for f in $FILES; do [ -s $O/positions/$f.rds ] || die "positions arm $NM did not write $f.rds"; done
+    echo "$AST" > $O/positions/.arm_$NM.stamp.tmp && mv $O/positions/.arm_$NM.stamp.tmp $O/positions/.arm_$NM.stamp; }
+  arm core_all "positions_core_W1raw_ptaall positions_core_W2contig_ptaall positions_core_W3dist_ptaall positions_core_W4fe_ptaall" --arm=core --pta=all --cores=$CORES
+  arm core_inforce "positions_core_W1raw_ptainforce positions_core_W2contig_ptainforce positions_core_W3dist_ptainforce positions_core_W4fe_ptainforce" --arm=core --pta=inforce --cores=$CORES
+  arm dipl "positions_dipl_W1raw_ptaall positions_dipl_W2contig_ptaall positions_dipl_W3dist_ptaall positions_dipl_W4fe_ptaall" --arm=dipl --pta=all --cores=$CORES
+  arm igo "positions_igo_arm" --arm=igo
 fi
 for e in $EXPECT; do [ -s $O/positions/$e.rds ] || die "positions file missing: $e.rds"; done
 POS=(); for e in $EXPECT; do POS+=( $O/positions/$e.rds ); done
 SHA=$( (for e in $EXPECT; do h $O/positions/$e.rds; done) | shasum -a 256 | cut -c1-16 )
-ENV=$(Rscript -e 'cat(R.version.string, "|"); for (p in strsplit(commandArgs(TRUE)[1], " ")[[1]]) cat(p, as.character(packageVersion(p)), "|")' "$PKGS")
+ENV=$ENVQ
 ## code identity = the content of the scripts and this runner (doc-only commits do not invalidate outputs); the commit is logged
 FP=$( { cat run_all.sh R/*.R R/lib/*.R | shasum -a 256; cat config.sh; echo "TEST=$TEST WINDOWS=$WINDOWS B=$B_BOOT/$B_PERM N=$N_RANDOM_BOOT K=$MERROR_K"; shasum -a 256 data_entry/manifest.csv; echo "$SHA"; echo "layers $(h $O/layers_dy.rds) net $NETSHA"; echo "$ENV"; } | shasum -a 256 | cut -c1-16 )
 if [ -s $O/FINGERPRINT ]; then [ "$(cat $O/FINGERPRINT)" = "$FP" ] || die "$O was built from different code/config/inputs (fingerprint $(cat $O/FINGERPRINT), now $FP); use OUT=<new folder> or remove $O"
@@ -74,6 +85,7 @@ say "fingerprint $FP | commit $(git rev-parse --short HEAD) | positions sha $SHA
 say "environment: $ENV"
 MAN=$O/status/manifest_sweeps.tsv
 INC=$O/status/incomplete.txt; : > $INC
+CUR=$O/status/current_tasks.txt; : > $CUR
 
 ## ---- 2. validation (outcome-blind) ----
 echo "$MAIN_SPEC" > $O/sets/main_id.txt
@@ -94,8 +106,12 @@ fresh $O/sets/random_ids.txt "$RST" || { Rscript -e 'set.seed(123); v <- read.cs
   $O/validation/measure_validation.csv $O/sets/random_ids.txt "$MAIN_SPEC" $N_RANDOM_BOOT; stamp $O/sets/random_ids.txt "$RST"; }
 sub_set random --set=ids --ids=$O/sets/random_ids.txt
 ## expected spec ids of every positions file and set (N6: the summarizer checks the analysed ids against these exactly); each id file is stamped with its source's hash
-ids_of() { local F=$1 I=$O/sets/ids/$(basename "$1" .rds).txt; fresh "$I" "$(h "$F")" || { Rscript -e 'writeLines(colnames(readRDS(commandArgs(TRUE)[1])$R), commandArgs(TRUE)[2])' "$F" "$I.tmp" && mv "$I.tmp" "$I" && stamp "$I" "$(h "$F")"; }; echo "$I"; }
-for F in "${POS[@]}" $O/sets/{phaseA,main,noatop,random}.rds; do ids_of "$F" > /dev/null; done
+## GPT review D4: the helper fails (non-zero) unless the ids file exists with the CURRENT stamp; callers check it
+ids_of() { local F=$1 I=$O/sets/ids/$(basename "$1" .rds).txt S; S=$(h "$F")
+  if ! fresh "$I" "$S"; then rm -f "$I" "$I.stamp"; Rscript -e 'writeLines(colnames(readRDS(commandArgs(TRUE)[1])$R), commandArgs(TRUE)[2])' "$F" "$I.tmp" || return 1
+    mv "$I.tmp" "$I" || return 1; stamp "$I" "$S" || return 1; fi
+  fresh "$I" "$S" || return 1; echo "$I"; }
+for F in "${POS[@]}" $O/sets/{phaseA,main,noatop,random}.rds; do ids_of "$F" > /dev/null || die "expected-ids file for $F could not be built"; done
 cmp -s <(grep -v '^$' inputs/phaseA_specs.txt) $O/sets/ids/phaseA.txt || die "sets/phaseA.rds does not hold exactly the ids in inputs/phaseA_specs.txt"
 cmp -s $O/sets/random_ids.txt $O/sets/ids/random.txt || die "sets/random.rds does not hold exactly the ids in random_ids.txt"
 [ "$(cat $O/sets/ids/main.txt)" = "$MAIN_SPEC" ] || die "sets/main.rds does not hold exactly the main measure"
@@ -124,7 +140,8 @@ MAIN_MID=$O/dumps/long_${TYPES}_bon$(wtag $WINDOW_MAIN)_relyear_mid.rds
 ## its CSV still exists without ERROR rows. The manifest is rebuilt from the records before the summary (never appended).
 sweep() {  # sweep <group> <dump> <positions> [options]
   local G=$1 DP=$2 PS=$3; shift 3; local OD=$O/sweep/$G; mkdir -p $OD
-  hm $DP; hm $PS; local KEY; KEY=$(echo "$G $(h $DP) $(h $PS) $*" | shasum | cut -c1-16); local ST=$O/status/sweep_$KEY
+  local KEY; KEY=$(echo "$G $(h $DP) $(h $PS) $*" | shasum | cut -c1-16); local ST=$O/status/sweep_$KEY
+  echo "$KEY" >> $CUR    # GPT review D1: this invocation's planned tasks; only these can enter the manifest
   if [ -s $ST ]; then local F0; F0=$(cut -f2 $ST); [ -s "$F0" ] && ! grep -q '"ERROR"' "$F0" && return 0; fi
   local T; T=$(mktemp); local rc=0
   Rscript R/07_fit_sweep.R $DP $PS $OD --bilateral=onset --cores=$CORES "$@" > "$T" 2>&1 || rc=$?
@@ -132,9 +149,11 @@ sweep() {  # sweep <group> <dump> <positions> [options]
   local F; F=$(sed -n 's/^WROTE //p' "$T" | tail -1); rm -f "$T"
   if [ "$rc" != 0 ] || [ -z "$F" ] || [ ! -s "$F" ]; then echo "$G $(basename $PS) $*: failed (exit $rc)" >> $INC; return 0; fi
   if grep -q '"ERROR"' "$F"; then echo "$G $(basename $PS) $*: ERROR rows in $F" >> $INC; return 0; fi
-  local I; I=$(ids_of $PS)
-  { grep -l -F -x -- "$F" $O/status/sweep_*.path 2>/dev/null || true; } | while read -r old; do rm -f "${old%.path}" "$old"; done   # one record per CSV
-  printf "%s\t%s\t%s\t%s\n" "$G" "$F" "$(wc -l < $I | tr -d ' ')" "$I" > $ST.tmp && mv $ST.tmp $ST && echo "$F" > $ST.path
+  local I; I=$(ids_of $PS) || { echo "$G $(basename $PS) $*: expected-ids file failed" >> $INC; return 0; }
+  ## GPT review D3: the single atomic record is the only source of truth; an older record pointing to the same CSV is superseded and removed
+  local R0; for R0 in $O/status/sweep_*; do [ -e "$R0" ] || continue; case "$R0" in *.tmp) continue;; esac
+    [ "$R0" != "$ST" ] && [ "$(cut -f2 "$R0")" = "$F" ] && rm -f "$R0"; done
+  printf "%s\t%s\t%s\t%s\n" "$G" "$F" "$(wc -l < $I | tr -d ' ')" "$I" > $ST.tmp && mv $ST.tmp $ST
 }
 
 ## ---- 5. multiverse ----
@@ -144,6 +163,14 @@ for W in $WINDOWS; do for F in "${MV[@]}"; do
   sweep multiverse_mid_w$W  $O/dumps/long_${TYPES}_bon$(wtag $W)_relyear_mid.rds $F
 done; done
 for F in "${MV[@]}"; do sweep multiverse_stepB_w$WINDOW_MAIN $MAIN_MID $F --stepB=TRUE; done      # originator decisions at onset, dispute fatality
+## intensity samples (PI 2026-11-20; full sweep): jointly fatal and dispute fatality level >= 2..6, every measure x every window, built from each
+## window's fatal-MID frame; fits that fail are recorded INVALID per model and the run continues
+varin() { local IN=$1 NM=$2; shift 2; hm $IN; local F=$O/dumps/var_$NM.rds ST; ST="$(h $IN) $*"; fresh $F "$ST" && return 0; rm -f $F
+  runR "Error|sample " R/06_make_variants.R $IN $F "$@" || die "variant $NM failed"; [ -s $F ] || die "variant $NM wrote nothing"; stamp $F "$ST"; }
+for W in $WINDOWS; do for S in $INTENSITY; do
+  varin $O/dumps/long_${TYPES}_bon$(wtag $W)_relyear_fmid.rds int_${S}_w$W --variant=sample --keep=$S
+  for F in "${MV[@]}"; do sweep multiverse_${S}_w$W $O/dumps/var_int_${S}_w$W.rds $F; done
+done; done
 for W in $WINDOWS; do sweep fourtypes_w$W $O/dumps/long_bcjs_bon$(wtag $W)_relyear_fmid.rds $PA; done
 
 ## ---- 6. robustness on the Phase A measures (main window) ----
@@ -197,7 +224,7 @@ inf() { [ -s $O/influence/$1_loo.csv ] && [ -s $O/influence/$1_top.txt ] && retu
   [ -s $O/influence/$1_loo.csv ] && [ -s $O/influence/$1_top.txt ] || die "influence ($1) wrote no output"; }
 inf disp; inf init
 for N in 5 10; do var droptop$N --variant=drop --disputes=$(head -$N $O/influence/disp_top.txt | paste -sd, -); sweep rob_drop_top$N $O/dumps/var_droptop$N.rds $PA; done
-for X in un strict strict_noborder expanded; do   # history-chosen lists (docs/historical_exclusions.md; PI approved 2026-11-20); run only if the list file exists
+for X in un strict strict_noborder expanded noruleA anycoder; do   # history-chosen lists (docs/historical_exclusions.md; PI approved 2026-11-20); run only if the list file exists
   if [ -s inputs/exclusions_$X.txt ]; then var hist_$X --variant=drop --disputes=$(grep -v '^#' inputs/exclusions_$X.txt | cut -d' ' -f1 | paste -sd, -); sweep rob_drop_hist_$X $O/dumps/var_hist_$X.rds $PA
   else say "skip: inputs/exclusions_$X.txt not present (list awaiting approval)"; echo "history drop $X: list not approved" >> $INC; fi
 done
@@ -224,10 +251,9 @@ es es_main_onset_fallback $O/sets/main.rds "$MAIN_SPEC" --align=onset --onset_fa
 
 ## ---- 10. summary: manifest rebuilt from the validated task records (N5), then the summarizer reads only those ----
 { printf "group\tpath\tn_requested\tids_file\n"
-  for ST in $O/status/sweep_*; do
-    if [ ! -e "$ST" ] || [[ "$ST" == *.path ]] || [[ "$ST" == *.tmp ]]; then continue; fi
-    F0=$(cut -f2 "$ST"); if [ -s "$F0" ] && ! grep -q '"ERROR"' "$F0"; then cat "$ST"; fi
-  done; } > $MAN.tmp
+  while read -r K; do ST=$O/status/sweep_$K                          # D1: planned tasks of THIS invocation only (superseded records never qualify)
+    [ -s "$ST" ] || continue; F0=$(cut -f2 "$ST"); if [ -s "$F0" ] && ! grep -q '"ERROR"' "$F0"; then cat "$ST"; fi
+  done < <(sort -u $CUR); } > $MAN.tmp
 mv $MAN.tmp $MAN
 runR "summarized|Error" R/11_summarize.R $MAN $O/validation/measure_validation.csv "$MAIN_SPEC" $O/summary || { echo "summary failed" >> $INC; }
 if [ -s $INC ]; then say "LOOP_FINISHED_WITH_GAPS: $(wc -l < $INC) items in $INC"; cat $INC | tee -a "$LOG"; exit 2; fi

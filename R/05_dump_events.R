@@ -477,6 +477,15 @@ if (DUMP_LONG) {
   stopifnot(!anyNA(fk)); D$ev_fatal <- as.integer(fk)
   if (SAMPLE == "fmid") stopifnot(all(D$ev_fatal == 1L))
   logf("dump_long: events in the fatal-MID sample %d of %d", sum(D$ev_fatal[D$chosen == 1L]), sum(D$chosen == 1L))
+  ## PI 2026-11-20 intensity samples: dispute fatality level (events.rds fatality_disp, GML codes 1-6; -9 -> NA) and jointly fatal (both states of
+  ## the event have fatalities in the dispute: fatal1 > 0 and fatal2 > 0, state-level per dispute, not pair-specific; NA if either is unknown)
+  srci <- ev_rds[!ev_rds$escalation, c("initiator", "target", "year", "fatality_disp", "fatal1", "fatal2")]
+  mi <- match(ek2$key, paste(srci$initiator, srci$target, srci$year)); stopifnot(!anyNA(mi))
+  fdv <- srci$fatality_disp[mi]; D$fat_level <- ifelse(is.na(fdv) | fdv < 0, NA_integer_, as.integer(fdv))
+  f1 <- srci$fatal1[mi]; f2 <- srci$fatal2[mi]; D$jfatal <- ifelse(is.na(f1) | is.na(f2), NA_integer_, as.integer(f1 > 0 & f2 > 0))
+  logf("dump_long: intensity -- fatality level of chosen events %s; jointly fatal %d, not %d, unknown %d",
+       paste(names(table(D$fat_level[D$chosen == 1L], useNA = "ifany")), table(D$fat_level[D$chosen == 1L], useNA = "ifany"), sep = ":", collapse = " "),
+       sum(D$jfatal[D$chosen == 1L] == 1L, na.rm = TRUE), sum(D$jfatal[D$chosen == 1L] == 0L, na.rm = TRUE), sum(is.na(D$jfatal[D$chosen == 1L])))
   ## loop review P2-5: a DISPUTE-level outcome for step B -- the event's primary dispute has fatality > 0 in the GML dispute table
   ## (peacesciencer gml_mid_disps; -9 = unknown -> NA). The pair-level ev_fatal above is kept for the old membership version.
   gd <- as.data.frame(peacesciencer::gml_mid_disps)[, c("dispnum", "fatality")]

@@ -22,6 +22,7 @@ TYPES=bcd                 # three types: bilateral / initiating-side coalition (
 WINDOW_MAIN=1             # originator window in months (definite bound); windows 0-6 run for the appendix
 WINDOWS="0 1 2 3 4 5 6"
 SAMPLE_MAIN=fmid          # fatal MIDs; "mid" = all MID onsets (failed-bargain step A)
+INTENSITY="jf fd2 fd3 fd4 fd5 fd6"   # intensity samples run through the full multiverse (jointly fatal; dispute fatality level >= 2..6)
 MAIN_SPEC='W2contig_ptaall|igo+def+off+neu+nonagg+consul+dca+un|pr'   # the main relational measure (chosen 2026-11-18)
 
 ## ---- resampling ----

@@ -14,6 +14,7 @@
 ## Usage: Rscript v2/R/25_rel_boot.R <long_dump.rds> <positions.rds> <spec_id> <out.csv> [--mode=boot|perm_dR|perm_type] [--B=2000] [--cores=2]
 ## ============================================================================
 suppressMessages({ library(survival); library(parallel) })
+local({ f <- sub("^--file=", "", grep("^--file=", commandArgs(FALSE), value = TRUE)); source(file.path(dirname(normalizePath(f)), "lib", "report_gate.R")) })
 args <- commandArgs(trailingOnly = TRUE); stopifnot(length(args) >= 4)
 DUMP <- args[1]; POSF <- args[2]; SPEC <- args[3]; OUT <- args[4]
 fl <- sub("^--([A-Za-z_]+)=.*$", "\\1", grep("^--", args, value = TRUE))
@@ -99,7 +100,7 @@ okq <- colSums(!is.na(BS))                                         # usable draw
 rs <- vapply(res, function(z) { r <- attr(z, "reason"); if (is.null(r)) "" else r }, "")
 drops <- data.frame(draw = which(nzchar(rs)), reason = rs[nzchar(rs)])
 ## delta review N4: no interval, positivity share or diagnostic tail value without a valid (finite) observed estimate
-reportq <- B >= 200L & okq / B >= 0.90 & is.finite(est[QN])
+reportq <- report_gate(B, okq, est[QN])                             # R/lib/report_gate.R (tested directly in tests/test_resample_edge.R)
 logf("usable draws: M0 %d, M1 %d of %d; draws with a dropped model %d", okq[[QN[1]]], okq[[QN[5]]], B, nrow(drops))
 qf <- function(p) ifelse(reportq, apply(BS, 2, quantile, p, na.rm = TRUE), NA_real_)
 if (MODE == "boot") {

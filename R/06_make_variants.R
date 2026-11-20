@@ -19,7 +19,7 @@ args <- commandArgs(trailingOnly = TRUE)
 stopifnot(length(args) >= 3)
 IN <- args[1]; OUT <- args[2]
 opt <- function(name, default) { a <- grep(paste0("^--", name, "="), args, value = TRUE); if (length(a)) sub(paste0("^--", name, "="), "", a) else default }
-VAR <- opt("variant", ""); stopifnot(VAR %in% c("aggr", "expdef", "drop", "dropside"))
+VAR <- opt("variant", ""); stopifnot(VAR %in% c("aggr", "expdef", "drop", "dropside", "sample"))
 logf <- function(...) cat(sprintf("[%s] ", format(Sys.time(), "%H:%M:%S")), sprintf(...), "\n", sep = "")
 d <- readRDS(IN); D <- as.data.table(d$D)
 stopifnot(all(c("ev_id", "chosen", "type", "c1", "c2", "yr", "disp") %in% names(D)))
@@ -107,6 +107,21 @@ if (VAR == "expdef") {
   D[, c("yr_m1", "n_all", "ally_init") := NULL]
   d$Z_cols <- c(d$Z_cols, paste0("def_", d$roles))
   d$types <- paste0(d$types, if (ANCHOR == "onset") "_expdef" else "_expdefentry")
+}
+
+if (VAR == "sample") {
+  ## PI 2026-11-20 intensity samples (fatal-MID dumps only): --keep=jf keeps strata whose chosen event is jointly fatal (both states have
+  ## fatalities in the dispute); --keep=fd<k> (k = 2..6) keeps strata whose dispute fatality level is >= k (GML codes: 2 > 25 deaths, 3 > 100,
+  ## 4 > 250, 5 > 500, 6 > 999). Strata with an unknown value are dropped and counted.
+  KEEP <- opt("keep", ""); stopifnot(KEEP %in% c("jf", paste0("fd", 2:6)), d$sample == "fmid", all(c("fat_level", "jfatal") %in% names(D)))
+  ev <- D[chosen == 1, .(ev_id, fat_level, jfatal)]
+  val <- if (KEEP == "jf") ev$jfatal == 1L else ev$fat_level >= as.integer(sub("fd", "", KEEP))
+  n_unk <- sum(is.na(val)); keep_ev <- ev$ev_id[!is.na(val) & val]
+  D <- D[ev_id %in% keep_ev]
+  logf("sample %s: kept %d of %d strata (%d unknown dropped); by type %s", KEEP, uniqueN(D$ev_id), s0, n_unk,
+       paste(sprintf("%s %d", d$roles, tabulate(D[chosen == 1]$type + 1L, length(d$roles))), collapse = ", "))
+  stopifnot(uniqueN(D$ev_id) > 0)
+  d$types <- paste0(d$types, "_", KEEP)
 }
 
 if (VAR == "drop") {

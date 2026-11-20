@@ -12,7 +12,7 @@ One question, one main model, every robustness check in one run.
 | Who is an originator | Present within **1 month** of the dispute's first originator (definite date bound) | 0–6 months |
 | Coalition status | At onset (`--bilateral=onset`) | — |
 | Joiner side | Relative to the dispute's initiating side (case-reviewed; see `docs/decisions.md`) | Drop the 2 hard / 13 reviewed disputes |
-| Sample | Fatal MIDs | All MID onsets (failed-bargain step A) |
+| Sample | Fatal MIDs | All MID onsets (failed-bargain step A); intensity samples through the full multiverse: jointly fatal (both states have fatalities in the dispute; state-level, not pair-specific) and dispute fatality level ≥ 2, 3, 4, 5, 6 (GML codes: > 25, > 100, > 250, > 500, > 999 deaths); unknown fatality dropped and counted |
 | Relational measure | `W2contig_ptaall|igo+def+off+neu+nonagg+consul+dca+un|pr` | All 7,686 measures |
 | Choice set | System members with a position, covariates and stage-2 availability in the event year | — |
 | Inference | Two-way cluster-robust (initiator × dispute) | Pigeonhole two-way bootstrap; permutation diagnostics |
@@ -40,7 +40,7 @@ Everything is written to `output/`; the log is `output/logs/run_<time>.log`.
 | 2 validation | `R/03_validate_measures.R` | `output/validation/` | Does a measure put the powerful states where they belong? Plausibility rules, correlation with CINC, major-power rank, year-to-year stability, top-10 states by era. Outcome-blind. |
 | 3 measure sets | `R/04_subset_positions.R` | `output/sets/` | Phase A (main + 200 random plausible), main only, no-ATOP measures, 25 random plausible measures |
 | 4 event frames | `R/05_dump_events.R` | `output/dumps/` | One frame per type scheme × window × sample |
-| 5 multiverse | `R/07_fit_sweep.R` | `output/sweep/multiverse_*` | Every measure × every window, fatal MIDs and all MID onsets; failed-bargain step B on every measure; four types on Phase A |
+| 5 multiverse | `R/06_make_variants.R`, `R/07_fit_sweep.R` | `output/sweep/multiverse_*` | Every measure × every window, for fatal MIDs, all MID onsets, jointly fatal and fatality levels ≥ 2–6; failed-bargain step B on every measure; four types on Phase A |
 | 6 robustness | `R/06_make_variants.R`, `R/07_fit_sweep.R` | `output/sweep/robustness/` | Every check below, on the 201 Phase A measures |
 | 7 influence | `R/09_influence.R` | `output/influence/` | Leave-one-dispute-out and leave-one-initiator-out; then drop the top 5 / top 10 disputes |
 | 8 resampling | `R/08_resample.R` | `output/resample/` | Pigeonhole bootstrap (main measure at every window, all-MID, 25 random measures). Permutations of dR within events and of type labels are **artificial-assignment diagnostics** (`diag_*`, column `p_diag`), not randomization tests. |
@@ -58,7 +58,7 @@ Everything is written to `output/`; the log is `output/logs/run_<time>.log`.
 | Reverse timing | `lead_t`, `lead_t1`, `lead_t1_sample_tm1` | Ties lost because of the conflict |
 | Failed bargains | `stepA` (target choice among all MID onsets); `stepB_orig_disp` (originator decisions at dispute onset: does the dispute become fatal, GML dispute fatality); `stepB_all_pair` (old membership version, comparison only) | Isolation shapes whom states confront vs whether the dispute fails. Step B keeps only decisions in the primary dispute's GML start year, reports per-type gap terms, type-intercept contrasts and a joint test of both, counts of disputes / initiator-dispute decisions / events, and a cross-tab of its outcome (GML dispute fatality) against fatal-sample membership with unknown outcomes by type and era (`stepB_crosstab_*.csv`). The outcome is eventual severity of the dispute from a pre-dispute reference, not a measured nonfatal-to-fatal transition. Joiners are excluded from step B because first-fatality dates are not in the data, so a joiner cannot be shown to have entered before the dispute turned deadly. |
 | Coding | `dropside_hard`, `dropside_reviewed` (joiner strata incl. window-promoted joiners), `dropside_hard_disp`, `dropside_reviewed_disp` (every event of those disputes) | Side coding |
-| Concentration | `drop_top5`, `drop_top10` (chosen by the main measure's own leave-one-out influence: adversarial diagnostics, not confirmation); `drop_hist_un`, `drop_hist_strict`, `drop_hist_strict_noborder`, `drop_hist_expanded` (chosen on history under a fixed coding rule, `docs/historical_exclusions.md`) | A few great-power or punitive coalitions |
+| Concentration | `drop_top5`, `drop_top10` (chosen by the main measure's own leave-one-out influence: adversarial diagnostics, not confirmation); `drop_hist_un`, `drop_hist_strict`, `drop_hist_strict_noborder`, `drop_hist_expanded`, `drop_hist_noruleA`, `drop_hist_anycoder` (chosen on history under a fixed coding rule, `docs/historical_exclusions.md`) | A few great-power or punitive coalitions |
 | Weighting and scale | `unit_weights`, `yscale_tm1`, `pooledscale` | Event weights; scale year |
 | Measurement error | `merror_def_<sign>_<k>`, `merror_contig_<sign>_<k>` (both signs), `merror_random_<k>_d1..5` (5 independent draws); each writes the rank correlation between the measure and its perturbed version | Fragility to error that mimics alliance or contiguity confounding, and to noise. A fragility test, not a correction for confounding. |
 
