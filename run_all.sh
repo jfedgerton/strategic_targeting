@@ -3,7 +3,7 @@
 ## run_all.sh -- the full multiverse loop (2026-11-19; restart and provenance rules rebuilt after the loop review P1-1..P1-3)
 ##   bash run_all.sh            production run into ./output
 ##   TEST=1 bash run_all.sh     mechanics check into ./output_test (2 windows, main measure only, tiny B) -- never mixes with ./output
-## Provenance (P1-3): at start the run computes a FINGERPRINT of the code commit, config.sh, the data_entry manifest and the sha256 of every
+## Provenance (P1-3): at start the run computes a FINGERPRINT of the code (all R scripts and this runner), config.sh, the data_entry manifest and the sha256 of every
 ## positions file. An output folder belongs to exactly one fingerprint: if ./output was built from anything else the run stops (start a new
 ## folder with OUT=... or remove the old one). Within one fingerprint a finished step is skipped; a step is "finished" only when its output was
 ## written atomically and, for sweeps, contains no ERROR rows. Sweeps with ERROR rows are recorded as INCOMPLETE and the run ends non-zero.
@@ -45,7 +45,8 @@ fi
 for e in $EXPECT; do [ -s $O/positions/$e.rds ] || die "positions file missing: $e.rds"; done
 POS=(); for e in $EXPECT; do POS+=( $O/positions/$e.rds ); done
 SHA=$( (cd $O/positions && for e in $EXPECT; do shasum -a 256 -- "$(readlink -f $e.rds)" | cut -d' ' -f1; done) | shasum -a 256 | cut -c1-16 )
-FP=$( { git rev-parse HEAD; cat config.sh; echo "TEST=$TEST WINDOWS=$WINDOWS B=$B_BOOT/$B_PERM N=$N_RANDOM_BOOT K=$MERROR_K"; shasum -a 256 data_entry/manifest.csv; echo "$SHA"; } | shasum -a 256 | cut -c1-16 )
+## code identity = the content of the scripts and this runner (doc-only commits do not invalidate outputs); the commit is logged
+FP=$( { cat run_all.sh R/*.R R/lib/*.R | shasum -a 256; cat config.sh; echo "TEST=$TEST WINDOWS=$WINDOWS B=$B_BOOT/$B_PERM N=$N_RANDOM_BOOT K=$MERROR_K"; shasum -a 256 data_entry/manifest.csv; echo "$SHA"; } | shasum -a 256 | cut -c1-16 )
 if [ -s $O/FINGERPRINT ]; then [ "$(cat $O/FINGERPRINT)" = "$FP" ] || die "$O was built from different code/config/inputs (fingerprint $(cat $O/FINGERPRINT), now $FP); use OUT=<new folder> or remove $O"
 else echo "$FP" > $O/FINGERPRINT; fi
 say "fingerprint $FP | commit $(git rev-parse --short HEAD) | positions sha $SHA | cores $CORES | types $TYPES | main window $WINDOW_MAIN | test $TEST"
