@@ -15,6 +15,6 @@ Executed here (TEST=1, Linux): LOOP_DONE; restart 19 s, no refits. Initiator fra
 Questions: (1) any bug or P1/P2 in these changes; (2) is anything in the existing grid invalid or meaningless for a two-group initiator frame (e.g., permutation of type labels, event study by type, typed controls); (3) does dropping joiner strata change the interpretation of any robustness check.
 
 ## Part 2 — review the stage-2 design memo (`docs/stage2_design_memo.md`)
-Judge the unit, risk set, timing rule, model, covariates and identification table. For each of the five open decisions in §10, give a recommendation with reasons. Flag anything that would make the stage-2 estimand ill-defined or not comparable with stage 1.
+Judge the unit, risk set, timing rule, model, covariates and identification table. The PI has made the five decisions in §10 (both estimators; likely vs unlikely joiners by relevance tiers and an opportunity offset; fatal MIDs; sum and strongest-link ties; re-entries ignored with a sensitivity). Do not relitigate them; flag only problems in how they are specified (e.g., an ill-defined tier, an offset that leaks the outcome, a hazard/one-shot comparison that is not like for like). Flag anything that would make the stage-2 estimand ill-defined or not comparable with stage 1.
 
 Write everything to `docs/REVIEW_stage1.md`. Read-only otherwise; do not run the R scripts.
