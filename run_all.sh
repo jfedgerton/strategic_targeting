@@ -124,6 +124,14 @@ cmp -s $O/sets/random_ids.txt $O/sets/ids/random.txt || die "sets/random.rds doe
 ## ---- 4. event frames ----
 wtag() { [ "$1" -gt 0 ] && echo "_w${1}d" || echo ""; }
 dump() {  # dump <types> <window> <sample> [--unit_weights=TRUE]
+  ## PI 2026-11-21: TYPES=init (stage 1: bilateral initiators vs coalition originators) is built from the four-type frame by R/06 --variant=initiators
+  if [ "$1" = "init" ]; then local W=$2 SM=$3 UWT=""; [ "${4:-}" = "--unit_weights=TRUE" ] && UWT="_uw"
+    shift; dump bcjs "$@"; local SRC=$O/dumps/long_bcjs_bon$(wtag $W)_relyear${UWT}_$SM.rds F=$O/dumps/long_init_bon$(wtag $W)_relyear${UWT}_$SM.rds
+    [ -s $F ] && return 0
+    runR "initiators|Error" R/06_make_variants.R $SRC $F.tmp.rds --variant=initiators || { rm -f $F.tmp.rds; die "initiator frame failed: $F"; }
+    Rscript -e 'a <- commandArgs(TRUE); d <- readRDS(a[1]); stopifnot(d$types == "init", identical(d$roles, c("bil", "coal")), all(d$D$type %in% 0:1), d$sample == a[2], as.integer(d$coorig_months) == as.integer(a[3]))' \
+      $F.tmp.rds $SM $W || { rm -f $F.tmp.rds; die "initiator frame $F is not the requested frame"; }
+    mv $F.tmp.rds $F; hinv $F; return 0; fi
   local T=$1 W=$2 SM=$3; shift 3; local WF=""; [ "$W" -gt 0 ] && WF="--coorig_months=$W --coorig_bound=definite"
   local UW=""; [[ " $* " == *"--unit_weights=TRUE"* ]] && UW="_uw"
   local F=$O/dumps/long_${T}_bon$(wtag $W)_relyear${UW}_${SM}.rds
@@ -188,14 +196,15 @@ var aggr_base --variant=aggr --window=complete_base  # the same strata without t
 var aggr_censored --variant=aggr --window=censored   # every stratum; truncated counts after 2010 (lower-bound appendix sensitivity)
 var expdef --variant=expdef --anchor=onset --layers=$O/layers_dy.rds
 var expdefentry --variant=expdef --anchor=entry --layers=$O/layers_dy.rds
-for L in hard reviewed hard_disp reviewed_disp; do var ds_$L --variant=dropside --level=$L; done
+DSL="hard reviewed hard_disp reviewed_disp"; [ "$TYPES" = "init" ] && DSL="hard_disp reviewed_disp"   # init frame has no joiner strata
+for L in $DSL; do var ds_$L --variant=dropside --level=$L; done
 sweep rob_base $MAIN_F $PA
 sweep rob_aggr $O/dumps/var_aggr.rds $PA
 sweep rob_aggr_base $O/dumps/var_aggr_base.rds $PA
 sweep rob_aggr_censored $O/dumps/var_aggr_censored.rds $PA
 sweep rob_expdef $O/dumps/var_expdef.rds $PA
 sweep rob_expdefentry $O/dumps/var_expdefentry.rds $PA
-for L in hard reviewed hard_disp reviewed_disp; do sweep rob_dropside_$L $O/dumps/var_ds_$L.rds $PA; done
+for L in $DSL; do sweep rob_dropside_$L $O/dumps/var_ds_$L.rds $PA; done
 for L in 5 10; do
   sweep rob_lag${L}_yearscale $MAIN_F $PA --pos_lag=$L
   sweep rob_samp${L}_yearscale $MAIN_F $PA --sample_lag=$L
@@ -226,7 +235,8 @@ sweep rob_stepB_all_pair $MAIN_MID $PA --stepB=TRUE --stepB_unit=all --stepB_out
 
 ## ---- 7. influence; influence-chosen and history-chosen dispute drops ----
 inf() { [ -s $O/influence/$1_loo.csv ] && [ -s $O/influence/$1_top.txt ] && return 0
-  runR "LOO|refits|Error" R/09_influence.R $MAIN_F $O/sets/main.rds "$MAIN_SPEC" $O/influence/$1 --unit=$1 --cores=$CORES || die "influence ($1) failed"
+  local IQ="chooser-bil:u_R_less,defender-chooser:u_R_less"; [ "$TYPES" = "init" ] && IQ="coal-bil:u_R_less"
+  runR "LOO|refits|Error" R/09_influence.R $MAIN_F $O/sets/main.rds "$MAIN_SPEC" $O/influence/$1 --unit=$1 --q=$IQ --cores=$CORES || die "influence ($1) failed"
   [ -s $O/influence/$1_loo.csv ] && [ -s $O/influence/$1_top.txt ] || die "influence ($1) wrote no output"; }
 inf disp; inf init
 for N in 5 10; do var droptop$N --variant=drop --disputes=$(head -$N $O/influence/disp_top.txt | paste -sd, -); sweep rob_drop_top$N $O/dumps/var_droptop$N.rds $PA; done

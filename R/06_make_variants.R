@@ -19,7 +19,7 @@ args <- commandArgs(trailingOnly = TRUE)
 stopifnot(length(args) >= 3)
 IN <- args[1]; OUT <- args[2]
 opt <- function(name, default) { a <- grep(paste0("^--", name, "="), args, value = TRUE); if (length(a)) sub(paste0("^--", name, "="), "", a) else default }
-VAR <- opt("variant", ""); stopifnot(VAR %in% c("aggr", "expdef", "drop", "dropside", "sample"))
+VAR <- opt("variant", ""); stopifnot(VAR %in% c("aggr", "expdef", "drop", "dropside", "sample", "initiators"))
 logf <- function(...) cat(sprintf("[%s] ", format(Sys.time(), "%H:%M:%S")), sprintf(...), "\n", sep = "")
 d <- readRDS(IN); D <- as.data.table(d$D)
 stopifnot(all(c("ev_id", "chosen", "type", "c1", "c2", "yr", "disp") %in% names(D)))
@@ -107,6 +107,19 @@ if (VAR == "expdef") {
   D[, c("yr_m1", "n_all", "ally_init") := NULL]
   d$Z_cols <- c(d$Z_cols, paste0("def_", d$roles))
   d$types <- paste0(d$types, if (ANCHOR == "onset") "_expdef" else "_expdefentry")
+}
+
+if (VAR == "initiators") {
+  ## PI 2026-11-21 stage-1 main specification: initiation decisions only. From a four-type (bcjs) frame keep the strata of bilateral initiators
+  ## and coalition originators (originators within the window); joiner strata (both sides) are dropped -- joiners choose a side in stage 2,
+  ## not a target. Roles become bil / coal; the frame's types tag becomes "init" so every downstream name carries it.
+  stopifnot(identical(d$roles, c("bil", "coal", "joinA", "joinB")), !any(grepl("_(bil|coal|joinA|joinB)$", d$Z_cols)))
+  n_before <- tabulate(D[chosen == 1L, type] + 1L, 4L)
+  D <- D[ev_id %in% D[chosen == 1L & type %in% 0:1, ev_id]]
+  stopifnot(all(D$type %in% 0:1), uniqueN(D$ev_id) == sum(n_before[1:2]))
+  d$roles <- c("bil", "coal"); d$types <- "init"
+  logf("initiators: kept bilateral %d and coalition-originator %d strata; dropped attack-side joiner %d and target-side joiner %d strata",
+       n_before[1], n_before[2], n_before[3], n_before[4])
 }
 
 if (VAR == "sample") {

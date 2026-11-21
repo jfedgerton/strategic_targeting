@@ -18,7 +18,7 @@ REUSE_DIPL="${REUSE_DIPL:-"$HOME/strategic_targeting_relsweep/v2/output/rel_swee
 CORES="${CORES:-$(sysctl -n hw.ncpu 2>/dev/null || nproc)}"
 
 ## ---- main specification (PI 2026-11-19) ----
-TYPES=bcd                 # three types: bilateral / initiating-side coalition (originators within the window + attack-side joiners) / target-side joiners
+TYPES="${TYPES:-bcd}"                 # three types: bilateral / initiating-side coalition (originators within the window + attack-side joiners) / target-side joiners
 WINDOW_MAIN=1             # originator window in months (definite bound); windows 0-6 run for the appendix
 WINDOWS="0 1 2 3 4 5 6"
 SAMPLE_MAIN=fmid          # fatal MIDs; "mid" = all MID onsets (failed-bargain step A)
