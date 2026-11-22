@@ -65,6 +65,9 @@ NEW_SRY_ANY="positions_core_W6srybook_ptaany positions_core_W7sryyear_ptaany"
 EXPECT="$EXPECT $NEW_ANY $NEW_SRY_ALL $NEW_SRY_INF $NEW_SRY_ANY"
 link_pos() { local F=$1 D=$O/positions/$(basename "$1"); [ -s "$F" ] || die "positions source missing: $F"
   if [ -L "$D" ]; then [ "$(readlink "$D")" = "$F" ] || die "$D points to $(readlink "$D"), config says $F"; else ln -s "$F" "$D"; fi; }
+## GPT review SRY4 (2026-11-22): linked files carry no content provenance for the layers they were built from, so a grid that mixes them
+## with arms built from this run's layers cannot be shown to be coherent. Every arm is built from this run's layers.
+[ "$REUSE_POSITIONS" = "1" ] && die "REUSE_POSITIONS=1 is not allowed for the 2026-11-22 grid (GPT review SRY4): set REUSE_POSITIONS=0 so every arm is built from this run's layers (~4 h)"
 if [ "$REUSE_POSITIONS" = "1" ]; then
   for F in "$REUSE_CORE_IGO"/positions_core_W{1raw,2contig,3dist,4fe}_pta{all,inforce}.rds "$REUSE_CORE_IGO"/positions_igo_arm.rds "$REUSE_DIPL"/positions_dipl_W{1raw,2contig,3dist,4fe}_ptaall.rds; do link_pos "$F"; done
 fi
@@ -74,7 +77,7 @@ if [ -s $O/NETSHA ] && [ "$(cat $O/NETSHA)" != "$NETSHA" ]; then die "network in
 if ! fresh $O/layers_dy.rds "$NETSHA"; then rm -f $O/layers_dy.rds; runR "Error|wrote" R/01_build_layers.R "$NETDATA" $O/layers_dy.rds.tmp.rds || die "layers build failed"; mv $O/layers_dy.rds.tmp.rds $O/layers_dy.rds; stamp $O/layers_dy.rds "$NETSHA"; fi
 ## GPT review D5: each arm is stamped with the layers file and builder hashes; an arm whose stamp differs (or is missing) is rebuilt, so an
 ## interrupted first build cannot mix arms made from different layer versions
-AST="$(h $O/layers_dy.rds) $(h R/02_build_positions.R) $ENVQ"
+AST="$(h $O/layers_dy.rds) $(h R/02_build_positions.R) $(h R/lib/sry.R) $ENVQ"
 arm() { local NM=$1 FILES=$2; shift 2; local ok=1 f; for f in $FILES; do [ -s $O/positions/$f.rds ] || ok=0; done
     if [ $ok = 1 ] && [ "$(cat $O/positions/.arm_$NM.stamp 2>/dev/null)" = "$AST" ]; then return 0; fi
     for f in $FILES; do rm -f $O/positions/$f.rds; done

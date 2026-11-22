@@ -142,22 +142,13 @@ edge_w <- function(W, l) {
 ## PI 2026-11-22: book-aligned "sry" tie score per layer (signed, NA where the layer does not apply); see the header
 SRY_FAM <- c(igo = "pois", def = "logit", off = "logit", neu = "logit", nonagg = "logit", consul = "logit", dca = "logit", un = "ols",
              pta = if (PTA == "any") "logit" else "pois")
+source(file.path(dirname(normalizePath(sub("^--file=", "", grep("^--file=", commandArgs(FALSE), value = TRUE)[1]))), "lib", "sry.R"))   # sry_layer(), sry_combo()
+SRYX <- data.frame(a = dy$ccode1, b = dy$ccode2, year = dy$year, lcap = dy$lcap, contig_land = dy$contig_land)
 sry_score <- function(W, l) {
   v <- V[, l]; ok <- dy$year >= first_year[[l]] & yr_has[, l] & !is.na(v)
   if (SRY_FAM[[l]] == "pois") v <- round(expm1(v))                # Poisson on the raw counts (V holds log1p for igo / pta counts)
-  stopifnot(all(abs(v[ok] - round(v[ok])) < 1e-6) || SRY_FAM[[l]] != "pois", all(v[ok] %in% c(0, 1)) || SRY_FAM[[l]] != "logit")
-  n1 <- sum(ok); okd <- c(ok, ok); dd <- dbl[okd, ]; dd$v <- c(v, v)[okd]
-  fml <- if (W == "W6srybook") v ~ lcap | a + b + year else v ~ lcap + contig_land | year
-  m <- switch(SRY_FAM[[l]], ols = feols(fml, data = dd, notes = FALSE, warn = FALSE),
-              logit = feglm(fml, data = dd, family = binomial("logit"), notes = FALSE, warn = FALSE),
-              pois = fepois(fml, data = dd, notes = FALSE, warn = FALSE))
-  ex <- rep(NA_real_, nrow(dd)); ex[obs(m)] <- fitted(m)
-  ndrop <- sum(is.na(ex)); ex[is.na(ex)] <- dd$v[is.na(ex)]       # rows dropped as perfectly predicted (all-0 or all-1 FE groups): residual 0
-  r2 <- dd$v - ex; asym <- max(abs(r2[seq_len(n1)] - r2[n1 + seq_len(n1)])); stopifnot(asym < 1e-4)
-  x <- rep(NA_real_, nrow(dy)); x[ok] <- (r2[seq_len(n1)] + r2[n1 + seq_len(n1)]) / 2
-  for (ix in yr_split) { j <- ix[ok[ix]]; if (length(j)) { mx <- max(abs(x[j])); x[j] <- if (mx > 0) x[j] / mx else 0 } }
-  attr(x, "info") <- sprintf("%s %s: n %d, perfectly predicted %d, share > 0 %.3f", l, SRY_FAM[[l]], n1, ndrop, mean(x[ok] > 0))
-  x
+  x <- sry_layer(v, ok, SRYX, W, SRY_FAM[[l]], yr_split)
+  attr(x, "info") <- paste(l, SRY_FAM[[l]], attr(x, "info")); x
 }
 
 ## ---- 3. combos -------------------------------------------------------------------------------------------------------
@@ -228,8 +219,7 @@ if (ARM %in% c("core", "dipl")) {
     }
     one <- function(k) {
       L <- combos[[k]]
-      if (W %in% SRY) { M <- EL[, L, drop = FALSE]; k <- rowSums(!is.na(M)); sc <- ifelse(k > 0, rowSums(M, na.rm = TRUE) / pmax(k, 1), 0)
-        S <- pmax(sc, 0); E <- numeric(length(S)); for (ix in yr_split) { m <- max(S[ix]); if (m > 0) E[ix] <- S[ix] / m } }
+      if (W %in% SRY) E <- sry_combo(EL[, L, drop = FALSE], yr_split)
       else if (W == "W1raw") { S <- rowSums(EL[, L, drop = FALSE]); E <- numeric(length(S)); for (ix in yr_split) { m <- max(S[ix]); if (m > 0) E[ix] <- S[ix] / m } }
       else { S <- sqrt(rowSums(EL[, L, drop = FALSE]^2)); E <- within_year_range01(S) }
       cent(E)

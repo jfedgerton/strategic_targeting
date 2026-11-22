@@ -10,7 +10,7 @@ DATA_ENTRY="${DATA_ENTRY:-"$HOME/strategic_targeting_relsweep/v2/data_entry"}"
 NETDATA="${NETDATA:-"$HOME/Dropbox/state_targeting/relsweep_data"}"
 ## Reuse already-built positions? The core and IGO arms do not contain the diplomacy layer, so the 2026-11-18 files are unchanged by the
 ## no-future-diplomacy fix; the diplomacy arm must come from the 2026-11-19 no-future build. Set REUSE_POSITIONS=0 to rebuild everything (~4 h).
-REUSE_POSITIONS="${REUSE_POSITIONS:-1}"
+REUSE_POSITIONS="${REUSE_POSITIONS:-0}"   # 2026-11-22 (GPT review SRY4): full rebuild required; run_all.sh refuses 1
 REUSE_CORE_IGO="${REUSE_CORE_IGO:-"$HOME/strategic_targeting_relsweep/v2/output/rel_sweep/run_20261118_124722/positions"}"
 REUSE_DIPL="${REUSE_DIPL:-"$HOME/strategic_targeting_relsweep/v2/output/rel_sweep/nofut_20261119_104425/positions"}"
 
