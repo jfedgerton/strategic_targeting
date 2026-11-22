@@ -37,3 +37,18 @@ Late landmarks, the recurrent family, dynamic entrants, monthly-updated tiers, t
 
 ## Exploratory (outside the pipeline, PI request)
 `explore/x_s2_fe_twostep.R` is a two-step fixed-effects stand-in for the AME's shared target effect. It is labelled pre-freeze and uses the revision-1 build.
+
+## Revision 4 (2026-11-22): surface amendment, robustness variants, reference fitter
+- **Surface** (memo "Surface amendment"). `s2_surface()` builds the joiner's gaps to the opposing side with stage-1 scaling. `S2_REF_DESIGN` is now the surface design plus the stage-1 directed controls toward the opposing side (`S2_Z_TOWARD`), the recruitment terms toward the joined side, and dispute-level terms. The previous linear design is kept as `S2_REF_DESIGN_LINEAR` (sweep level `design = linear`). New sweep dimensions are `opp_side` (mean/min) and `design`.
+- **Opposing-side variants (A1–A4)**, 40 in all: aggregation (mean / min / max / lead / total) × members (onset roster / primary pair from `s2_primary_pair()`) × lag (1 / 5) × dR scale (year / pooled), saved as `s2_surface_variants.rds`. The builder asserts that the reference variant equals the built surface. Primary pairs resolve for 551 of 560 disputes.
+- **Fitter** `R/s2_02_fit_reference.R` covers:
+  - the four-category logit, converged to max |gradient| below 1e−3;
+  - two-way CGM vcov;
+  - surface contrasts by the delta method;
+  - the separation rule (drops `likely` and `dem_x_B` from O);
+  - the 40 variants and the linear design;
+  - B1/B2 permutations (likelihood-ratio statistic);
+  - B3 measurement error, where positions are perturbed and the surface is rebuilt from `s2_surface_inputs.rds`.
+- **Reference fit** (`docs/s2_fit_logs/`): n 63,143; surface block Wald χ² 118 on 15 df. The robustness outputs come from the run in progress.
+- **Tests**: 33–34 added (surface arithmetic, aggregations, lag via `ty`, primary pair, mirroring of the design). ALL PASS.
+- **Open assumption**: the democracy cutoff is polity2 ≥ 6. It must be verified against the main repo's `01_build_data.R`, section 6.

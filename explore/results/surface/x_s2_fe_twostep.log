@@ -1,0 +1,189 @@
+EXPLORATORY, PRE-FREEZE two-step FE run 2026-11-22 13:21:47; B = 200
+step 1: events 619, rows 72031, targets chosen 119 (chosen >= 2: 86), never-chosen alternatives pooled as reference 98
+step 1 without FE: dR_bil 0.080, dR_coal 0.967 | with target FE: dR_bil -0.122, dR_coal 0.762; FE NA (not identified) 0; FE range -18.88 to 8.51
+step 1 with FE: |b_j| > 10 (quasi-separated targets) 6
+step 2: one-shot rows 65416; reference cohort (in_ref) 63143; outcomes A 121, B 184, orig 71, out 62767
+step 2 design: frozen S2_REF_DESIGN (A 20, B 20 terms); O drops 'likely' (all 71 originator entrants are likely: separation)
+  likely           mean    0.343 sd   0.475 | mean among A   0.975, B   0.837, orig   1.000
+  sA_dM            mean   -0.384 sd   0.895 | mean among A   0.093, B   0.457, orig   0.113
+  sA_dM2           mean    0.948 sd   1.455 | mean among A   0.402, B   0.705, orig   0.468
+  sA_dR            mean    0.018 sd   0.977 | mean among A   0.770, B   0.585, orig   0.649
+  sA_dR2           mean    0.955 sd   1.723 | mean among A   1.893, B   1.423, orig   1.598
+  sA_dMR           mean    0.261 sd   1.096 | mean among A   0.307, B   0.625, orig   0.084
+  land_side_B      mean    0.028 sd   0.164 | mean among A   0.231, B   0.201, orig   0.296
+  lcap_B           mean    8.664 sd   0.770 | mean among A   7.328, B   7.797, orig   7.512
+  dem_side_B       mean    0.252 sd   0.432 | mean among A   0.070, B   0.103, orig   0.070
+  dem_x_B          mean    0.084 sd   0.276 | mean among A   0.008, B   0.076, orig   0.000
+  defoff_side_B    mean    0.053 sd   0.223 | mean among A   0.198, B   0.261, orig   0.197
+  major_side_B     mean    0.108 sd   0.310 | mean among A   0.140, B   0.082, orig   0.127
+  major_x_B        mean    0.005 sd   0.069 | mean among A   0.058, B   0.033, orig   0.099
+  mid_tm1_side_B   mean    0.011 sd   0.103 | mean among A   0.132, B   0.038, orig   0.211
+  prior_side_B     mean    0.099 sd   0.385 | mean among A   0.824, B   0.231, orig   0.862
+  tie_sum_A        mean    0.152 sd   0.221 | mean among A   0.457, B   0.214, orig   0.875
+  ally_side_A      mean    0.107 sd   0.309 | mean among A   0.579, B   0.223, orig   0.620
+  share_A          mean    0.550 sd   0.314 | mean among A   0.611, B   0.674, orig   0.645
+  n_side_A         mean    1.052 sd   0.390 | mean among A   1.025, B   1.033, orig   1.577
+  n_side_B         mean    1.026 sd   0.158 | mean among A   1.017, B   1.011, orig   1.028
+  sB_dM            mean   -0.495 sd   0.883 | mean among A  -0.174, B   0.109, orig  -0.347
+  sB_dM2           mean    1.024 sd   1.534 | mean among A   0.837, B   0.542, orig   1.297
+  sB_dR            mean    0.017 sd   1.006 | mean among A   0.037, B   0.538, orig  -0.129
+  sB_dR2           mean    1.013 sd   1.803 | mean among A   0.748, B   1.799, orig   0.793
+  sB_dMR           mean    0.257 sd   1.174 | mean among A   0.484, B   0.496, orig   0.630
+  land_side_A      mean    0.033 sd   0.178 | mean among A   0.215, B   0.234, orig   0.183
+  lcap_A           mean    8.656 sd   0.776 | mean among A   7.689, B   7.815, orig   7.758
+  dem_side_A       mean    0.217 sd   0.410 | mean among A   0.281, B   0.130, orig   0.451
+  dem_x_A          mean    0.074 sd   0.260 | mean among A   0.140, B   0.027, orig   0.221
+  defoff_side_A    mean    0.054 sd   0.227 | mean among A   0.331, B   0.179, orig   0.493
+  major_side_A     mean    0.173 sd   0.379 | mean among A   0.570, B   0.255, orig   0.662
+  major_x_A        mean    0.010 sd   0.099 | mean among A   0.165, B   0.141, orig   0.268
+  mid_tm1_side_A   mean    0.016 sd   0.125 | mean among A   0.066, B   0.185, orig   0.070
+  prior_side_A     mean    0.133 sd   0.445 | mean among A   0.560, B   0.772, orig   0.887
+  tie_sum_B        mean    0.146 sd   0.200 | mean among A   0.244, B   0.287, orig   0.263
+  ally_side_B      mean    0.102 sd   0.302 | mean among A   0.248, B   0.288, orig   0.225
+  share_B          mean    0.450 sd   0.314 | mean among A   0.389, B   0.326, orig   0.355
+  bbar             mean    2.718 sd   1.649 | mean among A     NaN, B     NaN, orig     NaN
+step 2: repeat targets used for b_j 86; clipped at +-5 6; disputes with no repeat-target b_j in the target set (dropped) 0
+step 2: disputes dropped (no usable b_j) 33
+point fits converged: no-theta 0 (max |grad| 1.4e-05), theta 0 (1.0e-05); LR (theta block, 3 df) 12.67
+bootstrap time 55.9 min, failures 0
+bootstrap: 200 successful of 200
+A.M+1                           0.206  [ -1.063,   1.074]  share>0 0.59
+A.M-1                          -0.744  [ -1.575,  -0.207]  share>0 0.01
+A.R+1                           0.573  [ -0.171,   0.980]  share>0 0.91
+A.R-1                          -0.139  [ -0.779,   0.237]  share>0 0.21
+B.M+1                           0.734  [ -0.054,   1.514]  share>0 0.96
+B.M-1                          -1.240  [ -2.202,  -0.833]  share>0 0.00
+B.R+1                           0.381  [ -0.019,   0.723]  share>0 0.96
+B.R-1                          -0.147  [ -0.554,   0.168]  share>0 0.17
+O.M+1                           0.641  [ -0.686,   1.630]  share>0 0.83
+O.M-1                          -0.692  [ -1.568,  -0.023]  share>0 0.03
+O.R+1                           0.019  [ -0.571,   0.479]  share>0 0.49
+O.R-1                          -0.048  [ -0.979,   0.505]  share>0 0.36
+A:(int@mean)                   -8.956  [-32.851,  -6.970]  share>0 0.00
+A:likely                        2.591  [  1.290,  39.817]  share>0 1.00
+A:sA_dM                         0.475  [ -0.360,   1.220]  share>0 0.86
+A:sA_dM2                       -0.269  [ -0.896,   0.034]  share>0 0.05
+A:sA_dR                         0.356  [ -0.201,   0.845]  share>0 0.90
+A:sA_dR2                        0.217  [ -0.170,   0.374]  share>0 0.81
+A:sA_dMR                       -0.096  [ -0.474,   0.503]  share>0 0.47
+A:land_side_B                  -0.355  [ -1.230,   0.717]  share>0 0.29
+A:lcap_B                       -0.825  [ -1.139,  -0.470]  share>0 0.00
+A:dem_side_B                   -1.194  [ -2.425,  -0.239]  share>0 0.01
+A:dem_x_B                      -1.420  [-63.008,   0.151]  share>0 0.04
+A:defoff_side_B                 0.141  [ -0.759,   0.870]  share>0 0.68
+A:major_side_B                  0.738  [ -0.778,   2.330]  share>0 0.89
+A:major_x_B                     0.100  [ -0.883,   1.297]  share>0 0.59
+A:mid_tm1_side_B                0.206  [ -0.573,   1.443]  share>0 0.71
+A:prior_side_B                  0.625  [ -0.103,   1.215]  share>0 0.95
+A:tie_sum_A                     1.288  [ -0.201,   2.983]  share>0 0.95
+A:ally_side_A                   0.394  [ -0.894,   1.360]  share>0 0.71
+A:share_A                       0.070  [ -1.970,   3.815]  share>0 0.62
+A:n_side_A                     -1.673  [-26.604,  -0.236]  share>0 0.01
+A:n_side_B                     -0.905  [-37.746,   0.606]  share>0 0.12
+A:bbar                          0.029  [ -5.841,   6.807]  share>0 0.04
+B:(int@mean)                   -7.251  [-31.862,  -6.045]  share>0 0.00
+B:likely                        0.835  [  0.077,   2.891]  share>0 0.97
+B:sB_dM                         0.987  [  0.493,   1.683]  share>0 1.00
+B:sB_dM2                       -0.253  [ -0.703,  -0.003]  share>0 0.03
+B:sB_dR                         0.264  [ -0.029,   0.628]  share>0 0.95
+B:sB_dR2                        0.117  [ -0.110,   0.228]  share>0 0.89
+B:sB_dMR                        0.422  [  0.020,   1.054]  share>0 0.97
+B:land_side_A                   0.340  [ -0.189,   0.801]  share>0 0.88
+B:lcap_A                       -0.583  [ -0.904,  -0.350]  share>0 0.00
+B:dem_side_A                   -0.543  [ -1.654,   0.425]  share>0 0.15
+B:dem_x_A                      -0.980  [ -2.347,   0.026]  share>0 0.03
+B:defoff_side_A                 0.280  [ -0.430,   0.771]  share>0 0.78
+B:major_side_A                  0.329  [ -1.542,   1.734]  share>0 0.65
+B:major_x_A                     0.748  [  0.040,   2.082]  share>0 0.97
+B:mid_tm1_side_A                0.723  [  0.025,   1.450]  share>0 0.98
+B:prior_side_A                  0.183  [ -0.283,   0.562]  share>0 0.79
+B:tie_sum_B                     1.498  [ -0.686,   3.347]  share>0 0.90
+B:ally_side_B                  -0.247  [ -1.117,   0.795]  share>0 0.34
+B:share_B                      -2.352  [ -4.274,  -0.601]  share>0 0.01
+B:n_side_A                     -0.505  [-29.524,   0.261]  share>0 0.09
+B:n_side_B                     -0.692  [-108.411,   0.954]  share>0 0.18
+B:bbar                         -0.059  [ -1.517,   9.916]  share>0 0.04
+O:(int@mean)                   -8.575  [-30.860,  -7.118]  share>0 0.00
+O:sA_dM                         0.666  [ -0.131,   1.305]  share>0 0.95
+O:sA_dM2                       -0.025  [ -0.937,   0.445]  share>0 0.53
+O:sA_dR                         0.033  [ -0.422,   0.600]  share>0 0.57
+O:sA_dR2                       -0.015  [ -0.527,   0.176]  share>0 0.32
+O:sA_dMR                       -0.109  [ -1.046,   0.535]  share>0 0.26
+O:land_side_B                   0.531  [ -0.826,   1.737]  share>0 0.75
+O:lcap_B                       -0.771  [ -1.228,  -0.256]  share>0 0.02
+O:dem_side_B                   -1.720  [ -4.175,  -0.874]  share>0 0.00
+O:defoff_side_B                 0.184  [ -1.416,   1.286]  share>0 0.56
+O:major_side_B                 -0.738  [-54.183,   1.068]  share>0 0.21
+O:major_x_B                     2.087  [ -0.497,  51.461]  share>0 0.94
+O:mid_tm1_side_B                1.017  [ -0.574,   2.645]  share>0 0.93
+O:prior_side_B                  0.533  [ -0.192,   1.127]  share>0 0.89
+O:tie_sum_A                     2.962  [  1.510,   5.344]  share>0 1.00
+O:ally_side_A                  -0.172  [ -1.466,   0.946]  share>0 0.41
+O:share_A                      -0.142  [ -1.983,   2.373]  share>0 0.52
+O:n_side_A                     -0.483  [ -5.156,   0.695]  share>0 0.16
+O:n_side_B                      0.188  [-54.956,   2.838]  share>0 0.62
+O:bbar                          0.427  [ -2.295,   9.445]  share>0 0.07
+noTheta.A:(int@mean)           -8.953  [-33.367,  -8.580]  share>0 0.00
+noTheta.A:likely                2.604  [  1.290,  33.731]  share>0 1.00
+noTheta.A:sA_dM                 0.473  [ -0.360,   1.220]  share>0 0.87
+noTheta.A:sA_dM2               -0.267  [ -0.896,   0.034]  share>0 0.05
+noTheta.A:sA_dR                 0.353  [ -0.201,   0.845]  share>0 0.90
+noTheta.A:sA_dR2                0.207  [ -0.170,   0.374]  share>0 0.81
+noTheta.A:sA_dMR               -0.098  [ -0.474,   0.502]  share>0 0.47
+noTheta.A:land_side_B          -0.355  [ -1.230,   0.717]  share>0 0.29
+noTheta.A:lcap_B               -0.811  [ -1.139,  -0.482]  share>0 0.00
+noTheta.A:dem_side_B           -1.200  [ -2.423,  -0.239]  share>0 0.01
+noTheta.A:dem_x_B              -1.423  [-50.082,   0.151]  share>0 0.04
+noTheta.A:defoff_side_B         0.129  [ -0.759,   0.870]  share>0 0.68
+noTheta.A:major_side_B          0.740  [ -0.778,   2.330]  share>0 0.89
+noTheta.A:major_x_B             0.092  [ -0.883,   1.297]  share>0 0.59
+noTheta.A:mid_tm1_side_B        0.208  [ -0.573,   1.443]  share>0 0.71
+noTheta.A:prior_side_B          0.635  [ -0.103,   1.215]  share>0 0.95
+noTheta.A:tie_sum_A             1.312  [ -0.201,   2.983]  share>0 0.95
+noTheta.A:ally_side_A           0.374  [ -0.894,   1.360]  share>0 0.71
+noTheta.A:share_A               0.075  [ -1.970,   3.815]  share>0 0.62
+noTheta.A:n_side_A             -1.648  [-26.253,  -0.236]  share>0 0.01
+noTheta.A:n_side_B             -0.904  [-37.882,   0.642]  share>0 0.12
+noTheta.B:(int@mean)           -7.245  [-10.246,  -6.791]  share>0 0.00
+noTheta.B:likely                0.822  [  0.077,   2.891]  share>0 0.97
+noTheta.B:sB_dM                 1.010  [  0.522,   1.684]  share>0 1.00
+noTheta.B:sB_dM2               -0.246  [ -0.703,  -0.003]  share>0 0.03
+noTheta.B:sB_dR                 0.261  [ -0.029,   0.628]  share>0 0.95
+noTheta.B:sB_dR2                0.118  [ -0.110,   0.228]  share>0 0.89
+noTheta.B:sB_dMR                0.418  [  0.020,   1.054]  share>0 0.97
+noTheta.B:land_side_A           0.337  [ -0.191,   0.801]  share>0 0.88
+noTheta.B:lcap_A               -0.597  [ -0.904,  -0.350]  share>0 0.00
+noTheta.B:dem_side_A           -0.524  [ -1.618,   0.425]  share>0 0.15
+noTheta.B:dem_x_A              -0.927  [ -2.346,   0.026]  share>0 0.03
+noTheta.B:defoff_side_A         0.267  [ -0.430,   0.771]  share>0 0.78
+noTheta.B:major_side_A          0.361  [ -1.503,   1.734]  share>0 0.65
+noTheta.B:major_x_A             0.749  [  0.040,   2.082]  share>0 0.97
+noTheta.B:mid_tm1_side_A        0.719  [  0.020,   1.450]  share>0 0.98
+noTheta.B:prior_side_A          0.174  [ -0.282,   0.562]  share>0 0.78
+noTheta.B:tie_sum_B             1.466  [ -0.686,   3.347]  share>0 0.90
+noTheta.B:ally_side_B          -0.202  [ -1.117,   0.801]  share>0 0.34
+noTheta.B:share_B              -2.394  [ -4.274,  -0.821]  share>0 0.01
+noTheta.B:n_side_A             -0.528  [-26.835,   0.261]  share>0 0.09
+noTheta.B:n_side_B             -0.701  [-61.801,   0.954]  share>0 0.18
+noTheta.O:(int@mean)           -8.424  [-16.682,  -8.226]  share>0 0.00
+noTheta.O:sA_dM                 0.609  [ -0.131,   1.305]  share>0 0.95
+noTheta.O:sA_dM2                0.024  [ -0.937,   0.445]  share>0 0.53
+noTheta.O:sA_dR                 0.019  [ -0.458,   0.661]  share>0 0.57
+noTheta.O:sA_dR2               -0.011  [ -0.527,   0.176]  share>0 0.32
+noTheta.O:sA_dMR               -0.144  [ -1.046,   0.535]  share>0 0.26
+noTheta.O:land_side_B           0.476  [ -0.825,   1.737]  share>0 0.75
+noTheta.O:lcap_B               -0.697  [ -1.197,  -0.249]  share>0 0.02
+noTheta.O:dem_side_B           -1.849  [ -4.175,  -0.874]  share>0 0.00
+noTheta.O:defoff_side_B         0.224  [ -1.416,   1.286]  share>0 0.56
+noTheta.O:major_side_B         -0.679  [-55.408,   1.068]  share>0 0.21
+noTheta.O:major_x_B             2.027  [ -0.497,  56.671]  share>0 0.94
+noTheta.O:mid_tm1_side_B        1.020  [ -0.574,   2.629]  share>0 0.93
+noTheta.O:prior_side_B          0.569  [ -0.192,   1.127]  share>0 0.89
+noTheta.O:tie_sum_A             2.882  [  1.510,   5.344]  share>0 1.00
+noTheta.O:ally_side_A          -0.076  [ -1.466,   0.946]  share>0 0.41
+noTheta.O:share_A              -0.139  [ -1.983,   2.373]  share>0 0.52
+noTheta.O:n_side_A             -0.374  [ -5.129,   0.806]  share>0 0.16
+noTheta.O:n_side_B              0.245  [-51.074,   2.838]  share>0 0.62
+dR_bil_fe                      -0.122  [ -0.552,   0.053]  share>0 0.04
+dR_coal_fe                      0.762  [  0.126,   1.514]  share>0 0.99
+X_DONE

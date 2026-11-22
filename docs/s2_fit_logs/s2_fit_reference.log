@@ -1,0 +1,75 @@
+stage-2 reference fit 2026-11-22 13:33:51; build /home/claude/s2r4_stage1; git 2795494; R 4.3.3
+reference cohort 63143 rows, 544 disputes, 217 candidate states; outcomes A 121, B 184, orig 71, out 62767
+separation rule: dropped from O: likely, dem_x_B
+reference fit: n 63143, logLik -1979.75, max |grad| 9.3e-06, CGM negative eigenvalues 12; surface block Wald chi2 118.17 on 15 df, p = 0.0000
+surface contrasts (utility change; gap = joiner minus the side it fights; 95% two-way intervals):
+  A  M +1:   0.160  [ -0.916,   1.235]
+  A  M -1:  -0.662  [ -1.410,   0.087]
+  A  R +1:   0.541  [  0.087,   0.995]
+  A  R -1:  -0.212  [ -0.761,   0.338]
+  B  M +1:   0.719  [  0.031,   1.408]
+  B  M -1:  -1.139  [ -1.796,  -0.483]
+  B  R +1:   0.358  [  0.049,   0.667]
+  B  R -1:  -0.118  [ -0.464,   0.228]
+  O  M +1:   0.832  [ -0.098,   1.762]
+  O  M -1:  -0.466  [ -1.151,   0.218]
+  O  R +1:   0.046  [ -0.350,   0.443]
+  O  R -1:  -0.066  [ -0.708,   0.575]
+coefficients (two-way SE):
+  A:(int@mean)             -8.974  (0.605)  p 0.000
+  A:likely                  2.613  (0.938)  p 0.005
+  A:sA_dM                   0.411  (0.418)  p 0.326
+  A:sA_dM2                 -0.251  (0.221)  p 0.256
+  A:sA_dR                   0.376  (0.236)  p 0.111
+  A:sA_dR2                  0.165  (0.102)  p 0.106
+  A:sA_dMR                 -0.077  (0.196)  p 0.692
+  A:land_side_B            -0.314  (0.477)  p 0.510
+  A:lcap_B                 -0.777  (0.165)  p 0.000
+  A:dem_side_B             -1.209  (0.538)  p 0.025
+  A:dem_x_B                -1.394  (1.134)  p 0.219
+  A:defoff_side_B           0.135  (0.402)  p 0.737
+  A:major_side_B            0.656  (0.704)  p 0.351
+  A:major_x_B               0.063  (0.480)  p 0.896
+  A:mid_tm1_side_B          0.289  (0.490)  p 0.555
+  A:prior_side_B            0.687  (0.317)  p 0.030
+  A:tie_sum_A               1.530  (0.869)  p 0.078
+  A:ally_side_A             0.209  (0.579)  p 0.718
+  A:share_A                -0.028  (1.417)  p 0.984
+  A:n_side_A               -1.584  (0.899)  p 0.078
+  A:n_side_B               -0.915  (0.888)  p 0.303
+  B:(int@mean)             -7.234  (0.432)  p 0.000
+  B:likely                  0.986  (0.529)  p 0.062
+  B:sB_dM                   0.929  (0.297)  p 0.002
+  B:sB_dM2                 -0.210  (0.171)  p 0.220
+  B:sB_dR                   0.238  (0.159)  p 0.133
+  B:sB_dR2                  0.120  (0.054)  p 0.026
+  B:sB_dMR                  0.372  (0.194)  p 0.055
+  B:land_side_A             0.367  (0.285)  p 0.198
+  B:lcap_A                 -0.550  (0.156)  p 0.000
+  B:dem_side_A             -0.462  (0.487)  p 0.342
+  B:dem_x_A                -0.891  (0.491)  p 0.070
+  B:defoff_side_A           0.222  (0.357)  p 0.534
+  B:major_side_A            0.255  (0.780)  p 0.744
+  B:major_x_A               0.817  (0.422)  p 0.053
+  B:mid_tm1_side_A          0.744  (0.328)  p 0.023
+  B:prior_side_A            0.180  (0.224)  p 0.423
+  B:tie_sum_B               1.517  (0.992)  p 0.126
+  B:ally_side_B            -0.301  (0.426)  p 0.480
+  B:share_B                -2.147  (0.796)  p 0.007
+  B:n_side_A               -0.542  (0.366)  p 0.139
+  B:n_side_B               -0.828  (1.259)  p 0.511
+  O:(int@mean)             -8.462  (0.347)  p 0.000
+  O:sA_dM                   0.649  (0.340)  p 0.056
+  O:sA_dM2                  0.183  (0.241)  p 0.449
+  O:sA_dR                   0.056  (0.236)  p 0.811
+  O:sA_dR2                 -0.010  (0.136)  p 0.942
+  O:sA_dMR                 -0.174  (0.267)  p 0.516
+  O:land_side_B             0.478  (0.662)  p 0.470
+  O:lcap_B                 -0.715  (0.251)  p 0.004
+  O:dem_side_B             -1.844  (0.595)  p 0.002
+  O:defoff_side_B           0.132  (0.577)  p 0.820
+  O:major_side_B           -0.685  (1.118)  p 0.540
+  O:major_x_B               2.066  (0.975)  p 0.034
+  O:mid_tm1_side_B          1.016  (0.710)  p 0.152
+  O:prior_side_B            0.609  (0.357)  p 0.088
+  O:tie_sum_A               2.978  (0.675)  p 0.000
