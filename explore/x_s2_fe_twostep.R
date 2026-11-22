@@ -60,7 +60,10 @@ VB <- c("tie_sum_B", "tgt_cent_mean", "lcap_B", "ally_side_B", "likely", "lcinc"
 VO <- c("tie_sum_A", "lcap_A", "ally_side_A")   # likely dropped: every originator entrant is in the likely tier (separation)
 fit2 <- function(X, wt, with_b) {
   va <- c(VA, if (with_b) "bbar"); vb <- c(VB, if (with_b) "bbar"); vo <- c(VO, if (with_b) "bbar")
-  XA <- cbind(1, as.matrix(X[, ..va])); XB <- cbind(1, as.matrix(X[, ..vb])); XO <- cbind(1, as.matrix(X[, ..vo]))
+  ## covariates centred and scaled by fixed constants (CS, from the full point-fit data) so BFGS is well conditioned; slopes are reported per
+  ## original unit (divided back), intercepts are at the covariate means
+  cs <- function(M) sweep(sweep(M, 2, CS$m[colnames(M)]), 2, CS$s[colnames(M)], "/")
+  XA <- cbind(1, cs(as.matrix(X[, ..va]))); XB <- cbind(1, cs(as.matrix(X[, ..vb]))); XO <- cbind(1, cs(as.matrix(X[, ..vo])))
   yA <- X$y == "A"; yB <- X$y == "B"; yO <- X$y == "orig"
   ka <- ncol(XA); kb <- ncol(XB); ko <- ncol(XO)
   nll <- function(p) { uA <- XA %*% p[1:ka]; uB <- XB %*% p[ka + 1:kb]; uO <- XO %*% p[ka + kb + 1:ko]
@@ -71,15 +74,18 @@ fit2 <- function(X, wt, with_b) {
     pA <- exp(uA - mx) / den; pB <- exp(uB - mx) / den; pO <- exp(uO - mx) / den
     -c(crossprod(XA, wt * (yA - pA)), crossprod(XB, wt * (yB - pB)), crossprod(XO, wt * (yO - pO))) }
   st <- c(log(mean(yA)), rep(0, ka - 1), log(mean(yB)), rep(0, kb - 1), log(mean(yO)), rep(0, ko - 1))
-  o <- optim(st, nll, gr, method = "BFGS", control = list(maxit = 2000, reltol = 1e-12))
-  nm <- c(paste0("A:", c("(int)", va)), paste0("B:", c("(int)", vb)), paste0("O:", c("(int)", vo)))
-  list(coef = setNames(o$par, nm), conv = o$convergence, ll = -o$value)
+  o <- optim(st, nll, gr, method = "BFGS", control = list(maxit = 5000, reltol = 1e-14))
+  gmax <- max(abs(gr(o$par)))
+  sc <- c(1, CS$s[va], 1, CS$s[vb], 1, CS$s[vo]); par <- o$par / sc
+  nm <- c(paste0("A:", c("(int@mean)", va)), paste0("B:", c("(int@mean)", vb)), paste0("O:", c("(int@mean)", vo)))
+  list(coef = setNames(par, nm), conv = if (o$convergence == 0 && gmax < 1e-3 * max(1, sum(wt) / 1000)) 0L else 1L, ll = -o$value, gmax = gmax)
 }
 bb <- bbar_of(bfe); X0 <- merge(X, bb, by = "dispnum", all.x = TRUE)
+allv <- unique(c(VA, VB, VO, "bbar")); CS <- list(m = sapply(allv, function(v) mean(X0[[v]], na.rm = TRUE)), s = sapply(allv, function(v) sd(X0[[v]], na.rm = TRUE)))
 logf("step 2: repeat targets used for b_j %d; clipped at +-5 %d; disputes with no repeat-target b_j in the target set (dropped) %d", length(REP), sum(abs(bfe[names(bfe) %in% REP]) > 5), 0L); logf("step 2: disputes dropped (no usable b_j) %d", uniqueN(X0[is.na(bbar), dispnum]))
 X0 <- X0[!is.na(bbar)]
 f0 <- fit2(X0, rep(1, nrow(X0)), FALSE); f1 <- fit2(X0, rep(1, nrow(X0)), TRUE)
-logf("point fits converged: no-theta %d, theta %d; LR (theta block, 3 df) %.2f", f0$conv, f1$conv, 2 * (f1$ll - f0$ll))
+logf("point fits converged: no-theta %d (max |grad| %.1e), theta %d (%.1e); LR (theta block, 3 df) %.2f", f0$conv, f0$gmax, f1$conv, f1$gmax, 2 * (f1$ll - f0$ll))
 
 ## ---- bootstrap over disputes (both steps) ----------------------------------------------------------------------------------------
 disp_all <- sort(unique(c(D$disp, X0$dispnum)))
