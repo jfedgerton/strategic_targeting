@@ -56,9 +56,10 @@ NCH <- table(ch$c2); REP <- names(NCH)[NCH >= 2]
 bbar_of <- function(b) { b <- pmin(pmax(b[names(b) %in% REP], -5), 5); tb <- TS[, .(dispnum, b = b[as.character(ccode)])]; tb[, .(bbar = mean(b, na.rm = TRUE), n_b = sum(!is.na(b))), by = dispnum] }
 ## four-category logit: utilities relative to out
 VA <- S2_REF_DESIGN$A; VB <- S2_REF_DESIGN$B
-VO <- setdiff(S2_REF_DESIGN$O, "likely")   # deviation from the frozen design: every originator entrant is in the likely tier (separation)
+VO <- setdiff(S2_REF_DESIGN$O, c("likely", "dem_x_B"))   # deviations from the frozen design (separation): every originator entrant is in the likely
+                                                          # tier, and none is a democracy facing a democratic target side
 logf("step 2 design: frozen S2_REF_DESIGN (A %d, B %d terms); O drops 'likely' (all %d originator entrants are likely: separation)", length(VA), length(VB), sum(X$y == "orig"))
-stopifnot(all(X[y == "orig", likely == 1]))
+stopifnot(all(X[y == "orig", likely == 1]), all(X[y == "orig", dem_x_B == 0]))
 fit2 <- function(X, wt, with_b) {
   va <- c(VA, if (with_b) "bbar"); vb <- c(VB, if (with_b) "bbar"); vo <- c(VO, if (with_b) "bbar")
   ## covariates centred and scaled by fixed constants (CS, from the full point-fit data) so BFGS is well conditioned; slopes are reported per
@@ -83,6 +84,8 @@ fit2 <- function(X, wt, with_b) {
 }
 bb <- bbar_of(bfe); X0 <- merge(X, bb, by = "dispnum", all.x = TRUE)
 allv <- unique(c(VA, VB, VO, "bbar")); CS <- list(m = sapply(allv, function(v) mean(X0[[v]], na.rm = TRUE)), s = sapply(allv, function(v) sd(X0[[v]], na.rm = TRUE)))
+if (any(CS$s < 1e-12)) stop("constant regressor(s) in step 2: ", paste(names(CS$s)[CS$s < 1e-12], collapse = " "))
+for (v in allv) logf("  %-16s mean %8.3f sd %7.3f | mean among A %7.3f, B %7.3f, orig %7.3f", v, CS$m[v], CS$s[v], mean(X0[y == "A"][[v]]), mean(X0[y == "B"][[v]]), mean(X0[y == "orig"][[v]]))
 logf("step 2: repeat targets used for b_j %d; clipped at +-5 %d; disputes with no repeat-target b_j in the target set (dropped) %d", length(REP), sum(abs(bfe[names(bfe) %in% REP]) > 5), 0L); logf("step 2: disputes dropped (no usable b_j) %d", uniqueN(X0[is.na(bbar), dispnum]))
 X0 <- X0[!is.na(bbar)]
 f0 <- fit2(X0, rep(1, nrow(X0)), FALSE); f1 <- fit2(X0, rep(1, nrow(X0)), TRUE)
@@ -90,6 +93,12 @@ logf("point fits converged: no-theta %d (max |grad| %.1e), theta %d (%.1e); LR (
 
 ## ---- bootstrap over disputes (both steps) ----------------------------------------------------------------------------------------
 disp_all <- sort(unique(c(D$disp, X0$dispnum)))
+## surface contrasts per alternative (stage-1 style): utility change when the gap to the opposing side moves from 0 to +1 / -1 on one axis
+surf_c <- function(cf) { out <- c()
+  for (al in c("A", "B", "O")) { pre <- if (al == "B") "sB_" else "sA_"; g <- function(t) { v <- cf[paste0(al, ":", pre, t)]; if (is.na(v)) 0 else unname(v) }
+    out[paste0(al, ".M+1")] <- g("dM") + g("dM2"); out[paste0(al, ".M-1")] <- -g("dM") + g("dM2")
+    out[paste0(al, ".R+1")] <- g("dR") + g("dR2"); out[paste0(al, ".R-1")] <- -g("dR") + g("dR2") }
+  out }
 MM <- lapply(seq_len(B), function(b) { m <- tabulate(sample.int(length(disp_all), length(disp_all), replace = TRUE), length(disp_all)); names(m) <- disp_all; m })
 t0 <- Sys.time()
 one_draw <- function(m) {
@@ -100,7 +109,7 @@ one_draw <- function(m) {
     wt <- m[as.character(Xb$dispnum)]; keep <- wt > 0; Xb <- Xb[keep]; wt <- wt[keep]
     g0 <- fit2(Xb, wt, FALSE); g1 <- fit2(Xb, wt, TRUE)
     if (g1$conv != 0 || g0$conv != 0) stop("no convergence")
-    c(g1$coef, setNames(g0$coef, paste0("noTheta.", names(g0$coef))), dR_bil_fe = unname(coef(mb)["dR_bil"]), dR_coal_fe = unname(coef(mb)["dR_coal"]))
+    c(surf_c(g1$coef), g1$coef, setNames(g0$coef, paste0("noTheta.", names(g0$coef))), dR_bil_fe = unname(coef(mb)["dR_bil"]), dR_coal_fe = unname(coef(mb)["dR_coal"]))
   }, error = function(e) NULL)
   r
 }
@@ -108,7 +117,7 @@ draws <- parallel::mclapply(MM, one_draw, mc.cores = 2L)
 fails <- sum(vapply(draws, is.null, TRUE)); draws <- draws[!vapply(draws, is.null, TRUE)]
 logf("bootstrap time %.1f min, failures %d", as.numeric(difftime(Sys.time(), t0, units = "mins")), fails)
 DR <- do.call(rbind, draws)
-pt <- c(f1$coef, setNames(f0$coef, paste0("noTheta.", names(f0$coef))), dR_bil_fe = unname(coef(m1)["dR_bil"]), dR_coal_fe = unname(coef(m1)["dR_coal"]))
+pt <- c(surf_c(f1$coef), f1$coef, setNames(f0$coef, paste0("noTheta.", names(f0$coef))), dR_bil_fe = unname(coef(m1)["dR_bil"]), dR_coal_fe = unname(coef(m1)["dR_coal"]))
 res <- data.table(term = names(pt), est = pt, lo = apply(DR[, names(pt)], 2, quantile, .025), hi = apply(DR[, names(pt)], 2, quantile, .975),
                   share_pos = colMeans(DR[, names(pt)] > 0))
 fwrite(res, file.path(OUT, "x_s2_fe_twostep_coefs.csv"))
