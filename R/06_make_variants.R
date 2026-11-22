@@ -161,7 +161,7 @@ if (VAR == "dropside") {
     dl <- if (LEV == "hard_disp") SIDE_HARD else SIDE_REVIEWED
     unique(D[chosen == 1L & vapply(strsplit(dispnums, ";"), function(x) any(x %in% dl), TRUE), ev_id]) }
   D <- D[!(ev_id %in% drop_ev)]
-  logf("dropside (%s): removed %d strata (joiner strata, incl. window-promoted joiners; under init, promoted coalition originators); types left %s", LEV, length(drop_ev), paste(tabulate(D[chosen == 1L, type] + 1L, length(d$roles)), collapse = "/"))
+  logf(paste0("dropside (%s): removed %d strata", if (LEV %in% c("hard", "reviewed")) " (joiner strata incl. window-promoted joiners; under init, promoted coalition originators)" else " (every event of the listed disputes)", "; types left %s"), LEV, length(drop_ev), paste(tabulate(D[chosen == 1L, type] + 1L, length(d$roles)), collapse = "/"))
   d$types <- paste0(d$types, "_dropside", LEV)
 }
 

@@ -46,7 +46,7 @@ stamp() { hinv "$1"; echo "$2" > "$1.stamp.tmp" && mv "$1.stamp.tmp" "$1.stamp";
 ## ---- 0. preflight (P1-1) ----
 for W in $WINDOWS; do [[ "$W" =~ ^[0-6]$ ]] || die "window $W outside 0-6"; done
 [[ " $WINDOWS " == *" $WINDOW_MAIN "* ]] || die "main window $WINDOW_MAIN is not in WINDOWS"
-PKGS="survival data.table dplyr igraph peacesciencer countrycode sandwich ggplot2 parallel"; [ "$REUSE_POSITIONS" != "1" ] && PKGS="$PKGS fixest igoR"   # N1: rebuild needs fixest, igoR
+PKGS="survival data.table dplyr igraph peacesciencer countrycode sandwich ggplot2 parallel fixest"; [ "$REUSE_POSITIONS" != "1" ] && PKGS="$PKGS igoR"   # N1: rebuild needs igoR; the new arms (2026-11-22) always need fixest
 Rscript -e 'p <- strsplit(commandArgs(TRUE)[1], " ")[[1]]; m <- p[!vapply(p, requireNamespace, TRUE, quietly = TRUE)]; if (length(m)) stop("missing R packages: ", paste(m, collapse = ", "))' "$PKGS"
 ENVQ=$(Rscript -e 'cat(R.version.string, "|"); for (p in strsplit(commandArgs(TRUE)[1], " ")[[1]]) cat(p, as.character(packageVersion(p)), "|")' "$PKGS")
 if [ "$TEST" != "1" ] && ! git diff --quiet HEAD 2>/dev/null; then die "uncommitted changes in the repo; commit them first (production runs are tied to a commit)"; fi
@@ -56,30 +56,41 @@ for f in events.rds participants_timing.rds sy_positions.rds manifest.csv; do [ 
 
 ## ---- 1. positions (link or build), then fingerprint ----
 EXPECT="positions_core_W1raw_ptaall positions_core_W1raw_ptainforce positions_core_W2contig_ptaall positions_core_W2contig_ptainforce positions_core_W3dist_ptaall positions_core_W3dist_ptainforce positions_core_W4fe_ptaall positions_core_W4fe_ptainforce positions_dipl_W1raw_ptaall positions_dipl_W2contig_ptaall positions_dipl_W3dist_ptaall positions_dipl_W4fe_ptaall positions_igo_arm"
+## PI 2026-11-22: book-aligned weightings (W6srybook, W7sryyear) under all three PTA codings, and unweighted PTA (ptaany) for W1-W4.
+## These arms are always built in this run folder (never taken from the reuse folders, which predate them).
+NEW_ANY="positions_core_W1raw_ptaany positions_core_W2contig_ptaany positions_core_W3dist_ptaany positions_core_W4fe_ptaany"
+NEW_SRY_ALL="positions_core_W6srybook_ptaall positions_core_W7sryyear_ptaall"
+NEW_SRY_INF="positions_core_W6srybook_ptainforce positions_core_W7sryyear_ptainforce"
+NEW_SRY_ANY="positions_core_W6srybook_ptaany positions_core_W7sryyear_ptaany"
+EXPECT="$EXPECT $NEW_ANY $NEW_SRY_ALL $NEW_SRY_INF $NEW_SRY_ANY"
 link_pos() { local F=$1 D=$O/positions/$(basename "$1"); [ -s "$F" ] || die "positions source missing: $F"
   if [ -L "$D" ]; then [ "$(readlink "$D")" = "$F" ] || die "$D points to $(readlink "$D"), config says $F"; else ln -s "$F" "$D"; fi; }
 if [ "$REUSE_POSITIONS" = "1" ]; then
-  for F in "$REUSE_CORE_IGO"/positions_core_*.rds "$REUSE_CORE_IGO"/positions_igo_arm.rds "$REUSE_DIPL"/positions_dipl_*.rds; do link_pos "$F"; done
+  for F in "$REUSE_CORE_IGO"/positions_core_W{1raw,2contig,3dist,4fe}_pta{all,inforce}.rds "$REUSE_CORE_IGO"/positions_igo_arm.rds "$REUSE_DIPL"/positions_dipl_W{1raw,2contig,3dist,4fe}_ptaall.rds; do link_pos "$F"; done
 fi
 NETSHA=$( (for f in dipl_dyad.csv destaRaw.rda dca_dyad.csv; do [ -s "$NETDATA/$f" ] || die "missing $NETDATA/$f"; h "$NETDATA/$f"; done; h R/01_build_layers.R) | shasum -a 256 | cut -c1-16 )
 ## GPT review E1: an existing run folder records its network-input hash; a different input stops the run BEFORE layers are rebuilt in it
 if [ -s $O/NETSHA ] && [ "$(cat $O/NETSHA)" != "$NETSHA" ]; then die "network inputs changed since $O was built (was $(cat $O/NETSHA), now $NETSHA); use OUT=<new folder>"; fi
 if ! fresh $O/layers_dy.rds "$NETSHA"; then rm -f $O/layers_dy.rds; runR "Error|wrote" R/01_build_layers.R "$NETDATA" $O/layers_dy.rds.tmp.rds || die "layers build failed"; mv $O/layers_dy.rds.tmp.rds $O/layers_dy.rds; stamp $O/layers_dy.rds "$NETSHA"; fi
-if [ "$REUSE_POSITIONS" != "1" ]; then
-  ## GPT review D5: each arm is stamped with the layers file and builder hashes; an arm whose stamp differs (or is missing) is rebuilt, so an
-  ## interrupted first build cannot mix arms made from different layer versions
-  AST="$(h $O/layers_dy.rds) $(h R/02_build_positions.R) $ENVQ"
-  arm() { local NM=$1 FILES=$2; shift 2; local ok=1 f; for f in $FILES; do [ -s $O/positions/$f.rds ] || ok=0; done
+## GPT review D5: each arm is stamped with the layers file and builder hashes; an arm whose stamp differs (or is missing) is rebuilt, so an
+## interrupted first build cannot mix arms made from different layer versions
+AST="$(h $O/layers_dy.rds) $(h R/02_build_positions.R) $ENVQ"
+arm() { local NM=$1 FILES=$2; shift 2; local ok=1 f; for f in $FILES; do [ -s $O/positions/$f.rds ] || ok=0; done
     if [ $ok = 1 ] && [ "$(cat $O/positions/.arm_$NM.stamp 2>/dev/null)" = "$AST" ]; then return 0; fi
     for f in $FILES; do rm -f $O/positions/$f.rds; done
     runR "Error|wrote" R/02_build_positions.R $O/layers_dy.rds $O/positions "$@" || die "positions arm $NM failed"
     for f in $FILES; do [ -s $O/positions/$f.rds ] || die "positions arm $NM did not write $f.rds"; hinv $O/positions/$f.rds; done
     echo "$AST" > $O/positions/.arm_$NM.stamp.tmp && mv $O/positions/.arm_$NM.stamp.tmp $O/positions/.arm_$NM.stamp; }
+if [ "$REUSE_POSITIONS" != "1" ]; then
   arm core_all "positions_core_W1raw_ptaall positions_core_W2contig_ptaall positions_core_W3dist_ptaall positions_core_W4fe_ptaall" --arm=core --pta=all --cores=$CORES
   arm core_inforce "positions_core_W1raw_ptainforce positions_core_W2contig_ptainforce positions_core_W3dist_ptainforce positions_core_W4fe_ptainforce" --arm=core --pta=inforce --cores=$CORES
   arm dipl "positions_dipl_W1raw_ptaall positions_dipl_W2contig_ptaall positions_dipl_W3dist_ptaall positions_dipl_W4fe_ptaall" --arm=dipl --pta=all --cores=$CORES
   arm igo "positions_igo_arm" --arm=igo
 fi
+arm core_any "$NEW_ANY" --arm=core --pta=any --cores=$CORES
+arm core_sry_all "$NEW_SRY_ALL" --arm=core --pta=all --weightings=W6srybook,W7sryyear --cores=$CORES
+arm core_sry_inforce "$NEW_SRY_INF" --arm=core --pta=inforce --weightings=W6srybook,W7sryyear --cores=$CORES
+arm core_sry_any "$NEW_SRY_ANY" --arm=core --pta=any --weightings=W6srybook,W7sryyear --cores=$CORES
 for e in $EXPECT; do [ -s $O/positions/$e.rds ] || die "positions file missing: $e.rds"; done
 POS=(); for e in $EXPECT; do POS+=( $O/positions/$e.rds ); done
 SHA=$( (for e in $EXPECT; do h $O/positions/$e.rds; done) | shasum -a 256 | cut -c1-16 )

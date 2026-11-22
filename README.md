@@ -13,7 +13,7 @@ One question, one main model, every robustness check in one run.
 | Coalition status | At onset (`--bilateral=onset`) | — |
 | Joiner side | Relative to the dispute's initiating side (case-reviewed; see `docs/decisions.md`) | Drop the 2 hard / 13 reviewed disputes |
 | Sample | Fatal MIDs | All MID onsets (failed-bargain step A); intensity samples through the full multiverse: jointly fatal (both states have fatalities in the dispute; state-level, not pair-specific) and dispute fatality level ≥ 2, 3, 4, 5, 6 (GML codes: > 25, > 100, > 250, > 500, > 999 deaths); unknown fatality dropped and counted |
-| Relational measure | `W2contig_ptaall|igo+def+off+neu+nonagg+consul+dca+un|pr` | All 7,686 measures |
+| Relational measure | `W2contig_ptaall|igo+def+off+neu+nonagg+consul+dca+un|pr` | All 12,294 measures (incl. the book-aligned sry weightings and unweighted PTA, added 2026-11-22; `docs/measure_alignment_2026-11-21.md`) |
 | Choice set | System members with a position, covariates and stage-2 availability in the event year | — |
 | Inference | Two-way cluster-robust (initiator × dispute) | Pigeonhole two-way bootstrap; permutation diagnostics |
 
@@ -51,7 +51,7 @@ Everything is written to `output/`; the log is `output/logs/run_<time>.log`.
 
 | Step | Script | Output | Question |
 |---|---|---|---|
-| 1 positions | `R/01_build_layers.R`, `R/02_build_positions.R` | `output/positions/` | The 7,686 relational measures: layer combinations × 4 weightings × PageRank/degree × PTA coding, plus the IGO arm. Diplomacy uses no future waves. |
+| 1 positions | `R/01_build_layers.R`, `R/02_build_positions.R` | `output/positions/` | The 12,294 relational measures: layer combinations × 6 weightings (W1–W4; book-aligned W6srybook, W7sryyear in the core arm) × PageRank/degree × PTA coding (all / in force / any), plus the diplomacy and IGO arms. Diplomacy uses no future waves. The reused 2026-11-18/19 files are linked; the 2026-11-22 arms are always built in the run folder. |
 | 2 validation | `R/03_validate_measures.R` | `output/validation/` | Does a measure put the powerful states where they belong? Plausibility rules, correlation with CINC, major-power rank, year-to-year stability, top-10 states by era. Outcome-blind. |
 | 3 measure sets | `R/04_subset_positions.R` | `output/sets/` | Phase A (main + 200 random plausible), main only, no-ATOP measures, 25 random plausible measures |
 | 4 event frames | `R/05_dump_events.R` | `output/dumps/` | One frame per type scheme × window × sample |

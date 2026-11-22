@@ -15,6 +15,13 @@
 ##              W2-W4: residuals clipped at 0 and divided by the layer-year maximum; combo edge = sqrt(sum of squares) rescaled to
 ##              [0,1] within year (IO-9933 Euclidean root of clipped positive residuals; PI 2026-11-18)
 ##   PTAs: --pta=all (signed or in force) | inforce (only treaties with an entry-into-force year); both are run (PI 2026-11-18)
+##         | any (PI 2026-11-22): unweighted, 1 if the dyad has any PTA (signed or in force), not logged; like inforce, only combos with PTA
+##   Book-aligned weightings (PI 2026-11-22; --weightings=W6srybook,W7sryyear, core arm only), the book project's 'sry' tie model:
+##              per layer an expected-tie model on the doubled data -- logit for binary layers (ATOP types, DCA, PTA any), Poisson for counts
+##              (IGO, PTA all/inforce; raw counts), OLS for UN kappa -- with W6srybook: log(1+capdist) | sender + receiver + year FE (the book),
+##              W7sryyear: log(1+capdist) + contig_land | year FE (no state FE). Tie score = observed - expected (symmetric), divided by the
+##              layer-year max |score|; combo score = mean over the combo's layers that apply to the dyad-year (signed); edge = positive part,
+##              rescaled to [0,1] within year. Validated against a standalone build on 2026-11-21 (docs/measure_alignment_2026-11-21.md).
 ##   centrality: pr  = log PageRank (igraph default damping 0.85, undirected, weighted; isolates keep the teleport share)
 ##               deg = weighted degree / (n_t - 1)  (no log: isolates have 0)
 ##   IGO arm (--arm=igo): bipartite IGO memberships (igoR, full members), Newman weights 1/(k_g - 1), and cosine-normalised
@@ -40,7 +47,7 @@ stopifnot(length(args) >= 2)
 LAYER_RDS <- args[1]; OUT_DIR <- args[2]
 opt <- function(name, default) { a <- grep(paste0("^--", name, "="), args, value = TRUE); if (length(a)) sub(paste0("^--", name, "="), "", a) else default }
 ARM <- opt("arm", "core"); CORES <- as.integer(opt("cores", "1"))
-PTA <- opt("pta", "all"); stopifnot(PTA %in% c("all", "inforce"))   # PI 2026-11-18: PTAs both ways
+PTA <- opt("pta", "all"); stopifnot(PTA %in% c("all", "inforce", "any"))   # PI 2026-11-18: PTAs both ways; PI 2026-11-22: + unweighted (any)
 TAG <- paste0("pta", PTA)
 ONLY_W <- opt("weightings", ""); MAX_COMBOS <- as.integer(opt("max_combos", "0"))   # smoke-test options; a full run uses neither
 stopifnot(ARM %in% c("core", "dipl", "igo"), CORES >= 1)
@@ -67,7 +74,8 @@ CORE <- c("igo", "def", "off", "neu", "nonagg", "consul", "pta", "dca", "un")
 LAYERS <- if (ARM == "dipl") c(CORE, "dipl") else CORE
 V <- sapply(LAYERS, function(l) {
   v <- as.numeric(dy[[if (l == "pta" && PTA == "inforce") "pta_inforce" else l]])
-  if (l %in% c("igo", "pta")) v <- log1p(v)
+  if (l == "pta" && PTA == "any") v <- as.numeric(v > 0)          # PI 2026-11-22: unweighted PTA (not logged)
+  else if (l %in% c("igo", "pta")) v <- log1p(v)
   if (l == "un") v[is.na(v)] <- NA_real_                        # handled below: no tie
   v })
 stopifnot(!anyNA(V[, setdiff(LAYERS, "un")]))
@@ -77,8 +85,10 @@ dens <- sapply(LAYERS, function(l) mean(V[dy$year >= first_year[l], l] != 0, na.
 logf("share of non-zero dyad-years within existence years: %s", paste(sprintf("%s %.3f", LAYERS, dens), collapse = ", "))
 
 ## ---- 2. per-layer edge weights under each weighting ----------------------------------------------------------------
-WEIGHTINGS <- c("W1raw", "W2contig", "W3dist", "W4fe")      # PI 2026-11-18: W5 (state x year FE) dropped
-if (nzchar(ONLY_W)) { WEIGHTINGS <- strsplit(ONLY_W, ",")[[1]]; stopifnot(all(WEIGHTINGS %in% c("W1raw", "W2contig", "W3dist", "W4fe"))) }
+WEIGHTINGS <- c("W1raw", "W2contig", "W3dist", "W4fe")      # PI 2026-11-18: W5 (state x year FE) dropped; default set unchanged
+SRY <- c("W6srybook", "W7sryyear")                           # PI 2026-11-22: book-aligned weightings, requested explicitly with --weightings
+if (nzchar(ONLY_W)) { WEIGHTINGS <- strsplit(ONLY_W, ",")[[1]]; stopifnot(all(WEIGHTINGS %in% c("W1raw", "W2contig", "W3dist", "W4fe", SRY))) }
+if (any(WEIGHTINGS %in% SRY)) stopifnot(ARM == "core")        # no tie model is specified for the diplomacy layer
 ## layer-years with no non-zero value (e.g. offensive alliances in years nobody holds one) carry ZERO weight, like pre-existence
 ## years (PI 2026-11-18, review P1-2): otherwise the residual of an all-zero year is a pure contiguity / distance surface
 yr_has <- sapply(LAYERS, function(l) { v <- V[, l]; a <- tapply(!is.na(v) & v != 0, dy$year, any); a[as.character(dy$year)] })
@@ -129,6 +139,27 @@ edge_w <- function(W, l) {
   e
 }
 
+## PI 2026-11-22: book-aligned "sry" tie score per layer (signed, NA where the layer does not apply); see the header
+SRY_FAM <- c(igo = "pois", def = "logit", off = "logit", neu = "logit", nonagg = "logit", consul = "logit", dca = "logit", un = "ols",
+             pta = if (PTA == "any") "logit" else "pois")
+sry_score <- function(W, l) {
+  v <- V[, l]; ok <- dy$year >= first_year[[l]] & yr_has[, l] & !is.na(v)
+  if (SRY_FAM[[l]] == "pois") v <- round(expm1(v))                # Poisson on the raw counts (V holds log1p for igo / pta counts)
+  stopifnot(all(abs(v[ok] - round(v[ok])) < 1e-6) || SRY_FAM[[l]] != "pois", all(v[ok] %in% c(0, 1)) || SRY_FAM[[l]] != "logit")
+  n1 <- sum(ok); okd <- c(ok, ok); dd <- dbl[okd, ]; dd$v <- c(v, v)[okd]
+  fml <- if (W == "W6srybook") v ~ lcap | a + b + year else v ~ lcap + contig_land | year
+  m <- switch(SRY_FAM[[l]], ols = feols(fml, data = dd, notes = FALSE, warn = FALSE),
+              logit = feglm(fml, data = dd, family = binomial("logit"), notes = FALSE, warn = FALSE),
+              pois = fepois(fml, data = dd, notes = FALSE, warn = FALSE))
+  ex <- rep(NA_real_, nrow(dd)); ex[obs(m)] <- fitted(m)
+  ndrop <- sum(is.na(ex)); ex[is.na(ex)] <- dd$v[is.na(ex)]       # rows dropped as perfectly predicted (all-0 or all-1 FE groups): residual 0
+  r2 <- dd$v - ex; asym <- max(abs(r2[seq_len(n1)] - r2[n1 + seq_len(n1)])); stopifnot(asym < 1e-4)
+  x <- rep(NA_real_, nrow(dy)); x[ok] <- (r2[seq_len(n1)] + r2[n1 + seq_len(n1)]) / 2
+  for (ix in yr_split) { j <- ix[ok[ix]]; if (length(j)) { mx <- max(abs(x[j])); x[j] <- if (mx > 0) x[j] / mx else 0 } }
+  attr(x, "info") <- sprintf("%s %s: n %d, perfectly predicted %d, share > 0 %.3f", l, SRY_FAM[[l]], n1, ndrop, mean(x[ok] > 0))
+  x
+}
+
 ## ---- 3. combos -------------------------------------------------------------------------------------------------------
 if (ARM %in% c("core", "dipl")) {
   combos <- list()
@@ -139,8 +170,8 @@ if (ARM %in% c("core", "dipl")) {
   }
   stopifnot(length(combos) == 384L)
   ## GPT review P2-8: under --pta=inforce, combos without the PTA layer are identical to the --pta=all ones; build only combos with PTA
-  if (PTA == "inforce") { combos <- combos[vapply(combos, function(x) "pta" %in% x, TRUE)]; stopifnot(length(combos) == 192L)
-    logf("pta = inforce: only the %d combos containing PTA are built (the rest duplicate --pta=all)", length(combos)) }
+  if (PTA %in% c("inforce", "any")) { combos <- combos[vapply(combos, function(x) "pta" %in% x, TRUE)]; stopifnot(length(combos) == 192L)
+    logf("pta = %s: only the %d combos containing PTA are built (the rest duplicate --pta=all)", PTA, length(combos)) }
   if (MAX_COMBOS > 0) { combos <- combos[c(1:min(MAX_COMBOS, 384))]; logf("SMOKE TEST: first %d combos only", length(combos)) }
   combo_id <- vapply(combos, function(x) paste(x, collapse = "+"), "")
   logf("%d layer combos (each contains igo or def)%s", length(combos), if (ARM == "dipl") " + dipl" else "")
@@ -182,15 +213,24 @@ if (ARM %in% c("core", "dipl")) {
   spec_rows <- list()
   for (W in WEIGHTINGS) {
     t0 <- Sys.time()
+    if (W %in% SRY) {
+      EW <- lapply(LAYERS, function(l) sry_score(W, l)); names(EW) <- LAYERS
+      for (l in LAYERS) logf("%s: %s", W, attr(EW[[l]], "info"))
+      EL <- sapply(EW, as.numeric); colnames(EL) <- LAYERS; rm(EW)
+      stopifnot(all(is.na(EL) | (EL >= -1 - 1e-12 & EL <= 1 + 1e-12)))
+    } else {
     EW <- lapply(LAYERS, function(l) edge_w(W, l)); names(EW) <- LAYERS
     if (W != "W1raw") logf("%s: layer-years with no positive residual (zero weight) %s", W,
                            paste(sprintf("%s %d", LAYERS, vapply(EW, function(e) attr(e, "n_num_empty"), 0L)), collapse = ", "))
     EL <- sapply(EW, as.numeric); colnames(EL) <- LAYERS; rm(EW)   # dyad-year x layer
     stopifnot(!anyNA(EL), all(EL >= 0), all(EL <= 1 + 1e-12))
     logf("%s: per-layer edge weights built (mean weight by layer: %s)", W, paste(sprintf("%s %.3f", LAYERS, colMeans(EL)), collapse = ", "))
+    }
     one <- function(k) {
       L <- combos[[k]]
-      if (W == "W1raw") { S <- rowSums(EL[, L, drop = FALSE]); E <- numeric(length(S)); for (ix in yr_split) { m <- max(S[ix]); if (m > 0) E[ix] <- S[ix] / m } }
+      if (W %in% SRY) { M <- EL[, L, drop = FALSE]; k <- rowSums(!is.na(M)); sc <- ifelse(k > 0, rowSums(M, na.rm = TRUE) / pmax(k, 1), 0)
+        S <- pmax(sc, 0); E <- numeric(length(S)); for (ix in yr_split) { m <- max(S[ix]); if (m > 0) E[ix] <- S[ix] / m } }
+      else if (W == "W1raw") { S <- rowSums(EL[, L, drop = FALSE]); E <- numeric(length(S)); for (ix in yr_split) { m <- max(S[ix]); if (m > 0) E[ix] <- S[ix] / m } }
       else { S <- sqrt(rowSums(EL[, L, drop = FALSE]^2)); E <- within_year_range01(S) }
       cent(E)
     }
@@ -209,7 +249,7 @@ if (ARM %in% c("core", "dipl")) {
     spec_rows[[W]] <- specs
     logf("%s: %d specs in %.1f min; not identified (constant in >= 5%% of years): %d", W, ncol(Rm), as.numeric(difftime(Sys.time(), t0, units = "mins")), sum(!specs$identified))
   }
-  write.csv(bind_rows(spec_rows), file.path(OUT_DIR, sprintf("specs_%s_%s.csv", ARM, TAG)), row.names = FALSE)
+  write.csv(bind_rows(spec_rows), file.path(OUT_DIR, sprintf("specs_%s_%s%s.csv", ARM, TAG, if (all(WEIGHTINGS %in% SRY)) "_sry" else "")), row.names = FALSE)
 }
 
 ## ---- 5. IGO arm: bipartite (Newman) and cosine-normalised shared-IGO ties --------------------------------------------
