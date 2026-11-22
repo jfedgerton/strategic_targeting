@@ -1,0 +1,36 @@
+two-step FE joint model 2026-11-22 16:38:23; dump long_init_bon_w1d_relyear_fmid.rds; build /home/claude/s2r5_stage1; B = 200
+step 1: events 619 (bilateral 478, coalition 141), rows 72031; targets chosen 119 (>= 2: 86)
+step 1 target-FE model: rows of chosen targets only 48633 of 72031 (events kept 619)
+step 1 two-way CGM negative eigenvalues: no FE 1, target FE 24
+step 1 target FE (relative to the most-chosen target): range -5.12 to 2.18; centred on repeat targets, |b_j| > 5 (clipped) 0
+step 2: reference rows 63143; with a usable bbar 58950 (33 disputes dropped); outcomes A 120, B 177, orig 70, out 58583
+step 2: LR theta block (3 df) 82.45; theta (two-way SE conditional on bbar): A -0.868 (0.229), B -0.349 (0.123), O 0.381 (0.350)
+bootstrap: 200 of 200 draws succeeded (80.6 min)
+  S1.bil.M.1               -0.701  [ -1.731,   0.568]  share>0 0.17
+  S1.bil.M.-1               0.069  [ -1.235,   0.880]  share>0 0.41
+  S1.bil.R.1               -0.243  [ -0.599,   0.002]  share>0 0.03
+  S1.bil.R.-1               0.243  [ -0.171,   0.597]  share>0 0.93
+  S1.coal.M.1              -1.213  [ -2.273,   0.093]  share>0 0.04
+  S1.coal.M.-1              1.123  [ -0.114,   2.165]  share>0 0.95
+  S1.coal.R.1               0.844  [  0.152,   1.443]  share>0 0.99
+  S1.coal.R.-1             -0.508  [ -1.717,   0.046]  share>0 0.05
+  S2.A.M.1                  0.086  [ -1.402,   1.165]  share>0 0.56
+  S2.A.M.-1                -0.499  [ -1.419,   0.015]  share>0 0.04
+  S2.A.R.1                  0.597  [ -0.115,   1.036]  share>0 0.94
+  S2.A.R.-1                -0.321  [ -1.152,   0.175]  share>0 0.12
+  S2.B.M.1                  0.674  [ -0.111,   1.377]  share>0 0.95
+  S2.B.M.-1                -1.194  [ -2.047,  -0.854]  share>0 0.00
+  S2.B.R.1                  0.409  [  0.004,   0.744]  share>0 0.97
+  S2.B.R.-1                -0.162  [ -0.706,   0.106]  share>0 0.15
+  S2.O.M.1                  0.451  [ -1.109,   1.448]  share>0 0.72
+  S2.O.M.-1                -0.584  [ -1.701,   0.142]  share>0 0.06
+  S2.O.R.1                 -0.029  [ -0.520,   0.436]  share>0 0.41
+  S2.O.R.-1                -0.056  [ -1.303,   0.423]  share>0 0.37
+  A:bbar                   -0.868  [ -1.078,  -0.121]  share>0 0.00
+  B:bbar                   -0.349  [ -0.564,   0.010]  share>0 0.04
+  O:bbar                    0.381  [ -0.168,   1.127]  share>0 0.91
+  A:tie_sum_A               0.723  [ -0.436,   2.724]  share>0 0.90
+  B:tie_sum_B               0.932  [ -1.050,   2.642]  share>0 0.81
+  O:tie_sum_A               2.919  [  1.503,   5.748]  share>0 1.00
+  B:share_B                -2.318  [ -4.512,  -0.866]  share>0 0.00
+S2_JOINT_FE_DONE
