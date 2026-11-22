@@ -1,4 +1,4 @@
-stage-2 risk-set build 2026-11-22 12:26:59; mode release; fatal_def gml; reference window 1; git 61605d8
+stage-2 risk-set build 2026-11-22 12:52:17; mode release; fatal_def gml; reference window 1; git d52b703
 inputs: data_entry /mnt/user-data/uploads/strategic_targeting_relsweep/v2/data_entry; layers /mnt/user-data/uploads/targeting_multiverse/output/layers_dy.rds; positions /home/claude/align/positions_cmp.rds [W2contig|noPTA|pr]; dump /home/claude/align/long_bcjs_bon_w1d_relyear_fmid.rds
 participants_timing 5862 spells / 2436 disputes; gml_part 5217 rows; gml_mid_disps 2174 disputes; positions 15561 state-years
 population: GML-fatal 542; stage-1 fatal-event primary disputes 560; intersection 440; GML only 102; stage-1 only 120 (ID lists in fatal_sets.csv); using gml
@@ -12,7 +12,7 @@ participant spells 1476 (1469 participants): exit from GML 1441, imputed (Dec of
   second-spell audit: dispute 4273, state 666: spell 1 1998-1998 side 1 entry 23987 exit 23987 | spell 2 2002-2002 side 1 entry 24032 exit 24032
   second-spell audit: dispute 4273, state 670: spell 1 2000-2001 side 1 entry 23989 exit 24019 | spell 2 2003-2003 side 1 entry 24037 exit 24038
   second-spell audit: dispute 4273, state 696: spell 1 1999-1999 side 1 entry 23997 exit 23997 | spell 2 2003-2003 side 1 entry 24037 exit 24038
-dispute end = latest participant exit: exact GML month 524 disputes, imputed (Dec of the last year) 17
+dispute end = latest participant exit, by source: capped 19, exact 505, imputed 17 (exact = an unmodified GML exit attains it)
 initiating side by rule: 1 493, 2 45, 3 3, 4 0, 5 (unresolved) 0; reviewed 11 (hard 2)
 disputes in the stage-2 sample: 541; by fold: 1:62 2:13 3:43 4:21 5:280 6:122; baseline sets with >1 initiating-side originator 19, >1 target-set member 13
 non-baseline participants by window (A / B / orig): W0 158/177/0; W1 90/177/68; W2 78/177/80; W3 73/177/85; W4 72/177/86; W5 67/177/91; W6 64/177/94
@@ -43,10 +43,12 @@ relevance tiers: likely 21748 of 63986 (contiguous 5120, same region 16318, majo
 covariate missingness (rows): own CINC 453, own centrality 453; side CINC incomplete A 753 / B 1091; side dyad rows incomplete A 1177 / B 1512; target set without t-1 position 11 disputes
 jointly fatal (side level): yes 312, no 204, unresolved 25; participants without a fatality code 73
 reference estimation cohort: 61924 of 63986 rows; outcomes A 88, B 162, orig 68, out 61606
-  excluded: missing own_cent             out 420
-  excluded: incomplete horizon           B 9, out 109
-  excluded: missing tgt_cent_mean        out 1085, B 2
-  excluded: missing log_cinc_ratio_A     out 436, B 1
-  excluded rows by fold: 1:40 2:167 3:25 4:57 5:944 6:829; reference rows in disputes with an imputed end 2039
+  exclusions by FIRST failing reason (mutually exclusive partition; horizon first, then S2_AVAIL order):
+    missing own_cent             out 420
+    incomplete horizon           B 9, out 109
+    missing tgt_cent_mean        out 1085, B 2
+    missing log_cinc_ratio_A     out 436, B 1
+  nonexclusive missingness (all rows / complete-horizon rows): tgt_cent_mean 1091/1087; own_cent 453/452; log_cinc_ratio_A 1177/1175; log_cinc_ratio_B 1512/1507; share_A 1551/1547; min_capdist_A 1177/1175; min_capdist_B 1512/1507; contig_side_A 1177/1175; contig_side_B 1512/1507; ally_side_A 1177/1175; ally_side_B 1512/1507
+  excluded rows by fold: 1:40 2:167 3:25 4:57 5:944 6:829; reference rows by endpoint source: exact 57911, capped 1974, imputed 2039
 written (release build): s2_disputes 541, s2_oneshot_w1 63986 (reference cohort 61924), s2_monthly_w1 774467, rosters 19348, edges 680069
 S2_BUILD_DONE

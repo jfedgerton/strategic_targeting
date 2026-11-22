@@ -163,4 +163,28 @@ check("26 end policy: follow-up stops before month 7 (first empty B month)", ide
 ## 27. conditional side equation respects the A mask (P(A | T) exactly 0 inside the window)
 check("27 side probability is 0 where avail_A is FALSE, logistic elsewhere", { pp <- s2_side_prob(c(1, 1), c(0, 0), c(FALSE, TRUE)); pp[1] == 0 && abs(pp[2] - plogis(1)) < 1e-12 })
 
+## ---- GPT recheck fixtures (2026-11-22) -------------------------------------------------------------------------------------------
+## 28. endpoint provenance: a capped exit attaining the maximum is not "exact"
+PTe <- data.table(dispnum = c(1L, 1L, 2L, 2L, 3L), exit_mk = c(s2_mk(1940L, 12L), s2_mk(1940L, 11L), 500L, 500L, 600L),
+                  exit_imputed = c(FALSE, FALSE, FALSE, TRUE, TRUE), exit_capped = c(TRUE, FALSE, FALSE, FALSE, FALSE), exit_before_entry = FALSE)
+DE <- s2_dispute_end(PTe)
+check("28 capped GML exit (Jun 1942 capped to Dec 1940) sets the end: end_source capped, not exact", DE[dispnum == 1, end_source == "capped" & !end_exact & end_mk == s2_mk(1940L, 12L)])
+check("28 tie at the maximum between an exact and an imputed exit -> exact; imputed only -> imputed", DE[dispnum == 2, end_source] == "exact" && DE[dispnum == 3, end_source] == "imputed")
+## 29. prior conflict counts DISTINCT disputes per side: one historical MID with two roster members counts once; current and future excluded
+PAIRS <- data.table(dispnum = 100L, ccode = 5L, j = c(1L, 2L), side_rel = "A", ty = 1950L)
+PM <- data.table(pdisp = c(7L, 7L, 8L, 100L, 9L), a = 5L, b = c(1L, 2L, 1L, 1L, 2L), styear = c(1940L, 1940L, 1945L, 1951L, 1952L))
+PM <- rbind(PM, PM[, .(pdisp, a = b, b = a, styear)])
+check("29 prior MIDs: dispute 7 (both members) counts once, 8 counts, current (100) and future (9) excluded -> 2", s2_prior_side(PAIRS, PM)$prior_n == 2L)
+check("29 no history -> 0, not NA", s2_prior_side(transform(PAIRS, ccode = 6L), PM)$prior_n == 0L)
+## 30. strict aggregation
+check("30 strict sum/min/any: a missing member gives NA; complete inputs aggregate", is.na(s2_strict_sum(c(0.02, NA))) && is.na(s2_strict_any(c(FALSE, NA))) &&
+      is.na(s2_strict_min(c(3, NA))) && s2_strict_sum(c(0.02, 0.03)) == 0.05 && s2_strict_any(c(FALSE, TRUE)) == 1L && s2_strict_any(c(FALSE, FALSE)) == 0L)
+## 31. reference-cohort exclusion precedence and the nonexclusive census
+O31 <- data.table(complete = c(FALSE, TRUE, TRUE, TRUE), a = c(NA, NA, 1, 1), b = c(1, NA, NA, 1))
+R31 <- s2_ref_cohort(O31, c("a", "b"))
+check("31 precedence: incomplete horizon first, then the first missing column in list order", identical(R31$excl_reason, c("incomplete horizon", "missing a", "missing b", "")) && identical(R31$in_ref, c(FALSE, FALSE, FALSE, TRUE)))
+check("31 census counts every missing value (a: 2 rows, 1 complete; b: 2 rows, 2 complete)", identical(attr(R31, "census")$n_missing_any_row, c(2L, 2L)) && identical(attr(R31, "census")$n_missing_complete_rows, c(1L, 2L)))
+check("32 frozen design: every model term is an availability column or a fixed transform of one (lcap_s = log1p(min_capdist_s), share_B = 1 - share_A); no tie maxima, no standalone own CINC",
+      all(setdiff(unique(unlist(S2_REF_DESIGN)), c("lcap_A", "lcap_B", "share_B")) %in% S2_AVAIL) && !any(grepl("tie_max|log_cinc_k", unlist(S2_REF_DESIGN))))
+
 cat(if (ok_all) "ALL PASS\n" else "SOME TESTS FAILED\n"); quit(status = if (ok_all) 0 else 1)

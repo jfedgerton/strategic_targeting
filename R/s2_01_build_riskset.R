@@ -73,11 +73,10 @@ if (nrow(gap_viol)) fail("%d participants have a spell exit reaching into the ne
 
 ## ---- 3. dispute table: reference onset, end (max spell exit), initiating side, fold ----------------------------------------------
 ref <- P[orig == 1L, .(onset_lo = min(entry_lo), onset_hi = min(entry_hi)), by = dispnum]
-dend <- PT[, .(end_mk = max(exit_mk)), by = dispnum]
-dend <- merge(dend, PT[, .(dispnum, exit_mk, exit_imputed)], by.x = c("dispnum", "end_mk"), by.y = c("dispnum", "exit_mk"))[, .(end_imputed = all(exit_imputed)), by = .(dispnum, end_mk)]
+dend <- s2_dispute_end(PT)                                        # recheck finding 1: endpoint provenance (exact / capped / imputed / adjusted)
 DT <- merge(merge(data.table(dispnum = fat_d), ref, by = "dispnum", all.x = TRUE), dend, by = "dispnum", all.x = TRUE)
 stopifnot(!anyNA(DT$onset_lo), !anyNA(DT$end_mk))
-logf("dispute end = latest participant exit: exact GML month %d disputes, imputed (Dec of the last year) %d", sum(!DT$end_imputed), sum(DT$end_imputed))
+logf("dispute end = latest participant exit, by source: %s (exact = an unmodified GML exit attains it)", paste(sprintf("%s %d", names(table(DT$end_source)), table(DT$end_source)), collapse = ", "))
 bad_end <- DT[end_mk < onset_lo]; if (nrow(bad_end)) { logf("availability exclusion: disputes ending before their reference onset %s", paste(bad_end$dispnum, collapse = " ")); DT <- DT[end_mk >= onset_lo] }
 IS <- as.data.table(s2_init_side(P, EV, cow_war_inter, DT$dispnum))
 DT <- merge(DT, IS, by = "dispnum")
@@ -214,18 +213,17 @@ NMC <- as.data.table(cow_nmc)[, .(ccode, year, cinc)]
 sx <- merge(row0[, .(dispnum, ccode, ty = onset_year - 1L)], R0[, .(dispnum, j = ccode, side_rel)], by = "dispnum", allow.cartesian = TRUE)[ccode != j]
 sx <- merge(sx, NMC[, .(j = ccode, ty = year, cinc_j = cinc)], by = c("j", "ty"), all.x = TRUE)
 sx <- merge(sx, DYk[, .(ccode = k, j, ty = year, capdist, conttype, ally)], by = c("ccode", "j", "ty"), all.x = TRUE)
-## prior MIDs: distinct GML disputes starting before the onset year between k and j (the current dispute excluded)
-pm <- unique(merge(GDY[, .(dispnum, a = ccode1, b = ccode2)], GD[, .(dispnum, styear)], by = "dispnum"))
-sx <- merge(sx, merge(sx[, .(dispnum, ccode, j, ty)], pm, by.x = c("ccode", "j"), by.y = c("a", "b"), allow.cartesian = TRUE)[
-  dispnum.y != dispnum.x & styear <= ty, .(prior_n = uniqueN(dispnum.y)), by = .(dispnum = dispnum.x, ccode, j)], by = c("dispnum", "ccode", "j"), all.x = TRUE)
-sx[is.na(prior_n), prior_n := 0L]
-maj_s <- maj_at(merge(R0[, .(dispnum, ccode)], DT[, .(dispnum, onset_lo)], by = "dispnum"))[, maj := TRUE]
+## prior MIDs (recheck finding 4): DISTINCT GML disputes between k and any member of side s starting no later than t - 1 (current excluded)
+pm <- unique(merge(GDY[, .(pdisp = dispnum, a = ccode1, b = ccode2)], GD[, .(pdisp = dispnum, styear)], by = "pdisp"))
+PRI <- s2_prior_side(sx[, .(dispnum, ccode, j, side_rel, ty)], pm)
+## side major-power status at t - 1 (recheck finding 2): major in December of the year before onset; the candidate's tier stays onset-based
+maj_s <- maj_at(merge(R0[, .(dispnum, ccode)], DT[, .(dispnum, onset_lo = s2_mk(onset_year - 1L, 12L))], by = "dispnum"))[, maj := TRUE]
 sx <- merge(sx, maj_s[, .(dispnum, j = ccode, maj)], by = c("dispnum", "j"), all.x = TRUE); sx[is.na(maj), maj := FALSE]
 ## side size counts the whole roster (including members the candidate cannot tie to: none, since cohort members are never baselines)
-SC <- sx[, .(n_side = .N, side_cinc = if (anyNA(cinc_j)) NA_real_ else sum(cinc_j), cinc_miss = anyNA(cinc_j),
-             min_capdist = if (anyNA(capdist)) NA_real_ else min(capdist), contig_side = if (anyNA(conttype)) NA_integer_ else as.integer(any(conttype %in% 1:5)),
-             ally_side = if (anyNA(ally)) NA_integer_ else as.integer(any(ally > 0)), dyad_miss = anyNA(capdist) | anyNA(conttype) | anyNA(ally),
-             prior_side = log1p(sum(prior_n)), major_side = as.integer(any(maj))), by = .(dispnum, ccode, side_rel)]
+SC <- sx[, .(n_side = .N, side_cinc = s2_strict_sum(cinc_j), cinc_miss = anyNA(cinc_j), min_capdist = s2_strict_min(capdist),
+             contig_side = s2_strict_any(ifelse(is.na(conttype), NA, conttype %in% 1:5)), ally_side = s2_strict_any(ifelse(is.na(ally), NA, ally > 0)),
+             dyad_miss = anyNA(capdist) | anyNA(conttype) | anyNA(ally), major_side = as.integer(any(maj))), by = .(dispnum, ccode, side_rel)]
+SC <- merge(SC, PRI[, .(dispnum, ccode, side_rel, prior_side = log1p(prior_n))], by = c("dispnum", "ccode", "side_rel"))
 SC <- dcast(SC, dispnum + ccode ~ side_rel, value.var = c("n_side", "side_cinc", "cinc_miss", "min_capdist", "contig_side", "ally_side", "dyad_miss", "prior_side", "major_side"))
 own <- merge(row0[, .(dispnum, ccode, ty = onset_year - 1L)], NMC[, .(ccode, ty = year, cinc_k = cinc)], by = c("ccode", "ty"), all.x = TRUE)
 own <- merge(own, POS[, .(ccode, ty = year, own_cent = R)], by = c("ccode", "ty"), all.x = TRUE)
@@ -250,25 +248,28 @@ DT <- merge(DT, GD[, .(dispnum, fat_level = fatality)], by = "dispnum", all.x = 
 ONE <- Reduce(function(a, b) merge(a, b, by = c("dispnum", "ccode"), all.x = TRUE),
               list(OS, T1[, .(dispnum, ccode, tie_sum_A, tie_max_A, tie_sum_B, tie_max_B, tie_nocov)], T5[, .(dispnum, ccode, tie_sum_A_l5, tie_max_A_l5, tie_sum_B_l5, tie_max_B_l5, tie_nocov_l5)],
                    TIER[, .(dispnum, ccode, likely, any_contig, any_reg, major, any_ally)], SC))
-ONE <- merge(ONE, DT[, .(dispnum, fold, onset_year, jfatal, fat_level, tgt_cent_mean, tgt_cent_min, side_case, end_imputed)], by = "dispnum")
+ONE <- merge(ONE, DT[, .(dispnum, fold, onset_year, jfatal, fat_level, tgt_cent_mean, tgt_cent_min, side_case, end_source, end_imputed, end_exact)], by = "dispnum")
+ONE[, `:=`(lcap_A = log1p(min_capdist_A), lcap_B = log1p(min_capdist_B))]          # fixed transforms named in S2_REF_DESIGN
 stopifnot(nrow(ONE) == nrow(OS), !anyDuplicated(ONE[, .(dispnum, ccode)]))
-## reference one-shot schema (memo section 7 / section 13 reference cell): every column required, finite, on complete-horizon rows
-REF_COLS <- c("tie_sum_A", "tie_sum_B", "tie_max_A", "tie_max_B", "tgt_cent_mean", "own_cent", "log_cinc_k", "log_cinc_ratio_A", "log_cinc_ratio_B", "share_A",
-              "min_capdist_A", "min_capdist_B", "contig_side_A", "contig_side_B", "ally_side_A", "ally_side_B", "prior_side_A", "prior_side_B",
-              "n_side_A", "n_side_B", "major_side_A", "major_side_B", "likely")
-stopifnot(all(REF_COLS %in% names(ONE)))
-ONE[, excl_reason := ifelse(!complete, "incomplete horizon", "")]
-for (cc in REF_COLS) ONE[excl_reason == "" & !is.finite(as.numeric(get(cc))), excl_reason := paste("missing", cc)]
-ONE[, in_ref := excl_reason == ""]
+## reference one-shot: availability columns (S2_AVAIL) define the estimation cohort; S2_REF_DESIGN is the frozen model (recheck finding 3)
+TERMS <- unique(unlist(S2_REF_DESIGN)); stopifnot(all(S2_AVAIL %in% names(ONE)), all(TERMS %in% names(ONE)))
+ONE <- s2_ref_cohort(ONE, S2_AVAIL); census <- attr(ONE, "census")
+stopifnot(all(ONE$y %in% S2_CATS), !anyDuplicated(ONE[, .(dispnum, ccode)]), all(ONE$H >= 0), all(ONE[y != "out", m_event <= H]))
 ex <- ONE[in_ref == FALSE, .N, by = .(excl_reason, y)]
 logf("reference estimation cohort: %d of %d rows; outcomes %s", sum(ONE$in_ref), nrow(ONE), tabs(ONE[in_ref == TRUE]$y))
-for (r in unique(ex$excl_reason)) logf("  excluded: %-28s %s", r, paste(ex[excl_reason == r, sprintf("%s %d", y, N)], collapse = ", "))
-logf("  excluded rows by fold: %s; reference rows in disputes with an imputed end %d", paste(ONE[in_ref == FALSE, .N, by = fold][order(fold), sprintf("%d:%d", fold, N)], collapse = " "), sum(ONE$in_ref & ONE$end_imputed))
-stopifnot(!anyNA(ONE[in_ref == TRUE, ..REF_COLS]), all(vapply(REF_COLS, function(cc) all(is.finite(as.numeric(ONE[in_ref == TRUE][[cc]]))), TRUE)))
+logf("  exclusions by FIRST failing reason (mutually exclusive partition; horizon first, then S2_AVAIL order):")
+for (r in unique(ex$excl_reason)) logf("    %-28s %s", r, paste(ex[excl_reason == r, sprintf("%s %d", y, N)], collapse = ", "))
+logf("  nonexclusive missingness (all rows / complete-horizon rows): %s", paste(census[n_missing_any_row > 0, sprintf("%s %d/%d", column, n_missing_any_row, n_missing_complete_rows)], collapse = "; "))
+fwrite(census, file.path(OUT, "missingness_census.csv"))
+logf("  excluded rows by fold: %s; reference rows by endpoint source: %s", paste(ONE[in_ref == FALSE, .N, by = fold][order(fold), sprintf("%d:%d", fold, N)], collapse = " "),
+     paste(ONE[in_ref == TRUE, .N, by = end_source][, sprintf("%s %d", end_source, N)], collapse = ", "))
+stopifnot(!anyNA(ONE[in_ref == TRUE, ..TERMS]), all(vapply(TERMS, function(cc) all(is.finite(as.numeric(ONE[in_ref == TRUE][[cc]]))), TRUE)))
 MON <- merge(MON, TIER[, .(dispnum, ccode, likely)], by = c("dispnum", "ccode"))
-MON <- merge(MON, DT[, .(dispnum, fold, end_imputed)], by = "dispnum")
+MON <- merge(MON, DT[, .(dispnum, fold, end_source, end_imputed, onset_year)], by = "dispnum")
+stopifnot(all(MON$fold == s2_fold(MON$onset_year)))                  # every monthly row carries its dispute's onset fold (recheck finding 6)
+MON[, onset_year := NULL]
 META <- list(built = format(Sys.time()), git = GIT, mode = MODE, fatal_def = FATAL_DEF, fatal_label = if (FATAL_DEF == "stage1") "primary disputes represented by stage-1 fatal-event flags" else "GML dispute fatality > 0",
-             window = W_REF, positions = POSF, poscol = POSCOL, ref_cols = REF_COLS, monthly_covariates = "ties and frozen tier only (monthly non-tie covariates not built)")
+             window = W_REF, positions = POSF, poscol = POSCOL, avail_cols = S2_AVAIL, ref_design = S2_REF_DESIGN, monthly_covariates = "ties and frozen tier only (monthly non-tie covariates not built)")
 for (o in c("DT", "ONE", "MON")) { x <- get(o); setattr(x, "s2_meta", META); assign(o, x) }
 saveRDS(META, file.path(OUT, "s2_meta.rds")); saveRDS(DT, file.path(OUT, "s2_disputes.rds")); saveRDS(PT, file.path(OUT, "s2_participant_spells.rds"))
 saveRDS(CLW, file.path(OUT, "s2_classification_w0_6.rds")); saveRDS(ONE, file.path(OUT, sprintf("s2_oneshot_w%d.rds", W_REF))); saveRDS(MON, file.path(OUT, sprintf("s2_monthly_w%d.rds", W_REF)))

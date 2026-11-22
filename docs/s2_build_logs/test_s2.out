@@ -54,4 +54,12 @@
 25 1914-1919 dispute: fold from the onset key = 2                                            PASS
 26 end policy: follow-up stops before month 7 (first empty B month)                          PASS
 27 side probability is 0 where avail_A is FALSE, logistic elsewhere                          PASS
+28 capped GML exit (Jun 1942 capped to Dec 1940) sets the end: end_source capped, not exact  PASS
+28 tie at the maximum between an exact and an imputed exit -> exact; imputed only -> imputed PASS
+29 prior MIDs: dispute 7 (both members) counts once, 8 counts, current (100) and future (9) excluded -> 2 PASS
+29 no history -> 0, not NA                                                                   PASS
+30 strict sum/min/any: a missing member gives NA; complete inputs aggregate                  PASS
+31 precedence: incomplete horizon first, then the first missing column in list order         PASS
+31 census counts every missing value (a: 2 rows, 1 complete; b: 2 rows, 2 complete)          PASS
+32 frozen design: every model term is an availability column or a fixed transform of one (lcap_s = log1p(min_capdist_s), share_B = 1 - share_A); no tie maxima, no standalone own CINC PASS
 ALL PASS

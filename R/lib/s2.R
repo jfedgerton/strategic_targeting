@@ -296,3 +296,54 @@ s2_side_prob <- function(uA, uB, avail_A) {
   stopifnot(length(uA) == length(uB), length(uA) == length(avail_A))
   p <- plogis(uA - uB); p[!avail_A] <- 0; p
 }
+
+## ---- recheck fixes (GPT build recheck 2026-11-22, docs/REVIEW_stage2_build_recheck_gpt.md) ------------------------------------------
+## Endpoint provenance (finding 1): the dispute end is the latest participant exit; it is "exact" only if an UNMODIFIED GML exit attains it
+## (not imputed, not capped, not raised to the entry month). end_source = exact | capped | imputed | adjusted (precedence imputed > capped >
+## adjusted when no exact spell attains the maximum).
+s2_dispute_end <- function(PT) {
+  PT <- as.data.table(PT); stopifnot(all(c("exit_imputed", "exit_capped", "exit_before_entry") %in% names(PT)))
+  PT[, exact := !exit_imputed & !exit_capped & !exit_before_entry]
+  E <- PT[, { mx <- max(exit_mk); at <- exit_mk == mx
+    .(end_mk = mx, end_source = if (any(exact[at])) "exact" else if (any(exit_imputed[at])) "imputed" else if (any(exit_capped[at])) "capped" else "adjusted") }, by = dispnum]
+  E[, end_imputed := end_source == "imputed"]; E[, end_exact := end_source == "exact"]
+  E[order(dispnum)]
+}
+## Prior conflict per side (finding 4): DISTINCT historical disputes between candidate k and any member of side s, starting no later than
+## year ty (the year before onset), the current dispute excluded. PAIRS: (dispnum, ccode, j, side_rel, ty); PM: (pdisp, a, b, styear) with
+## both orientations. Returns (dispnum, ccode, side_rel, prior_n).
+s2_prior_side <- function(PAIRS, PM) {
+  PAIRS <- as.data.table(PAIRS); PM <- as.data.table(PM)
+  X <- merge(PAIRS, PM, by.x = c("ccode", "j"), by.y = c("a", "b"), allow.cartesian = TRUE)[pdisp != dispnum & styear <= ty]
+  out <- X[, .(prior_n = uniqueN(pdisp)), by = .(dispnum, ccode, side_rel)]
+  out <- merge(unique(PAIRS[, .(dispnum, ccode, side_rel)]), out, by = c("dispnum", "ccode", "side_rel"), all.x = TRUE)
+  out[is.na(prior_n), prior_n := 0L]; out[order(dispnum, ccode, side_rel)]
+}
+## Strict side aggregation (memo B5 amendment): NA when any member's input is missing; never a partial sum or a false "no".
+s2_strict_sum <- function(x) if (anyNA(x)) NA_real_ else sum(x)
+s2_strict_min <- function(x) if (anyNA(x)) NA_real_ else min(x)
+s2_strict_any <- function(x) if (anyNA(x)) NA_integer_ else as.integer(any(x))
+## Reference estimation cohort (finding 5): incomplete horizon first, then the first missing availability column in list order (a
+## mutually exclusive partition); the nonexclusive missingness census is returned separately.
+s2_ref_cohort <- function(ONE, avail) {
+  ONE <- as.data.table(ONE); stopifnot(all(avail %in% names(ONE)), "complete" %in% names(ONE))
+  ONE[, excl_reason := ifelse(!complete, "incomplete horizon", "")]
+  for (cc in avail) ONE[excl_reason == "" & !is.finite(as.numeric(get(cc))), excl_reason := paste("missing", cc)]
+  ONE[, in_ref := excl_reason == ""]
+  census <- data.table(column = avail, n_missing_any_row = vapply(avail, function(cc) sum(!is.finite(as.numeric(ONE[[cc]]))), 0L),
+                       n_missing_complete_rows = vapply(avail, function(cc) sum(ONE$complete & !is.finite(as.numeric(ONE[[cc]]))), 0L))
+  attr(ONE, "census") <- census; ONE
+}
+## Frozen reference design (finding 3): availability columns vs model terms. The fitter builds exactly these alternative-specific terms.
+##   A (join initiating side, third party), B (join target side), O (originator entry, own intercept, A-side covariates), out = reference.
+##   Every term has its own coefficient per alternative. "likely" (relevance tier, frozen at onset) enters as an alternative-specific
+##   intercept shift (the "full set with tier interactions" cell). Ties are raw sums (N4); tie maxima are a sweep level, not reference terms.
+S2_REF_DESIGN <- list(
+  A = c("likely", "tie_sum_A", "tgt_cent_mean", "own_cent", "log_cinc_ratio_A", "share_A", "lcap_A", "contig_side_A", "ally_side_A", "prior_side_A",
+        "n_side_A", "n_side_B", "major_side_A", "major_side_B"),
+  B = c("likely", "tie_sum_B", "tgt_cent_mean", "own_cent", "log_cinc_ratio_B", "share_B", "lcap_B", "contig_side_B", "ally_side_B", "prior_side_B",
+        "n_side_A", "n_side_B", "major_side_A", "major_side_B"),
+  O = c("likely", "tie_sum_A", "tgt_cent_mean", "own_cent", "log_cinc_ratio_A", "share_A", "lcap_A", "contig_side_A", "ally_side_A", "prior_side_A",
+        "n_side_A", "n_side_B", "major_side_A", "major_side_B"))
+S2_AVAIL <- c("tie_sum_A", "tie_sum_B", "tgt_cent_mean", "own_cent", "log_cinc_ratio_A", "log_cinc_ratio_B", "share_A", "min_capdist_A", "min_capdist_B",
+              "contig_side_A", "contig_side_B", "ally_side_A", "ally_side_B", "prior_side_A", "prior_side_B", "n_side_A", "n_side_B", "major_side_A", "major_side_B", "likely")
