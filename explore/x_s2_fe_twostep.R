@@ -45,19 +45,20 @@ logf("step 1 with FE: |b_j| > 10 (quasi-separated targets) %d", sum(abs(bfe) > 1
 ## ---- step-2 data -------------------------------------------------------------------------------------------------------------------
 ONE <- as.data.table(readRDS(file.path(S2, "s2_oneshot_w1.rds"))); CL <- as.data.table(readRDS(file.path(S2, "s2_classification_w0_6.rds")))[W == 1L]
 TS <- CL[baseline == TRUE & side_rel == "B", .(dispnum, ccode)]
-X <- ONE[complete == TRUE]
-X[, `:=`(lcap_A = log1p(min_capdist_A), lcap_B = log1p(min_capdist_B), lcinc = log(cinc_k))]
-need <- c("tie_sum_A", "tie_sum_B", "tgt_cent_mean", "lcap_A", "lcap_B", "ally_side_A", "ally_side_B", "likely", "lcinc")
-n0 <- nrow(X); X <- X[complete.cases(X[, ..need]) & is.finite(lcinc)]
-logf("step 2: complete-horizon rows %d; dropped for missing covariates %d; outcomes %s", n0, n0 - nrow(X), paste(sprintf("%s %d", names(table(X$y)), table(X$y)), collapse = ", "))
+## revision-3 build (GPT fixes): reference estimation cohort (in_ref) and the frozen design S2_REF_DESIGN (R/lib/s2.R)
+source("R/lib/s2.R"); stopifnot("in_ref" %in% names(ONE))
+n0 <- nrow(ONE); X <- ONE[in_ref == TRUE]
+X[, likely := as.numeric(likely)]; for (v in c("contig_side_A", "contig_side_B", "ally_side_A", "ally_side_B", "major_side_A", "major_side_B")) X[, (v) := as.numeric(get(v))]
+logf("step 2: one-shot rows %d; reference cohort (in_ref) %d; outcomes %s", n0, nrow(X), paste(sprintf("%s %d", names(table(X$y)), table(X$y)), collapse = ", "))
 
 NCH <- table(ch$c2); REP <- names(NCH)[NCH >= 2]
 ## b_j used only for targets chosen >= 2 times (one-off targets are not usefully identified) and clipped to [-5, 5]
 bbar_of <- function(b) { b <- pmin(pmax(b[names(b) %in% REP], -5), 5); tb <- TS[, .(dispnum, b = b[as.character(ccode)])]; tb[, .(bbar = mean(b, na.rm = TRUE), n_b = sum(!is.na(b))), by = dispnum] }
 ## four-category logit: utilities relative to out
-VA <- c("tie_sum_A", "tgt_cent_mean", "lcap_A", "ally_side_A", "likely", "lcinc")
-VB <- c("tie_sum_B", "tgt_cent_mean", "lcap_B", "ally_side_B", "likely", "lcinc")
-VO <- c("tie_sum_A", "lcap_A", "ally_side_A")   # likely dropped: every originator entrant is in the likely tier (separation)
+VA <- S2_REF_DESIGN$A; VB <- S2_REF_DESIGN$B
+VO <- setdiff(S2_REF_DESIGN$O, "likely")   # deviation from the frozen design: every originator entrant is in the likely tier (separation)
+logf("step 2 design: frozen S2_REF_DESIGN (A %d, B %d terms); O drops 'likely' (all %d originator entrants are likely: separation)", length(VA), length(VB), sum(X$y == "orig"))
+stopifnot(all(X[y == "orig", likely == 1]))
 fit2 <- function(X, wt, with_b) {
   va <- c(VA, if (with_b) "bbar"); vb <- c(VB, if (with_b) "bbar"); vo <- c(VO, if (with_b) "bbar")
   ## covariates centred and scaled by fixed constants (CS, from the full point-fit data) so BFGS is well conditioned; slopes are reported per
