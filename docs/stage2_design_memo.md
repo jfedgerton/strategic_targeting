@@ -1,6 +1,6 @@
-# Stage 2 (joining) design memo — revision 2 (2026-11-21), after the GPT stage-1 review (M1–M5)
+# Stage 2 (joining) design memo — revision 3 (2026-11-22): M1–M5 approved; specification multiverse
 
-Nothing in this memo is implemented. Rules are fixed in writing before any stage-2 result is seen; alternatives run as sensitivities. Items marked **[PI]** await the PI's decision; the recommended default is stated. Revision 1 (PI decisions of 2026-11-21) is kept in §11; GPT's findings M1–M5 are in `docs/REVIEW_stage1.md`.
+Nothing in this memo is implemented. Rules are fixed in writing before any stage-2 result is seen; alternatives run as sensitivities. Items marked **[PI]** were decided on 2026-11-22: the PI approved every recommended default (M1–M5). The PI also asked that every alternative be run as a sweep, not a single sensitivity (§10), and that the joint AME be the intended main model once it is built and validated (§12). Revision 1 (PI decisions of 2026-11-21) is kept in §11; GPT's findings M1–M5 are in `docs/REVIEW_stage1.md`.
 
 ## 1. Question and claim
 Stage 1 shows that coalition initiators attack relationally isolated, materially stronger states, while bilateral initiators fight peers. Stage 2 asks which third parties enter an ongoing fatal dispute, and on which side. The recruitability argument predicts more entry on the attacking side by states tied to the attackers and when the target is isolated, and more entry on the target's side by states tied to the target. Stage 2 describes these conditional associations among selected fatal disputes; it does not by itself identify recruitment as the cause of the stage-1 pattern (M5).
@@ -76,8 +76,31 @@ PI decision (rev. 1): separate likely from unlikely joiners by the fixed tiers a
 | Alliance inside the tie measure | alliance control on/off; no-ATOP tie measure |
 | Concentration in a few large wars | leave-one-dispute-out; drop WWI/WWII; stage-1 history lists |
 
-## 10. Robustness grid
-M1 (a) vs (b); one-shot vs monthly (cumulative incidence); tiers (likely-only; full with tier interactions; monthly-updated tiers); offset λ = 0, 1; all MIDs; windows 0–6; tie sum vs max; onset-frozen vs lagged ties; target set mean vs min; side switches first-side vs censored; re-entries ignored vs counted; dynamic entrants included; alliance on/off; lags 1/5; nested vs flat model; permutation diagnostic shuffling tie values within dispute-month; measurement error mimicking alliance and contiguity confounding (both signs) plus noise; leave-one-dispute-out; pigeonhole bootstrap on the main measure.
+## 10. Specification multiverse (PI 2026-11-22: multiple approaches and sweeps throughout)
+Every alternative below is a sweep dimension, reported as a distribution with the recommended default marked, not a one-off sensitivity. The defaults define the reference specification; the main measure is the stage-1 main measure.
+
+| Dimension | Levels (default first) |
+|---|---|
+| Stage boundary (M1) | onset start; late entry after the window |
+| Estimator (M2) | one-shot side choice; monthly competing risks (cumulative incidence) |
+| Model form (M5) | flat three-alternative logit; nested (join vs stay out, then side) |
+| Risk set (M3/M4) | likely tier only; full set with tier interactions; full set + opportunity offset λ = 1; full set, λ = 0 |
+| Tier timing | frozen at onset; updated monthly (monthly estimator only) |
+| Tie aggregation | sum over side members; strongest single link |
+| Tie timing | lagged one year; frozen the year before onset |
+| Target centrality | mean of the target set; minimum |
+| Side switches | first side; censored at the switch |
+| Re-entries | ignored; new decisions |
+| Dynamic entrants | excluded; included (monthly only) |
+| Alliance control | on; off |
+| Lags | 1 year; 5 years |
+| Window | 1 month; 0–6 |
+| Sample | fatal MIDs; all MIDs; jointly fatal; fatality levels ≥ 2–6 |
+| Relational measure | main; the plausible stage-1 measures (layers × weightings incl. sry) |
+
+Scale. The full factorial is too large to cross with every measure. Plan (to be costed after the build): the full specification factorial on the main measure; every measure on the reference specification; the Phase A measure set crossed with the dimensions that change the estimand (stage boundary, estimator, risk set, tie aggregation). Each cell reports the H1–H3 predicted-probability contrasts, and the summary reports, per dimension, the share of cells whose interval excludes zero (a descriptive grid summary, not replications).
+
+Diagnostics on the reference specification and its main alternatives: permutation shuffling tie values within dispute-month; measurement error mimicking alliance and contiguity confounding (both signs) plus random noise; leave-one-dispute-out and the stage-1 history-exclusion lists; pigeonhole bootstrap.
 
 ## 11. Revision 1 PI decisions (2026-11-21, unchanged)
 1. Estimator: both the monthly competing-risks model and the one-shot side choice.
@@ -86,5 +109,7 @@ M1 (a) vs (b); one-shot vs monthly (cumulative incidence); tiers (likely-only; f
 4. Ties: sum over a side's members and strongest single link.
 5. Re-entries: ignored in the main specification; new entries in a sensitivity.
 
-## 12. Order of work
-PI decisions on §2–§6 → GPT review of this revision → risk-set and dyadic tie build with synthetic tests → main model → GPT audit → stage-2 multiverse on the laptop → formal model memo → joint AME last.
+## 12. Order of work and the main model
+GPT review of this revision → risk-set and dyadic tie build with synthetic tests → reference model → GPT audit → stage-2 specification multiverse on the laptop → formal model memo covering both stages → AME build (stage-2 AME, stage-1 AME with the target effect, joint model; GPT review and independent audit before each).
+
+PI 2026-11-22: the joint AME is intended as the paper's main model. It becomes main only if it meets the pre-set criteria fixed before its results are seen (convergence, effective sample size, parameter recovery on simulated data, posterior predictive checks; `docs/ame_joint_sketch.md`). The separate stage-1 and stage-2 multiverses remain the transparent baseline and the robustness envelope it is judged against; if the AME fails the criteria, the separate models lead and the AME is reported as attempted.
