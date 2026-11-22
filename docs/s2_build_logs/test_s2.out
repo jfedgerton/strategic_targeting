@@ -1,0 +1,46 @@
+1 baseline = orig == 1 (10, 20 in dispute 1); same-month non-originators are not baseline    PASS
+2 same-month non-original B entrant (30): category B at every window, entry month 0          PASS
+3 same-month A entrant (40): A at W = 0, orig at W = 1                                       PASS
+3 month-3 A entrant (50): A at W = 1, orig at W = 3 (definite bound <= W)                    PASS
+4 W = 1: avail_orig TRUE in months 0-1, FALSE from month 2; avail_A the complement; avail_B always PASS
+4 W = 0: no originator alternative in any month, A available from month 0                    PASS
+5 candidates 40 (orig at m0), 50 (A at m3), 60 (never) share masks month by month            PASS
+5 the mask function takes only the month index and window (no candidate or outcome argument) PASS
+6 dispute 2 (no promotion observed): originator available to 60 in months 0-1 at W = 1       PASS
+7 s2_classify takes participants, disputes and W only (no fitted-event argument); 50 classified without an event PASS
+8 auxiliary/sequential mask: T always available, O exactly where the flat model's orig is    PASS
+9 monthly rows of 50 at W = 1: months 0-3, outcome A at month 3 only                         PASS
+9 an observed outcome in a masked cell stops the build                                       PASS
+10 system exit: 70 has H = 4, trunc_exit, not complete; outcome out                          PASS
+10 administrative truncation: dispute 3 rows trunc_admin, H to Dec 2014 (1 month), not complete PASS
+10 complete-horizon one-shot reference excludes truncated rows; monthly keeps them censored  PASS
+11 80 (entered the system after onset) is not in dispute 1's cohort; listed as a dynamic entrant PASS
+11 baselines are not in their own dispute's cohort                                           PASS
+12 retrospective cohort: 40 dropped at W = 1, no orig outcome left                           PASS
+13 month 0: A = {10}, B = {20} (baselines only; same-month entrants 30, 40 not yet in a roster) PASS
+13 month 1: A = {10, 40}, B = {20, 30} (active in month 0)                                   PASS
+13 50 (enters month 3) is not in A's roster before month 4                                   PASS
+13 80 (side B from month 3) joins B's roster at month 4                                      PASS
+14 empty side, carry: B at month 7 carries month 6's roster {20}, flagged                    PASS
+14 empty side, end: no B roster at month 7; empty months listed from 7                       PASS
+14 empty side at month 0 (no target set) stops                                               PASS
+15 ties of 60 at month 1: A = {10, 40} -> sum 1.4, max 0.9; B = {20, 30} -> sum 0.2, max 0.2 (no link = 0) PASS
+15 roster member 40 in A: only the 10-40 link counts (edges are a < b, so self-ties cannot arise; the filter is defensive) PASS
+15 wrong tie year gives zeros, not NA                                                        PASS
+16 folds exhaustive and disjoint over 1816-2014; 1914 dispute spanning to 1919 takes fold 2 (onset) PASS
+16 year outside 1816-2014 stops                                                              PASS
+17 tiers: same region (60), contiguous (260), major (710), allied (900) likely; 365 unlikely PASS
+18 mixed side-level fatalities: A {0, unknown} vs B fatal -> unresolved                      PASS
+18 both sides with a known fatal participant -> yes                                          PASS
+18 one side all known nonfatal -> no (unknown on the other side does not matter)             PASS
+19 flat CIF: F_A = 0.7 * 0.3, F_B = 0.1 + 0.7 * 0.1, F_orig = 0.2                            PASS
+19 sequential: a positive originator hazard lowers third-party A incidence through survival  PASS
+20 rule 1: originator-originator event gives the initiator's side (0); joiner-initiated events ignored PASS
+20 rule 2: no originator event, not war-linked -> Side A (1)                                 PASS
+20 disagreement with the case review stops (dispute 1035 must be side 0)                     PASS
+21 reference cell is legal                                                                   PASS
+21 one-shot x re-entries as new decisions is illegal                                         PASS
+21 one-shot x monthly tiers / dynamic entrants / two-month bins illegal                      PASS
+21 monthly x truncated one-shot horizon illegal                                              PASS
+21 W = 0: retrospective and prospective cohorts share one key (deduplicated)                 PASS
+ALL PASS
