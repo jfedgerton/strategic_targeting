@@ -26,7 +26,8 @@
 14 empty side at month 0 (no target set) stops                                               PASS
 15 ties of 60 at month 1: A = {10, 40} -> sum 1.4, max 0.9; B = {20, 30} -> sum 0.2, max 0.2 (no link = 0) PASS
 15 roster member 40 in A: only the 10-40 link counts (edges are a < b, so self-ties cannot arise; the filter is defensive) PASS
-15 wrong tie year gives zeros, not NA                                                        PASS
+15 covered year without links gives observed zeros (not NA)                                  PASS
+15 uncovered year gives NA ties and tie_nocov (never an observed zero; GPT P2-4)             PASS
 16 folds exhaustive and disjoint over 1816-2014; 1914 dispute spanning to 1919 takes fold 2 (onset) PASS
 16 year outside 1816-2014 stops                                                              PASS
 17 tiers: same region (60), contiguous (260), major (710), allied (900) likely; 365 unlikely PASS
@@ -43,4 +44,14 @@
 21 one-shot x monthly tiers / dynamic entrants / two-month bins illegal                      PASS
 21 monthly x truncated one-shot horizon illegal                                              PASS
 21 W = 0: retrospective and prospective cohorts share one key (deduplicated)                 PASS
+22 GML episode spanning two spells: spell 1 exit capped at Dec 1940 (flagged), spell 2 exit Jun 1942 PASS
+22 the participant is absent from A's roster throughout 1941 (months 13-24 use m - 1 = 12..23) and back from month 25 PASS
+22 no GML match -> exit imputed at Dec of the last spell year (flagged)                      PASS
+23 Jan 1900 and Dec 1900 keys are 22800 and 22811; Jan 1901 follows Dec 1900                 PASS
+23 invalid month code (-9, 0, 13) stops                                                      PASS
+23 a never-entering row has months 0..H inclusive (H + 1 rows, last row censored)            PASS
+24 both sides with a known fatal participant and further unknowns -> yes                     PASS
+25 1914-1919 dispute: fold from the onset key = 2                                            PASS
+26 end policy: follow-up stops before month 7 (first empty B month)                          PASS
+27 side probability is 0 where avail_A is FALSE, logistic elsewhere                          PASS
 ALL PASS

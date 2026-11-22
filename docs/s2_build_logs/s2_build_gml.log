@@ -1,43 +1,52 @@
-stage-2 risk-set build 2026-11-22 11:51:13; data_entry /mnt/user-data/uploads/strategic_targeting_relsweep/v2/data_entry; layers /mnt/user-data/uploads/targeting_multiverse/output/layers_dy.rds; reference window 1
-git commit 5be666b
-participants_timing 5862 spells / 2436 disputes; gml_part 5217 rows; gml_mid_disps 2174 disputes
-fatal dispute sets: GML 542; stage-1 fatal-event primary disputes 560; both 440; GML only 102; stage-1 only 120; using --fatal_def=gml
-GML disputes: fatal 542, nonfatal 1587, unknown (-9) 45 (unknown dropped, counted)
-fatal disputes absent from participants_timing (dropped): 266
-check: events.rds fatality_disp vs gml_mid_disps fatality on 1982 single-source disputes: 292 disagree
-dispute end month: GML participant end dates 541 disputes; fallback (Dec of last spell year) 0
-initiating side by rule: 1 (originator events) 493, 2 (Side A, not war-linked) 45, 3 (war rule) 3, 4 (war ambiguous -> Side A) 0, 5 (mixed-source war link, unresolved) 0; reviewed 11 (hard 2)
-disputes in the stage-2 sample: 541; by fold: 1:62 2:13 3:43 4:21 5:280 6:122
-participant spells 1476 (1469 participants); exit month from GML 1441, fallback Dec of last year 35; exit before definite entry (set to entry) 0; side switches 8 (first side kept); second spells 7 (ignored as entries, kept in rosters)
-baseline sets: disputes with >1 initiating-side originator 19, >1 target-set member 13
+stage-2 risk-set build 2026-11-22 12:26:59; mode release; fatal_def gml; reference window 1; git 61605d8
+inputs: data_entry /mnt/user-data/uploads/strategic_targeting_relsweep/v2/data_entry; layers /mnt/user-data/uploads/targeting_multiverse/output/layers_dy.rds; positions /home/claude/align/positions_cmp.rds [W2contig|noPTA|pr]; dump /home/claude/align/long_bcjs_bon_w1d_relyear_fmid.rds
+participants_timing 5862 spells / 2436 disputes; gml_part 5217 rows; gml_mid_disps 2174 disputes; positions 15561 state-years
+population: GML-fatal 542; stage-1 fatal-event primary disputes 560; intersection 440; GML only 102; stage-1 only 120 (ID lists in fatal_sets.csv); using gml
+availability exclusion: disputes absent from participants_timing 1 [266]
+fatality codes, events.rds vs GML (single-source disputes, 292 differ): fatal/nonfatal status differs 75; severity level differs 33; unknown code on one side 184
+participant spells 1476 (1469 participants): exit from GML 1441, imputed (Dec of last spell year) 35, GML end capped at the spell's last year 54, >1 matching GML episode 9; side switches 8 (first side kept)
+  second-spell audit: dispute 258, state 220: spell 1 1939-1941 side 1 entry 23270 exit 23298 | spell 2 1944-1945 side 1 entry 23337 exit 23347
+  second-spell audit: dispute 258, state 365: spell 1 1939-1939 side 0 entry 23276 exit 23276 | spell 2 1941-1945 side 1 entry 23297 exit 23347
+  second-spell audit: dispute 4182, state 652: spell 1 1993-1996 side 0 entry 23922 exit 23959 | spell 2 2000-2001 side 0 entry 24004 exit 24018
+  second-spell audit: dispute 4273, state 210: spell 1 1999-1999 side 1 entry 23997 exit 23997 | spell 2 2003-2003 side 1 entry 24038 exit 24038
+  second-spell audit: dispute 4273, state 666: spell 1 1998-1998 side 1 entry 23987 exit 23987 | spell 2 2002-2002 side 1 entry 24032 exit 24032
+  second-spell audit: dispute 4273, state 670: spell 1 2000-2001 side 1 entry 23989 exit 24019 | spell 2 2003-2003 side 1 entry 24037 exit 24038
+  second-spell audit: dispute 4273, state 696: spell 1 1999-1999 side 1 entry 23997 exit 23997 | spell 2 2003-2003 side 1 entry 24037 exit 24038
+dispute end = latest participant exit: exact GML month 524 disputes, imputed (Dec of the last year) 17
+initiating side by rule: 1 493, 2 45, 3 3, 4 0, 5 (unresolved) 0; reviewed 11 (hard 2)
+disputes in the stage-2 sample: 541; by fold: 1:62 2:13 3:43 4:21 5:280 6:122; baseline sets with >1 initiating-side originator 19, >1 target-set member 13
 non-baseline participants by window (A / B / orig): W0 158/177/0; W1 90/177/68; W2 78/177/80; W3 73/177/85; W4 72/177/86; W5 67/177/91; W6 64/177/94
-same-month (onset-month) non-original entrants by side (R1 count): B 36, A 36
-acceptance: stage-1 events from a later participant spell (excluded; re-entries are not stage-2 entries): 1 [365 in 258 (1941)]
-acceptance: stage-1 bcjs W1 events 853 (unique initiator-dispute); in the stage-2 sample 691 (others: dispute not in the GML-fatal sample)
-acceptance (a) baseline roles: mismatches 0 of 691
-acceptance (b) promotions at W1: mismatches 0 of 271 original joiners (stage-1 promoted 51, stage-2 orig 51)
-acceptance (c) joiner sides (stage-1 joinA/joinB vs stage-2 A/B): mismatches 0 of 220
-N2: non-baseline participants without a fitted stage-1 event, classified by the participant-level rule: 64 (A 12, B 35, orig 17)
-cohort rows (state x dispute) 63986; complete horizon 63865; truncated: administrative 0, system exit 121; dynamic entrants (excluded) 5; entries after the horizon (treated as out) 10
-one-shot outcomes W1, all rows: A 84, B 168, orig 68, out 63666; complete-horizon rows: A 84, B 159, orig 68, out 63554
-  window 0: one-shot outcomes A 152, B 168, out 63666; retrospective cohort drops 0
-  window 1: one-shot outcomes A 84, B 168, orig 68, out 63666; retrospective cohort drops 68
-  window 2: one-shot outcomes A 72, B 168, orig 80, out 63666; retrospective cohort drops 80
-  window 3: one-shot outcomes A 67, B 168, orig 85, out 63666; retrospective cohort drops 85
-  window 4: one-shot outcomes A 66, B 168, orig 86, out 63666; retrospective cohort drops 86
-  window 5: one-shot outcomes A 61, B 168, orig 91, out 63666; retrospective cohort drops 91
-  window 6: one-shot outcomes A 58, B 168, orig 94, out 63666; retrospective cohort drops 94
-monthly rows W1: 783167 (63986 state-disputes); outcomes A 84, B 168, orig 68, out 782847; censored last rows 63666
-dispute duration (months, reference to end): median 5, 90% 32, max 156
-rosters: dispute-months 6852; side-months carried forward (empty side) 14 in 4 disputes (A 9, B 5)
-main-measure edges: 680069 positive dyad-years of 918315
-verify: log PageRank from the stage-2 edges vs positions_cmp.rds (W2contig|noPTA|pr), max abs deviation by year 1850/1914/1938/1960/1990/2010: 8.8e-14 3.6e-15 2.7e-15 2.7e-15 6.2e-15 2.7e-15
-one-shot rows whose lag-1 tie year precedes the layers (ties 0, flagged): 0
-ties: one-shot rows with any positive tie to A 46951 / to B 47803 of 63986; monthly rows 593694 / 590876 of 783167
-relevance tiers (frozen at onset): likely 21748 of 63986 cohort rows (contiguous 5120, same region 16318, major 2896, allied at t-1 9969)
-covariates: side CINC zero or wholly missing (ratio NA, never 0/0) A 753 / B 1044
-covariates: rows with missing own CINC 453; side CINC with a missing member 753 (A) / 1091 (B); missing min capital distance A 0 / B 0
-target centrality: disputes with a missing t-1 position for a target-set member 11
-jointly fatal (side level): yes 312, no 204, unresolved 25; participants without a fatality code (unknown) 73
-written: s2_disputes (541), s2_oneshot_w1 (63986), s2_monthly_w1 (783167), rosters (19319), edges (680069)
+same-month non-original entrants by side (R1 count): B 36, A 36
+acceptance (i): baseline sets equal orig == 1 on all 1134 baseline participants
+acceptance (ii): promotion boundary holds in all 2345 non-baseline participant-windows
+uncertain dates: initiating-side entrants promoted under the possible bound but not the definite bound, by window: W0 0 W1 7 W2 10 W3 10 W4 12 W5 12 W6 11
+acceptance (iii): stage-1 projection records 870: later spell (re-entry) 1; matched 707; outside selected disputes 162
+  later-spell records (kept in rosters, excluded from the first-entry projection): 365 in 258 (1941)
+acceptance (iii): matched records 707; baseline-role mismatches 0; promotion mismatches 0 of 287 original-joiner records (stage-1 promoted 51); joiner-side mismatches 0 of 236
+N2: non-baseline participants without a stage-1 projection record, classified by the participant-level rule: 64 (A 12, B 35, orig 17)
+cohort rows 63986; complete horizon 63868; truncated: administrative 0, system exit 118; dynamic entrants (excluded) 5; entries after the horizon (out) 0
+one-shot outcomes W1: all rows A 88, B 174, orig 68, out 63656; complete-horizon rows A 88, B 165, orig 68, out 63547
+  window 0: A 156, B 174, out 63656; retrospective cohort drops 0
+  window 1: A 88, B 174, orig 68, out 63656; retrospective cohort drops 68
+  window 2: A 76, B 174, orig 80, out 63656; retrospective cohort drops 80
+  window 3: A 71, B 174, orig 85, out 63656; retrospective cohort drops 85
+  window 4: A 70, B 174, orig 86, out 63656; retrospective cohort drops 86
+  window 5: A 65, B 174, orig 91, out 63656; retrospective cohort drops 91
+  window 6: A 62, B 174, orig 94, out 63656; retrospective cohort drops 94
+monthly rows W1: 774467 (63986 state-disputes); outcomes A 88, B 174, orig 68, out 774137
+dispute duration (months): median 5, 90% 32, max 156
+rosters: dispute-months 6760; carried side-months 86 in 13 disputes (A 56, B 30); end policy would drop 10386 monthly rows
+main-measure edges: 680069 positive dyad-years; covered years 1816-2014 (199); log PageRank vs W2contig|noPTA|pr: max abs deviation over all years 5.7e-13 (worst year 1816)
+tie coverage: one-shot rows without a covered tie year, lag 1 0, lag 5 21 (NA, flagged)
+ties: one-shot rows with a positive tie to A 46951 / to B 47803 of 63986; monthly rows without tie coverage 0
+relevance tiers: likely 21748 of 63986 (contiguous 5120, same region 16318, major 2896, allied at t-1 9969); candidate-baseline pairs without a dyad row in the onset year 0
+covariate missingness (rows): own CINC 453, own centrality 453; side CINC incomplete A 753 / B 1091; side dyad rows incomplete A 1177 / B 1512; target set without t-1 position 11 disputes
+jointly fatal (side level): yes 312, no 204, unresolved 25; participants without a fatality code 73
+reference estimation cohort: 61924 of 63986 rows; outcomes A 88, B 162, orig 68, out 61606
+  excluded: missing own_cent             out 420
+  excluded: incomplete horizon           B 9, out 109
+  excluded: missing tgt_cent_mean        out 1085, B 2
+  excluded: missing log_cinc_ratio_A     out 436, B 1
+  excluded rows by fold: 1:40 2:167 3:25 4:57 5:944 6:829; reference rows in disputes with an imputed end 2039
+written (release build): s2_disputes 541, s2_oneshot_w1 63986 (reference cohort 61924), s2_monthly_w1 774467, rosters 19348, edges 680069
 S2_BUILD_DONE

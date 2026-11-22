@@ -87,11 +87,12 @@ check("14 empty side at month 0 (no target set) stops", expect_error(s2_rosters(
 ## ---- ties (section 4) ---------------------------------------------------------------------------------------------------------------
 E <- data.frame(a = c(10L, 20L, 40L, 10L), b = c(60L, 60L, 60L, 40L), year = 8L, w = c(0.5, 0.2, 0.9, 0.7))
 ROW <- data.frame(dispnum = 1L, ccode = c(60L, 40L), m = 1L, year_tie = 8L)
-TI <- s2_ties(ROW, RC, E)
+TI <- s2_ties(ROW, RC, E, covered = 8L)
 check("15 ties of 60 at month 1: A = {10, 40} -> sum 1.4, max 0.9; B = {20, 30} -> sum 0.2, max 0.2 (no link = 0)",
       TI[ccode == 60, isTRUE(all.equal(c(tie_sum_A, tie_max_A, tie_sum_B, tie_max_B), c(1.4, 0.9, 0.2, 0.2)))])
 check("15 roster member 40 in A: only the 10-40 link counts (edges are a < b, so self-ties cannot arise; the filter is defensive)", TI[ccode == 40, isTRUE(all.equal(c(tie_sum_A, tie_max_A), c(0.7, 0.7)))])
-check("15 wrong tie year gives zeros, not NA", { t2 <- s2_ties(transform(ROW, year_tie = 7L), RC, E); all(t2$tie_sum_A == 0) && !anyNA(t2) })
+check("15 covered year without links gives observed zeros (not NA)", { t2 <- s2_ties(transform(ROW, year_tie = 7L), RC, E, covered = 7:8); all(t2$tie_sum_A == 0) && !any(t2$tie_nocov) })
+check("15 uncovered year gives NA ties and tie_nocov (never an observed zero; GPT P2-4)", { t3 <- s2_ties(transform(ROW, year_tie = 6L), RC, E, covered = 7:8); all(is.na(t3$tie_sum_A)) && all(t3$tie_nocov) })
 
 ## ---- folds (B4) ---------------------------------------------------------------------------------------------------------------------
 check("16 folds exhaustive and disjoint over 1816-2014; 1914 dispute spanning to 1919 takes fold 2 (onset)", { f <- s2_fold(1816:2014); !anyNA(f) && identical(as.integer(table(f)), S2_FOLDS$hi - S2_FOLDS$lo + 1L) && s2_fold(1914L) == 2L })
@@ -134,5 +135,32 @@ check("21 one-shot x re-entries as new decisions is illegal", is.na(s2_cell_key(
 check("21 one-shot x monthly tiers / dynamic entrants / two-month bins illegal", all(is.na(c(s2_cell_key(modifyList(ref, list(tier_timing = "monthly"))), s2_cell_key(modifyList(ref, list(dynamic = "include"))), s2_cell_key(modifyList(ref, list(agg2 = "yes")))))))
 check("21 monthly x truncated one-shot horizon illegal", is.na(s2_cell_key(modifyList(ref, list(estimator = "monthly", horizon = "truncated")))))
 check("21 W = 0: retrospective and prospective cohorts share one key (deduplicated)", identical(s2_cell_key(modifyList(ref, list(window = "0", cohort = "retrospective"))), s2_cell_key(modifyList(ref, list(window = "0")))))
+
+## ---- GPT build review fixtures (2026-11-22) -----------------------------------------------------------------------------------------
+## 22. P1-1: stage-1 spells 1940 and 1942 (inactive 1941); one GML episode 1940-1942 must not bridge the gap
+PTg <- data.frame(dispnum = 7L, ccode = 99L, spell = 1:2, spell_first = c(1940L, 1942L), spell_last = c(1940L, 1942L))
+Gg <- data.frame(dispnum = 7L, ccode = 99L, styear = 1940L, endyear = 1942L, end_mk = s2_mk(1942L, 6L))
+SE <- s2_spell_exits(PTg, Gg)
+check("22 GML episode spanning two spells: spell 1 exit capped at Dec 1940 (flagged), spell 2 exit Jun 1942", SE$exit_mk[1] == s2_mk(1940L, 12L) && SE$exit_capped[1] && SE$exit_mk[2] == s2_mk(1942L, 6L) && !SE$exit_capped[2])
+PSg <- data.frame(dispnum = 7L, ccode = c(99L, 99L, 1L, 2L), spell = c(1L, 2L, 1L, 1L), side_rel = c("A", "A", "A", "B"), baseline = c(FALSE, FALSE, TRUE, TRUE),
+                  m_in = c(1L, 24L, 0L, 0L), m_out = c(SE$exit_mk - s2_mk(1940L, 1L), 40L, 40L))   # onset Jan 1940
+RG <- s2_rosters(PSg, data.frame(dispnum = 7L, m = 0:40), "carry")
+check("22 the participant is absent from A's roster throughout 1941 (months 13-24 use m - 1 = 12..23) and back from month 25", !any(RG$ccode == 99L & RG$m %in% 13:24) && all(25:30 %in% RG$m[RG$ccode == 99L]))
+check("22 no GML match -> exit imputed at Dec of the last spell year (flagged)", { s0 <- s2_spell_exits(PTg, Gg[0, ]); all(s0$exit_imputed) && s0$exit_mk[2] == s2_mk(1942L, 12L) })
+## 23. month keys: January / December, invalid codes; inclusive horizon rows
+check("23 Jan 1900 and Dec 1900 keys are 22800 and 22811; Jan 1901 follows Dec 1900", s2_mk(1900L, 1L) == 22800L && s2_mk(1900L, 12L) == 22811L && s2_mk(1901L, 1L) == 22812L && s2_mk_year(22811L) == 1900L)
+check("23 invalid month code (-9, 0, 13) stops", expect_error(s2_mk(1900L, -9L)) && expect_error(s2_mk(1900L, 0L)) && expect_error(s2_mk(1900L, 13L)))
+check("23 a never-entering row has months 0..H inclusive (H + 1 rows, last row censored)", nrow(r60) == OS1[dispnum == 1 & ccode == 60, H] + 1L && tail(r60$y_m, 1) == "out")
+## 24. jointly fatal: known fatal on both sides plus unknown participants -> yes
+J2 <- s2_jfatal(data.frame(dispnum = 4, ccode = 1:4, side_rel = c("A", "A", "B", "B")), data.frame(dispnum = 4, ccode = 1:4, fat = c(2, -9, NA, 1)))
+check("24 both sides with a known fatal participant and further unknowns -> yes", J2$jfatal == "yes")
+## 25. a dispute starting Aug 1914 and ending 1919 takes fold 2 for all its rows
+DT25 <- data.frame(dispnum = 25L, onset_lo = s2_mk(1914L, 8L), end_mk = s2_mk(1919L, 6L))
+check("25 1914-1919 dispute: fold from the onset key = 2", s2_fold(s2_mk_year(DT25$onset_lo)) == 2L)
+## 26. end policy truncates follow-up before the first empty side-month
+MON26 <- data.table(dispnum = 1L, ccode = 60L, m = 0:10)
+check("26 end policy: follow-up stops before month 7 (first empty B month)", identical(s2_truncate_end(MON26, attr(REe, "empty"))$m, 0:6))
+## 27. conditional side equation respects the A mask (P(A | T) exactly 0 inside the window)
+check("27 side probability is 0 where avail_A is FALSE, logistic elsewhere", { pp <- s2_side_prob(c(1, 1), c(0, 0), c(FALSE, TRUE)); pp[1] == 0 && abs(pp[2] - plogis(1)) < 1e-12 })
 
 cat(if (ok_all) "ALL PASS\n" else "SOME TESTS FAILED\n"); quit(status = if (ok_all) 0 else 1)

@@ -1,145 +1,163 @@
 ## R/s2_01_build_riskset.R -- stage-2 (joining) risk set on real data. Contract: docs/stage2_design_memo.md section 13 (rev 6).
 ## Builds the dispute table, participant classification (windows 0-6), prospective cohort with horizons, one-shot rows and monthly rows at
-## the reference window, rosters (carry-forward; end-policy census), main-measure ties, tiers, folds, side-level jointly-fatal status and
-## covariates; runs the R1/N2 acceptance tests against a stage-1 bcjs dump. NO MODEL IS FIT.
+## the reference window, rosters (carry-forward; end-policy census), main-measure ties, tiers, folds, side-level jointly-fatal status and the
+## one-shot reference covariates; reconciles every stage-1 projection record. NO MODEL IS FIT.
+## Revision 2026-11-22 (GPT build review, docs/REVIEW_stage2_build_gpt.md): P1-1 spell exits capped at each spell's last year; P1-2 required
+## positions input and the full one-shot reference covariate set with a schema assertion; P2-3 fail-closed acceptance with explicit
+## reconciliation reasons (--mode=release); P2-4 missing vs zero (tie coverage, strict side aggregates, t-1 geography); P2-5 PI decision:
+## the stage-1 fatal set is the reference (--fatal_def=stage1 default), ID lists, fatality-code decomposition, imputed-end flags; P2-6 broader
+## acceptance (full-universe baselines, promotion boundaries, uncertain dates, all-year PageRank check).
 ## Usage:
-##   Rscript R/s2_01_build_riskset.R --data_entry=DIR --layers=layers_dy.rds --out=DIR [--dump_bcjs=long_bcjs_bon_w1d_relyear_fmid.rds]
-##          [--verify_positions=positions.rds --verify_col='W2contig|noPTA|pr'] [--window=1]
-suppressPackageStartupMessages({ library(data.table); library(peacesciencer) })
+##   Rscript R/s2_01_build_riskset.R --data_entry=DIR --layers=layers_dy.rds --positions=positions.rds --poscol='W2contig|noPTA|pr' --out=DIR
+##          --dump_bcjs=long_bcjs_bon_w1d_relyear_fmid.rds [--mode=release|exploratory] [--window=1] [--fatal_def=stage1|gml]
+suppressPackageStartupMessages({ library(data.table); library(peacesciencer); library(igraph) })
 this_file <- sub("^--file=", "", grep("^--file=", commandArgs(FALSE), value = TRUE)[1])
 source(file.path(dirname(normalizePath(this_file)), "lib", "s2.R"))
 args <- commandArgs(trailingOnly = TRUE)
 opt <- function(name, default = NULL) { a <- grep(paste0("^--", name, "="), args, value = TRUE); if (length(a)) sub(paste0("^--", name, "="), "", a) else default }
-known <- c("data_entry", "layers", "out", "dump_bcjs", "verify_positions", "verify_col", "window", "fatal_def")
+known <- c("data_entry", "layers", "positions", "poscol", "out", "dump_bcjs", "mode", "window", "fatal_def")
 fl <- sub("^--([a-z_]+)=.*$", "\\1", args); if (any(!fl %in% known) || anyDuplicated(fl)) stop("unknown or duplicated option: ", paste(fl, collapse = " "))
-DE <- opt("data_entry"); LAYERS_RDS <- opt("layers"); OUT <- opt("out"); W_REF <- as.integer(opt("window", "1")); FATAL_DEF <- opt("fatal_def", "gml")
-stopifnot(!is.null(DE), !is.null(LAYERS_RDS), !is.null(OUT), W_REF %in% 0:6, FATAL_DEF %in% c("gml", "stage1"))
+DE <- opt("data_entry"); LAYERS_RDS <- opt("layers"); POSF <- opt("positions"); POSCOL <- opt("poscol"); OUT <- opt("out")
+W_REF <- as.integer(opt("window", "1")); FATAL_DEF <- opt("fatal_def", "stage1"); MODE <- opt("mode", "release"); DUMP <- opt("dump_bcjs")
+stopifnot(!is.null(DE), !is.null(LAYERS_RDS), !is.null(POSF), !is.null(POSCOL), !is.null(OUT), W_REF %in% 0:6, FATAL_DEF %in% c("gml", "stage1"),
+          MODE %in% c("release", "exploratory"))
+if (MODE == "release" && is.null(DUMP)) stop("--mode=release requires --dump_bcjs (acceptance is mandatory for a release build)")
 dir.create(OUT, showWarnings = FALSE, recursive = TRUE)
 LOG <- file.path(OUT, "s2_build.log"); cat("", file = LOG)
 logf <- function(...) { s <- sprintf(...); cat(s, "\n", sep = ""); cat(s, "\n", sep = "", file = LOG, append = TRUE) }
-logf("stage-2 risk-set build %s; data_entry %s; layers %s; reference window %d", format(Sys.time()), DE, LAYERS_RDS, W_REF)
-logf("git commit %s", tryCatch(system2("git", c("-C", dirname(normalizePath(this_file)), "rev-parse", "--short", "HEAD"), stdout = TRUE), error = function(e) "unknown"))
+fail <- function(...) { s <- sprintf(...); logf("FAILED: %s", s); if (MODE == "release") stop(s, call. = FALSE) else logf("(exploratory mode: continuing)") }
+GIT <- tryCatch(system2("git", c("-C", dirname(normalizePath(this_file)), "rev-parse", "--short", "HEAD"), stdout = TRUE), error = function(e) "unknown")
+logf("stage-2 risk-set build %s; mode %s; fatal_def %s; reference window %d; git %s", format(Sys.time()), MODE, FATAL_DEF, W_REF, GIT)
+logf("inputs: data_entry %s; layers %s; positions %s [%s]; dump %s", DE, LAYERS_RDS, POSF, POSCOL, if (is.null(DUMP)) "none" else DUMP)
 set.seed(123)
 
 ## ---- 0. inputs ---------------------------------------------------------------------------------------------------------------------
 P <- as.data.table(readRDS(file.path(DE, "participants_timing.rds")))
-EV <- readRDS(file.path(DE, "events.rds"))
+EV <- as.data.table(readRDS(file.path(DE, "events.rds")))
 DY <- as.data.table(readRDS(LAYERS_RDS))
+pz <- readRDS(POSF); stopifnot(POSCOL %in% colnames(pz$R)); POS <- data.table(pz$key, R = pz$R[, POSCOL]); stopifnot(!anyDuplicated(POS[, .(ccode, year)]))
 GP <- as.data.table(gml_part); GD <- as.data.table(gml_mid_disps); GDY <- as.data.table(gml_mid_ddydisps)
-logf("participants_timing %d spells / %d disputes; gml_part %d rows; gml_mid_disps %d disputes", nrow(P), uniqueN(P$dispnum), nrow(GP), nrow(GD))
+logf("participants_timing %d spells / %d disputes; gml_part %d rows; gml_mid_disps %d disputes; positions %d state-years", nrow(P), uniqueN(P$dispnum), nrow(GP), nrow(GD), nrow(POS))
+GP[, end_mk := s2_mk(endyear, endmon)]                           # s2_mk stops on invalid month codes (P2-5)
 
-## ---- 1. dispute sample (B5) ----------------------------------------------------------------------------------------------------
-## --fatal_def=gml (memo B5 text): GML dispute fatality > 0. --fatal_def=stage1: the primary disputes of the stage-1 fatal events (events.rds
-## in_fmid, the COW-based source chain stage 1 samples on). The memo assumed these coincide; they do not (overlap logged), so both are built.
-fat_g <- GD[fatality > 0, dispnum]; fat_s1 <- unique(as.integer(as.data.table(EV)[in_fmid == TRUE, dispnum]))
-logf("fatal dispute sets: GML %d; stage-1 fatal-event primary disputes %d; both %d; GML only %d; stage-1 only %d; using --fatal_def=%s",
-     length(fat_g), length(fat_s1), length(intersect(fat_g, fat_s1)), length(setdiff(fat_g, fat_s1)), length(setdiff(fat_s1, fat_g)), FATAL_DEF)
+## ---- 1. dispute population (B5; PI 2026-11-22: stage-1 fatal set is the reference, GML a labelled alternative) ---------------------
+fat_g <- GD[fatality > 0, dispnum]
+fat_s1 <- unique(as.integer(EV[in_fmid == TRUE, dispnum]))      # "primary disputes represented by stage-1 fatal-event flags"
+SETS <- data.table(dispnum = sort(unique(c(fat_g, fat_s1))))[, `:=`(in_gml = dispnum %in% fat_g, in_stage1 = dispnum %in% fat_s1)]
+fwrite(SETS, file.path(OUT, "fatal_sets.csv"))
+logf("population: GML-fatal %d; stage-1 fatal-event primary disputes %d; intersection %d; GML only %d; stage-1 only %d (ID lists in fatal_sets.csv); using %s",
+     length(fat_g), length(fat_s1), sum(SETS$in_gml & SETS$in_stage1), sum(SETS$in_gml & !SETS$in_stage1), sum(!SETS$in_gml & SETS$in_stage1), FATAL_DEF)
 fat_d <- if (FATAL_DEF == "gml") fat_g else fat_s1
-logf("GML disputes: fatal %d, nonfatal %d, unknown (-9) %d (unknown dropped, counted)", length(fat_g), sum(GD$fatality == 0), sum(GD$fatality < 0))
-miss <- setdiff(fat_d, P$dispnum); if (length(miss)) logf("fatal disputes absent from participants_timing (dropped): %s", paste(miss, collapse = " "))
+miss <- setdiff(fat_d, P$dispnum); if (length(miss)) logf("availability exclusion: disputes absent from participants_timing %d [%s]", length(miss), paste(miss, collapse = " "))
 fat_d <- intersect(fat_d, P$dispnum)
-## consistency with the stage-1 event file's dispute fatality (events.rds fatality_disp)
-ev_f <- unique(as.data.table(EV)[!EV$escalation & n_disputes == 1L, .(dispnum, fatality_disp)])
-cmp <- merge(ev_f, GD[, .(dispnum, fatality)], by = "dispnum")
-logf("check: events.rds fatality_disp vs gml_mid_disps fatality on %d single-source disputes: %d disagree", nrow(cmp), sum(cmp$fatality_disp != cmp$fatality))
+## fatality-code comparison: events.rds dispute fatality (stage-1 source chain) vs GML dispute fatality, single-source disputes
+cmp <- merge(unique(EV[escalation == FALSE & n_disputes == 1L, .(dispnum, f_ev = fatality_disp)]), GD[, .(dispnum, f_g = fatality)], by = "dispnum")
+cmp <- cmp[f_ev != f_g]
+cmp[, kind := ifelse(f_ev < 0 | f_g < 0, "unknown code on one side", ifelse((f_ev > 0) != (f_g > 0), "fatal/nonfatal status differs", "severity level differs"))]
+logf("fatality codes, events.rds vs GML (single-source disputes, %d differ): %s", nrow(cmp), paste(sprintf("%s %d", names(table(cmp$kind)), table(cmp$kind)), collapse = "; "))
+fwrite(cmp, file.path(OUT, "fatality_code_differences.csv"))
 
-## ---- 2. dispute table: reference onset, end month, initiating side, fold ---------------------------------------------------------------
-ref <- P[orig == 1L, .(onset_lo = min(entry_lo), onset_hi = min(entry_hi)), by = dispnum]           # stage-1 TIMING_REF = originator
-GP[, end_mk := s2_mk(endyear, endmon)]; GP[, st_mk := s2_mk(styear, stmon)]
-gend <- GP[, .(end_gml = max(end_mk)), by = dispnum]
-P[, exit_fallback := s2_mk(spell_last, 12L)]
-pend <- P[, .(end_p = max(exit_fallback)), by = dispnum]
-DT <- merge(merge(data.table(dispnum = fat_d), ref, by = "dispnum", all.x = TRUE), gend, by = "dispnum", all.x = TRUE)
-DT <- merge(DT, pend, by = "dispnum", all.x = TRUE)
-stopifnot(!anyNA(DT$onset_lo))
-DT[, end_mk := ifelse(is.na(end_gml), end_p, end_gml)]
-logf("dispute end month: GML participant end dates %d disputes; fallback (Dec of last spell year) %d", sum(!is.na(DT$end_gml)), sum(is.na(DT$end_gml)))
-bad_end <- DT[end_mk < onset_lo]; if (nrow(bad_end)) { logf("disputes ending before their reference onset (dropped): %s", paste(bad_end$dispnum, collapse = " ")); DT <- DT[end_mk >= onset_lo] }
+## ---- 2. participant spells and exits (P1-1) --------------------------------------------------------------------------------------
+PT <- P[dispnum %in% fat_d, .(dispnum, ccode, spell, spell_first, spell_last, side = side_entry, orig, entry_lo, entry_hi, side_switch)]
+SE <- s2_spell_exits(PT, GP[, .(dispnum, ccode, styear, endyear, end_mk)])
+PT <- merge(PT, SE, by = c("dispnum", "ccode", "spell"))
+n_inv <- sum(PT$exit_mk < PT$entry_hi)
+if (n_inv) { logf("spells whose exit precedes the definite entry month (exit set to entry month, flagged) %d", n_inv); PT[, exit_before_entry := exit_mk < entry_hi]; PT[exit_mk < entry_hi, exit_mk := entry_hi] } else PT[, exit_before_entry := FALSE]
+logf("participant spells %d (%d participants): exit from GML %d, imputed (Dec of last spell year) %d, GML end capped at the spell's last year %d, >1 matching GML episode %d; side switches %d (first side kept)",
+     nrow(PT), uniqueN(PT[, .(dispnum, ccode)]), sum(!PT$exit_imputed), sum(PT$exit_imputed), sum(PT$exit_capped), sum(PT$n_gml > 1L), sum(PT$side_switch))
+for (r in which(PT$spell > 1L)) { k <- PT[dispnum == PT$dispnum[r] & ccode == PT$ccode[r]][order(spell)]
+  logf("  second-spell audit: dispute %d, state %d: %s", PT$dispnum[r], PT$ccode[r], paste(sprintf("spell %d %d-%d side %d entry %d exit %d%s%s", k$spell, k$spell_first, k$spell_last, k$side, k$entry_hi, k$exit_mk,
+       ifelse(k$exit_capped, " capped", ""), ifelse(k$exit_imputed, " imputed", "")), collapse = " | ")) }
+gap_viol <- PT[order(dispnum, ccode, spell)][, .(viol = any(shift(exit_mk) >= s2_mk(spell_first, 1L), na.rm = TRUE)), by = .(dispnum, ccode)][viol == TRUE]
+if (nrow(gap_viol)) fail("%d participants have a spell exit reaching into the next spell's first year", nrow(gap_viol))
+
+## ---- 3. dispute table: reference onset, end (max spell exit), initiating side, fold ----------------------------------------------
+ref <- P[orig == 1L, .(onset_lo = min(entry_lo), onset_hi = min(entry_hi)), by = dispnum]
+dend <- PT[, .(end_mk = max(exit_mk)), by = dispnum]
+dend <- merge(dend, PT[, .(dispnum, exit_mk, exit_imputed)], by.x = c("dispnum", "end_mk"), by.y = c("dispnum", "exit_mk"))[, .(end_imputed = all(exit_imputed)), by = .(dispnum, end_mk)]
+DT <- merge(merge(data.table(dispnum = fat_d), ref, by = "dispnum", all.x = TRUE), dend, by = "dispnum", all.x = TRUE)
+stopifnot(!anyNA(DT$onset_lo), !anyNA(DT$end_mk))
+logf("dispute end = latest participant exit: exact GML month %d disputes, imputed (Dec of the last year) %d", sum(!DT$end_imputed), sum(DT$end_imputed))
+bad_end <- DT[end_mk < onset_lo]; if (nrow(bad_end)) { logf("availability exclusion: disputes ending before their reference onset %s", paste(bad_end$dispnum, collapse = " ")); DT <- DT[end_mk >= onset_lo] }
 IS <- as.data.table(s2_init_side(P, EV, cow_war_inter, DT$dispnum))
 DT <- merge(DT, IS, by = "dispnum")
-logf("initiating side by rule: 1 (originator events) %d, 2 (Side A, not war-linked) %d, 3 (war rule) %d, 4 (war ambiguous -> Side A) %d, 5 (mixed-source war link, unresolved) %d; reviewed %d (hard %d)",
-     sum(DT$side_rule == 1), sum(DT$side_rule == 2), sum(DT$side_rule == 3), sum(DT$side_rule == 4), sum(DT$side_rule == 5), sum(DT$side_case != ""), sum(DT$side_case == "hard"))
-if (any(DT$side_rule == 5L)) { logf("dropped (unresolved side): %s", paste(DT[side_rule == 5L, dispnum], collapse = " ")); DT <- DT[side_rule != 5L] }
-DT[, onset_year := s2_mk_year(onset_lo)]; DT[, fold := s2_fold(onset_year)]
-logf("disputes in the stage-2 sample: %d; by fold: %s", nrow(DT), paste(sprintf("%d:%d", 1:6, tabulate(DT$fold, 6)), collapse = " "))
-
-## ---- 3. participant spells with exit months -------------------------------------------------------------------------------------
-PT <- P[dispnum %in% DT$dispnum, .(dispnum, ccode, spell, spell_first, spell_last, side = side_entry, orig, entry_lo, entry_hi, side_switch, exit_fallback)]
-gx <- GP[, .(dispnum, ccode, g_sty = styear, g_endy = endyear, end_mk)]
-mx <- gx[PT, on = .(dispnum, ccode, g_sty <= spell_last, g_endy >= spell_first), nomatch = NA, .(dispnum, ccode, spell = i.spell, end_mk = x.end_mk)]
-mx <- mx[, .(exit_gml = if (all(is.na(end_mk))) NA_integer_ else max(end_mk, na.rm = TRUE)), by = .(dispnum, ccode, spell)]
-PT <- merge(PT, mx, by = c("dispnum", "ccode", "spell"))
-PT[, exit_mk := ifelse(is.na(exit_gml), exit_fallback, exit_gml)]
-n_inv <- sum(PT$exit_mk < PT$entry_hi); PT[exit_mk < entry_hi, exit_mk := entry_hi]
-logf("participant spells %d (%d participants); exit month from GML %d, fallback Dec of last year %d; exit before definite entry (set to entry) %d; side switches %d (first side kept); second spells %d (ignored as entries, kept in rosters)",
-     nrow(PT), uniqueN(PT[, .(dispnum, ccode)]), sum(!is.na(PT$exit_gml)), sum(is.na(PT$exit_gml)), n_inv, sum(PT$side_switch), sum(PT$spell > 1L))
-## target set and initiating side nonempty (B3)
+logf("initiating side by rule: 1 %d, 2 %d, 3 %d, 4 %d, 5 (unresolved) %d; reviewed %d (hard %d)", sum(DT$side_rule == 1), sum(DT$side_rule == 2), sum(DT$side_rule == 3),
+     sum(DT$side_rule == 4), sum(DT$side_rule == 5), sum(DT$side_case != ""), sum(DT$side_case == "hard"))
+if (any(DT$side_rule == 5L)) { logf("availability exclusion: unresolved initiating side %s", paste(DT[side_rule == 5L, dispnum], collapse = " ")); DT <- DT[side_rule != 5L] }
+PT <- PT[dispnum %in% DT$dispnum]
 CLr <- s2_classify(PT, DT, W_REF)
 ts <- CLr[baseline == TRUE, .(nA = sum(side_rel == "A"), nB = sum(side_rel == "B")), by = dispnum]
 no_ts <- setdiff(DT$dispnum, ts[nA > 0 & nB > 0, dispnum])
-if (length(no_ts)) { logf("disputes without a baseline participant on one side (dropped, B3): %s", paste(no_ts, collapse = " ")); DT <- DT[!dispnum %in% no_ts]; PT <- PT[!dispnum %in% no_ts] }
-logf("baseline sets: disputes with >1 initiating-side originator %d, >1 target-set member %d", sum(ts$nA > 1), sum(ts$nB > 1))
+if (length(no_ts)) { logf("availability exclusion: no baseline participant on one side (B3) %s", paste(no_ts, collapse = " ")); DT <- DT[!dispnum %in% no_ts]; PT <- PT[!dispnum %in% no_ts] }
+DT[, onset_year := s2_mk_year(onset_lo)]; DT[, fold := s2_fold(onset_year)]
+logf("disputes in the stage-2 sample: %d; by fold: %s; baseline sets with >1 initiating-side originator %d, >1 target-set member %d", nrow(DT),
+     paste(sprintf("%d:%d", 1:6, tabulate(DT$fold, 6)), collapse = " "), sum(ts$nA > 1), sum(ts$nB > 1))
 
-## ---- 4. classification at windows 0-6 and acceptance tests (R1, N2) ----------------------------------------------------------------
+## ---- 4. classification (windows 0-6) and acceptance (R1, N2; P2-3, P2-6) ------------------------------------------------------------
 CLW <- rbindlist(lapply(0:6, function(w) s2_classify(PT, DT, w)[, W := w]))
-tab <- CLW[baseline == FALSE, .N, by = .(W, cat)]; tab <- dcast(tab, W ~ cat, value.var = "N", fill = 0)
-logf("non-baseline participants by window (A / B / orig): %s", paste(sprintf("W%d %d/%d/%d", tab$W, tab$A, tab$B, if ("orig" %in% names(tab)) tab$orig else 0L), collapse = "; "))
+tab <- dcast(CLW[baseline == FALSE, .N, by = .(W, cat)], W ~ cat, value.var = "N", fill = 0); if (!"orig" %in% names(tab)) tab[, orig := 0L]
+logf("non-baseline participants by window (A / B / orig): %s", paste(sprintf("W%d %d/%d/%d", tab$W, tab$A, tab$B, tab$orig), collapse = "; "))
 CL <- CLW[W == W_REF][, W := NULL]
 sm <- CL[baseline == FALSE & m_entry == 0L, .N, by = side_rel]
-logf("same-month (onset-month) non-original entrants by side (R1 count): %s", paste(sprintf("%s %d", sm$side_rel, sm$N), collapse = ", "))
-DUMP <- opt("dump_bcjs")
+logf("same-month non-original entrants by side (R1 count): %s", paste(sprintf("%s %d", sm$side_rel, sm$N), collapse = ", "))
+## (i) full-universe baseline equality: per dispute, the builder's baseline set = every participant with orig == 1 in participants_timing
+bu <- merge(CL[baseline == TRUE, .(dispnum, ccode, b = TRUE)], unique(P[dispnum %in% DT$dispnum & orig == 1L, .(dispnum, ccode, o = TRUE)]), by = c("dispnum", "ccode"), all = TRUE)
+if (anyNA(bu$b) || anyNA(bu$o)) fail("baseline sets differ from orig == 1 on the full participant universe (%d rows)", sum(is.na(bu$b) | is.na(bu$o))) else logf("acceptance (i): baseline sets equal orig == 1 on all %d baseline participants", nrow(bu))
+## (ii) promotion boundaries: orig iff A side, W >= 1, m_entry <= W (definite bound); uncertain dates counted where the possible bound differs
+PB <- merge(CLW[baseline == FALSE], PT[spell == 1L, .(dispnum, ccode, entry_lo)], by = c("dispnum", "ccode"))
+PB <- merge(PB, DT[, .(dispnum, onset_hi)], by = "dispnum")
+bnd <- PB[, sum((cat == "orig") != (side_rel == "A" & W >= 1L & m_entry <= W))]
+if (bnd) fail("promotion boundary violated in %d participant-windows", bnd) else logf("acceptance (ii): promotion boundary holds in all %d non-baseline participant-windows", nrow(PB))
+PB[, poss := side_rel == "A" & W >= 1L & pmax(entry_lo - onset_hi, 0L) <= W]
+logf("uncertain dates: initiating-side entrants promoted under the possible bound but not the definite bound, by window: %s",
+     paste(PB[, .(n = sum(poss & cat != "orig")), by = W][order(W), sprintf("W%d %d", W, n)], collapse = " "))
+## (iii) reconciliation of every stage-1 projection record (initiator x dispute x event year x type)
 if (!is.null(DUMP)) {
   d <- readRDS(DUMP); stopifnot(d$types == "bcjs", as.integer(d$coorig_months) == W_REF)
-  ch <- unique(as.data.table(d$D)[chosen == 1L, .(c1, disp, yr, type, orig_joiner)])
-  ## stage 1 classifies each event by the participant spell covering the event year; stage 2 classifies the FIRST spell (re-entries ignored,
-  ## memo section 4). Events from later spells are a stated projection difference, reported separately and excluded from the tests.
-  sp <- PT[ch, on = .(dispnum = disp, ccode = c1, spell_first <= yr, spell_last >= yr), nomatch = NA, .(disp = i.disp, c1 = i.c1, yr = i.yr, spell = x.spell)]
-  sp <- sp[, .(spell = min(spell)), by = .(disp, c1, yr)]
-  ch <- merge(ch, sp, by = c("disp", "c1", "yr"), all.x = TRUE)
-  logf("acceptance: stage-1 events from a later participant spell (excluded; re-entries are not stage-2 entries): %d [%s]", ch[!is.na(spell) & spell > 1L, .N],
-       paste(ch[!is.na(spell) & spell > 1L, sprintf("%d in %d (%d)", c1, disp, yr)], collapse = "; "))
-  ch <- unique(ch[is.na(spell) | spell == 1L, .(c1, disp, type, orig_joiner)])
-  X <- merge(ch, CL, by.x = c("disp", "c1"), by.y = c("dispnum", "ccode"))
-  logf("acceptance: stage-1 bcjs W%d events %d (unique initiator-dispute); in the stage-2 sample %d (others: dispute not in the GML-fatal sample)", W_REF, nrow(ch), nrow(X))
-  a_base <- X[, sum((!orig_joiner) != baseline)]
-  a_prom <- X[orig_joiner == TRUE, sum((type == 1L) != (cat == "orig"))]
+  pr1 <- unique(as.data.table(d$D)[chosen == 1L, .(c1, disp, yr, type, orig_joiner)])
+  cov <- PT[pr1, on = .(dispnum = disp, ccode = c1, spell_first <= yr, spell_last >= yr), nomatch = NA, .(disp = i.disp, c1 = i.c1, yr = i.yr, type = i.type, spell = x.spell)]
+  cov <- cov[, .(n_spell = sum(!is.na(spell)), spell = if (all(is.na(spell))) NA_integer_ else min(spell, na.rm = TRUE)), by = .(disp, c1, yr, type)]
+  pr1 <- merge(pr1, cov, by = c("disp", "c1", "yr", "type"))
+  pr1[, reason := ifelse(!disp %in% DT$dispnum, "outside selected disputes", ifelse(n_spell == 0L, "missing participant spell", ifelse(n_spell > 1L, "ambiguous spell", ifelse(spell > 1L, "later spell (re-entry)", "matched"))))]
+  logf("acceptance (iii): stage-1 projection records %d: %s", nrow(pr1), paste(sprintf("%s %d", names(table(pr1$reason)), table(pr1$reason)), collapse = "; "))
+  if (any(pr1$reason %in% c("missing participant spell", "ambiguous spell"))) fail("projection records with a missing or ambiguous covering spell: %d", sum(pr1$reason %in% c("missing participant spell", "ambiguous spell")))
+  lr <- pr1[reason == "later spell (re-entry)"]; if (nrow(lr)) logf("  later-spell records (kept in rosters, excluded from the first-entry projection): %s", paste(sprintf("%d in %d (%d)", lr$c1, lr$disp, lr$yr), collapse = "; "))
+  X <- merge(pr1[reason == "matched"], CL, by.x = c("disp", "c1"), by.y = c("dispnum", "ccode"), all.x = TRUE)
+  if (anyNA(X$cat)) fail("matched projection records without a stage-2 classification: %d", sum(is.na(X$cat)))
+  a_base <- X[, sum((!orig_joiner) != baseline)]; a_prom <- X[orig_joiner == TRUE, sum((type == 1L) != (cat == "orig"))]
   a_side <- X[orig_joiner == TRUE & type %in% 2:3, sum(ifelse(type == 2L, "A", "B") != side_rel)]
-  logf("acceptance (a) baseline roles: mismatches %d of %d", a_base, nrow(X))
-  logf("acceptance (b) promotions at W%d: mismatches %d of %d original joiners (stage-1 promoted %d, stage-2 orig %d)", W_REF, a_prom, sum(X$orig_joiner), X[orig_joiner == TRUE, sum(type == 1L)], X[orig_joiner == TRUE, sum(cat == "orig")])
-  logf("acceptance (c) joiner sides (stage-1 joinA/joinB vs stage-2 A/B): mismatches %d of %d", a_side, X[orig_joiner == TRUE & type %in% 2:3, .N])
-  nofit <- CL[baseline == FALSE & !paste(dispnum, ccode) %in% paste(ch$disp, ch$c1)]
-  logf("N2: non-baseline participants without a fitted stage-1 event, classified by the participant-level rule: %d (A %d, B %d, orig %d)", nrow(nofit), sum(nofit$cat == "A"), sum(nofit$cat == "B"), sum(nofit$cat == "orig"))
-  if (a_base + a_prom + a_side > 0) { mm <- X[((!orig_joiner) != baseline) | (orig_joiner & (type == 1L) != (cat == "orig")) | (orig_joiner & type %in% 2:3 & ifelse(type == 2L, "A", "B") != side_rel)]
-    fwrite(mm, file.path(OUT, "acceptance_mismatches.csv")); logf("ACCEPTANCE FAILED: mismatches written to acceptance_mismatches.csv") }
+  logf("acceptance (iii): matched records %d; baseline-role mismatches %d; promotion mismatches %d of %d original-joiner records (stage-1 promoted %d); joiner-side mismatches %d of %d",
+       nrow(X), a_base, a_prom, X[orig_joiner == TRUE, .N], X[orig_joiner == TRUE, sum(type == 1L)], a_side, X[orig_joiner == TRUE & type %in% 2:3, .N])
+  nofit <- CL[baseline == FALSE & !paste(dispnum, ccode) %in% paste(pr1$disp, pr1$c1)]
+  logf("N2: non-baseline participants without a stage-1 projection record, classified by the participant-level rule: %d (A %d, B %d, orig %d)", nrow(nofit), sum(nofit$cat == "A"), sum(nofit$cat == "B"), sum(nofit$cat == "orig"))
+  if (a_base + a_prom + a_side > 0) { fwrite(X[((!orig_joiner) != baseline) | (orig_joiner & (type == 1L) != (cat == "orig")) | (orig_joiner & type %in% 2:3 & ifelse(type == 2L, "A", "B") != side_rel)],
+                                             file.path(OUT, "acceptance_mismatches.csv")); fail("acceptance mismatches %d (acceptance_mismatches.csv)", a_base + a_prom + a_side) }
 }
 
 ## ---- 5. cohort, horizons, one-shot and monthly rows (B1, B2, N1) ----------------------------------------------------------------------
 CS <- as.data.table(cow_states)[, .(ccode = as.integer(ccode), st_mk = s2_mk(styear, stmonth), end_mk = s2_mk(endyear, endmonth))]
-COH <- s2_cohort(DT, CL, CS)
-DYN <- s2_dynamic_entrants(COH, CL)
-OS <- s2_oneshot(COH, CL)
-logf("cohort rows (state x dispute) %d; complete horizon %d; truncated: administrative %d, system exit %d; dynamic entrants (excluded) %d; entries after the horizon (treated as out) %d",
+COH <- s2_cohort(DT, CL, CS)                                     # asserts one system spell per (dispute, state)
+DYN <- s2_dynamic_entrants(COH, CL); OS <- s2_oneshot(COH, CL)
+logf("cohort rows %d; complete horizon %d; truncated: administrative %d, system exit %d; dynamic entrants (excluded) %d; entries after the horizon (out) %d",
      nrow(COH), sum(COH$complete), sum(COH$trunc_admin), sum(COH$trunc_exit), nrow(DYN), sum(OS$late))
-logf("one-shot outcomes W%d, all rows: %s; complete-horizon rows: %s", W_REF, paste(sprintf("%s %d", names(table(OS$y)), table(OS$y)), collapse = ", "),
-     paste(sprintf("%s %d", names(table(OS[complete == TRUE]$y)), table(OS[complete == TRUE]$y)), collapse = ", "))
-for (w in 0:6) { o <- s2_oneshot(COH, CLW[W == w][, W := NULL]); logf("  window %d: one-shot outcomes %s; retrospective cohort drops %d", w, paste(sprintf("%s %d", names(table(o$y)), table(o$y)), collapse = ", "), sum(o$y == "orig")) }
+tabs <- function(y) paste(sprintf("%s %d", names(table(y)), table(y)), collapse = ", ")
+logf("one-shot outcomes W%d: all rows %s; complete-horizon rows %s", W_REF, tabs(OS$y), tabs(OS[complete == TRUE]$y))
+for (w in 0:6) { o <- s2_oneshot(COH, CLW[W == w][, W := NULL]); logf("  window %d: %s; retrospective cohort drops %d", w, tabs(o$y), sum(o$y == "orig")) }
 MON <- s2_monthly(OS, W_REF)
-logf("monthly rows W%d: %d (%d state-disputes); outcomes %s; censored last rows %d", W_REF, nrow(MON), nrow(OS), paste(sprintf("%s %d", names(table(MON$y_m)), table(MON$y_m)), collapse = ", "),
-     nrow(OS[y == "out"]))
-logf("dispute duration (months, reference to end): median %.0f, 90%% %.0f, max %d", median(DT$end_mk - DT$onset_lo), quantile(DT$end_mk - DT$onset_lo, .9), max(DT$end_mk - DT$onset_lo))
+logf("monthly rows W%d: %d (%d state-disputes); outcomes %s", W_REF, nrow(MON), nrow(OS), tabs(MON$y_m))
+logf("dispute duration (months): median %.0f, 90%% %.0f, max %d", median(DT$end_mk - DT$onset_lo), quantile(DT$end_mk - DT$onset_lo, .9), max(DT$end_mk - DT$onset_lo))
 
 ## ---- 6. rosters (B3) ---------------------------------------------------------------------------------------------------------------
 PS <- merge(PT[, .(dispnum, ccode, spell, exit_mk, entry_hi)], CL[, .(dispnum, ccode, side_rel, baseline)], by = c("dispnum", "ccode"))
 PS <- merge(PS, DT[, .(dispnum, onset_lo)], by = "dispnum")
 PS[, m_in := ifelse(baseline & spell == 1L, 0L, pmax(entry_hi - onset_lo, 0L))]; PS[, m_out := exit_mk - onset_lo]
 MO <- unique(MON[, .(dispnum, m)])
-ROS <- s2_rosters(PS, MO, "carry"); ROE <- s2_rosters(PS, MO, "end")
-emp <- attr(ROE, "empty")
-logf("rosters: dispute-months %d; side-months carried forward (empty side) %d in %d disputes (A %d, B %d)", nrow(MO), nrow(emp), uniqueN(emp$dispnum), sum(emp$side_rel == "A"), sum(emp$side_rel == "B"))
+ROS <- s2_rosters(PS, MO, "carry"); emp <- attr(s2_rosters(PS, MO, "end"), "empty")
+logf("rosters: dispute-months %d; carried side-months %d in %d disputes (A %d, B %d); end policy would drop %d monthly rows", nrow(MO), nrow(emp), uniqueN(emp$dispnum),
+     sum(emp$side_rel == "A"), sum(emp$side_rel == "B"), nrow(MON) - nrow(s2_truncate_end(MON, emp)))
 
-## ---- 7. main-measure ties (section 4, N4) ------------------------------------------------------------------------------------------
-## main measure (config.sh MAIN_SPEC): W2contig, layers igo+def+off+neu+nonagg+consul+dca+un, clipped residuals / layer-year max, Euclidean combo
-## rescaled within year. Same code path as R/02_build_positions.R edge_w() for W2contig (copied; verified below by recomputing PageRank).
+## ---- 7. main-measure ties (section 4, N4; P2-4 coverage) ---------------------------------------------------------------------------
+## main measure (config.sh MAIN_SPEC) via R/02_build_positions.R's W2contig code path (copied), checked against the positions in EVERY year
 MAIN_L <- c("igo", "def", "off", "neu", "nonagg", "consul", "dca", "un")
 setorder(DY, year, ccode1, ccode2)
 V <- sapply(MAIN_L, function(l) { v <- as.numeric(DY[[l]]); if (l == "igo") v <- log1p(v); v })
@@ -156,34 +174,27 @@ EL <- sapply(MAIN_L, function(l) {
 S <- sqrt(rowSums(EL^2)); EW <- numeric(length(S))
 for (ix in yr_split) { r <- range(S[ix]); if (r[2] - r[1] >= 1e-12) EW[ix] <- (S[ix] - r[1]) / (r[2] - r[1]) }
 EDGE <- data.table(a = DY$ccode1, b = DY$ccode2, year = DY$year, w = EW)[w > 0]
-logf("main-measure edges: %d positive dyad-years of %d", nrow(EDGE), nrow(DY))
-VP <- opt("verify_positions")
-if (!is.null(VP)) {
-  suppressPackageStartupMessages(library(igraph))
-  pz <- readRDS(VP); vc <- opt("verify_col"); stopifnot(!is.null(vc), vc %in% colnames(pz$R))
-  ys <- c(1850L, 1914L, 1938L, 1960L, 1990L, 2010L); dev <- c()
-  for (y in ys) { k <- pz$key$year == y; vs <- pz$key$ccode[k]; e <- EDGE[year == y]
-    g <- graph_from_data_frame(e[, .(as.character(a), as.character(b), weight = w)], directed = FALSE, vertices = data.frame(name = as.character(vs)))
-    p <- page_rank(g, directed = FALSE)$vector; dev <- c(dev, max(abs(log(p[as.character(vs)]) - pz$R[k, vc]))) }
-  logf("verify: log PageRank from the stage-2 edges vs %s (%s), max abs deviation by year %s: %s", basename(VP), vc, paste(ys, collapse = "/"), paste(sprintf("%.1e", dev), collapse = " "))
-  if (any(dev > 1e-6)) stop("stage-2 edges do not reproduce the stage-1 main-measure positions")
-}
-## one-shot ties: month-0 rosters, edges of onset year - 1 (lag 1) and onset year - 5 (lag 5)
+COVER <- sort(unique(DY$year))
+dev <- vapply(COVER, function(y) { k <- POS$year == y; vs <- POS$ccode[k]; e <- EDGE[year == y]
+  g <- graph_from_data_frame(e[, .(as.character(a), as.character(b), weight = w)], directed = FALSE, vertices = data.frame(name = as.character(vs)))
+  max(abs(log(page_rank(g, directed = FALSE)$vector[as.character(vs)]) - POS$R[k])) }, 0)
+logf("main-measure edges: %d positive dyad-years; covered years %d-%d (%d); log PageRank vs %s: max abs deviation over all years %.1e (worst year %d)",
+     nrow(EDGE), min(COVER), max(COVER), length(COVER), POSCOL, max(dev), COVER[which.max(dev)])
+if (max(dev) > 1e-6) stop("stage-2 edges do not reproduce the stage-1 main-measure positions")
 R0 <- ROS[m == 0L]
 row0 <- merge(OS[, .(dispnum, ccode)], DT[, .(dispnum, onset_year)], by = "dispnum")[, m := 0L]
-T1 <- s2_ties(row0[, .(dispnum, ccode, m, year_tie = onset_year - 1L)], R0, EDGE)
-T5 <- s2_ties(row0[, .(dispnum, ccode, m, year_tie = onset_year - 5L)], R0, EDGE)
-setnames(T5, c("tie_sum_A", "tie_max_A", "tie_sum_B", "tie_max_B"), paste0(c("tie_sum_A", "tie_max_A", "tie_sum_B", "tie_max_B"), "_l5"))
-n_pre <- sum(row0$onset_year - 1L < min(DY$year)); logf("one-shot rows whose lag-1 tie year precedes the layers (ties 0, flagged): %d", n_pre)
-## monthly ties: rosters at m - 1 (lagged), edges of (calendar year of month m) - 1
+T1 <- s2_ties(row0[, .(dispnum, ccode, m, year_tie = onset_year - 1L)], R0, EDGE, COVER)
+T5 <- s2_ties(row0[, .(dispnum, ccode, m, year_tie = onset_year - 5L)], R0, EDGE, COVER)
+setnames(T5, c("tie_sum_A", "tie_max_A", "tie_sum_B", "tie_max_B", "tie_nocov"), paste0(c("tie_sum_A", "tie_max_A", "tie_sum_B", "tie_max_B", "tie_nocov"), "_l5"))
+logf("tie coverage: one-shot rows without a covered tie year, lag 1 %d, lag 5 %d (NA, flagged)", sum(T1$tie_nocov), sum(T5$tie_nocov_l5))
 MON <- merge(MON, DT[, .(dispnum, onset_lo)], by = "dispnum")
 MON[, year_tie := s2_mk_year(onset_lo + m) - 1L]
-TM <- s2_ties(MON[, .(dispnum, ccode, m, year_tie)], ROS, EDGE)
-MON <- merge(MON, TM[, .(dispnum, ccode, m, tie_sum_A, tie_max_A, tie_sum_B, tie_max_B)], by = c("dispnum", "ccode", "m"))
-logf("ties: one-shot rows with any positive tie to A %d / to B %d of %d; monthly rows %d / %d of %d", sum(T1$tie_max_A > 0), sum(T1$tie_max_B > 0), nrow(T1),
-     sum(MON$tie_max_A > 0), sum(MON$tie_max_B > 0), nrow(MON))
+TM <- s2_ties(MON[, .(dispnum, ccode, m, year_tie)], ROS, EDGE, COVER)
+MON <- merge(MON, TM[, .(dispnum, ccode, m, tie_sum_A, tie_max_A, tie_sum_B, tie_max_B, tie_nocov)], by = c("dispnum", "ccode", "m"))
+logf("ties: one-shot rows with a positive tie to A %d / to B %d of %d; monthly rows without tie coverage %d", sum(T1$tie_max_A > 0, na.rm = TRUE), sum(T1$tie_max_B > 0, na.rm = TRUE), nrow(T1), sum(MON$tie_nocov))
 
-## ---- 8. tiers (frozen at onset), covariates, jointly fatal ---------------------------------------------------------------------------
+## ---- 8. tiers (frozen at onset) ------------------------------------------------------------------------------------------------------
+## tiers use contiguity in the onset year ("frozen at onset", memo section 4) and alliances at t - 1; side covariates below use t - 1 throughout
 BASE <- CL[baseline == TRUE, .(dispnum, ccode)]
 DYk <- rbind(DY[, .(k = ccode1, j = ccode2, year, conttype, capdist, ally)], DY[, .(k = ccode2, j = ccode1, year, conttype, capdist, ally)])
 pr <- merge(merge(COH[, .(dispnum, ccode)], BASE[, .(dispnum, j = ccode)], by = "dispnum", allow.cartesian = TRUE), DT[, .(dispnum, onset_year)], by = "dispnum")
@@ -191,55 +202,76 @@ pr <- merge(pr, DYk[, .(k, j, year, conttype)], by.x = c("ccode", "j", "onset_ye
 pr[, ty := onset_year - 1L]
 pr <- merge(pr, DYk[, .(k, j, year, ally)], by.x = c("ccode", "j", "ty"), by.y = c("k", "j", "year"), all.x = TRUE)
 MJ <- as.data.table(cow_majors)[, .(ccode, st_mk = s2_mk(styear, stmonth), end_mk = s2_mk(endyear, endmonth))]
-maj <- MJ[merge(COH[, .(dispnum, ccode)], DT[, .(dispnum, onset_lo)], by = "dispnum"), on = .(ccode, st_mk <= onset_lo, end_mk >= onset_lo), nomatch = 0L, .(dispnum = i.dispnum, ccode)]
-TIER <- s2_tiers(COH, BASE, CONTIG = pr[!is.na(conttype) & conttype %in% 1:5, .(dispnum, ccode, j)], MAJ = unique(maj), ALLY = pr[!is.na(ally) & ally > 0, .(dispnum, ccode, j)])
-logf("relevance tiers (frozen at onset): likely %d of %d cohort rows (contiguous %d, same region %d, major %d, allied at t-1 %d)", sum(TIER$likely), nrow(TIER), sum(TIER$any_contig), sum(TIER$any_reg), sum(TIER$major), sum(TIER$any_ally))
-## side covariates at onset (one-shot): CINC ratio and side share (t - 1), minimum capital distance, alliance with any side member (t - 1)
+maj_at <- function(X) unique(MJ[X, on = .(ccode, st_mk <= onset_lo, end_mk >= onset_lo), nomatch = 0L, .(dispnum = i.dispnum, ccode)])
+maj <- maj_at(merge(COH[, .(dispnum, ccode)], DT[, .(dispnum, onset_lo)], by = "dispnum"))
+TIER <- s2_tiers(COH, BASE, CONTIG = pr[!is.na(conttype) & conttype %in% 1:5, .(dispnum, ccode, j)], MAJ = maj, ALLY = pr[!is.na(ally) & ally > 0, .(dispnum, ccode, j)])
+logf("relevance tiers: likely %d of %d (contiguous %d, same region %d, major %d, allied at t-1 %d); candidate-baseline pairs without a dyad row in the onset year %d",
+     sum(TIER$likely), nrow(TIER), sum(TIER$any_contig), sum(TIER$any_reg), sum(TIER$major), sum(TIER$any_ally), sum(is.na(pr$conttype)))
+
+## ---- 9. one-shot reference covariates (memo section 7; t - 1; P1-2, P2-4) ----------------------------------------------------------
+## Strict aggregation: a side aggregate is NA when any member's input is missing (reason flags kept); never a partial sum or a false "no".
 NMC <- as.data.table(cow_nmc)[, .(ccode, year, cinc)]
-sx <- merge(merge(row0[, .(dispnum, ccode, onset_year)], R0[, .(dispnum, j = ccode, side_rel)], by = "dispnum", allow.cartesian = TRUE)[ccode != j], NMC, by.x = c("j", "onset_year"), by.y = c("ccode", "year"), all.x = TRUE)
-sx[, ty := onset_year - 1L]
-sx <- merge(sx, DYk[, .(k, j, year, capdist)], by.x = c("ccode", "j", "onset_year"), by.y = c("k", "j", "year"), all.x = TRUE)
-sx <- merge(sx, DYk[, .(k, j, year, ally_t1 = ally)], by.x = c("ccode", "j", "ty"), by.y = c("k", "j", "year"), all.x = TRUE)
-## side CINC uses t - 1: re-merge cinc at ty
-sx[, cinc := NULL]; sx <- merge(sx, NMC, by.x = c("j", "ty"), by.y = c("ccode", "year"), all.x = TRUE)
-SC <- sx[, .(side_cinc = if (all(is.na(cinc))) NA_real_ else sum(cinc, na.rm = TRUE), side_cinc_na = sum(is.na(cinc)), min_capdist = suppressWarnings(min(capdist, na.rm = TRUE)), ally_side = as.integer(any(ally_t1 > 0, na.rm = TRUE))), by = .(dispnum, ccode, side_rel)]
-SC[!is.finite(min_capdist), min_capdist := NA_real_]
-SC <- dcast(SC, dispnum + ccode ~ side_rel, value.var = c("side_cinc", "side_cinc_na", "min_capdist", "ally_side"))
-own <- merge(row0[, .(dispnum, ccode, ty = onset_year - 1L)], NMC, by.x = c("ccode", "ty"), by.y = c("ccode", "year"), all.x = TRUE)
-SC <- merge(SC, own[, .(dispnum, ccode, cinc_k = cinc)], by = c("dispnum", "ccode"))
-SC[, `:=`(cinc_ratio_A = ifelse(side_cinc_A > 0, cinc_k / side_cinc_A, NA_real_), cinc_ratio_B = ifelse(side_cinc_B > 0, cinc_k / side_cinc_B, NA_real_),
+sx <- merge(row0[, .(dispnum, ccode, ty = onset_year - 1L)], R0[, .(dispnum, j = ccode, side_rel)], by = "dispnum", allow.cartesian = TRUE)[ccode != j]
+sx <- merge(sx, NMC[, .(j = ccode, ty = year, cinc_j = cinc)], by = c("j", "ty"), all.x = TRUE)
+sx <- merge(sx, DYk[, .(ccode = k, j, ty = year, capdist, conttype, ally)], by = c("ccode", "j", "ty"), all.x = TRUE)
+## prior MIDs: distinct GML disputes starting before the onset year between k and j (the current dispute excluded)
+pm <- unique(merge(GDY[, .(dispnum, a = ccode1, b = ccode2)], GD[, .(dispnum, styear)], by = "dispnum"))
+sx <- merge(sx, merge(sx[, .(dispnum, ccode, j, ty)], pm, by.x = c("ccode", "j"), by.y = c("a", "b"), allow.cartesian = TRUE)[
+  dispnum.y != dispnum.x & styear <= ty, .(prior_n = uniqueN(dispnum.y)), by = .(dispnum = dispnum.x, ccode, j)], by = c("dispnum", "ccode", "j"), all.x = TRUE)
+sx[is.na(prior_n), prior_n := 0L]
+maj_s <- maj_at(merge(R0[, .(dispnum, ccode)], DT[, .(dispnum, onset_lo)], by = "dispnum"))[, maj := TRUE]
+sx <- merge(sx, maj_s[, .(dispnum, j = ccode, maj)], by = c("dispnum", "j"), all.x = TRUE); sx[is.na(maj), maj := FALSE]
+## side size counts the whole roster (including members the candidate cannot tie to: none, since cohort members are never baselines)
+SC <- sx[, .(n_side = .N, side_cinc = if (anyNA(cinc_j)) NA_real_ else sum(cinc_j), cinc_miss = anyNA(cinc_j),
+             min_capdist = if (anyNA(capdist)) NA_real_ else min(capdist), contig_side = if (anyNA(conttype)) NA_integer_ else as.integer(any(conttype %in% 1:5)),
+             ally_side = if (anyNA(ally)) NA_integer_ else as.integer(any(ally > 0)), dyad_miss = anyNA(capdist) | anyNA(conttype) | anyNA(ally),
+             prior_side = log1p(sum(prior_n)), major_side = as.integer(any(maj))), by = .(dispnum, ccode, side_rel)]
+SC <- dcast(SC, dispnum + ccode ~ side_rel, value.var = c("n_side", "side_cinc", "cinc_miss", "min_capdist", "contig_side", "ally_side", "dyad_miss", "prior_side", "major_side"))
+own <- merge(row0[, .(dispnum, ccode, ty = onset_year - 1L)], NMC[, .(ccode, ty = year, cinc_k = cinc)], by = c("ccode", "ty"), all.x = TRUE)
+own <- merge(own, POS[, .(ccode, ty = year, own_cent = R)], by = c("ccode", "ty"), all.x = TRUE)
+SC <- merge(SC, own[, .(dispnum, ccode, cinc_k, own_cent)], by = c("dispnum", "ccode"))
+SC[, `:=`(log_cinc_k = ifelse(cinc_k > 0, log(cinc_k), NA_real_),
+          log_cinc_ratio_A = ifelse(cinc_k > 0 & side_cinc_A > 0, log(cinc_k / side_cinc_A), NA_real_), log_cinc_ratio_B = ifelse(cinc_k > 0 & side_cinc_B > 0, log(cinc_k / side_cinc_B), NA_real_),
           share_A = ifelse(side_cinc_A + side_cinc_B > 0, side_cinc_A / (side_cinc_A + side_cinc_B), NA_real_))]
-logf("covariates: side CINC zero or wholly missing (ratio NA, never 0/0) A %d / B %d", sum(!(SC$side_cinc_A > 0), na.rm = TRUE) + sum(is.na(SC$side_cinc_A)), sum(!(SC$side_cinc_B > 0), na.rm = TRUE) + sum(is.na(SC$side_cinc_B)))
 SC[, share_B := 1 - share_A]
-logf("covariates: rows with missing own CINC %d; side CINC with a missing member %d (A) / %d (B); missing min capital distance A %d / B %d",
-     sum(is.na(SC$cinc_k)), sum(SC$side_cinc_na_A > 0), sum(SC$side_cinc_na_B > 0), sum(is.na(SC$min_capdist_A)), sum(is.na(SC$min_capdist_B)))
-## target centrality (main measure, t - 1): mean and minimum over the original target set
-POSV <- if (!is.null(VP)) data.table(pz$key, R = pz$R[, opt("verify_col")]) else NULL
-if (!is.null(POSV)) {
-  tgt <- merge(merge(BASE, CL[baseline == TRUE, .(dispnum, ccode, side_rel)], by = c("dispnum", "ccode"))[side_rel == "B"], DT[, .(dispnum, ty = onset_year - 1L)], by = "dispnum")
-  tgt <- merge(tgt, POSV, by.x = c("ccode", "ty"), by.y = c("ccode", "year"), all.x = TRUE)
-  TC <- tgt[, .(tgt_cent_mean = mean(R), tgt_cent_min = min(R)), by = dispnum]
-  logf("target centrality: disputes with a missing t-1 position for a target-set member %d", sum(is.na(TC$tgt_cent_mean)))
-} else TC <- data.table(dispnum = DT$dispnum, tgt_cent_mean = NA_real_, tgt_cent_min = NA_real_)
-## jointly fatal (side level) from participant fatality codes (gml_mid_ddydisps, participant = ccode1; max over its rows; -9 unknown)
+tgt <- merge(CL[baseline == TRUE & side_rel == "B", .(dispnum, ccode)], DT[, .(dispnum, ty = onset_year - 1L)], by = "dispnum")
+tgt <- merge(tgt, POS[, .(ccode, ty = year, R)], by = c("ccode", "ty"), all.x = TRUE)
+TC <- tgt[, .(tgt_cent_mean = if (anyNA(R)) NA_real_ else mean(R), tgt_cent_min = if (anyNA(R)) NA_real_ else min(R), tgt_pos_miss = anyNA(R)), by = dispnum]
+logf("covariate missingness (rows): own CINC %d, own centrality %d; side CINC incomplete A %d / B %d; side dyad rows incomplete A %d / B %d; target set without t-1 position %d disputes",
+     sum(is.na(SC$log_cinc_k)), sum(is.na(SC$own_cent)), sum(SC$cinc_miss_A), sum(SC$cinc_miss_B), sum(SC$dyad_miss_A), sum(SC$dyad_miss_B), sum(TC$tgt_pos_miss))
+
+## ---- 10. jointly fatal; assemble; reference schema and estimation cohort ------------------------------------------------------------
 PF <- GDY[, .(fat = as.integer(if (any(fatality1 > 0)) max(fatality1) else if (all(fatality1 == 0)) 0 else -9)), by = .(dispnum, ccode = ccode1)]
-CLall <- CL[, .(dispnum, ccode, side_rel)]
-JF <- s2_jfatal(CLall, PF)
-logf("jointly fatal (side level): yes %d, no %d, unresolved %d; participants without a fatality code (unknown) %d",
-     sum(JF$jfatal == "yes"), sum(JF$jfatal == "no"), sum(JF$jfatal == "unresolved"), nrow(CLall[!PF, on = .(dispnum, ccode)]))
+JF <- s2_jfatal(CL[, .(dispnum, ccode, side_rel)], PF)
+logf("jointly fatal (side level): yes %d, no %d, unresolved %d; participants without a fatality code %d", sum(JF$jfatal == "yes"), sum(JF$jfatal == "no"), sum(JF$jfatal == "unresolved"),
+     nrow(CL[!PF, on = .(dispnum, ccode)]))
 DT <- merge(merge(DT, JF, by = "dispnum"), TC, by = "dispnum", all.x = TRUE)
 DT <- merge(DT, GD[, .(dispnum, fat_level = fatality)], by = "dispnum", all.x = TRUE)
-
-## ---- 9. assemble and write ------------------------------------------------------------------------------------------------------
 ONE <- Reduce(function(a, b) merge(a, b, by = c("dispnum", "ccode"), all.x = TRUE),
-              list(OS, T1[, .(dispnum, ccode, tie_sum_A, tie_max_A, tie_sum_B, tie_max_B)], T5[, .(dispnum, ccode, tie_sum_A_l5, tie_max_A_l5, tie_sum_B_l5, tie_max_B_l5)],
+              list(OS, T1[, .(dispnum, ccode, tie_sum_A, tie_max_A, tie_sum_B, tie_max_B, tie_nocov)], T5[, .(dispnum, ccode, tie_sum_A_l5, tie_max_A_l5, tie_sum_B_l5, tie_max_B_l5, tie_nocov_l5)],
                    TIER[, .(dispnum, ccode, likely, any_contig, any_reg, major, any_ally)], SC))
-ONE <- merge(ONE, DT[, .(dispnum, fold, onset_year, jfatal, fat_level, tgt_cent_mean, tgt_cent_min, side_case)], by = "dispnum")
+ONE <- merge(ONE, DT[, .(dispnum, fold, onset_year, jfatal, fat_level, tgt_cent_mean, tgt_cent_min, side_case, end_imputed)], by = "dispnum")
 stopifnot(nrow(ONE) == nrow(OS), !anyDuplicated(ONE[, .(dispnum, ccode)]))
+## reference one-shot schema (memo section 7 / section 13 reference cell): every column required, finite, on complete-horizon rows
+REF_COLS <- c("tie_sum_A", "tie_sum_B", "tie_max_A", "tie_max_B", "tgt_cent_mean", "own_cent", "log_cinc_k", "log_cinc_ratio_A", "log_cinc_ratio_B", "share_A",
+              "min_capdist_A", "min_capdist_B", "contig_side_A", "contig_side_B", "ally_side_A", "ally_side_B", "prior_side_A", "prior_side_B",
+              "n_side_A", "n_side_B", "major_side_A", "major_side_B", "likely")
+stopifnot(all(REF_COLS %in% names(ONE)))
+ONE[, excl_reason := ifelse(!complete, "incomplete horizon", "")]
+for (cc in REF_COLS) ONE[excl_reason == "" & !is.finite(as.numeric(get(cc))), excl_reason := paste("missing", cc)]
+ONE[, in_ref := excl_reason == ""]
+ex <- ONE[in_ref == FALSE, .N, by = .(excl_reason, y)]
+logf("reference estimation cohort: %d of %d rows; outcomes %s", sum(ONE$in_ref), nrow(ONE), tabs(ONE[in_ref == TRUE]$y))
+for (r in unique(ex$excl_reason)) logf("  excluded: %-28s %s", r, paste(ex[excl_reason == r, sprintf("%s %d", y, N)], collapse = ", "))
+logf("  excluded rows by fold: %s; reference rows in disputes with an imputed end %d", paste(ONE[in_ref == FALSE, .N, by = fold][order(fold), sprintf("%d:%d", fold, N)], collapse = " "), sum(ONE$in_ref & ONE$end_imputed))
+stopifnot(!anyNA(ONE[in_ref == TRUE, ..REF_COLS]), all(vapply(REF_COLS, function(cc) all(is.finite(as.numeric(ONE[in_ref == TRUE][[cc]]))), TRUE)))
 MON <- merge(MON, TIER[, .(dispnum, ccode, likely)], by = c("dispnum", "ccode"))
-MON <- merge(MON, DT[, .(dispnum, fold)], by = "dispnum")
-saveRDS(DT, file.path(OUT, "s2_disputes.rds")); saveRDS(PT, file.path(OUT, "s2_participant_spells.rds")); saveRDS(CLW, file.path(OUT, "s2_classification_w0_6.rds"))
-saveRDS(ONE, file.path(OUT, sprintf("s2_oneshot_w%d.rds", W_REF))); saveRDS(MON, file.path(OUT, sprintf("s2_monthly_w%d.rds", W_REF)))
+MON <- merge(MON, DT[, .(dispnum, fold, end_imputed)], by = "dispnum")
+META <- list(built = format(Sys.time()), git = GIT, mode = MODE, fatal_def = FATAL_DEF, fatal_label = if (FATAL_DEF == "stage1") "primary disputes represented by stage-1 fatal-event flags" else "GML dispute fatality > 0",
+             window = W_REF, positions = POSF, poscol = POSCOL, ref_cols = REF_COLS, monthly_covariates = "ties and frozen tier only (monthly non-tie covariates not built)")
+for (o in c("DT", "ONE", "MON")) { x <- get(o); setattr(x, "s2_meta", META); assign(o, x) }
+saveRDS(META, file.path(OUT, "s2_meta.rds")); saveRDS(DT, file.path(OUT, "s2_disputes.rds")); saveRDS(PT, file.path(OUT, "s2_participant_spells.rds"))
+saveRDS(CLW, file.path(OUT, "s2_classification_w0_6.rds")); saveRDS(ONE, file.path(OUT, sprintf("s2_oneshot_w%d.rds", W_REF))); saveRDS(MON, file.path(OUT, sprintf("s2_monthly_w%d.rds", W_REF)))
 saveRDS(ROS, file.path(OUT, "s2_rosters_carry.rds")); saveRDS(EDGE, file.path(OUT, "s2_main_edges.rds"))
-logf("written: s2_disputes (%d), s2_oneshot_w%d (%d), s2_monthly_w%d (%d), rosters (%d), edges (%d)", nrow(DT), W_REF, nrow(ONE), W_REF, nrow(MON), nrow(ROS), nrow(EDGE))
+logf("written (%s build): s2_disputes %d, s2_oneshot_w%d %d (reference cohort %d), s2_monthly_w%d %d, rosters %d, edges %d", MODE, nrow(DT), W_REF, nrow(ONE), sum(ONE$in_ref), W_REF, nrow(MON), nrow(ROS), nrow(EDGE))
 logf("S2_BUILD_DONE")

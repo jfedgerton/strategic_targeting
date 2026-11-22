@@ -14,7 +14,11 @@ S2_MK_END <- 12L * 2014L + 11L                                  # Dec 2014, admi
 S2_FOLDS <- data.frame(fold = 1:6, lo = c(1816L, 1914L, 1919L, 1939L, 1946L, 1990L), hi = c(1913L, 1918L, 1938L, 1945L, 1989L, 2014L))
 S2_CATS <- c("A", "B", "orig", "out")
 
-s2_mk <- function(y, m) 12L * as.integer(y) + as.integer(m) - 1L
+s2_mk <- function(y, m) {                                       # GPT build review P2-5: invalid month codes never become valid keys
+  y <- as.integer(y); m <- as.integer(m)
+  if (anyNA(y) || anyNA(m) || any(m < 1L | m > 12L) || any(y < 1800L | y > 2100L)) stop(sprintf("s2_mk: invalid year/month codes (%d rows)", sum(is.na(y) | is.na(m) | !(m %in% 1:12) | !(y %in% 1800:2100))))
+  12L * y + m - 1L
+}
 s2_mk_year <- function(mk) as.integer(mk %/% 12L)
 
 ## ---- folds (B4): six disjoint era folds by the dispute's onset year --------------------------------------------------------------------
@@ -175,9 +179,10 @@ s2_rosters <- function(PS, months, policy = "carry") {
 
 ## ---- ties (section 4, N4): raw edge weights on the measure's [0,1] scale --------------------------------------------------------------
 ## ROW: (dispnum, ccode, m, year_tie) candidate rows; ROS: rosters (dispnum, m, ccode, side_rel); E: (a, b, year, w), a < b, undirected.
-## Returns tie_sum_A, tie_max_A, tie_sum_B, tie_max_B (0 where no link). A candidate never ties to itself.
-s2_ties <- function(ROW, ROS, E) {
-  E <- as.data.table(E); stopifnot(all(E$a < E$b), !anyDuplicated(E[, .(a, b, year)]), all(E$w >= 0 & E$w <= 1))
+## Returns tie_sum_A, tie_max_A, tie_sum_B, tie_max_B: 0 where no link in a COVERED year; NA (flag tie_nocov) where year_tie is not in
+## `covered` (GPT build review P2-4: unavailable coverage is never an observed zero). A candidate never ties to itself.
+s2_ties <- function(ROW, ROS, E, covered) {
+  E <- as.data.table(E); stopifnot(all(E$a < E$b), !anyDuplicated(E[, .(a, b, year)]), all(E$w >= 0 & E$w <= 1), all(E$year %in% covered))
   EE <- rbind(E[, .(k = a, j = b, year, w)], E[, .(k = b, j = a, year, w)])
   X <- as.data.table(ROW)[as.data.table(ROS)[, .(dispnum, m, j = ccode, side_rel)], on = .(dispnum, m), allow.cartesian = TRUE, nomatch = 0L]
   X <- X[ccode != j]
@@ -186,6 +191,8 @@ s2_ties <- function(ROW, ROS, E) {
   A <- dcast(A, dispnum + ccode + m ~ side_rel, value.var = c("tie_sum", "tie_max"), fill = 0)
   out <- merge(as.data.table(ROW), A, by = c("dispnum", "ccode", "m"), all.x = TRUE)
   for (cc in c("tie_sum_A", "tie_max_A", "tie_sum_B", "tie_max_B")) { if (!cc %in% names(out)) out[, (cc) := 0]; set(out, which(is.na(out[[cc]])), cc, 0) }
+  out[, tie_nocov := !(year_tie %in% covered)]
+  for (cc in c("tie_sum_A", "tie_max_A", "tie_sum_B", "tie_max_B")) set(out, which(out$tie_nocov), cc, NA_real_)
   out[order(dispnum, ccode, m)]
 }
 
@@ -254,4 +261,38 @@ s2_cell_key <- function(cell) {
   if (c1$window == "0" && c1$cohort == "retrospective") c1$cohort <- "prospective"           # W = 0: no originator category either way
   ## not mapped here (data-dependent): side-switch censoring is de-duplicated by the builder when no switcher affects a roster
   paste(vapply(names(S2_DIMS), function(d) c1[[d]], ""), collapse = "|")
+}
+
+## ---- spell exits (GPT build review P1-1) ----------------------------------------------------------------------------------------
+## PT spells (dispnum, ccode, spell, spell_first, spell_last); G: GML participant episodes (dispnum, ccode, styear, endyear, end_mk).
+## A GML episode overlapping a spell by year gives the exit month, CAPPED at December of the spell's last year so a GML episode spanning
+## two separated stage-1 spells never bridges the inactive gap. No match -> December of spell_last (imputed). Flags: exit_imputed,
+## exit_capped (GML end beyond the spell's last year), n_gml (matching episodes; > 1 counted).
+s2_spell_exits <- function(PT, G) {
+  PT <- as.data.table(PT); G <- as.data.table(G)
+  mx <- G[PT, on = .(dispnum, ccode, styear <= spell_last, endyear >= spell_first), nomatch = NA,
+          .(dispnum, ccode, spell = i.spell, spell_last = i.spell_last, end_mk = x.end_mk)]
+  mx <- mx[, .(exit_gml = if (all(is.na(end_mk))) NA_integer_ else max(end_mk, na.rm = TRUE), n_gml = sum(!is.na(end_mk)), spell_last = spell_last[1]), by = .(dispnum, ccode, spell)]
+  mx[, cap := s2_mk(spell_last, 12L)]
+  mx[, exit_imputed := is.na(exit_gml)]
+  mx[, exit_capped := !exit_imputed & exit_gml > cap]
+  mx[, exit_mk := ifelse(exit_imputed, cap, pmin(exit_gml, cap))]
+  stopifnot(nrow(mx) == nrow(PT), !anyNA(mx$exit_mk))
+  mx[order(dispnum, ccode, spell), .(dispnum, ccode, spell, exit_mk, exit_imputed, exit_capped, n_gml)]
+}
+
+## ---- end-of-follow-up policy (B3 sweep level "end") -------------------------------------------------------------------------------
+## MON monthly rows; EMPTY (dispnum, m, side_rel) empty side-months. Follow-up ends before the first empty month of either side.
+s2_truncate_end <- function(MON, EMPTY) {
+  MON <- as.data.table(MON); f <- as.data.table(EMPTY)[, .(m_stop = min(m)), by = dispnum]
+  X <- merge(MON, f, by = "dispnum", all.x = TRUE)
+  X <- X[is.na(m_stop) | m < m_stop]; X[, m_stop := NULL]
+  X[]
+}
+
+## ---- conditional side equation (sequential model) respects the A mask (GPT build review P3-7) ---------------------------------------
+## P(A | third-party entry, m) = exp(uA) / (exp(uA) + exp(uB)) where A is available, exactly 0 where avail_A is FALSE.
+s2_side_prob <- function(uA, uB, avail_A) {
+  stopifnot(length(uA) == length(uB), length(uA) == length(avail_A))
+  p <- plogis(uA - uB); p[!avail_A] <- 0; p
 }

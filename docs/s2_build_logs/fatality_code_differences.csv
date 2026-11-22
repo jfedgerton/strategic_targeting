@@ -1,0 +1,293 @@
+dispnum,f_ev,f_g,kind
+13,-9,3,unknown code on one side
+22,-9,2,unknown code on one side
+28,3,5,severity level differs
+30,-9,0,unknown code on one side
+50,2,6,severity level differs
+53,0,1,fatal/nonfatal status differs
+56,-9,0,unknown code on one side
+89,6,4,severity level differs
+108,-9,5,unknown code on one side
+112,6,4,severity level differs
+113,6,5,severity level differs
+123,-9,3,unknown code on one side
+133,-9,1,unknown code on one side
+145,-9,2,unknown code on one side
+154,-9,0,unknown code on one side
+158,-9,2,unknown code on one side
+172,-9,1,unknown code on one side
+173,-9,5,unknown code on one side
+178,-9,1,unknown code on one side
+197,-9,6,unknown code on one side
+203,-9,1,unknown code on one side
+230,-9,0,unknown code on one side
+253,0,1,fatal/nonfatal status differs
+254,-9,2,unknown code on one side
+259,-9,1,unknown code on one side
+321,-9,2,unknown code on one side
+324,-9,6,unknown code on one side
+339,0,6,fatal/nonfatal status differs
+349,3,-9,unknown code on one side
+356,-9,2,unknown code on one side
+367,0,3,fatal/nonfatal status differs
+394,-9,0,unknown code on one side
+395,-9,0,unknown code on one side
+397,-9,0,unknown code on one side
+398,-9,0,unknown code on one side
+418,-9,1,unknown code on one side
+518,-9,0,unknown code on one side
+523,-9,4,unknown code on one side
+604,-9,1,unknown code on one side
+605,-9,1,unknown code on one side
+607,2,0,fatal/nonfatal status differs
+610,-9,2,unknown code on one side
+613,6,4,severity level differs
+1039,3,-9,unknown code on one side
+1051,-9,1,unknown code on one side
+1061,-9,1,unknown code on one side
+1067,3,-9,unknown code on one side
+1070,4,5,severity level differs
+1072,-9,0,unknown code on one side
+1081,-9,1,unknown code on one side
+1087,-9,0,unknown code on one side
+1093,-9,0,unknown code on one side
+1104,-9,1,unknown code on one side
+1105,-9,0,unknown code on one side
+1106,-9,3,unknown code on one side
+1107,-9,0,unknown code on one side
+1109,-9,1,unknown code on one side
+1117,0,4,fatal/nonfatal status differs
+1118,-9,0,unknown code on one side
+1119,-9,0,unknown code on one side
+1124,1,0,fatal/nonfatal status differs
+1131,-9,0,unknown code on one side
+1133,-9,0,unknown code on one side
+1138,1,0,fatal/nonfatal status differs
+1154,5,4,severity level differs
+1173,0,2,fatal/nonfatal status differs
+1184,-9,0,unknown code on one side
+1190,0,1,fatal/nonfatal status differs
+1191,-9,0,unknown code on one side
+1197,-9,1,unknown code on one side
+1213,-9,6,unknown code on one side
+1215,-9,0,unknown code on one side
+1228,1,0,fatal/nonfatal status differs
+1233,-9,1,unknown code on one side
+1268,-9,3,unknown code on one side
+1272,6,5,severity level differs
+1284,2,1,severity level differs
+1285,2,3,severity level differs
+1304,3,1,severity level differs
+1319,-9,1,unknown code on one side
+1321,-9,2,unknown code on one side
+1339,0,1,fatal/nonfatal status differs
+1350,-9,0,unknown code on one side
+1353,-9,6,unknown code on one side
+1360,-9,4,unknown code on one side
+1362,-9,0,unknown code on one side
+1364,-9,1,unknown code on one side
+1368,-9,0,unknown code on one side
+1374,4,6,severity level differs
+1376,-9,1,unknown code on one side
+1377,2,1,severity level differs
+1381,2,3,severity level differs
+1392,0,1,fatal/nonfatal status differs
+1410,-9,0,unknown code on one side
+1426,-9,0,unknown code on one side
+1427,1,0,fatal/nonfatal status differs
+1441,-9,6,unknown code on one side
+1466,-9,0,unknown code on one side
+1482,6,5,severity level differs
+1486,2,1,severity level differs
+1508,-9,0,unknown code on one side
+1519,6,3,severity level differs
+1544,-9,0,unknown code on one side
+1549,-9,1,unknown code on one side
+1550,-9,0,unknown code on one side
+1567,-9,1,unknown code on one side
+1571,-9,1,unknown code on one side
+1579,-9,4,unknown code on one side
+1593,2,0,fatal/nonfatal status differs
+1610,-9,1,unknown code on one side
+1613,0,1,fatal/nonfatal status differs
+1627,-9,0,unknown code on one side
+1646,0,2,fatal/nonfatal status differs
+1685,-9,0,unknown code on one side
+1694,-9,0,unknown code on one side
+1703,1,0,fatal/nonfatal status differs
+1707,0,1,fatal/nonfatal status differs
+1708,-9,0,unknown code on one side
+1709,1,0,fatal/nonfatal status differs
+1710,-9,1,unknown code on one side
+1717,-9,0,unknown code on one side
+1723,-9,5,unknown code on one side
+1785,-9,5,unknown code on one side
+1796,1,0,fatal/nonfatal status differs
+1825,-9,1,unknown code on one side
+2010,1,0,fatal/nonfatal status differs
+2020,0,1,fatal/nonfatal status differs
+2071,3,6,severity level differs
+2072,5,6,severity level differs
+2074,3,4,severity level differs
+2102,-9,0,unknown code on one side
+2112,3,2,severity level differs
+2119,2,1,severity level differs
+2120,1,0,fatal/nonfatal status differs
+2132,0,1,fatal/nonfatal status differs
+2140,1,0,fatal/nonfatal status differs
+2149,-9,2,unknown code on one side
+2155,-9,1,unknown code on one side
+2177,-9,0,unknown code on one side
+2184,-9,1,unknown code on one side
+2186,-9,5,unknown code on one side
+2194,0,1,fatal/nonfatal status differs
+2195,0,1,fatal/nonfatal status differs
+2196,0,1,fatal/nonfatal status differs
+2204,1,0,fatal/nonfatal status differs
+2215,0,1,fatal/nonfatal status differs
+2231,-9,0,unknown code on one side
+2244,2,-9,unknown code on one side
+2245,2,4,severity level differs
+2300,0,1,fatal/nonfatal status differs
+2316,-9,1,unknown code on one side
+2325,-9,1,unknown code on one side
+2349,-9,0,unknown code on one side
+2353,-9,0,unknown code on one side
+2360,-9,0,unknown code on one side
+2367,-9,0,unknown code on one side
+2371,-9,0,unknown code on one side
+2590,-9,0,unknown code on one side
+2597,1,0,fatal/nonfatal status differs
+2603,-9,4,unknown code on one side
+2604,-9,6,unknown code on one side
+2605,1,6,severity level differs
+2610,0,1,fatal/nonfatal status differs
+2619,1,0,fatal/nonfatal status differs
+2639,2,1,severity level differs
+2644,0,1,fatal/nonfatal status differs
+2713,-9,1,unknown code on one side
+2725,-9,0,unknown code on one side
+2730,0,1,fatal/nonfatal status differs
+2732,1,0,fatal/nonfatal status differs
+2735,-9,0,unknown code on one side
+2740,-9,1,unknown code on one side
+2745,-9,0,unknown code on one side
+2749,-9,2,unknown code on one side
+2768,-9,0,unknown code on one side
+2775,-9,0,unknown code on one side
+2797,0,1,fatal/nonfatal status differs
+2802,-9,0,unknown code on one side
+2806,-9,0,unknown code on one side
+2892,-9,3,unknown code on one side
+2897,-9,1,unknown code on one side
+2898,0,1,fatal/nonfatal status differs
+2935,-9,1,unknown code on one side
+2938,-9,0,unknown code on one side
+2948,0,1,fatal/nonfatal status differs
+2959,-9,0,unknown code on one side
+2984,0,1,fatal/nonfatal status differs
+2998,-9,0,unknown code on one side
+3003,-9,1,unknown code on one side
+3004,-9,0,unknown code on one side
+3005,0,1,fatal/nonfatal status differs
+3025,-9,0,unknown code on one side
+3046,0,1,fatal/nonfatal status differs
+3058,3,2,severity level differs
+3060,-9,0,unknown code on one side
+3062,-9,1,unknown code on one side
+3073,0,1,fatal/nonfatal status differs
+3076,-9,0,unknown code on one side
+3082,-9,1,unknown code on one side
+3098,-9,1,unknown code on one side
+3112,0,1,fatal/nonfatal status differs
+3114,0,1,fatal/nonfatal status differs
+3129,-9,1,unknown code on one side
+3131,-9,4,unknown code on one side
+3138,0,1,fatal/nonfatal status differs
+3150,0,1,fatal/nonfatal status differs
+3152,-9,0,unknown code on one side
+3165,1,0,fatal/nonfatal status differs
+3173,-9,1,unknown code on one side
+3217,0,1,fatal/nonfatal status differs
+3264,-9,5,unknown code on one side
+3265,-9,0,unknown code on one side
+3364,-9,3,unknown code on one side
+3370,0,1,fatal/nonfatal status differs
+3372,3,1,severity level differs
+3374,0,1,fatal/nonfatal status differs
+3377,-9,0,unknown code on one side
+3378,0,1,fatal/nonfatal status differs
+3383,-9,0,unknown code on one side
+3412,0,1,fatal/nonfatal status differs
+3437,-9,2,unknown code on one side
+3438,0,1,fatal/nonfatal status differs
+3439,0,-9,unknown code on one side
+3443,-9,1,unknown code on one side
+3447,-9,3,unknown code on one side
+3503,0,2,fatal/nonfatal status differs
+3540,2,-9,unknown code on one side
+3550,0,1,fatal/nonfatal status differs
+3554,0,1,fatal/nonfatal status differs
+3557,4,6,severity level differs
+3558,-9,3,unknown code on one side
+3569,0,1,fatal/nonfatal status differs
+3574,-9,2,unknown code on one side
+3604,-9,1,unknown code on one side
+3618,-9,0,unknown code on one side
+3622,-9,6,unknown code on one side
+3626,1,0,fatal/nonfatal status differs
+3629,-9,0,unknown code on one side
+3630,6,5,severity level differs
+3634,-9,6,unknown code on one side
+3635,-9,6,unknown code on one side
+3636,-9,1,unknown code on one side
+3639,-9,6,unknown code on one side
+3703,0,1,fatal/nonfatal status differs
+3814,-9,0,unknown code on one side
+3822,-9,0,unknown code on one side
+3826,-9,0,unknown code on one side
+3827,-9,0,unknown code on one side
+3834,-9,0,unknown code on one side
+3913,0,1,fatal/nonfatal status differs
+3919,0,1,fatal/nonfatal status differs
+3921,0,1,fatal/nonfatal status differs
+3959,1,0,fatal/nonfatal status differs
+3960,1,2,severity level differs
+3979,-9,1,unknown code on one side
+3985,-9,2,unknown code on one side
+3988,0,1,fatal/nonfatal status differs
+3994,-9,2,unknown code on one side
+4075,-9,0,unknown code on one side
+4078,-9,2,unknown code on one side
+4085,-9,0,unknown code on one side
+4089,-9,0,unknown code on one side
+4092,1,0,fatal/nonfatal status differs
+4121,-9,2,unknown code on one side
+4123,-9,0,unknown code on one side
+4130,-9,0,unknown code on one side
+4137,5,-9,unknown code on one side
+4160,-9,1,unknown code on one side
+4161,-9,0,unknown code on one side
+4165,-9,1,unknown code on one side
+4203,-9,1,unknown code on one side
+4251,-9,3,unknown code on one side
+4252,-9,5,unknown code on one side
+4253,-9,3,unknown code on one side
+4271,-9,1,unknown code on one side
+4277,5,2,severity level differs
+4282,1,2,severity level differs
+4288,-9,1,unknown code on one side
+4318,-9,2,unknown code on one side
+4345,-9,0,unknown code on one side
+4349,-9,4,unknown code on one side
+4350,1,0,fatal/nonfatal status differs
+4374,0,1,fatal/nonfatal status differs
+4399,0,1,fatal/nonfatal status differs
+4403,1,0,fatal/nonfatal status differs
+4408,1,0,fatal/nonfatal status differs
+4414,-9,2,unknown code on one side
+4526,0,1,fatal/nonfatal status differs
+4537,2,0,fatal/nonfatal status differs
+4545,-9,1,unknown code on one side
+4585,-9,2,unknown code on one side
+4588,-9,1,unknown code on one side
