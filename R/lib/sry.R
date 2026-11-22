@@ -66,14 +66,18 @@ sry_layer <- function(v, ok, X, model, fam, yr_split, glm_iter = 25L) {
 ## combo: mean over the layers that apply to each dyad-year (signed), tiny cancellations zeroed; then
 ##   edge = "clip"   : positive part rescaled to [0,1] within year (default; below-expected ties carry no weight)
 ##   edge = "minmax" : signed score min-max normalized to [0,1] within year (PI 2026-11-22 alternative; below-expected ties keep a small
-##                     positive weight, the year's minimum dyad gets 0); a year whose score range is below SRY_COMBO_TOL gets all zeros
+##                     positive weight, the year's minimum applicable dyad gets 0); the range is taken over dyads with >= 1 applicable layer
+##                     and dyads with none keep edge 0 (GPT MM1); a year whose range is <= SRY_COMBO_TOL gets all zeros
 sry_combo <- function(M, yr_split, edge = "clip") {
   stopifnot(edge %in% c("clip", "minmax"))
   k <- rowSums(!is.na(M)); sc <- ifelse(k > 0, rowSums(M, na.rm = TRUE) / pmax(k, 1), 0)
   sc[abs(sc) < SRY_COMBO_TOL] <- 0                                # SRY1
   E <- numeric(length(sc))
   if (edge == "clip") { S <- pmax(sc, 0); for (ix in yr_split) { m <- max(S[ix]); if (m > 0) E[ix] <- S[ix] / m } }
-  else for (ix in yr_split) { r <- range(sc[ix]); if (r[2] - r[1] > SRY_COMBO_TOL) E[ix] <- (sc[ix] - r[1]) / (r[2] - r[1]) }
-  stopifnot(all(E >= 0 & E <= 1))
+  else for (ix in yr_split) {                                    # GPT review MM1: normalize over dyads with >= 1 applicable layer only;
+    j <- ix[k[ix] > 0]                                            # a dyad with no applicable layer keeps edge 0 (no tie), never an imputed one
+    if (length(j)) { r <- range(sc[j]); if (r[2] - r[1] > SRY_COMBO_TOL) E[j] <- (sc[j] - r[1]) / (r[2] - r[1]) } }
+  stopifnot(all(E >= 0 & E <= 1), all(E[k == 0] == 0))
+  attr(E, "n_no_layer") <- sum(k == 0)                            # census: dyad-years with no applicable layer (edge 0 under both rules)
   E
 }

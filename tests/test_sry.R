@@ -78,9 +78,17 @@ M8 <- cbind(c(0.4, -0.2, 0.1, NA), c(0.2, -0.4, 0.1, -0.2))          # combo mea
 E8 <- sry_combo(M8, list(1:4), edge = "minmax")
 check("8 min-max: max dyad -> 1, min dyad -> 0", E8[1] == 1 && E8[2] == 0)
 check("8 min-max: (0.1 + 0.3) / 0.6 and (-0.2 + 0.3) / 0.6", abs(E8[3] - 4/6) < 1e-12 && abs(E8[4] - 1/6) < 1e-12)
-check("8 clip on the same scores: (1, 0, 1/3, 0)", isTRUE(all.equal(sry_combo(M8, list(1:4)), c(1, 0, 1/3, 0))))
+check("8 clip on the same scores: (1, 0, 1/3, 0)", isTRUE(all.equal(as.numeric(sry_combo(M8, list(1:4))), c(1, 0, 1/3, 0))))
 check("8 min-max: flat year -> all 0", all(sry_combo(cbind(rep(0.2, 3)), list(1:3), edge = "minmax") == 0))
-check("8 min-max: two years normalized separately", { E <- sry_combo(cbind(c(1, 0, 5, 3)), list(1:2, 3:4), edge = "minmax"); identical(E, c(1, 0, 1, 0)) })
+check("8 min-max: two years normalized separately", { E <- sry_combo(cbind(c(1, 0, 5, 3)), list(1:2, 3:4), edge = "minmax"); identical(as.numeric(E), c(1, 0, 1, 0)) })
 check("8 unknown edge option stops", expect_error(sry_combo(M8, list(1:4), edge = "other")))
+
+## 9. GPT MM1: dyads with no applicable layer keep edge 0 under min-max
+E9 <- sry_combo(cbind(c(NA, -0.5, 0.5)), list(1:3), edge = "minmax")
+check("9 all-NA row in a mixed-sign year -> 0 (not 0.5); others (0, 1)", identical(as.numeric(E9), c(0, 0, 1)) && attr(E9, "n_no_layer") == 1)
+E9b <- sry_combo(cbind(c(NA, -0.5, -0.1)), list(1:3), edge = "minmax")
+check("9 all applicable scores negative: no-layer row 0, max applicable -> 1", identical(as.numeric(E9b), c(0, 0, 1)))
+check("9 clip unchanged for the all-NA row", sry_combo(cbind(c(NA, -0.5, 0.5)), list(1:3))[1] == 0)
+check("9 range below tolerance -> all zeros", all(sry_combo(cbind(c(0.2, 0.2 + 5e-11)), list(1:2), edge = "minmax") == 0))
 
 cat(if (ok_all) "ALL PASS\n" else "SOME TESTS FAILED\n"); quit(status = if (ok_all) 0 else 1)

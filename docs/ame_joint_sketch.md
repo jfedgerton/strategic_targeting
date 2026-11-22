@@ -14,7 +14,7 @@ U¹(e,j) = β_g′ f(dM_ij, dR_ij) + γ′z_ij + b_j(t) + u_i′Λ v_j + ε
 - u_i′Λ v_j is the AME multiplicative term (rank K = 1–2), capturing unmeasured similarity and third-order dependence between initiator and target.
 - ε is Gumbel noise, so the likelihood is a clogit per event.
 
-**Stage 2, joining.** For potential joiner k in dispute d (target j*) in month m, options {A, B, out}, "out" the reference:
+**Stage 2, joining.** *(Unfinished: the equations below show three alternatives and a single target j*; the AME gate document will restate them for the memo's four categories with the originator availability mask, the target set and its aggregation of b, scale constraints and priors.)* For potential joiner k in dispute d (target j*) in month m, options {A, B, out}, "out" the reference:
 
 U²(k,A) = λ_A·tie(k→A) + μ·R_j* + δ′x_kA + θ_A·b_j*(t) + u_k′Λ v̄_A + ε
 U²(k,B) = λ_B·tie(k→B) + δ′x_kB + θ_B·b_j*(t) + u_k′Λ v̄_B + ε

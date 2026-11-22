@@ -222,7 +222,8 @@ if (ARM %in% c("core", "dipl")) {
     }
     one <- function(k) {
       L <- combos[[k]]
-      if (W %in% SRY) E <- sry_combo(EL[, L, drop = FALSE], yr_split, edge = if (grepl("mm$", W)) "minmax" else "clip")
+      if (W %in% SRY) { E <- sry_combo(EL[, L, drop = FALSE], yr_split, edge = if (grepl("mm$", W)) "minmax" else "clip")
+        if (attr(E, "n_no_layer") > 0) message(sprintf("%s %s: %d dyad-years with no applicable layer (edge 0)", W, paste(L, collapse = "+"), attr(E, "n_no_layer"))) }
       else if (W == "W1raw") { S <- rowSums(EL[, L, drop = FALSE]); E <- numeric(length(S)); for (ix in yr_split) { m <- max(S[ix]); if (m > 0) E[ix] <- S[ix] / m } }
       else { S <- sqrt(rowSums(EL[, L, drop = FALSE]^2)); E <- within_year_range01(S) }
       cent(E)
