@@ -1,6 +1,6 @@
-# Stage 2 (joining) design memo — revision 3 (2026-11-22): M1–M5 approved; specification multiverse
+# Stage 2 (joining) design memo — revision 4 (2026-11-22): builder contract for B1–B5, C1, C2 (GPT `docs/REVIEW_stage2_memo.md`)
 
-Nothing in this memo is implemented. Rules are fixed in writing before any stage-2 result is seen; alternatives run as sensitivities. Items marked **[PI]** were decided on 2026-11-22: the PI approved every recommended default (M1–M5). The PI also asked that every alternative be run as a sweep, not a single sensitivity (§10), and that the joint AME be the intended main model once it is built and validated (§12). Revision 1 (PI decisions of 2026-11-21) is kept in §11; GPT's findings M1–M5 are in `docs/REVIEW_stage1.md`.
+Nothing in this memo is implemented. Rules are fixed in writing before any stage-2 result is seen; alternatives run as sensitivities. Items marked **[PI]** were decided on 2026-11-22: the PI approved every recommended default (M1–M5). The PI also asked that every alternative be run as a sweep, not a single sensitivity (§10), and that the joint AME be the intended main model once it is built and validated (§12). Revision 1 (PI decisions of 2026-11-21) is kept in §11; GPT's findings M1–M5 are in `docs/REVIEW_stage1.md`. **Revision 4 adds §13, the builder contract answering GPT's B1–B5, C1 and C2; where §13 and §2–§10 differ, §13 governs.** PI 2026-11-22: "do both" (update stage 1, proceed with stage 2); every GPT choice is written with the recommended default and its alternatives as labelled sweep levels.
 
 ## 1. Question and claim
 Stage 1 shows that coalition initiators attack relationally isolated, materially stronger states, while bilateral initiators fight peers. Stage 2 asks which third parties enter an ongoing fatal dispute, and on which side. The recruitability argument predicts more entry on the attacking side by states tied to the attackers and when the target is isolated, and more entry on the target's side by states tied to the target. Stage 2 describes these conditional associations among selected fatal disputes; it does not by itself identify recruitment as the cause of the stage-1 pattern (M5).
@@ -39,13 +39,13 @@ PI decision (rev. 1): separate likely from unlikely joiners by the fixed tiers a
 - **What q predicts:** the probability that k enters a given fatal dispute as a third party (not an originator), on either side. One-shot: over the dispute's follow-up. Monthly: a monthly entry hazard from the same features. Denominator = the §3 cohort.
 - **Offset vector:** (λ ln q, λ ln q, 0) for (join A, join B, stay out). This shifts participation versus staying out and, by construction, cancels from the A-versus-B choice among joiners. It is reported as a participation-opportunity sensitivity, not as an adjustment of side choice. λ ∈ {0, 1}; λ = 0 reproduces the unweighted model.
 - **Features (pre-decision only):** distance and contiguity to the onset participants (one-shot) or to the m − 1 roster (monthly), major power, CINC, regime. Never the eventual entrant list.
-- **Out-of-sample folds:** five folds by era (1816–1913, 1919–1938, 1939–1945, 1946–1989, 1990–2014). Each dispute's q comes from a model fitted on the other eras, with all rows of held-out disputes excluded. Training outcomes are third-party entries only (stage-1 originators excluded).
+- **Out-of-sample folds:** six folds by era, exhaustive and disjoint (1816–1913, 1914–1918, 1919–1938, 1939–1945, 1946–1989, 1990–2014; §13 B4). Each dispute's q comes from a model fitted on the other eras, with all rows of held-out disputes excluded. Training outcomes are third-party entries only (stage-1 originators excluded).
 
 ## 6. Model (M5)
 - **Main:** multinomial (alternative-specific) logit over {join A, join B, stay out}, stay out as reference, with join-alternative intercepts. Monthly model adds duration dependence as piecewise intervals (months 0–1, 2–3, 4–6, 7–12, 13+), interacted with the join alternatives.
 - **k-level quantities** (own centrality, duration, dispute size) enter only interacted with the join alternatives, with separate A and B coefficients.
 - **Side-specific quantities** (ties to s, power relative to s, distance and alliance to s, prior conflict with s) enter the utility of joining s, with separate coefficients for A and B.
-- **[PI] alternative check.** Revision 1 listed "multinomial logit" as an alternative; it is the same model, so it is dropped. Recommended replacement: a nested (two-step) version, join vs stay out, then side among joiners, which relaxes the equal-substitution restriction between the two join options.
+- **[PI] alternative check.** Revision 1 listed "multinomial logit" as an alternative; it is the same model, so it is dropped. Replacement: a sequential (two-equation) logit, defined in §13 C2. It is not a nested logit with an inclusive-value parameter.
 - Inference: two-way cluster-robust by potential joiner and dispute; pigeonhole bootstrap as the conservative check.
 
 ## 7. Covariates (lagged one year unless stated)
@@ -110,6 +110,56 @@ Diagnostics on the reference specification and its main alternatives: permutatio
 5. Re-entries: ignored in the main specification; new entries in a sensitivity.
 
 ## 12. Order of work and the main model
-GPT review of this revision → risk-set and dyadic tie build with synthetic tests → reference model → GPT audit → stage-2 specification multiverse on the laptop → formal model memo covering both stages → AME build (stage-2 AME, stage-1 AME with the target effect, joint model; GPT review and independent audit before each).
+GPT review of revision 4 → risk-set and dyadic tie build with synthetic tests → reference model → GPT audit → stage-2 specification multiverse on the laptop → formal model memo covering both stages → AME build (stage-2 AME, stage-1 AME with the target effect, joint model; GPT review and independent audit before each).
 
 PI 2026-11-22: the joint AME is intended as the paper's main model. It becomes main only if it meets the pre-set criteria fixed before its results are seen (convergence, effective sample size, parameter recovery on simulated data, posterior predictive checks; `docs/ame_joint_sketch.md`). The separate stage-1 and stage-2 multiverses remain the transparent baseline and the robustness envelope it is judged against; if the AME fails the criteria, the separate models lead and the AME is reported as attempted.
+
+## 13. Builder contract (revision 4; answers GPT B1–B5, C1, C2)
+Defaults first; every alternative listed is a labelled sweep level (PI 2026-11-22). Nothing here is implemented.
+
+### B1. Originator entries and the cohort
+- **Reference cohort (prospective).** At risk from the onset month: every system member at onset that is not a *baseline* participant. Baseline participants = states whose spell starts in the onset month by the stage-1 definite-bound rule (the dispute's first originator(s) on each side). Eventual window promotions are **not** excluded in advance.
+- **Outcomes.** Monthly: four categories per state-month: third-party A, third-party B, originator entry, stay out. Originator entry = an initiating-side entry that stage 1 promotes to coalition originator (only possible in months inside the window W); any later initiating-side entry is third-party A. One-shot: four labels (A, B, originator, none within horizon). Originator entry is a competing event: it ends the state's follow-up and enters the survival term, so it shapes A and B cumulative incidence. H1–H3 are reported on third-party A and B incidence; the originator category gets its own intercepts and the same covariates, and is reported descriptively.
+- **Alternative (sweep level, labelled retrospective):** cohort excluding every eventual window originator, three outcome categories. Conditional on not becoming an originator.
+- **Window algorithm.** The builder calls the stage-1 classification code itself (R/05 originator and initiating-side logic: onset reference, definite bound, side-specific promotion), not a re-implementation. Acceptance test: for windows 0–6, the set of window originators per dispute equals the stage-1 dump's coalition-originator set exactly; unknown dates follow the stage-1 rule and are counted. The two-month variant bins the same month index.
+- **Opportunity training labels (B4):** third-party entries (A or B) are positive; originator entries end the row (censored) and are not positives.
+
+### B2. Horizon, censoring and the late-entry cells
+- **Estimand.** First third-party entry on A or B within the observed horizon H = min(dispute end month, Dec 2014, the state's system exit). Named "within observed horizon".
+- **One-shot reference** uses rows with complete horizons (dispute ended by Dec 2014, no system exit during the dispute); truncated rows are counted and excluded. **Monthly** uses all rows with censoring at H. Sweep level: one-shot including truncated rows with log(H in months) on the join alternatives, labelled.
+- **Comparison.** Monthly hazards are aggregated to cumulative incidence over each row's own H on the one-shot reference rows, using observed lagged rosters; this is incidence conditional on the realized side history, and is named so. Recurrent-entry cells use expected number of entries, never pooled with first-entry incidence.
+- **Late-entry cells** (stage boundary = after the window): landmark cohort = states eligible and not participating at month W+1; the one-shot is initialized at the same landmark; covariates remeasured for the year before the landmark; the original target set stays the onset set.
+
+### B3. Month-0 roster, empty sides, target set
+- **Month 0:** side A = baseline initiating-side participants; side B = the original target set (baseline target-side participants). From month 1: the roster = participants active in month m−1. A window-promoted originator joins side A's roster from the month after its entry; eventual entrants are never in a roster before they enter.
+- **Empty side later:** default carry forward the last nonempty roster for that side, flagged; sweep level: follow-up ends when either side empties. Side power share and k/side capability are computed on the roster in use; with a carried roster they are never 0/0.
+- **Target set** must be nonempty and resolvable from the participant file; disputes without one are listed and dropped. Mean and minimum centrality are then always defined.
+- **Dynamic entrants** (monthly sweep level only): eligible from their first full month in the system; tiers and covariates computed at that month's year; baseline (onset-frozen) quantities are not imputed.
+
+### B4. Opportunity folds
+- Six disjoint folds by the dispute's onset month: 1816–1913, 1914–1918, 1919–1938, 1939–1945, 1946–1989, 1990–2014. Every row of a dispute takes its onset fold, so a dispute spanning eras never trains its own q. This is retrospective cross-fitting (other-era data, including later eras), not a historical forecast.
+- q is bounded to [1e−4, 1 − 1e−4] before the log; a failed or separated auxiliary fit stops the build; features are numeric (no unseen factor levels by construction). These policies are fixed now, before any main fit.
+
+### B5. Dispute-level samples
+- Defined on the dispute (MID number), not on stage-1 pairs: fatal = GML dispute fatality > 0 (the stage-1 `disp_fatal` source); level ≥ k = dispute fatality level ≥ k; **jointly fatal** = at least one participant with fatalities on each side (side-level, from the participant fatality codes). Unknown codes are dropped and counted. Every eligible third party in a selected dispute is in its cohort.
+
+### C1. Legal sweep cells
+| Crossing | Rule |
+|---|---|
+| One-shot × re-entries as new decisions | Illegal; re-entries exist only in the monthly recurrent family (expected entries), reported separately |
+| One-shot × monthly-updated tiers / dynamic entrants | Illegal (machine-readable legality table enforced by the builder) |
+| Absorbing first entry × censor at side switch | Censoring applies to the switching state's membership in *other* states' rosters; cells identical to the reference are de-duplicated |
+| Updated tier × full set without tier terms | Duplicate; dropped |
+| Lag 5 × onset-frozen ties | Ties from onset − 5; other covariates follow the lag level |
+| Windows | Seven unique values 0–6; W = 1 is the reference |
+| Offset λ | λ = 0 vs 1 compared on identical full-set rows; likely-only vs full set reported as a population change |
+
+**Reference specification (single cell):** prospective cohort (B1) with the originator competing event; one-shot within observed horizon on complete-horizon rows; flat four-category logit; full set with tier interactions, λ = 0; tiers frozen at onset; tie sum; ties lagged one year; target mean; first side; re-entries ignored; dynamic entrants excluded; alliance control on; window 1; fatal MIDs; main stage-1 measure; carry-forward rosters.
+**Scale.** The literal crossing is ~570,000 main-measure cells; the builder first writes the legal task list, then it is costed and capped, and any reduced design is fixed in writing before estimates are examined. Phase-A crossings are a *selected interaction subset* (stage boundary, estimator, risk set, tie aggregation, sample, window), not a claim to cover every estimand-changing dimension.
+**Contrasts.** H1–H3 = difference in predicted cumulative incidence (within H) when the covariate moves from its 25th to its 75th percentile in the reference cohort, others at observed values; tie sum and tie max are standardized (within-year SD) before contrasts; uncertainty by two-way cluster bootstrap. Summaries are reported within estimand families (first-entry incidence; recurrent expected entries; retrospective cohort) with requested / completed / valid counts.
+
+### C2. Sequential alternative
+Two logits: (1) participation — any third-party entry vs stay out, with the opportunity offset λ ln q here and only here; (2) side among third-party entrants — A vs B, with side-difference covariates (tie to A − tie to B, relative power, distance difference, alliance difference) and k-level terms. Originator entries are censored in this variant (labelled). Cumulative incidence of A = P(enter) × P(A | enter), aggregated over months as above. No inclusive-value parameter.
+
+### AME language (sketch corrected in `docs/ame_joint_sketch.md`)
+Sharing b_j models one source of dependence between target choice and joining; it does not correct selection into conflict or fatal disputes. The AME acceptance gate (likelihood, identification constraints and priors, R-hat/ESS/divergence thresholds, recovery and SBC tolerances, PPC targets, held-out folds, allowed remedial runs) is written as a separate document and fixed before any AME result is seen; success never depends on θ's sign, H1 significance, or agreement with the baseline.
