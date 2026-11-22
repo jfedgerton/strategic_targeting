@@ -217,12 +217,21 @@ sx <- merge(sx, DYk[, .(ccode = k, j, ty = year, capdist, conttype, ally, defoff
 ## build's POLITY_DEM_CUT is assumed to be 6: verify against v2/R/01_build_data.R section 6); MID ongoing between k and a member in t - 1
 DEMY <- as.data.table(ccode_democracy)[, .(ccode, year, dem = as.integer(!is.na(polity2) & polity2 >= 6))]
 sx <- merge(sx, DEMY[, .(j = ccode, ty = year, dem_j = dem)], by = c("j", "ty"), all.x = TRUE); sx[is.na(dem_j), dem_j := 0L]
-gmid <- unique(GDY[, .(pdisp = dispnum, a = ccode1, b = ccode2, year)])
-mt <- merge(sx[, .(dispnum, ccode, j, ty)], gmid, by.x = c("ccode", "j", "ty"), by.y = c("a", "b", "year"))[pdisp != dispnum, .(mid_tm1 = 1L), by = .(dispnum, ccode, j)]
-sx <- merge(sx, mt, by = c("dispnum", "ccode", "j"), all.x = TRUE); sx[is.na(mid_tm1), mid_tm1 := 0L]
+## conflict histories (GPT surface review P2-4): COW-MID histories mirror stage 1 (the main build keeps COW-based histories) and are the
+## reference; GML histories are kept as a labelled alternative (*_gml)
+CDY <- as.data.table(cow_mid_ddydisps); CD <- as.data.table(cow_mid_disps)
+mid_tm1_of <- function(DDY) { g <- unique(DDY[, .(pdisp = dispnum, a = ccode1, b = ccode2, year)])
+  merge(sx[, .(dispnum, ccode, j, ty)], g, by.x = c("ccode", "j", "ty"), by.y = c("a", "b", "year"))[pdisp != dispnum, .(v = 1L), by = .(dispnum, ccode, j)] }
+mt <- mid_tm1_of(CDY); setnames(mt, "v", "mid_tm1"); mtg <- mid_tm1_of(GDY); setnames(mtg, "v", "mid_tm1_gml")
+sx <- merge(merge(sx, mt, by = c("dispnum", "ccode", "j"), all.x = TRUE), mtg, by = c("dispnum", "ccode", "j"), all.x = TRUE)
+sx[is.na(mid_tm1), mid_tm1 := 0L]; sx[is.na(mid_tm1_gml), mid_tm1_gml := 0L]
 ## prior MIDs (recheck finding 4): DISTINCT GML disputes between k and any member of side s starting no later than t - 1 (current excluded)
-pm <- unique(merge(GDY[, .(pdisp = dispnum, a = ccode1, b = ccode2)], GD[, .(pdisp = dispnum, styear)], by = "pdisp"))
+pm <- unique(merge(CDY[, .(pdisp = dispnum, a = ccode1, b = ccode2)], CD[, .(pdisp = dispnum, styear)], by = "pdisp"))
+pmg <- unique(merge(GDY[, .(pdisp = dispnum, a = ccode1, b = ccode2)], GD[, .(pdisp = dispnum, styear)], by = "pdisp"))
 PRI <- s2_prior_side(sx[, .(dispnum, ccode, j, side_rel, ty)], pm)
+PRIg <- s2_prior_side(sx[, .(dispnum, ccode, j, side_rel, ty)], pmg)
+logf("conflict histories: COW-MID (reference, mirrors stage 1) and GML (alternative); candidate-member pairs with a MID at t-1 COW %d / GML %d; distinct prior-dispute counts > 0 by side COW %d / GML %d",
+     sum(sx$mid_tm1), sum(sx$mid_tm1_gml), sum(PRI$prior_n > 0), sum(PRIg$prior_n > 0))
 ## side major-power status at t - 1 (recheck finding 2): major in December of the year before onset; the candidate's tier stays onset-based
 maj_s <- maj_at(merge(R0[, .(dispnum, ccode)], DT[, .(dispnum, onset_lo = s2_mk(onset_year - 1L, 12L))], by = "dispnum"))[, maj := TRUE]
 sx <- merge(sx, maj_s[, .(dispnum, j = ccode, maj)], by = c("dispnum", "j"), all.x = TRUE); sx[is.na(maj), maj := FALSE]
@@ -231,9 +240,10 @@ SC <- sx[, .(n_side = .N, side_cinc = s2_strict_sum(cinc_j), cinc_miss = anyNA(c
              contig_side = s2_strict_any(ifelse(is.na(conttype), NA, conttype %in% 1:5)), ally_side = s2_strict_any(ifelse(is.na(ally), NA, ally > 0)),
              dyad_miss = anyNA(capdist) | anyNA(conttype) | anyNA(ally), major_side = as.integer(any(maj)),
              land_side = s2_strict_any(ifelse(is.na(conttype), NA, conttype == 1L)), defoff_side = s2_strict_any(ifelse(is.na(defoff), NA, defoff > 0)),
-             dem_side = mean(dem_j), mid_tm1_side = as.integer(any(mid_tm1 == 1L))), by = .(dispnum, ccode, side_rel)]
+             dem_side = mean(dem_j), mid_tm1_side = as.integer(any(mid_tm1 == 1L)), mid_tm1_side_gml = as.integer(any(mid_tm1_gml == 1L))), by = .(dispnum, ccode, side_rel)]
 SC <- merge(SC, PRI[, .(dispnum, ccode, side_rel, prior_side = log1p(prior_n))], by = c("dispnum", "ccode", "side_rel"))
-SC <- dcast(SC, dispnum + ccode ~ side_rel, value.var = c("n_side", "side_cinc", "cinc_miss", "min_capdist", "contig_side", "ally_side", "dyad_miss", "prior_side", "major_side", "land_side", "defoff_side", "dem_side", "mid_tm1_side"))
+SC <- merge(SC, PRIg[, .(dispnum, ccode, side_rel, prior_side_gml = log1p(prior_n))], by = c("dispnum", "ccode", "side_rel"))
+SC <- dcast(SC, dispnum + ccode ~ side_rel, value.var = c("n_side", "side_cinc", "cinc_miss", "min_capdist", "contig_side", "ally_side", "dyad_miss", "prior_side", "major_side", "land_side", "defoff_side", "dem_side", "mid_tm1_side", "mid_tm1_side_gml", "prior_side_gml"))
 own <- merge(row0[, .(dispnum, ccode, ty = onset_year - 1L)], NMC[, .(ccode, ty = year, cinc_k = cinc)], by = c("ccode", "ty"), all.x = TRUE)
 own <- merge(own, POS[, .(ccode, ty = year, own_cent = R)], by = c("ccode", "ty"), all.x = TRUE)
 own <- merge(own, DEMY[, .(ccode, ty = year, dem_k = dem)], by = c("ccode", "ty"), all.x = TRUE); own[is.na(dem_k), dem_k := 0L]
