@@ -15,7 +15,9 @@ fit_mnl <- function(X, design, label = "", vc = TRUE) {
   Y <- sapply(names(design), function(al) as.numeric(X$y == cats[[al]]))
   ## GPT P1-1: row-specific availability (memo N1, one-shot): A only when the horizon reaches past the window (H > W); originator entry only
   ## when W >= 1 (month 0 always lies inside the window); B always. Unavailable alternatives get probability exactly 0.
-  AV <- cbind(A = X$H > W_REF, B = rep(TRUE, nrow(X)), O = rep(W_REF >= 1L, nrow(X)))[, names(design), drop = FALSE]
+  ## GPT surface review P2-3 (PI 2026-11-22): originator entry is available only to likely-tier candidates (a structural zero, the limit the
+  ## separation implies: every originator entrant is in the likely tier); "likely" therefore does not enter O's utility
+  AV <- cbind(A = X$H > W_REF, B = rep(TRUE, nrow(X)), O = rep(W_REF >= 1L, nrow(X)) & X$likely == 1)[, names(design), drop = FALSE]
   if (any(Y == 1 & !AV)) stop(sprintf("%s: an observed outcome is unavailable under the one-shot mask (%d rows)", label, sum(Y == 1 & !AV)))
   k <- vapply(Z, ncol, 0L); idx <- split(seq_len(sum(k)), rep(names(k), k))
   util <- function(p) sapply(names(Z), function(al) drop(Z[[al]] %*% p[idx[[al]]]))
@@ -53,7 +55,9 @@ surf_contrasts <- function(f) {
   for (al in names(SURF_TERMS)) { pre <- SURF_TERMS[[al]]
     for (ax in c("M", "R")) for (sg in c(1, -1)) {
       a <- setNames(numeric(length(f$b)), names(f$b))
-      for (t in c(paste0("d", ax), paste0("d", ax, "2"))) { nmx <- paste0(al, ":", pre, t); if (nmx %in% names(a)) a[nmx] <- if (endsWith(t, "2")) 1 else sg }
+      tt <- paste0(al, ":", pre, c(paste0("d", ax), paste0("d", ax, "2")))
+      if (!all(tt %in% names(a))) { out[[length(out) + 1L]] <- data.table(alt = al, axis = ax, gap = sg, est = NA_real_, se = NA_real_); next }   # GPT P2-3: a dropped term is not an estimated zero
+      a[tt[1]] <- sg; a[tt[2]] <- 1
       est <- sum(a * f$b); se <- if (!is.null(f$V)) sqrt(max(drop(t(a) %*% f$V %*% a), 0)) else NA_real_
       out[[length(out) + 1L]] <- data.table(alt = al, axis = ax, gap = sg, est = est, se = se) } }
   rbindlist(out)

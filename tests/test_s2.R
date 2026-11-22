@@ -200,7 +200,7 @@ check("33 a side member without a position makes that side's gaps NA (strict)", 
 check("33 frozen surface design: each alternative carries its 5 surface terms, no linear position terms (own_cent, tgt_cent_mean, log_cinc_ratio)",
       all(S2_SURF_A %in% S2_REF_DESIGN$A) && all(S2_SURF_B %in% S2_REF_DESIGN$B) && all(S2_SURF_A %in% S2_REF_DESIGN$O) && !any(grepl("own_cent|tgt_cent|log_cinc_ratio", unlist(S2_REF_DESIGN))))
 check("33 mirroring: join A / originator take the stage-1 controls toward B (the side they fight); join B toward A; recruitment terms toward the joined side",
-      all(S2_Z_TOWARD("B") %in% S2_REF_DESIGN$A) && all(S2_Z_TOWARD("A") %in% S2_REF_DESIGN$B) && identical(S2_REF_DESIGN$O, S2_REF_DESIGN$A) && "tie_sum_A" %in% S2_REF_DESIGN$A && "tie_sum_B" %in% S2_REF_DESIGN$B)
+      all(S2_Z_TOWARD("B") %in% S2_REF_DESIGN$A) && all(S2_Z_TOWARD("A") %in% S2_REF_DESIGN$B) && identical(S2_REF_DESIGN$O, setdiff(S2_REF_DESIGN$A, c("likely", "dem_x_B"))) && "tie_sum_A" %in% S2_REF_DESIGN$A && "tie_sum_B" %in% S2_REF_DESIGN$B)
 check("33 sweep dimensions: opposing-side position mean/min and design surface/linear; reference = mean, surface", S2_REF[["opp_side"]] == "mean" && S2_REF[["design"]] == "surface" && is.null(S2_DIMS$target))
 
 ## 34. opposing-side variants (robustness A1-A2)

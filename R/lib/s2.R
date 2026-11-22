@@ -405,7 +405,10 @@ S2_Z_TOWARD <- function(o) c(paste0("land_side_", o), paste0("lcap_", o), paste0
 S2_REF_DESIGN <- list(
   A = c("likely", S2_SURF_A, S2_Z_TOWARD("B"), "tie_sum_A", "ally_side_A", "share_A", "n_side_A", "n_side_B"),
   B = c("likely", S2_SURF_B, S2_Z_TOWARD("A"), "tie_sum_B", "ally_side_B", "share_B", "n_side_A", "n_side_B"),
-  O = c("likely", S2_SURF_A, S2_Z_TOWARD("B"), "tie_sum_A", "ally_side_A", "share_A", "n_side_A", "n_side_B"))
+  O = c(S2_SURF_A, setdiff(S2_Z_TOWARD("B"), "dem_x_B"), "tie_sum_A", "ally_side_A", "share_A", "n_side_A", "n_side_B"))
+## O restrictions (GPT surface review P2-3, declared): originator entry is structurally unavailable to unlikely candidates (fit_mnl mask), so
+## "likely" is not an O term; dem_x_B is excluded from O because no originator entrant is a democracy facing a democratic target side (its MLE
+## does not exist) -- a declared restricted specification, reported as such
 S2_AVAIL <- unique(c(S2_AVAIL, "dM_kA", "dR_kA", "dM_kB", "dR_kB", "land_side_A", "land_side_B", "defoff_side_A", "defoff_side_B",
                      "dem_side_A", "dem_side_B", "mid_tm1_side_A", "mid_tm1_side_B"))
 ## sweep dimensions added by the surface amendment: opposing-side position (mean of the side / its most isolated, weakest member) and design
