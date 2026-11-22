@@ -1,0 +1,171 @@
+\documentclass[11pt]{article}
+\usepackage[margin=0.6in]{geometry}
+\usepackage{booktabs}
+\renewcommand{\arraystretch}{0.85}
+\begin{document}
+\begin{table}[!htbp]\centering\small
+\caption{Stage 1: target choice by initiation type (conditional logit)}\label{tab:stage1}
+\begin{tabular}{lcccc}
+\toprule
+ & \multicolumn{2}{c}{No target FE} & \multicolumn{2}{c}{Target FE} \\
+\cmidrule(lr){2-3}\cmidrule(lr){4-5}
+ & Bilateral & Coalition & Bilateral & Coalition \\
+\midrule
+\multicolumn{5}{l}{\emph{Utility change, gap = initiator minus target}} \\
+Target weaker (gap $+1$) & $-0.98^{***}$ & $-1.67^{***}$ & $-0.70$ & $-1.21^{**}$ \\
+ & (0.28) & (0.57) & (0.64) & (0.61) \\
+Target stronger (gap $-1$) & $0.25$ & $1.26^{***}$ & $0.07$ & $1.12^{*}$ \\
+ & (0.28) & (0.43) & (0.57) & (0.65) \\
+Target less central (gap $+1$) & $0.03$ & $1.10^{***}$ & $-0.24$ & $0.84^{***}$ \\
+ & (0.11) & (0.23) & (0.19) & (0.30) \\
+Target more central (gap $-1$) & $-0.13$ & $-0.84^{***}$ & $0.24$ & $-0.51$ \\
+ & (0.16) & (0.30) & (0.19) & (0.34) \\
+\midrule
+\multicolumn{5}{l}{\emph{Surface coefficients}} \\
+$\Delta M$ & $-0.61^{**}$ & $-1.46^{***}$ & $-0.39$ & $-1.17^{*}$ \\
+ & (0.24) & (0.48) & (0.59) & (0.61) \\
+$\Delta M^2$ & $-0.36^{**}$ & $-0.21$ & $-0.32^{**}$ & $-0.05$ \\
+ & (0.14) & (0.17) & (0.14) & (0.15) \\
+$\Delta R$ & $0.08$ & $0.97^{***}$ & $-0.24$ & $0.68^{**}$ \\
+ & (0.13) & (0.24) & (0.18) & (0.30) \\
+$\Delta R^2$ & $-0.05$ & $0.13$ & $-0.00$ & $0.17^{*}$ \\
+ & (0.05) & (0.11) & (0.05) & (0.10) \\
+$\Delta M \times \Delta R$ & $0.53^{***}$ & $-0.08$ & $0.56^{***}$ & $-0.19$ \\
+ & (0.15) & (0.09) & (0.15) & (0.12) \\
+\midrule
+\multicolumn{5}{l}{\emph{Controls (shared across types)}} \\
+Land contiguity & $1.82^{***}$ &  & $1.94^{***}$ &  \\
+ & (0.35) &  & (0.29) &  \\
+Log capital distance & $-0.78^{***}$ &  & $-1.11^{***}$ &  \\
+ & (0.16) &  & (0.14) &  \\
+Target democracy & $-0.16$ &  & $0.40^{*}$ &  \\
+ & (0.18) &  & (0.23) &  \\
+Joint democracy & $-1.63^{**}$ &  & $-1.82^{***}$ &  \\
+ & (0.65) &  & (0.51) &  \\
+Defense/offense pact & $0.36^{*}$ &  & $0.38^{**}$ &  \\
+ & (0.22) &  & (0.18) &  \\
+Target major power & $0.25$ &  & $0.21$ &  \\
+ & (0.33) &  & (0.46) &  \\
+Both major powers & $-1.25^{***}$ &  & $-1.15^{***}$ &  \\
+ & (0.44) &  & (0.40) &  \\
+MID at $t-1$ & $1.63^{***}$ &  & $1.52^{***}$ &  \\
+ & (0.23) &  & (0.21) &  \\
+Log prior MIDs & $0.93^{***}$ &  & $0.63^{***}$ &  \\
+ & (0.14) &  & (0.14) &  \\
+\midrule
+Events (bilateral / coalition) & \multicolumn{4}{c}{619 (478 / 141)} \\
+Alternative rows & \multicolumn{4}{c}{72,031} \\
+\bottomrule
+\end{tabular}
+\begin{minipage}{0.95\linewidth}\footnotesize\smallskip Conditional logit over all system members (fatal MIDs, 1-month originator window, main relational measure). Two-way cluster-robust SEs (initiator $\times$ dispute) in parentheses. $\Delta M$: log CINC share gap (pooled scale); $\Delta R$: relational-position gap at $t-1$ (onset-year scale). Utility changes evaluate the quadratic surface at a gap of $\pm 1$ on one axis with the other at 0. Target FE: one indicator per chosen target, fitted on the alternatives that are chosen at least once (never-chosen targets have fixed effects of $-\infty$ and drop out). $^{*}p<.10$, $^{**}p<.05$, $^{***}p<.01$.\end{minipage}
+\end{table}
+
+\clearpage
+\begin{table}[!htbp]\centering\small
+\caption{Stage 2: third-party entry and side choice (four-category logit, stay out = reference)}\label{tab:stage2}
+\begin{tabular}{lccc}
+\toprule
+ & Join initiating side & Join target side & Originator entry \\
+ & (fights target set) & (fights initiators) & (fights target set) \\
+\midrule
+\multicolumn{4}{l}{\emph{Utility change, gap = joiner minus the side it fights}} \\
+Opponent weaker (gap $+1$) & $0.16$ & $0.72^{**}$ & $0.68$ \\
+ & (0.49) & (0.35) & (0.43) \\
+Opponent stronger (gap $-1$) & $-0.58^{*}$ & $-1.13^{***}$ & $-0.39$ \\
+ & (0.35) & (0.33) & (0.34) \\
+Opponent less central (gap $+1$) & $0.53^{**}$ & $0.36^{**}$ & $0.02$ \\
+ & (0.23) & (0.16) & (0.20) \\
+Opponent more central (gap $-1$) & $-0.31$ & $-0.12$ & $-0.05$ \\
+ & (0.31) & (0.18) & (0.30) \\
+\midrule
+\multicolumn{4}{l}{\emph{Opponent surface}} \\
+$\Delta M$ & $0.37$ & $0.93^{***}$ & $0.54^{*}$ \\
+ & (0.38) & (0.29) & (0.31) \\
+$\Delta M^2$ & $-0.21$ & $-0.21$ & $0.14$ \\
+ & (0.20) & (0.17) & (0.24) \\
+$\Delta R$ & $0.42$ & $0.24$ & $0.04$ \\
+ & (0.26) & (0.16) & (0.22) \\
+$\Delta R^2$ & $0.11$ & $0.12^{**}$ & $-0.01$ \\
+ & (0.11) & (0.06) & (0.13) \\
+$\Delta M \times \Delta R$ & $-0.03$ & $0.37^{*}$ & $-0.21$ \\
+ & (0.18) & (0.19) & (0.26) \\
+\midrule
+\multicolumn{4}{l}{\emph{Stage-1 controls toward the opponent}} \\
+Land contiguity & $-0.24$ & $0.36$ & $0.43$ \\
+ & (0.46) & (0.29) & (0.61) \\
+Log distance (closest member) & $-0.83^{***}$ & $-0.55^{***}$ & $-0.52^{*}$ \\
+ & (0.17) & (0.16) & (0.27) \\
+Opponent democracy (share) & $-1.10^{**}$ & $-0.46$ & $-1.73^{***}$ \\
+ & (0.53) & (0.49) & (0.50) \\
+Democracy $\times$ opponent democracy & $-1.48$ & $-0.90^{**}$ & -- \\
+ & (1.11) & (0.45) &  \\
+Defense/offense pact & $0.15$ & $0.21$ & $0.01$ \\
+ & (0.40) & (0.37) & (0.55) \\
+Major power on opposing side & $0.59$ & $0.25$ & $-0.99$ \\
+ & (0.65) & (0.77) & (1.06) \\
+Major $\times$ opposing major & $0.18$ & $0.80^{*}$ & $2.03^{**}$ \\
+ & (0.43) & (0.42) & (0.89) \\
+MID at $t-1$ & $0.20$ & $0.69^{**}$ & $0.85$ \\
+ & (0.46) & (0.35) & (0.65) \\
+Log prior MIDs (distinct) & $0.69^{**}$ & $0.19$ & $0.61^{**}$ \\
+ & (0.30) & (0.22) & (0.30) \\
+\midrule
+\multicolumn{4}{l}{\emph{Joined side and dispute}} \\
+Tie sum to joined side & $1.54^{*}$ & $1.52$ & $2.87^{***}$ \\
+ & (0.79) & (0.98) & (0.63) \\
+ATOP pact with joined side & $0.16$ & $-0.30$ & $-0.54$ \\
+ & (0.57) & (0.42) & (0.38) \\
+Joined side's CINC share & $0.01$ & $-2.14^{***}$ & $-0.28$ \\
+ & (1.32) & (0.80) & (0.92) \\
+Initiating-side size & $-1.68^{**}$ & $-0.54$ & $-0.44$ \\
+ & (0.71) & (0.37) & (0.42) \\
+Target-side size & $-1.00$ & $-0.83$ & $0.28$ \\
+ & (0.75) & (1.22) & (0.94) \\
+Likely tier & $2.57^{***}$ & $0.98^{*}$ & -- \\
+ & (0.84) & (0.52) &  \\
+\bottomrule
+\end{tabular}
+\begin{minipage}{0.95\linewidth}\footnotesize\smallskip Reference cohort: system members at onset that are not original participants, complete horizons, fatal MIDs (stage-1 set), 1-month window; 63,143 candidate-dispute rows (initiating side 121, target side 184, originator 71). Two-way cluster-robust SEs (candidate state $\times$ dispute). Joining the initiating side is unavailable when the horizon ends within the window; originator entry is available only to likely-tier candidates (so the tier and democracy $\times$ opponent democracy do not enter that equation; --). Conflict histories from COW-MID. $^{*}p<.10$, $^{**}p<.05$, $^{***}p<.01$.\end{minipage}
+\end{table}
+
+\clearpage
+\begin{table}[!htbp]\centering\small
+\caption{Two-step fixed-effects joint model: shared target effect}\label{tab:jointfe}
+\begin{tabular}{lccc}
+\toprule
+\multicolumn{4}{l}{\emph{Stage 1 with target fixed effects: utility change}} \\
+ & Bilateral & Coalition & \\
+Target weaker (gap $+1$) & $-0.70$ & $-1.21^{**}$ &  \\
+ & (0.64) & (0.61) &  \\
+Target stronger (gap $-1$) & $0.07$ & $1.12^{*}$ &  \\
+ & (0.57) & (0.65) &  \\
+Target less central (gap $+1$) & $-0.24$ & $0.84^{***}$ &  \\
+ & (0.19) & (0.30) &  \\
+Target more central (gap $-1$) & $0.24$ & $-0.51$ &  \\
+ & (0.19) & (0.34) &  \\
+\midrule
+\multicolumn{4}{l}{\emph{Stage 2 with the target set's mean fixed effect}} \\
+ & Join initiating side & Join target side & Originator entry \\
+Opponent weaker (gap $+1$) & $0.09$ & $0.67^{*}$ & $0.45$ \\
+ & (0.49) & (0.36) & (0.53) \\
+Opponent stronger (gap $-1$) & $-0.50$ & $-1.19^{***}$ & $-0.58$ \\
+ & (0.34) & (0.33) & (0.45) \\
+Opponent less central (gap $+1$) & $0.60^{***}$ & $0.41^{**}$ & $-0.03$ \\
+ & (0.20) & (0.17) & (0.24) \\
+Opponent more central (gap $-1$) & $-0.32$ & $-0.16$ & $-0.06$ \\
+ & (0.28) & (0.19) & (0.32) \\
+$\theta$: target-set fixed effect $\bar b$ & $-0.87^{***}$ & $-0.35^{***}$ & $0.38$ \\
+ & (0.23) & (0.12) & (0.35) \\
+Tie sum to joined side & $0.72$ & $0.93$ & $2.92^{***}$ \\
+ & (0.85) & (0.97) & (0.72) \\
+Joined side's CINC share &  & $-2.32^{**}$ &  \\
+ &  & (0.90) &  \\
+\midrule
+Bootstrap draws (valid / requested) & \multicolumn{3}{c}{2 / 2 (preview: two-way SEs shown)} \\
+Stage-2 rows / LR($\theta$, 3 df) & \multicolumn{3}{c}{58,950 / 82.45} \\
+\bottomrule
+\end{tabular}
+\begin{minipage}{0.95\linewidth}\footnotesize\smallskip Step 1: stage-1 conditional logit with target fixed effects. Step 2: the stage-2 reference model plus $\bar b$, the mean fixed effect of the original target set (targets chosen at least twice, centred, clipped to $[-5,5]$); disputes without a usable $\bar b$ are dropped. Percentile 95\% intervals from a dispute-cluster bootstrap that refits both steps on each draw (seed 123); $^{\dagger}$ interval excludes 0. Targets never chosen in a draw leave that draw's fixed-effect model (their fixed effects diverge), as in the point fit.\end{minipage}
+\end{table}
+
+\end{document}

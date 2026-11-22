@@ -57,7 +57,17 @@ nref <- 63143L
 t2 <- paste0(t2, "\\bottomrule\n\\end{tabular}\n\\begin{minipage}{0.95\\linewidth}\\footnotesize\\smallskip Reference cohort: system members at onset that are not original participants, complete horizons, fatal MIDs (stage-1 set), 1-month window; 63,143 candidate-dispute rows (initiating side 121, target side 184, originator 71). Two-way cluster-robust SEs (candidate state $\\times$ dispute). Joining the initiating side is unavailable when the horizon ends within the window; originator entry is available only to likely-tier candidates (so the tier and democracy $\\times$ opponent democracy do not enter that equation; --). Conflict histories from COW-MID. $^{*}p<.10$, $^{**}p<.05$, $^{***}p<.01$.\\end{minipage}\n\\end{table}\n")
 
 ## ---- Table 3: two-step FE joint model -----------------------------------------------------------------------------------------------
-BT <- JF$BOOT; bq <- function(qq) { r <- BT[BT$q == qq]; if (nrow(r)) cell_ci(r$est, r$lo, r$hi) else c("", "") }
+BT <- JF$BOOT; USE_BOOT <- (JF$B - JF$fails) >= 100
+## until the bootstrap has >= 100 valid draws, Table 3 shows two-way cluster-robust SEs (stage 2 conditional on bbar) instead of intervals
+s2c <- surf_c3 <- NULL
+if (!USE_BOOT) { b <- JF$F_t$b; V <- JF$F_t$V
+  s2v <- function(al, ax, g) { pre <- if (al == "B") "sB_" else "sA_"; a <- setNames(numeric(length(b)), names(b)); tt <- paste0(al, ":", pre, c(paste0("d", ax), paste0("d", ax, "2")))
+    if (!all(tt %in% names(b))) return(c(NA, NA)); a[tt[1]] <- g; a[tt[2]] <- 1; c(sum(a * b), sqrt(max(drop(t(a) %*% V %*% a), 0))) } }
+bq <- function(qq) {
+  if (USE_BOOT) { r <- BT[BT$q == qq]; return(if (nrow(r)) cell_ci(r$est, r$lo, r$hi) else c("", "")) }
+  if (startsWith(qq, "S1.")) { p <- strsplit(qq, ".", fixed = TRUE)[[1]]; r <- JF$S1C[model == "target FE" & type == p[2] & axis == p[3] & gap == as.numeric(sub("^\\.", "", paste(p[-(1:3)], collapse = ".")))]; return(cell(r$est, r$se)) }
+  if (startsWith(qq, "S2.")) { p <- strsplit(qq, ".", fixed = TRUE)[[1]]; v <- s2v(p[2], p[3], as.numeric(paste(p[-(1:3)], collapse = "."))); return(cell(v[1], v[2])) }
+  if (qq %in% names(JF$F_t$b)) return(cell(JF$F_t$b[[qq]], sqrt(JF$F_t$V[qq, qq]))); c("", "") }
 t3 <- "\\begin{table}[!htbp]\\centering\\small\n\\caption{Two-step fixed-effects joint model: shared target effect}\\label{tab:jointfe}\n\\begin{tabular}{lccc}\n\\toprule\n"
 t3 <- paste0(t3, "\\multicolumn{4}{l}{\\emph{Stage 1 with target fixed effects: utility change}} \\\\\n & Bilateral & Coalition & \\\\\n")
 for (k in names(CONTR_LAB)) t3 <- paste0(t3, row2(sub("Opponent", "Target", CONTR_LAB[[k]]), list(bq(paste0("S1.bil.", k)), bq(paste0("S1.coal.", k)), c("", ""))))
@@ -66,8 +76,8 @@ for (k in names(CONTR_LAB)) t3 <- paste0(t3, row2(CONTR_LAB[[k]], lapply(alts, f
 t3 <- paste0(t3, row2("$\\theta$: target-set fixed effect $\\bar b$", list(bq("A:bbar"), bq("B:bbar"), bq("O:bbar"))))
 t3 <- paste0(t3, row2("Tie sum to joined side", list(bq("A:tie_sum_A"), bq("B:tie_sum_B"), bq("O:tie_sum_A"))))
 t3 <- paste0(t3, row2("Joined side's CINC share", list(c("", ""), bq("B:share_B"), c("", ""))))
-t3 <- paste0(t3, sprintf("\\midrule\nBootstrap draws (valid / requested) & \\multicolumn{3}{c}{%d / %d} \\\\\nStage-2 rows / LR($\\theta$, 3 df) & \\multicolumn{3}{c}{%s / %.2f} \\\\\n",
-                         JF$B - JF$fails, JF$B, format(JF$F_t$n, big.mark = ","), 2 * (JF$F_t$ll - JF$F_nt$ll)))
+t3 <- paste0(t3, sprintf("\\midrule\nBootstrap draws (valid / requested) & \\multicolumn{3}{c}{%d / %d%s} \\\\\nStage-2 rows / LR($\\theta$, 3 df) & \\multicolumn{3}{c}{%s / %.2f} \\\\\n",
+                         JF$B - JF$fails, JF$B, if (USE_BOOT) "" else " (preview: two-way SEs shown)", format(JF$F_t$n, big.mark = ","), 2 * (JF$F_t$ll - JF$F_nt$ll)))
 t3 <- paste0(t3, "\\bottomrule\n\\end{tabular}\n\\begin{minipage}{0.95\\linewidth}\\footnotesize\\smallskip Step 1: stage-1 conditional logit with target fixed effects. Step 2: the stage-2 reference model plus $\\bar b$, the mean fixed effect of the original target set (targets chosen at least twice, centred, clipped to $[-5,5]$); disputes without a usable $\\bar b$ are dropped. Percentile 95\\% intervals from a dispute-cluster bootstrap that refits both steps on each draw (seed 123); $^{\\dagger}$ interval excludes 0. Targets never chosen in a draw leave that draw's fixed-effect model (their fixed effects diverge), as in the point fit.\\end{minipage}\n\\end{table}\n")
 
 writeLines(c(t1, t2, t3), file.path(OUT, "tables.tex"))
