@@ -120,6 +120,9 @@ if (VAR == "initiators") {
   d$roles <- c("bil", "coal"); d$types <- "init"
   logf("initiators: kept bilateral %d and coalition-originator %d strata; dropped attack-side joiner %d and target-side joiner %d strata",
        n_before[1], n_before[2], n_before[3], n_before[4])
+  ## GPT stage-1 review S2: count retained coalition originators that are window-promoted joiners and carry a case-review side tag
+  if ("side_case" %in% names(D)) logf("initiators: retained strata whose chosen row has side_case hard %d / reviewed %d (promoted initiating-side joiners; the dropside_hard/reviewed checks remove them)",
+       D[chosen == 1L & side_case %in% "hard", uniqueN(ev_id)], D[chosen == 1L & side_case %in% "reviewed", uniqueN(ev_id)])
 }
 
 if (VAR == "sample") {
@@ -158,7 +161,7 @@ if (VAR == "dropside") {
     dl <- if (LEV == "hard_disp") SIDE_HARD else SIDE_REVIEWED
     unique(D[chosen == 1L & vapply(strsplit(dispnums, ";"), function(x) any(x %in% dl), TRUE), ev_id]) }
   D <- D[!(ev_id %in% drop_ev)]
-  logf("dropside (%s): removed %d joiner strata; types left %s", LEV, length(drop_ev), paste(tabulate(D[chosen == 1L, type] + 1L, length(d$roles)), collapse = "/"))
+  logf("dropside (%s): removed %d strata (joiner strata, incl. window-promoted joiners; under init, promoted coalition originators); types left %s", LEV, length(drop_ev), paste(tabulate(D[chosen == 1L, type] + 1L, length(d$roles)), collapse = "/"))
   d$types <- paste0(d$types, "_dropside", LEV)
 }
 

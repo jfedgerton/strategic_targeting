@@ -17,6 +17,21 @@ One question, one main model, every robustness check in one run.
 | Choice set | System members with a position, covariates and stage-2 availability in the event year | — |
 | Inference | Two-way cluster-robust (initiator × dispute) | Pigeonhole two-way bootstrap; permutation diagnostics |
 
+## Stage 1 (`TYPES=init`, PI 2026-11-21)
+
+`TYPES=init OUT=output_init bash run_all.sh` runs the same grid on initiation decisions only: bilateral initiators vs coalition originators (originators within the window, including initiating-side joiners promoted by the window). Joiner strata of both sides are dropped; joiners are stage-2 actors. `TYPES` accepts only `bcd` or `init` and is part of the fingerprint, so one output folder holds one scheme. What the inherited checks mean under init (GPT stage-1 review):
+
+| Check | Population under init |
+|---|---|
+| Main fit, intensity, lags, scale, measurement error, defensibility, aggression | the retained bilateral and coalition-originator strata |
+| `dropside_hard`, `dropside_reviewed` | promoted coalition originators whose side came from the case-reviewed map (count logged by R/06; 0 is reported, not skipped) |
+| `stepB_orig_disp` | narrower than the main fit: excludes original joiners promoted into the coalition group, and decisions outside the dispute's GML start year |
+| `stepB_all_pair` | all retained init-frame events (not all participants); comparison only |
+| `fourtypes_w*` | the extended four-type population (bilateral, originators, both joiner sides); a different set of actors, not an unpooled version of the init fit |
+| Type permutation | artificial-label diagnostic on bil/coal labels, not a randomization test |
+| Event study | chosen targets of bilateral vs coalition-originator events; entry and onset alignments largely coincide for originators |
+| Influence / top drops | recomputed within init, ranked on `coal-bil:u_R_less`; may pick different disputes than bcd |
+
 ## How to run
 
 ```bash

@@ -16,6 +16,8 @@
 ## ============================================================================
 set -euo pipefail
 cd "$(dirname "$0")"; source config.sh
+## GPT stage-1 review S1: TYPES is environment-overridable, so only the schemes this runner is built for are accepted, and the resolved value enters the fingerprint
+case "$TYPES" in bcd|init) ;; *) echo "TYPES must be bcd or init (got '$TYPES')" >&2; exit 1 ;; esac
 TEST="${TEST:-0}"
 if [ "$TEST" = "1" ]; then O="${OUT:-output_test}"; WINDOWS="0 1"; B_BOOT=20; B_PERM=20; N_RANDOM_BOOT=2; MERROR_K="0.5"; N_NOISE_DRAWS=1; else O="${OUT:-output}"; fi
 ## delta review N2: refuse a non-empty output folder this runner did not create (it cannot be tied to a fingerprint)
@@ -83,7 +85,7 @@ POS=(); for e in $EXPECT; do POS+=( $O/positions/$e.rds ); done
 SHA=$( (for e in $EXPECT; do h $O/positions/$e.rds; done) | shasum -a 256 | cut -c1-16 )
 ENV=$ENVQ
 ## code identity = the content of the scripts and this runner (doc-only commits do not invalidate outputs); the commit is logged
-FP=$( { cat run_all.sh R/*.R R/lib/*.R | shasum -a 256; cat config.sh; echo "TEST=$TEST WINDOWS=$WINDOWS B=$B_BOOT/$B_PERM N=$N_RANDOM_BOOT K=$MERROR_K"; shasum -a 256 data_entry/manifest.csv; echo "$SHA"; echo "layers $(h $O/layers_dy.rds) net $NETSHA"; echo "$ENV"; } | shasum -a 256 | cut -c1-16 )
+FP=$( { cat run_all.sh R/*.R R/lib/*.R | shasum -a 256; cat config.sh; echo "TEST=$TEST TYPES=$TYPES WINDOWS=$WINDOWS B=$B_BOOT/$B_PERM N=$N_RANDOM_BOOT K=$MERROR_K"; shasum -a 256 data_entry/manifest.csv; echo "$SHA"; echo "layers $(h $O/layers_dy.rds) net $NETSHA"; echo "$ENV"; } | shasum -a 256 | cut -c1-16 )
 if [ -s $O/FINGERPRINT ]; then [ "$(cat $O/FINGERPRINT)" = "$FP" ] || die "$O was built from different code/config/inputs (fingerprint $(cat $O/FINGERPRINT), now $FP); use OUT=<new folder> or remove $O"
 else echo "$FP" > $O/FINGERPRINT; echo "$NETSHA" > $O/NETSHA; fi
 say "fingerprint $FP | commit $(git rev-parse --short HEAD) | positions sha $SHA | cores $CORES | types $TYPES | main window $WINDOW_MAIN | test $TEST"
@@ -196,7 +198,9 @@ var aggr_base --variant=aggr --window=complete_base  # the same strata without t
 var aggr_censored --variant=aggr --window=censored   # every stratum; truncated counts after 2010 (lower-bound appendix sensitivity)
 var expdef --variant=expdef --anchor=onset --layers=$O/layers_dy.rds
 var expdefentry --variant=expdef --anchor=entry --layers=$O/layers_dy.rds
-DSL="hard reviewed hard_disp reviewed_disp"; [ "$TYPES" = "init" ] && DSL="hard_disp reviewed_disp"   # init frame has no joiner strata
+## GPT stage-1 review S2: kept under init too -- coalition originators include initiating-side joiners promoted by the window, whose side
+## came from the case-reviewed map (side_case tags survive the init filter); R06 logs how many strata each level removes (0 is reported, not skipped)
+DSL="hard reviewed hard_disp reviewed_disp"
 for L in $DSL; do var ds_$L --variant=dropside --level=$L; done
 sweep rob_base $MAIN_F $PA
 sweep rob_aggr $O/dumps/var_aggr.rds $PA
