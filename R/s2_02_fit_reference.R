@@ -18,6 +18,7 @@ opt <- function(name, default = NULL) { a <- grep(paste0("^--", name, "="), args
 fl <- sub("^--([a-z_]+)=.*$", "\\1", args); if (any(!fl %in% c("build", "out", "n_perm", "checks")) || anyDuplicated(fl)) stop("unknown or duplicated option")
 BUILD <- opt("build"); OUT <- opt("out"); N_PERM <- as.integer(opt("n_perm", "100")); CHECKS <- opt("checks", "all")
 stopifnot(!is.null(BUILD), !is.null(OUT), CHECKS %in% c("all", "none"), N_PERM >= 0)
+W_REF <- 1L
 dir.create(OUT, showWarnings = FALSE, recursive = TRUE); set.seed(123)
 LOG <- file.path(OUT, "s2_fit.log"); cat("", file = LOG)
 logf <- function(...) { s <- sprintf(...); cat(s, "\n", sep = ""); cat(s, "\n", sep = "", file = LOG, append = TRUE) }
@@ -46,9 +47,14 @@ fit_mnl <- function(X, design, label = "", vc = TRUE) {
   if (any(s < 1e-12)) stop(sprintf("%s: constant regressor(s) %s", label, paste(allv[s < 1e-12], collapse = " ")))
   Z <- lapply(design, function(vs) cbind(1, sweep(sweep(as.matrix(X[, ..vs]), 2, m[vs]), 2, s[vs], "/")))
   Y <- sapply(names(design), function(al) as.numeric(X$y == cats[[al]]))
+  ## GPT P1-1: row-specific availability (memo N1, one-shot): A only when the horizon reaches past the window (H > W); originator entry only
+  ## when W >= 1 (month 0 always lies inside the window); B always. Unavailable alternatives get probability exactly 0.
+  AV <- cbind(A = X$H > W_REF, B = rep(TRUE, nrow(X)), O = rep(W_REF >= 1L, nrow(X)))[, names(design), drop = FALSE]
+  if (any(Y == 1 & !AV)) stop(sprintf("%s: an observed outcome is unavailable under the one-shot mask (%d rows)", label, sum(Y == 1 & !AV)))
   k <- vapply(Z, ncol, 0L); idx <- split(seq_len(sum(k)), rep(names(k), k))
   util <- function(p) sapply(names(Z), function(al) drop(Z[[al]] %*% p[idx[[al]]]))
-  probs <- function(U) { mx <- pmax(0, apply(U, 1, max)); E <- exp(U - mx); den <- exp(-mx) + rowSums(E); list(P = E / den, lse = mx + log(den)) }
+  probs <- function(U) { U[!AV] <- -Inf; mx <- pmax(0, apply(U, 1, max)); E <- exp(U - mx); den <- exp(-mx) + rowSums(E); list(P = E / den, lse = mx + log(den)) }
+  ## Y * U below uses the finite utilities: Y is 0 wherever an alternative is unavailable, so no 0 x -Inf arises
   nll <- function(p) { U <- util(p); pr <- probs(U); -sum(rowSums(Y * U) - pr$lse) }
   gr <- function(p) { pr <- probs(util(p))$P; -unlist(lapply(names(Z), function(al) crossprod(Z[[al]], Y[, al] - pr[, al]))) }
   st <- unlist(lapply(names(Z), function(al) c(log(mean(Y[, al])), rep(0, k[[al]] - 1L))))
@@ -65,8 +71,12 @@ fit_mnl <- function(X, design, label = "", vc = TRUE) {
     cl <- function(g) { S <- rowsum(Sc, g, reorder = FALSE); crossprod(S) }
     Hi <- solve(H)
     M2 <- cl(X$ccode) + cl(X$dispnum) - cl(paste(X$ccode, X$dispnum))
-    e <- eigen(M2, symmetric = TRUE); n_neg <- sum(e$values < 0); M2 <- e$vectors %*% diag(pmax(e$values, 0)) %*% t(e$vectors)
-    V <- Hi %*% M2 %*% Hi; V <- V / outer(sc, sc); dimnames(V) <- list(nm, nm); attr(V, "n_neg") <- n_neg
+    ## GPT P1-2: as stage 1 (R/07 vc_2w), build the raw two-way covariance in the reported parameterization FIRST, then clip its negative
+    ## eigenvalues; the repair is recorded
+    V <- Hi %*% M2 %*% Hi; V <- V / outer(sc, sc); V <- (V + t(V)) / 2
+    e <- eigen(V, symmetric = TRUE); n_neg <- sum(e$values < 0); neg_mass <- sum(abs(e$values[e$values < 0])) / sum(abs(e$values))
+    if (n_neg) V <- e$vectors %*% diag(pmax(e$values, 0)) %*% t(e$vectors)
+    dimnames(V) <- list(nm, nm); attr(V, "n_neg") <- n_neg; attr(V, "neg_share") <- neg_mass; attr(V, "eig_raw") <- e$values
   }
   list(b = b, V = V, ll = -o$value, drops = drops, n = nrow(X), gmax = gmax, design = design)
 }
@@ -97,7 +107,7 @@ fwrite(COEF, file.path(OUT, "reference_coefs.csv"))
 SC0 <- surf_contrasts(F0); SC0[, `:=`(lo = est - 1.96 * se, hi = est + 1.96 * se)]
 fwrite(SC0, file.path(OUT, "reference_surface_contrasts.csv"))
 wb <- wald(F0, surf_block)
-logf("reference fit: n %d, logLik %.2f, max |grad| %.1e, CGM negative eigenvalues %d; surface block Wald chi2 %.2f on %d df, p = %.4f", F0$n, F0$ll, F0$gmax, attr(F0$V, "n_neg"), wb["chi2"], wb["df"], wb["p"])
+logf("reference fit: n %d, logLik %.2f, max |grad| %.1e, covariance negative eigenvalues %d (share of absolute eigenvalue mass %.2e); surface block Wald chi2 %.2f on %d df, p = %.4f", F0$n, F0$ll, F0$gmax, attr(F0$V, "n_neg"), attr(F0$V, "neg_share"), wb["chi2"], wb["df"], wb["p"])
 logf("surface contrasts (utility change; gap = joiner minus the side it fights; 95%% two-way intervals):")
 for (r in seq_len(nrow(SC0))) logf("  %s  %s %+d: %7.3f  [%7.3f, %7.3f]", SC0$alt[r], SC0$axis[r], SC0$gap[r], SC0$est[r], SC0$lo[r], SC0$hi[r])
 logf("coefficients (two-way SE):"); for (r in seq_len(nrow(COEF))) logf("  %-22s %8.3f  (%.3f)  p %.3f", COEF$term[r], COEF$est[r], COEF$se[r], COEF$p[r])
