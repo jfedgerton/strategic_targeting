@@ -278,6 +278,25 @@ logf("surface: dM scale %.3f (pooled log CINC share), dR scale by onset year (me
      sM, median(sR), sum(is.na(ONE$dR_kA) | is.na(ONE$dM_kA)), sum(is.na(ONE$dR_kB) | is.na(ONE$dM_kB)),
      paste(round(quantile(ONE$dM_kB, c(.25, .5, .75), na.rm = TRUE), 2), collapse = " "), paste(round(quantile(ONE$dR_kB, c(.25, .5, .75), na.rm = TRUE), 2), collapse = " "))
 stopifnot(nrow(ONE) == nrow(OS))
+## opposing-side robustness variants (A1 aggregation x A2 members x A3 timing x A4 dR scale); gaps only (the fitter forms the surface terms)
+PP <- s2_primary_pair(EV, CL)
+logf("primary pairs (first originator-originator event, initiator on the initiating side): %d of %d disputes", nrow(PP), nrow(DT))
+mem_p <- rbind(PP[, .(dispnum, side_rel = "A", j = prim_init)], PP[, .(dispnum, side_rel = "B", j = prim_tgt)])
+sRp <- setNames(rep(s2_gap_scale_pooled(POS$R, POS$year), length(sR)), names(sR))
+VAR <- CJ(agg = c("mean", "min", "max", "lead", "total"), members = c("roster", "primary"), lag = c(1L, 5L), scale = c("year", "pooled"), sorted = FALSE)
+VARS <- rows_s[, .(dispnum, ccode)]
+for (i in seq_len(nrow(VAR))) { v <- VAR[i]; key <- paste(v$agg, v$members, paste0("l", v$lag), v$scale, sep = "_")
+  sv <- s2_surface(rows_s[, .(dispnum, ccode, ty = t - v$lag, t)], if (v$members == "roster") mem_s else mem_p, PV, sM, if (v$scale == "year") sR else sRp, v$agg)
+  setnames(sv, c("dM_kA", "dR_kA", "dM_kB", "dR_kB"), paste0(c("dM_kA", "dR_kA", "dM_kB", "dR_kB"), "__", key))
+  VARS <- merge(VARS, sv[, c("dispnum", "ccode", paste0(c("dM_kA", "dR_kA", "dM_kB", "dR_kB"), "__", key)), with = FALSE], by = c("dispnum", "ccode"), all.x = TRUE) }
+ref_key <- "mean_roster_l1_year"
+stopifnot(isTRUE(all.equal(VARS[order(dispnum, ccode)][[paste0("dR_kB__", ref_key)]], ONE[order(dispnum, ccode)]$dR_kB)))   # reference variant = the built surface
+nv <- VARS[, lapply(.SD, function(x) sum(is.na(x))), .SDcols = grep("^dR_kB__", names(VARS), value = TRUE)]
+logf("surface variants: %d (aggregation x members x lag x dR scale); missing gap to B by variant ranges %d-%d rows (primary-pair and lag-5 coverage)", nrow(VAR), min(unlist(nv)), max(unlist(nv)))
+saveRDS(VARS, file.path(OUT, "s2_surface_variants.rds"))
+## inputs the fitter needs to rebuild the surface under perturbed positions (robustness B3): positions, rosters, scales, confounder counts
+CONF <- rbind(DY[, .(ccode = ccode1, year, def, contig_land)], DY[, .(ccode = ccode2, year, def, contig_land)])[, .(n_def = sum(def > 0), n_contig = sum(contig_land > 0)), by = .(ccode, year)]
+saveRDS(list(PV = PV, rows = rows_s, mem_roster = mem_s, mem_primary = mem_p, sM = sM, sR = sR, sR_pooled = sRp, conf = CONF), file.path(OUT, "s2_surface_inputs.rds"))
 stopifnot(nrow(ONE) == nrow(OS), !anyDuplicated(ONE[, .(dispnum, ccode)]))
 ## reference one-shot: availability columns (S2_AVAIL) define the estimation cohort; S2_REF_DESIGN is the frozen model (recheck finding 3)
 TERMS <- unique(unlist(S2_REF_DESIGN)); stopifnot(all(S2_AVAIL %in% names(ONE)), all(TERMS %in% names(ONE)))

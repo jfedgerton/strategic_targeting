@@ -358,20 +358,38 @@ S2_AVAIL <- c("tie_sum_A", "tie_sum_B", "tgt_cent_mean", "own_cent", "log_cinc_r
 ## ROWS: (dispnum, ccode, ty, t); MEM: (dispnum, side_rel, j); PV: (ccode, year, M, R); sM scalar; sR named by year (character).
 s2_gap_scale <- function(v) { n <- length(v); stopifnot(n > 1, !anyNA(v)); sqrt(2 * n * sum((v - mean(v))^2) / (n * (n - 1))) }
 s2_gap_scale_pooled <- function(v, yr) { ss <- tapply(v, yr, function(z) sum((z - mean(z))^2)); n <- tapply(v, yr, length); sqrt(sum(2 * n * ss) / sum(n * (n - 1))) }
+## agg (opposing-side robustness A1): "mean" (reference); "min" = weakest M and most isolated R (taken separately); "max" = strongest M and
+## most central R; "lead" = the member with the largest CINC share (its M and R); "total" = the side's combined share and combined PageRank
+## (M and R are logs, so total = log(sum(exp(.)))). MEM picks the members (A2: onset roster, or the primary initiator / target only); ROWS$ty
+## picks the timing (A3); sR the dR scale (A4: by year, or one pooled value repeated for every year).
 s2_surface <- function(ROWS, MEM, PV, sM, sR, agg = "mean") {
-  stopifnot(agg %in% c("mean", "min"), is.finite(sM), sM > 0, all(sR > 0))
+  stopifnot(agg %in% c("mean", "min", "max", "lead", "total"), is.finite(sM), sM > 0, all(sR > 0))
   ROWS <- as.data.table(ROWS); MEM <- as.data.table(MEM); PV <- as.data.table(PV)
-  f <- if (agg == "mean") mean else min
-  ms <- merge(merge(MEM, unique(ROWS[, .(dispnum, ty)]), by = "dispnum"), PV[, .(j = ccode, ty = year, Mj = M, Rj = R)], by = c("j", "ty"), all.x = TRUE)
-  SV <- ms[, .(M_side = if (anyNA(Mj)) NA_real_ else f(Mj), R_side = if (anyNA(Rj)) NA_real_ else f(Rj)), by = .(dispnum, side_rel)]
-  SV <- dcast(SV, dispnum ~ side_rel, value.var = c("M_side", "R_side"))
-  X <- merge(merge(ROWS, PV[, .(ccode, ty = year, Mk = M, Rk = R)], by = c("ccode", "ty"), all.x = TRUE), SV, by = "dispnum", all.x = TRUE)
+  ms <- merge(merge(MEM, unique(ROWS[, .(dispnum, ty)]), by = "dispnum", allow.cartesian = TRUE), PV[, .(j = ccode, ty = year, Mj = M, Rj = R)], by = c("j", "ty"), all.x = TRUE)
+  agg_f <- function(Mj, Rj) {
+    if (anyNA(Mj) || anyNA(Rj)) return(list(M_side = NA_real_, R_side = NA_real_))
+    switch(agg, mean = list(M_side = mean(Mj), R_side = mean(Rj)), min = list(M_side = min(Mj), R_side = min(Rj)), max = list(M_side = max(Mj), R_side = max(Rj)),
+           lead = { i <- which.max(Mj); list(M_side = Mj[i], R_side = Rj[i]) },
+           total = list(M_side = log(sum(exp(Mj))), R_side = log(sum(exp(Rj))))) }
+  SV <- ms[, agg_f(Mj, Rj), by = .(dispnum, ty, side_rel)]
+  SV <- dcast(SV, dispnum + ty ~ side_rel, value.var = c("M_side", "R_side"))
+  X <- merge(merge(ROWS, PV[, .(ccode, ty = year, Mk = M, Rk = R)], by = c("ccode", "ty"), all.x = TRUE), SV, by = c("dispnum", "ty"), all.x = TRUE)
   s_r <- unname(sR[as.character(X$t)]); stopifnot(!anyNA(s_r))
   X[, `:=`(dM_kA = (Mk - M_side_A) / sM, dR_kA = (Rk - R_side_A) / s_r, dM_kB = (Mk - M_side_B) / sM, dR_kB = (Rk - R_side_B) / s_r)]
   ## per alternative: sA_* (join A: vs B), sB_* (join B: vs A); the originator alternative uses sA_*
   X[, `:=`(sA_dM = dM_kB, sA_dM2 = dM_kB^2, sA_dR = dR_kB, sA_dR2 = dR_kB^2, sA_dMR = dM_kB * dR_kB,
            sB_dM = dM_kA, sB_dM2 = dM_kA^2, sB_dR = dR_kA, sB_dR2 = dR_kA^2, sB_dMR = dM_kA * dR_kA)]
   X[order(dispnum, ccode), .(dispnum, ccode, dM_kA, dR_kA, dM_kB, dR_kB, sA_dM, sA_dM2, sA_dR, sA_dR2, sA_dMR, sB_dM, sB_dM2, sB_dR, sB_dR2, sB_dMR)]
+}
+## primary pair (A2): the dispute's first originator-originator event with the initiator on the initiating side (earliest ev_start_lo, then
+## year, initiator, target). EV: events.rds; CL: classification (baseline, side_rel). Returns (dispnum, prim_init, prim_tgt); disputes without
+## such an event are absent (counted by the builder).
+s2_primary_pair <- function(EV, CL) {
+  EV <- as.data.table(EV)[escalation == FALSE, .(dispnum, initiator, target, year, ev_start_lo)]
+  B <- as.data.table(CL)[baseline == TRUE, .(dispnum, ccode, side_rel)]
+  X <- merge(merge(EV, B[, .(dispnum, initiator = ccode, si = side_rel)], by = c("dispnum", "initiator")), B[, .(dispnum, target = ccode, st = side_rel)], by = c("dispnum", "target"))
+  X <- X[si == "A" & st == "B"][order(dispnum, ev_start_lo, year, initiator, target)]
+  X[!duplicated(dispnum), .(dispnum, prim_init = initiator, prim_tgt = target)]
 }
 S2_SURF_A <- c("sA_dM", "sA_dM2", "sA_dR", "sA_dR2", "sA_dMR"); S2_SURF_B <- c("sB_dM", "sB_dM2", "sB_dR", "sB_dR2", "sB_dMR")
 ## Surface reference design (PI 2026-11-22: "stage 2 should mirror stage 1"; supersedes the linear S2_REF_DESIGN as the reference, which

@@ -203,4 +203,16 @@ check("33 mirroring: join A / originator take the stage-1 controls toward B (the
       all(S2_Z_TOWARD("B") %in% S2_REF_DESIGN$A) && all(S2_Z_TOWARD("A") %in% S2_REF_DESIGN$B) && identical(S2_REF_DESIGN$O, S2_REF_DESIGN$A) && "tie_sum_A" %in% S2_REF_DESIGN$A && "tie_sum_B" %in% S2_REF_DESIGN$B)
 check("33 sweep dimensions: opposing-side position mean/min and design surface/linear; reference = mean, surface", S2_REF[["opp_side"]] == "mean" && S2_REF[["design"]] == "surface" && is.null(S2_DIMS$target))
 
+## 34. opposing-side variants (robustness A1-A2)
+PV34 <- data.table(ccode = c(9L, 1L, 2L, 3L), year = 1950L, M = c(-3, -2, -4, -5), R = c(-4, -3, -5, -6))
+v <- function(a) s2_surface(ROWS33, MEM33, PV34, 2, c("1951" = 0.5), agg = a)
+check("34 max: strongest (-2) / most central (-3) A member -> dM_kA = -0.5, dR_kA = -2", isTRUE(all.equal(c(v("max")$dM_kA, v("max")$dR_kA), c(-0.5, -2))))
+check("34 lead: the member with the largest CINC share (1: M -2, R -3) -> dM_kA = -0.5, dR_kA = -2", isTRUE(all.equal(c(v("lead")$dM_kA, v("lead")$dR_kA), c(-0.5, -2))))
+check("34 total: log(e^-2 + e^-4) and log(e^-3 + e^-5) for A", isTRUE(all.equal(c(v("total")$dM_kA, v("total")$dR_kA), c((-3 - log(exp(-2) + exp(-4))) / 2, (-4 - log(exp(-3) + exp(-5))) / 0.5))))
+check("34 single-member side: every aggregation gives the same gap (B: dM_kB = 1)", all(vapply(c("mean", "min", "max", "lead", "total"), function(a) isTRUE(all.equal(v(a)$dM_kB, 1)), TRUE)))
+check("34 lag via ty: a different position year is used (positions for 1946 differ)", { pv <- rbind(PV34, transform(PV34, year = 1946L, R = R - 1)); s5 <- s2_surface(transform(ROWS33, ty = 1946L), MEM33, pv, 2, c("1951" = 0.5)); s5$dR_kA == 0 && s5$dM_kB == 1 })
+EV34 <- data.table(dispnum = 1L, initiator = c(10L, 40L, 10L), target = c(20L, 20L, 20L), year = c(1950L, 1950L, 1951L), ev_start_lo = c(5L, 3L, 9L), escalation = FALSE)
+CL34 <- data.table(dispnum = 1L, ccode = c(10L, 20L, 40L), baseline = c(TRUE, TRUE, FALSE), side_rel = c("A", "B", "A"))
+check("34 primary pair: earliest originator-originator event (10 -> 20); a non-baseline initiator (40) never defines it", identical(unlist(s2_primary_pair(EV34, CL34)[, .(prim_init, prim_tgt)]), c(prim_init = 10L, prim_tgt = 20L)))
+
 cat(if (ok_all) "ALL PASS\n" else "SOME TESTS FAILED\n"); quit(status = if (ok_all) 0 else 1)
