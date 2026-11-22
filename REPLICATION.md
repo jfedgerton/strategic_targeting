@@ -5,7 +5,7 @@ One repository, one commit, one output folder per loop. Every output folder reco
 ## Layout (Jared's MacBook)
 | Folder | Contents |
 |---|---|
-| `~/targeting_multiverse_v2/targeting_multiverse/` | This repository at the GPT-approved commit (2f4e903 code; later commits docs/tests only) |
+| `~/targeting_multiverse_v2/targeting_multiverse/` | This repository at the GPT-approved commit (see `git log`; the run log records the commit) |
 | `…/output_init/` | Stage 1, main analysis: `TYPES=init` (bilateral initiators vs coalition originators) |
 | `…/output_bcd/` | Appendix: `TYPES=bcd` (bilateral / attacking-side coalition / target-side joiners) |
 | `~/targeting_multiverse_archive/` | Earlier runs on the 7,686-measure grid, read-only baselines: Nov 20 bcd (f60c55c), Nov 21 init (230d585) |
@@ -20,13 +20,13 @@ One repository, one commit, one output folder per loop. Every output folder reco
 cd ~/targeting_multiverse_v2/targeting_multiverse
 git log --oneline -1            # the approved commit
 git status --short              # must be empty (production refuses uncommitted code)
-Rscript tests/test_sry.R        # 23 checks, ALL PASS
+Rscript tests/test_sry.R        # 29 checks, ALL PASS
 bash tests/test_hash_cache.sh   # runner hash-cache regression
 Rscript tests/test_resample_edge.R
 TYPES=init OUT=output_init caffeinate -i bash run_all.sh    # stage 1 (main)
 TYPES=bcd  OUT=output_bcd  caffeinate -i bash run_all.sh    # appendix (run after stage 1 finishes)
 ```
-Each loop rebuilds all relational positions from its own layers (`REUSE_POSITIONS=0`, enforced; about 4 h), then runs the multiverse (12,294 measures) and the robustness grid. Restarts resume; finished steps are skipped. `LOOP_DONE` ends a complete run; `LOOP_FINISHED_WITH_GAPS` lists gaps in `status/incomplete.txt`.
+Each loop rebuilds all relational positions from its own layers (`REUSE_POSITIONS=0`, enforced; minutes on the 18-core MacBook), then runs the multiverse (15,366 measures) and the robustness grid. Restarts resume; finished steps are skipped. `LOOP_DONE` ends a complete run; `LOOP_FINISHED_WITH_GAPS` lists gaps in `status/incomplete.txt`.
 
 ## Where results live
 | Output | Folder |

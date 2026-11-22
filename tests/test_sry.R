@@ -73,4 +73,14 @@ X7 <- data.frame(t(combn(1:4, 2))); names(X7) <- c("a", "b"); X7$year <- 1; X7$l
 v7 <- as.numeric(X7$a == 1 & X7$b == 2)
 check("7 nonconstant wholly FE-predicted layer is refused (stops), not zeroed", expect_error(sry_layer(v7, rep(TRUE, 6), X7, "W6srybook", "logit", list(1:6))))
 
+## 8. min-max edges (PI 2026-11-22): signed combo normalized to [0,1] within year; clip unchanged
+M8 <- cbind(c(0.4, -0.2, 0.1, NA), c(0.2, -0.4, 0.1, -0.2))          # combo means: 0.3, -0.3, 0.1, -0.2
+E8 <- sry_combo(M8, list(1:4), edge = "minmax")
+check("8 min-max: max dyad -> 1, min dyad -> 0", E8[1] == 1 && E8[2] == 0)
+check("8 min-max: (0.1 + 0.3) / 0.6 and (-0.2 + 0.3) / 0.6", abs(E8[3] - 4/6) < 1e-12 && abs(E8[4] - 1/6) < 1e-12)
+check("8 clip on the same scores: (1, 0, 1/3, 0)", isTRUE(all.equal(sry_combo(M8, list(1:4)), c(1, 0, 1/3, 0))))
+check("8 min-max: flat year -> all 0", all(sry_combo(cbind(rep(0.2, 3)), list(1:3), edge = "minmax") == 0))
+check("8 min-max: two years normalized separately", { E <- sry_combo(cbind(c(1, 0, 5, 3)), list(1:2, 3:4), edge = "minmax"); identical(E, c(1, 0, 1, 0)) })
+check("8 unknown edge option stops", expect_error(sry_combo(M8, list(1:4), edge = "other")))
+
 cat(if (ok_all) "ALL PASS\n" else "SOME TESTS FAILED\n"); quit(status = if (ok_all) 0 else 1)

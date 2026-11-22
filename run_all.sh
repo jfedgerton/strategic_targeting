@@ -59,9 +59,9 @@ EXPECT="positions_core_W1raw_ptaall positions_core_W1raw_ptainforce positions_co
 ## PI 2026-11-22: book-aligned weightings (W6srybook, W7sryyear) under all three PTA codings, and unweighted PTA (ptaany) for W1-W4.
 ## These arms are always built in this run folder (never taken from the reuse folders, which predate them).
 NEW_ANY="positions_core_W1raw_ptaany positions_core_W2contig_ptaany positions_core_W3dist_ptaany positions_core_W4fe_ptaany"
-NEW_SRY_ALL="positions_core_W6srybook_ptaall positions_core_W7sryyear_ptaall"
-NEW_SRY_INF="positions_core_W6srybook_ptainforce positions_core_W7sryyear_ptainforce"
-NEW_SRY_ANY="positions_core_W6srybook_ptaany positions_core_W7sryyear_ptaany"
+NEW_SRY_ALL="positions_core_W6srybook_ptaall positions_core_W7sryyear_ptaall positions_core_W6srybookmm_ptaall positions_core_W7sryyearmm_ptaall"
+NEW_SRY_INF="positions_core_W6srybook_ptainforce positions_core_W7sryyear_ptainforce positions_core_W6srybookmm_ptainforce positions_core_W7sryyearmm_ptainforce"
+NEW_SRY_ANY="positions_core_W6srybook_ptaany positions_core_W7sryyear_ptaany positions_core_W6srybookmm_ptaany positions_core_W7sryyearmm_ptaany"   # mm = min-max edges (PI 2026-11-22)
 EXPECT="$EXPECT $NEW_ANY $NEW_SRY_ALL $NEW_SRY_INF $NEW_SRY_ANY"
 link_pos() { local F=$1 D=$O/positions/$(basename "$1"); [ -s "$F" ] || die "positions source missing: $F"
   if [ -L "$D" ]; then [ "$(readlink "$D")" = "$F" ] || die "$D points to $(readlink "$D"), config says $F"; else ln -s "$F" "$D"; fi; }
@@ -91,9 +91,9 @@ if [ "$REUSE_POSITIONS" != "1" ]; then
   arm igo "positions_igo_arm" --arm=igo
 fi
 arm core_any "$NEW_ANY" --arm=core --pta=any --cores=$CORES
-arm core_sry_all "$NEW_SRY_ALL" --arm=core --pta=all --weightings=W6srybook,W7sryyear --cores=$CORES
-arm core_sry_inforce "$NEW_SRY_INF" --arm=core --pta=inforce --weightings=W6srybook,W7sryyear --cores=$CORES
-arm core_sry_any "$NEW_SRY_ANY" --arm=core --pta=any --weightings=W6srybook,W7sryyear --cores=$CORES
+arm core_sry_all "$NEW_SRY_ALL" --arm=core --pta=all --weightings=W6srybook,W7sryyear,W6srybookmm,W7sryyearmm --cores=$CORES
+arm core_sry_inforce "$NEW_SRY_INF" --arm=core --pta=inforce --weightings=W6srybook,W7sryyear,W6srybookmm,W7sryyearmm --cores=$CORES
+arm core_sry_any "$NEW_SRY_ANY" --arm=core --pta=any --weightings=W6srybook,W7sryyear,W6srybookmm,W7sryyearmm --cores=$CORES
 for e in $EXPECT; do [ -s $O/positions/$e.rds ] || die "positions file missing: $e.rds"; done
 POS=(); for e in $EXPECT; do POS+=( $O/positions/$e.rds ); done
 SHA=$( (for e in $EXPECT; do h $O/positions/$e.rds; done) | shasum -a 256 | cut -c1-16 )

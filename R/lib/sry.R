@@ -63,10 +63,17 @@ sry_layer <- function(v, ok, X, model, fam, yr_split, glm_iter = 25L) {
   x
 }
 
-## combo: mean over the layers that apply to each dyad-year (signed), tiny cancellations zeroed, positive part rescaled to [0,1] within year
-sry_combo <- function(M, yr_split) {
+## combo: mean over the layers that apply to each dyad-year (signed), tiny cancellations zeroed; then
+##   edge = "clip"   : positive part rescaled to [0,1] within year (default; below-expected ties carry no weight)
+##   edge = "minmax" : signed score min-max normalized to [0,1] within year (PI 2026-11-22 alternative; below-expected ties keep a small
+##                     positive weight, the year's minimum dyad gets 0); a year whose score range is below SRY_COMBO_TOL gets all zeros
+sry_combo <- function(M, yr_split, edge = "clip") {
+  stopifnot(edge %in% c("clip", "minmax"))
   k <- rowSums(!is.na(M)); sc <- ifelse(k > 0, rowSums(M, na.rm = TRUE) / pmax(k, 1), 0)
   sc[abs(sc) < SRY_COMBO_TOL] <- 0                                # SRY1
-  S <- pmax(sc, 0); E <- numeric(length(S)); for (ix in yr_split) { m <- max(S[ix]); if (m > 0) E[ix] <- S[ix] / m }
+  E <- numeric(length(sc))
+  if (edge == "clip") { S <- pmax(sc, 0); for (ix in yr_split) { m <- max(S[ix]); if (m > 0) E[ix] <- S[ix] / m } }
+  else for (ix in yr_split) { r <- range(sc[ix]); if (r[2] - r[1] > SRY_COMBO_TOL) E[ix] <- (sc[ix] - r[1]) / (r[2] - r[1]) }
+  stopifnot(all(E >= 0 & E <= 1))
   E
 }

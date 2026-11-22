@@ -22,6 +22,8 @@
 ##              W7sryyear: log(1+capdist) + contig_land | year FE (no state FE). Tie score = observed - expected (symmetric), divided by the
 ##              layer-year max |score|; combo score = mean over the combo's layers that apply to the dyad-year (signed); edge = positive part,
 ##              rescaled to [0,1] within year. Validated against a standalone build on 2026-11-21 (docs/measure_alignment_2026-11-21.md).
+##              W6srybookmm / W7sryyearmm (PI 2026-11-22): the same scores, but the signed combo score is min-max normalized to [0,1]
+##              within year (below-expected ties become weak positive ties; the year's minimum dyad gets weight 0) instead of clipped at 0.
 ##   centrality: pr  = log PageRank (igraph default damping 0.85, undirected, weighted; isolates keep the teleport share)
 ##               deg = weighted degree / (n_t - 1)  (no log: isolates have 0)
 ##   IGO arm (--arm=igo): bipartite IGO memberships (igoR, full members), Newman weights 1/(k_g - 1), and cosine-normalised
@@ -86,7 +88,8 @@ logf("share of non-zero dyad-years within existence years: %s", paste(sprintf("%
 
 ## ---- 2. per-layer edge weights under each weighting ----------------------------------------------------------------
 WEIGHTINGS <- c("W1raw", "W2contig", "W3dist", "W4fe")      # PI 2026-11-18: W5 (state x year FE) dropped; default set unchanged
-SRY <- c("W6srybook", "W7sryyear")                           # PI 2026-11-22: book-aligned weightings, requested explicitly with --weightings
+SRY <- c("W6srybook", "W7sryyear", "W6srybookmm", "W7sryyearmm")   # PI 2026-11-22: book-aligned weightings (requested with --weightings);
+## the "mm" variants use the same layer scores but normalize the signed combo score to [0,1] within year instead of clipping at zero (PI 2026-11-22)
 if (nzchar(ONLY_W)) { WEIGHTINGS <- strsplit(ONLY_W, ",")[[1]]; stopifnot(all(WEIGHTINGS %in% c("W1raw", "W2contig", "W3dist", "W4fe", SRY))) }
 if (any(WEIGHTINGS %in% SRY)) stopifnot(ARM == "core")        # no tie model is specified for the diplomacy layer
 ## layer-years with no non-zero value (e.g. offensive alliances in years nobody holds one) carry ZERO weight, like pre-existence
@@ -147,7 +150,7 @@ SRYX <- data.frame(a = dy$ccode1, b = dy$ccode2, year = dy$year, lcap = dy$lcap,
 sry_score <- function(W, l) {
   v <- V[, l]; ok <- dy$year >= first_year[[l]] & yr_has[, l] & !is.na(v)
   if (SRY_FAM[[l]] == "pois") v <- round(expm1(v))                # Poisson on the raw counts (V holds log1p for igo / pta counts)
-  x <- sry_layer(v, ok, SRYX, W, SRY_FAM[[l]], yr_split)
+  x <- sry_layer(v, ok, SRYX, sub("mm$", "", W), SRY_FAM[[l]], yr_split)
   attr(x, "info") <- paste(l, SRY_FAM[[l]], attr(x, "info")); x
 }
 
@@ -219,7 +222,7 @@ if (ARM %in% c("core", "dipl")) {
     }
     one <- function(k) {
       L <- combos[[k]]
-      if (W %in% SRY) E <- sry_combo(EL[, L, drop = FALSE], yr_split)
+      if (W %in% SRY) E <- sry_combo(EL[, L, drop = FALSE], yr_split, edge = if (grepl("mm$", W)) "minmax" else "clip")
       else if (W == "W1raw") { S <- rowSums(EL[, L, drop = FALSE]); E <- numeric(length(S)); for (ix in yr_split) { m <- max(S[ix]); if (m > 0) E[ix] <- S[ix] / m } }
       else { S <- sqrt(rowSums(EL[, L, drop = FALSE]^2)); E <- within_year_range01(S) }
       cent(E)

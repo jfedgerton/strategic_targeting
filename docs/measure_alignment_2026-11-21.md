@@ -31,3 +31,9 @@ Main-spec stage-1 fits (init, fatal, 1-month window), coalition − bilateral, l
 - A nonconstant layer whose every row is removed by recursive perfect-fit FE removal is refused (the arm stops); it does not occur in the 1816–2014 layers (all sry arms built). `tests/test_sry.R` check 7.
 - Any fixest warning, non-convergence, non-finite fitted value, missing required predictor or unexplained omission stops the arm.
 - Run with `REUSE_POSITIONS=0` (enforced) in fresh output folders. GPT recheck: GO at 2f4e903.
+
+## Book layer set and min-max edges (PI 2026-11-22)
+- The book's main measure (PI's specification): IGO count, ATOP defense, ATOP offense, DCA, PTA binary; sender + receiver + year FE + log distance; logit / Poisson; observed − expected; mean of five; symmetric. A standalone exact build matches the grid's `W6srybook_ptaany|igo+def+off+pta+dca|pr` at a within-year Spearman of 0.990 (signed vs in-force PTA 0.991). Differences: per-layer scaling (book: binary unscaled, IGO min-max; grid: each layer by its layer-year max abs score) and the averaging denominator (irrelevant for these five layers because it is constant within year).
+- Stage-1 single fits (init, fatal, 1 month), coalition − bilateral less central: book exact 0.76*; grid W6srybook 0.77*; W7sryyear 1.14*. Measures without IGO fail plausibility (China never rises).
+- Min-max edges (`W6srybookmm`, `W7sryyearmm`): the signed combo score normalized to [0,1] within year instead of clipped at 0. Standalone test on the book layers: fails plausibility (USSR Cold War percentile 0.38–0.39); W7 coalition − bilateral 0.99*, W6 0.21. Added as a sweep dimension; clipping stays the default.
+- Grid: + 3,072 measures (2 weightings × [384 + 192 + 192] combos × 2 centralities) → 15,366.
