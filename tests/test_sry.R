@@ -67,4 +67,10 @@ vb3[tgt] <- 1; vb3[X$a %in% c(3, 7) & !(seq_len(nrow(X)) %in% tgt)] <- 0
 s <- sry_layer(vb3, ok, X, "W6srybook", "logit", ys)
 check("6 planted 3-7 tie scores > 0 in every year", all(s[tgt] > 0))
 
+## 7. GPT recheck residual SRY3 (documented policy): a NONCONSTANT layer whose every row is removed by recursive perfect-fit FE removal
+##    is refused (the arm stops); it is not turned into zeros. Fixture: one year, 4 states, only tie 1-2 (W6, logit).
+X7 <- data.frame(t(combn(1:4, 2))); names(X7) <- c("a", "b"); X7$year <- 1; X7$lcap <- log1p(c(100, 900, 1600, 400, 2500, 700)); X7$contig_land <- 0
+v7 <- as.numeric(X7$a == 1 & X7$b == 2)
+check("7 nonconstant wholly FE-predicted layer is refused (stops), not zeroed", expect_error(sry_layer(v7, rep(TRUE, 6), X7, "W6srybook", "logit", list(1:6))))
+
 cat(if (ok_all) "ALL PASS\n" else "SOME TESTS FAILED\n"); quit(status = if (ok_all) 0 else 1)

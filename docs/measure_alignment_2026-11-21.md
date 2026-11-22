@@ -24,3 +24,10 @@ Main-spec stage-1 fits (init, fatal, 1-month window), coalition − bilateral, l
 - Unweighted PTA (`--pta=any`: 1 if any PTA, signed or in force) as a third PTA coding for W1–W4 too.
 - Diplomacy arm unchanged (no tie model specified for the diplomacy layer). Main measure unchanged until the PI decides.
 - New measures: W1–W4 × any 1,536; sry × all 1,536; sry × in force 768; sry × any 768. Total grid 7,686 → 12,294.
+
+## Fit-validity policy (GPT reviews of 2026-11-22, `docs/REVIEW_sry.md`, `docs/REVIEW_sry_recheck.md`)
+- Constant outcome over a layer's applicable rows: score 0, applicable, no fit.
+- Rows removed as perfectly predicted FE groups (or Poisson zero-outcome separation) inside a fitted layer: residual 0.
+- A nonconstant layer whose every row is removed by recursive perfect-fit FE removal is refused (the arm stops); it does not occur in the 1816–2014 layers (all sry arms built). `tests/test_sry.R` check 7.
+- Any fixest warning, non-convergence, non-finite fitted value, missing required predictor or unexplained omission stops the arm.
+- Run with `REUSE_POSITIONS=0` (enforced) in fresh output folders. GPT recheck: GO at 2f4e903.
