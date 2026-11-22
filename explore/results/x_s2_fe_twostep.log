@@ -1,0 +1,52 @@
+EXPLORATORY, PRE-FREEZE two-step FE run 2026-11-22 12:32:53; B = 200
+step 1: events 619, rows 72031, targets chosen 119 (chosen >= 2: 86), never-chosen alternatives pooled as reference 98
+step 1 without FE: dR_bil 0.080, dR_coal 0.967 | with target FE: dR_bil -0.122, dR_coal 0.762; FE NA (not identified) 0; FE range -18.88 to 8.51
+step 1 with FE: |b_j| > 10 (quasi-separated targets) 6
+step 2: complete-horizon rows 65272; dropped for missing covariates 1676; outcomes A 118, B 178, orig 71, out 63229
+step 2: repeat targets used for b_j 86; clipped at +-5 6; disputes with no repeat-target b_j in the target set (dropped) 0
+step 2: disputes dropped (no usable b_j) 34
+point fits converged: no-theta 0 (max |grad| 3.1e-06), theta 0 (2.9e-06); LR (theta block, 3 df) 9.73
+bootstrap time 24.7 min, failures 0
+bootstrap: 200 successful of 200
+A:(int@mean)                   -8.491  [-12.757,  -6.677]  share>0 0.00
+A:tie_sum_A                     0.129  [ -0.700,   1.191]  share>0 0.65
+A:tgt_cent_mean                -0.102  [ -1.088,   1.072]  share>0 0.43
+A:lcap_A                       -0.513  [ -1.056,   0.160]  share>0 0.07
+A:ally_side_A                   1.197  [  0.349,   2.006]  share>0 1.00
+A:likely                        2.817  [  0.984,  22.819]  share>0 1.00
+A:lcinc                         0.418  [  0.293,   0.574]  share>0 1.00
+A:bbar                         -0.054  [ -4.534,   0.004]  share>0 0.03
+B:(int@mean)                   -7.155  [-12.040,  -5.999]  share>0 0.00
+B:tie_sum_B                     0.612  [ -0.666,   1.530]  share>0 0.86
+B:tgt_cent_mean                -0.090  [ -0.704,   0.490]  share>0 0.37
+B:lcap_B                       -0.693  [ -0.894,  -0.511]  share>0 0.00
+B:ally_side_B                  -0.016  [ -0.680,   0.639]  share>0 0.54
+B:likely                        0.858  [  0.173,   2.977]  share>0 0.98
+B:lcinc                         0.558  [  0.457,   0.713]  share>0 1.00
+B:bbar                         -0.078  [ -0.862,  -0.084]  share>0 0.02
+O:(int@mean)                   -7.552  [ -8.322,  -6.713]  share>0 0.00
+O:tie_sum_A                     1.732  [  1.202,   3.616]  share>0 1.00
+O:lcap_A                       -0.522  [ -0.891,   0.027]  share>0 0.04
+O:ally_side_A                   1.005  [ -0.232,   1.841]  share>0 0.94
+O:bbar                          0.244  [ -0.366,   0.852]  share>0 0.04
+noTheta.A:(int@mean)           -8.487  [-19.889,  -7.845]  share>0 0.00
+noTheta.A:tie_sum_A             0.090  [ -0.700,   1.191]  share>0 0.65
+noTheta.A:tgt_cent_mean        -0.114  [ -1.088,   1.072]  share>0 0.43
+noTheta.A:lcap_A               -0.521  [ -1.056,   0.160]  share>0 0.07
+noTheta.A:ally_side_A           1.235  [  0.349,   2.006]  share>0 1.00
+noTheta.A:likely                2.809  [  0.984,  20.004]  share>0 1.00
+noTheta.A:lcinc                 0.420  [  0.293,   0.574]  share>0 1.00
+noTheta.B:(int@mean)           -7.152  [ -9.218,  -6.540]  share>0 0.00
+noTheta.B:tie_sum_B             0.573  [ -0.666,   1.530]  share>0 0.85
+noTheta.B:tgt_cent_mean        -0.099  [ -0.704,   0.490]  share>0 0.37
+noTheta.B:lcap_B               -0.716  [ -0.894,  -0.511]  share>0 0.00
+noTheta.B:ally_side_B           0.013  [ -0.680,   0.639]  share>0 0.54
+noTheta.B:likely                0.838  [  0.173,   2.977]  share>0 0.98
+noTheta.B:lcinc                 0.564  [  0.457,   0.713]  share>0 1.00
+noTheta.O:(int@mean)           -7.496  [ -8.134,  -7.142]  share>0 0.00
+noTheta.O:tie_sum_A             1.819  [  1.202,   3.616]  share>0 1.00
+noTheta.O:lcap_A               -0.494  [ -0.891,   0.027]  share>0 0.04
+noTheta.O:ally_side_A           0.951  [ -0.232,   1.841]  share>0 0.94
+dR_bil_fe                      -0.122  [ -0.602,   0.108]  share>0 0.08
+dR_coal_fe                      0.762  [  0.072,   1.472]  share>0 0.98
+X_DONE
