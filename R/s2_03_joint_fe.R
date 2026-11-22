@@ -31,10 +31,16 @@ GAP <- c("dM", "dM2", "dR", "dR2", "dMR")
 for (g in 0:1) for (v in GAP) D[, paste0(v, "_", ROLES[g + 1]) := get(v) * (type == g)]
 GT <- as.vector(outer(GAP, ROLES, paste, sep = "_"))
 ch <- D[chosen == 1L]; tg <- sort(unique(ch$c2))
-D[, tfe := relevel(factor(ifelse(c2 %in% tg, as.character(c2), "ref")), "ref")]
+## target FE (fix 2026-11-22): a target never chosen in the sample has fitted FE -> -Inf (quasi-separation), which made the FE level drift and the
+## CGM variance explode. Its rows contribute nothing in the limit, so the FE model is fitted on the rows of chosen targets only (the exact
+## limiting likelihood), with the most-chosen target as the reference level; the no-FE model keeps every alternative
+NCH0 <- sort(table(ch$c2), decreasing = TRUE)
+D[, tfe := factor(as.character(c2), levels = names(NCH0))]
 NCH <- table(ch$c2); REP <- names(NCH)[NCH >= 2]
 logf("step 1: events %d (bilateral %d, coalition %d), rows %d; targets chosen %d (>= 2: %d)", nrow(ch), sum(ch$type == 0), sum(ch$type == 1), nrow(D), length(tg), length(REP))
-fit1 <- function(dd, fe) { f <- as.formula(paste("Surv(rep(1, nrow(dd)), chosen) ~", paste(c(GT, Z, if (fe) "tfe"), collapse = " + "), "+ strata(ev_id)"))
+fit1 <- function(dd, fe) { if (fe) { tgb <- unique(dd[chosen == 1L, c2]); dd <- dd[c2 %in% tgb]; dd[, tfe := droplevels(factor(as.character(c2), levels = intersect(names(NCH0), as.character(tgb))))]
+    dd <- dd[dd[, .(k = .N), by = ev_id][k > 1L], on = "ev_id"] }
+  f <- as.formula(paste("Surv(rep(1, nrow(dd)), chosen) ~", paste(c(GT, Z, if (fe) "tfe"), collapse = " + "), "+ strata(ev_id)"))
   suppressWarnings(coxph(f, data = dd, weights = w, method = "breslow", control = coxph.control(iter.max = 50))) }
 vc_cl <- function(m, g) { Dd <- rowsum(residuals(m, type = "dfbeta", weighted = TRUE), g, reorder = FALSE); crossprod(Dd) }
 vc_2w <- function(m, dd) { V <- vc_cl(m, dd$init) + vc_cl(m, dd$disp) - vc_cl(m, dd$init_disp); e <- eigen(V, symmetric = TRUE)
@@ -45,22 +51,24 @@ s1_contr <- function(b, V = NULL) { out <- list()
     out[[length(out) + 1L]] <- data.table(type = r, axis = ax, gap = sg, est = sum(a * b), se = if (is.null(V)) NA_real_ else sqrt(max(drop(t(a) %*% V %*% a), 0))) }
   rbindlist(out) }
 m0 <- fit1(D, FALSE); m1 <- fit1(D, TRUE)
+D1 <- D[c2 %in% tg]; D1 <- D1[D1[, .(k = .N), by = ev_id][k > 1L], on = "ev_id"]
+logf("step 1 target-FE model: rows of chosen targets only %d of %d (events kept %d)", nrow(D1), nrow(D), uniqueN(D1$ev_id))
 b0 <- coef(m0); V0 <- vc_2w(m0, D); b1 <- coef(m1); keep1 <- !grepl("^tfe", names(b1))
-V1 <- vc_2w(m1, D)
+V1 <- vc_2w(m1, D1)
 S1 <- rbind(data.table(model = "no FE", term = names(b0), est = b0, se = sqrt(diag(V0))),
             data.table(model = "target FE", term = names(b1)[keep1], est = b1[keep1], se = sqrt(diag(V1))[keep1]))
 S1C <- rbind(s1_contr(b0, V0)[, model := "no FE"], s1_contr(b1[keep1], V1[keep1, keep1])[, model := "target FE"])
 logf("step 1 two-way CGM negative eigenvalues: no FE %d, target FE %d", attr(V0, "n_neg"), attr(V1, "n_neg"))
-bfe <- b1[!keep1]; names(bfe) <- sub("^tfe", "", names(bfe))
-logf("step 1 target FE (relative to the never-chosen pool, level not identified): range %.2f to %.2f; centred on repeat targets, |b_j| > 5 (clipped) %d", min(bfe, na.rm = TRUE), max(bfe, na.rm = TRUE), { bb <- bfe[names(bfe) %in% REP]; sum(abs(bb - mean(bb, na.rm = TRUE)) > 5, na.rm = TRUE) })
+bfe <- b1[!keep1]; names(bfe) <- sub("^tfe", "", names(bfe)); bfe <- c(setNames(0, names(NCH0)[1]), bfe)   # the reference target has b = 0
+logf("step 1 target FE (relative to the most-chosen target): range %.2f to %.2f; centred on repeat targets, |b_j| > 5 (clipped) %d", min(bfe, na.rm = TRUE), max(bfe, na.rm = TRUE), { bb <- bfe[names(bfe) %in% REP]; sum(abs(bb - mean(bb, na.rm = TRUE)) > 5, na.rm = TRUE) })
 
 ## ---- step 2 -----------------------------------------------------------------------------------------------------------------------
 ONE <- as.data.table(readRDS(file.path(BUILD, "s2_oneshot_w1.rds"))); CL <- as.data.table(readRDS(file.path(BUILD, "s2_classification_w0_6.rds")))[W == 1L]
 TS <- CL[baseline == TRUE & side_rel == "B", .(dispnum, ccode)]
 X <- ONE[in_ref == TRUE]
 for (v in names(X)) if (is.logical(X[[v]]) && v %in% unlist(S2_REF_DESIGN)) X[, (v) := as.numeric(get(v))]
-## the never-chosen reference group is never chosen, so its level is not identified (quasi-separation): only DIFFERENCES among chosen targets are.
-## b_j is therefore centred on the repeat targets' mean before clipping (location is absorbed by the stage-2 intercepts anyway)
+## only differences among chosen targets are identified: b_j is centred on the repeat targets' mean before clipping (location is absorbed by
+## the stage-2 intercepts)
 bbar_of <- function(b) { b <- b[names(b) %in% REP & is.finite(b)]; b <- pmin(pmax(b - mean(b), -5), 5); tb <- TS[, .(dispnum, b = b[as.character(ccode)])]; tb[, .(bbar = mean(b, na.rm = TRUE)), by = dispnum][is.finite(bbar)] }
 DES_T <- lapply(S2_REF_DESIGN, function(v) c(v, "bbar"))
 X1 <- merge(X, bbar_of(bfe), by = "dispnum")
@@ -79,6 +87,7 @@ fitw <- function(Xw, des, wt) {   # weighted refit: replicate rows by their disp
 one_draw <- function(m) tryCatch({
   Db <- copy(D); Db[, w := w * m[as.character(disp)]]; Db <- Db[w > 0]
   mb <- fit1(Db, TRUE); bb <- coef(mb); be <- bb[grepl("^tfe", names(bb))]; names(be) <- sub("^tfe", "", names(be))
+  refb <- setdiff(intersect(names(NCH0), as.character(unique(Db[chosen == 1L, c2]))), names(be))[1]; be <- c(setNames(0, refb), be)
   s1 <- s1_contr(bb[!grepl("^tfe", names(bb))])
   Xb <- merge(X, bbar_of(be), by = "dispnum"); wt <- m[as.character(Xb$dispnum)]; Xb <- Xb[wt > 0]; wt <- wt[wt > 0]
   ft <- fitw(Xb, DES_T, wt)
