@@ -1,4 +1,4 @@
-stage-2 risk-set build 2026-11-22 12:51:41; mode release; fatal_def stage1; reference window 1; git d52b703
+stage-2 risk-set build 2026-11-22 13:13:13; mode release; fatal_def stage1; reference window 1; git 2e3c900
 inputs: data_entry /mnt/user-data/uploads/strategic_targeting_relsweep/v2/data_entry; layers /mnt/user-data/uploads/targeting_multiverse/output/layers_dy.rds; positions /home/claude/align/positions_cmp.rds [W2contig|noPTA|pr]; dump /home/claude/align/long_bcjs_bon_w1d_relyear_fmid.rds
 participants_timing 5862 spells / 2436 disputes; gml_part 5217 rows; gml_mid_disps 2174 disputes; positions 15561 state-years
 population: GML-fatal 542; stage-1 fatal-event primary disputes 560; intersection 440; GML only 102; stage-1 only 120 (ID lists in fatal_sets.csv); using stage1
@@ -41,13 +41,14 @@ ties: one-shot rows with a positive tie to A 47917 / to B 48414 of 65416; monthl
 relevance tiers: likely 22395 of 65416 (contiguous 5231, same region 16844, major 3059, allied at t-1 10060); candidate-baseline pairs without a dyad row in the onset year 0
 covariate missingness (rows): own CINC 447, own centrality 447; side CINC incomplete A 690 / B 1266; side dyad rows incomplete A 1123 / B 1681; target set without t-1 position 12 disputes
 jointly fatal (side level): yes 318, no 177, unresolved 65; participants without a fatality code 168
+surface: dM scale 3.268 (pooled log CINC share), dR scale by onset year (median 0.809); rows with a missing gap to A 1123 / to B 1681; gap to B (dM, dR) quartiles -0.95 -0.34 0.23 / -0.47 0.06 0.55
 reference estimation cohort: 63143 of 65416 rows; outcomes A 121, B 184, orig 71, out 62767
   exclusions by FIRST failing reason (mutually exclusive partition; horizon first, then S2_AVAIL order):
     missing own_cent             out 414
     incomplete horizon           B 9, out 133
     missing log_cinc_ratio_A     A 2, out 452, B 1
     missing tgt_cent_mean        out 1260, B 2
-  nonexclusive missingness (all rows / complete-horizon rows): tgt_cent_mean 1266/1262; own_cent 447/446; log_cinc_ratio_A 1123/1121; log_cinc_ratio_B 1681/1676; share_A 1729/1725; min_capdist_A 1123/1121; min_capdist_B 1681/1676; contig_side_A 1123/1121; contig_side_B 1681/1676; ally_side_A 1123/1121; ally_side_B 1681/1676
+  nonexclusive missingness (all rows / complete-horizon rows): tgt_cent_mean 1266/1262; own_cent 447/446; log_cinc_ratio_A 1123/1121; log_cinc_ratio_B 1681/1676; share_A 1729/1725; min_capdist_A 1123/1121; min_capdist_B 1681/1676; contig_side_A 1123/1121; contig_side_B 1681/1676; ally_side_A 1123/1121; ally_side_B 1681/1676; dM_kA 1123/1121; dR_kA 1123/1121; dM_kB 1681/1676; dR_kB 1681/1676; land_side_A 1123/1121; land_side_B 1681/1676; defoff_side_A 1123/1121; defoff_side_B 1681/1676
   excluded rows by fold: 1:44 2:171 3:75 4:87 5:882 6:1014; reference rows by endpoint source: exact 55493, capped 1516, imputed 6134
 written (release build): s2_disputes 560, s2_oneshot_w1 65416 (reference cohort 63143), s2_monthly_w1 806131, rosters 20139, edges 680069
 S2_BUILD_DONE

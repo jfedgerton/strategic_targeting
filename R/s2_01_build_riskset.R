@@ -195,7 +195,7 @@ logf("ties: one-shot rows with a positive tie to A %d / to B %d of %d; monthly r
 ## ---- 8. tiers (frozen at onset) ------------------------------------------------------------------------------------------------------
 ## tiers use contiguity in the onset year ("frozen at onset", memo section 4) and alliances at t - 1; side covariates below use t - 1 throughout
 BASE <- CL[baseline == TRUE, .(dispnum, ccode)]
-DYk <- rbind(DY[, .(k = ccode1, j = ccode2, year, conttype, capdist, ally)], DY[, .(k = ccode2, j = ccode1, year, conttype, capdist, ally)])
+DYk <- rbind(DY[, .(k = ccode1, j = ccode2, year, conttype, capdist, ally, defoff = as.integer(def > 0 | off > 0))], DY[, .(k = ccode2, j = ccode1, year, conttype, capdist, ally, defoff = as.integer(def > 0 | off > 0))])
 pr <- merge(merge(COH[, .(dispnum, ccode)], BASE[, .(dispnum, j = ccode)], by = "dispnum", allow.cartesian = TRUE), DT[, .(dispnum, onset_year)], by = "dispnum")
 pr <- merge(pr, DYk[, .(k, j, year, conttype)], by.x = c("ccode", "j", "onset_year"), by.y = c("k", "j", "year"), all.x = TRUE)
 pr[, ty := onset_year - 1L]
@@ -212,7 +212,14 @@ logf("relevance tiers: likely %d of %d (contiguous %d, same region %d, major %d,
 NMC <- as.data.table(cow_nmc)[, .(ccode, year, cinc)]
 sx <- merge(row0[, .(dispnum, ccode, ty = onset_year - 1L)], R0[, .(dispnum, j = ccode, side_rel)], by = "dispnum", allow.cartesian = TRUE)[ccode != j]
 sx <- merge(sx, NMC[, .(j = ccode, ty = year, cinc_j = cinc)], by = c("j", "ty"), all.x = TRUE)
-sx <- merge(sx, DYk[, .(ccode = k, j, ty = year, capdist, conttype, ally)], by = c("ccode", "j", "ty"), all.x = TRUE)
+sx <- merge(sx, DYk[, .(ccode = k, j, ty = year, capdist, conttype, ally, defoff)], by = c("ccode", "j", "ty"), all.x = TRUE)
+## stage-1 directed controls mirrored toward each side (assemble_cell.R Z_DIRECTED, t - 1): democracy = polity2 >= 6 with missing -> 0 (the
+## build's POLITY_DEM_CUT is assumed to be 6: verify against v2/R/01_build_data.R section 6); MID ongoing between k and a member in t - 1
+DEMY <- as.data.table(ccode_democracy)[, .(ccode, year, dem = as.integer(!is.na(polity2) & polity2 >= 6))]
+sx <- merge(sx, DEMY[, .(j = ccode, ty = year, dem_j = dem)], by = c("j", "ty"), all.x = TRUE); sx[is.na(dem_j), dem_j := 0L]
+gmid <- unique(GDY[, .(pdisp = dispnum, a = ccode1, b = ccode2, year)])
+mt <- merge(sx[, .(dispnum, ccode, j, ty)], gmid, by.x = c("ccode", "j", "ty"), by.y = c("a", "b", "year"))[pdisp != dispnum, .(mid_tm1 = 1L), by = .(dispnum, ccode, j)]
+sx <- merge(sx, mt, by = c("dispnum", "ccode", "j"), all.x = TRUE); sx[is.na(mid_tm1), mid_tm1 := 0L]
 ## prior MIDs (recheck finding 4): DISTINCT GML disputes between k and any member of side s starting no later than t - 1 (current excluded)
 pm <- unique(merge(GDY[, .(pdisp = dispnum, a = ccode1, b = ccode2)], GD[, .(pdisp = dispnum, styear)], by = "pdisp"))
 PRI <- s2_prior_side(sx[, .(dispnum, ccode, j, side_rel, ty)], pm)
@@ -222,12 +229,18 @@ sx <- merge(sx, maj_s[, .(dispnum, j = ccode, maj)], by = c("dispnum", "j"), all
 ## side size counts the whole roster (including members the candidate cannot tie to: none, since cohort members are never baselines)
 SC <- sx[, .(n_side = .N, side_cinc = s2_strict_sum(cinc_j), cinc_miss = anyNA(cinc_j), min_capdist = s2_strict_min(capdist),
              contig_side = s2_strict_any(ifelse(is.na(conttype), NA, conttype %in% 1:5)), ally_side = s2_strict_any(ifelse(is.na(ally), NA, ally > 0)),
-             dyad_miss = anyNA(capdist) | anyNA(conttype) | anyNA(ally), major_side = as.integer(any(maj))), by = .(dispnum, ccode, side_rel)]
+             dyad_miss = anyNA(capdist) | anyNA(conttype) | anyNA(ally), major_side = as.integer(any(maj)),
+             land_side = s2_strict_any(ifelse(is.na(conttype), NA, conttype == 1L)), defoff_side = s2_strict_any(ifelse(is.na(defoff), NA, defoff > 0)),
+             dem_side = mean(dem_j), mid_tm1_side = as.integer(any(mid_tm1 == 1L))), by = .(dispnum, ccode, side_rel)]
 SC <- merge(SC, PRI[, .(dispnum, ccode, side_rel, prior_side = log1p(prior_n))], by = c("dispnum", "ccode", "side_rel"))
-SC <- dcast(SC, dispnum + ccode ~ side_rel, value.var = c("n_side", "side_cinc", "cinc_miss", "min_capdist", "contig_side", "ally_side", "dyad_miss", "prior_side", "major_side"))
+SC <- dcast(SC, dispnum + ccode ~ side_rel, value.var = c("n_side", "side_cinc", "cinc_miss", "min_capdist", "contig_side", "ally_side", "dyad_miss", "prior_side", "major_side", "land_side", "defoff_side", "dem_side", "mid_tm1_side"))
 own <- merge(row0[, .(dispnum, ccode, ty = onset_year - 1L)], NMC[, .(ccode, ty = year, cinc_k = cinc)], by = c("ccode", "ty"), all.x = TRUE)
 own <- merge(own, POS[, .(ccode, ty = year, own_cent = R)], by = c("ccode", "ty"), all.x = TRUE)
-SC <- merge(SC, own[, .(dispnum, ccode, cinc_k, own_cent)], by = c("dispnum", "ccode"))
+own <- merge(own, DEMY[, .(ccode, ty = year, dem_k = dem)], by = c("ccode", "ty"), all.x = TRUE); own[is.na(dem_k), dem_k := 0L]
+majk <- maj_at(merge(row0[, .(dispnum, ccode)], DT[, .(dispnum, onset_lo = s2_mk(onset_year - 1L, 12L))], by = "dispnum"))[, major_k := 1L]
+own <- merge(own, majk, by = c("dispnum", "ccode"), all.x = TRUE); own[is.na(major_k), major_k := 0L]
+SC <- merge(SC, own[, .(dispnum, ccode, cinc_k, own_cent, dem_k, major_k)], by = c("dispnum", "ccode"))
+SC[, `:=`(dem_x_A = dem_k * dem_side_A, dem_x_B = dem_k * dem_side_B, major_x_A = major_k * major_side_A, major_x_B = major_k * major_side_B)]
 SC[, `:=`(log_cinc_k = ifelse(cinc_k > 0, log(cinc_k), NA_real_),
           log_cinc_ratio_A = ifelse(cinc_k > 0 & side_cinc_A > 0, log(cinc_k / side_cinc_A), NA_real_), log_cinc_ratio_B = ifelse(cinc_k > 0 & side_cinc_B > 0, log(cinc_k / side_cinc_B), NA_real_),
           share_A = ifelse(side_cinc_A + side_cinc_B > 0, side_cinc_A / (side_cinc_A + side_cinc_B), NA_real_))]
@@ -250,6 +263,21 @@ ONE <- Reduce(function(a, b) merge(a, b, by = c("dispnum", "ccode"), all.x = TRU
                    TIER[, .(dispnum, ccode, likely, any_contig, any_reg, major, any_ally)], SC))
 ONE <- merge(ONE, DT[, .(dispnum, fold, onset_year, jfatal, fat_level, tgt_cent_mean, tgt_cent_min, side_case, end_source, end_imputed, end_exact)], by = "dispnum")
 ONE[, `:=`(lcap_A = log1p(min_capdist_A), lcap_B = log1p(min_capdist_B))]          # fixed transforms named in S2_REF_DESIGN
+## stage-2 targeting surface (PI 2026-11-22): joiner's gaps to the opposing side, stage-1 scaling (dM pooled scale of log CINC share over all
+## state-years of sy_positions; dR scale of the main-measure positions in the onset year); side value = mean of the month-0 roster ("min" kept
+## as sweep columns)
+SYP <- as.data.table(readRDS(file.path(DE, "sy_positions.rds")))[, .(ccode, year, M)]
+PV <- merge(SYP, POS[, .(ccode, year, R)], by = c("ccode", "year"), all = TRUE)
+sM <- s2_gap_scale_pooled(SYP$M, SYP$year); sR <- vapply(split(POS$R, POS$year), s2_gap_scale, 0)
+rows_s <- row0[, .(dispnum, ccode, ty = onset_year - 1L, t = onset_year)]
+mem_s <- R0[, .(dispnum, side_rel, j = ccode)]
+SURF <- s2_surface(rows_s, mem_s, PV, sM, sR, "mean")
+SURFm <- s2_surface(rows_s, mem_s, PV, sM, sR, "min")[, .(dispnum, ccode, dM_kA_min = dM_kA, dR_kA_min = dR_kA, dM_kB_min = dM_kB, dR_kB_min = dR_kB)]
+ONE <- merge(merge(ONE, SURF, by = c("dispnum", "ccode")), SURFm, by = c("dispnum", "ccode"))
+logf("surface: dM scale %.3f (pooled log CINC share), dR scale by onset year (median %.3f); rows with a missing gap to A %d / to B %d; gap to B (dM, dR) quartiles %s / %s",
+     sM, median(sR), sum(is.na(ONE$dR_kA) | is.na(ONE$dM_kA)), sum(is.na(ONE$dR_kB) | is.na(ONE$dM_kB)),
+     paste(round(quantile(ONE$dM_kB, c(.25, .5, .75), na.rm = TRUE), 2), collapse = " "), paste(round(quantile(ONE$dR_kB, c(.25, .5, .75), na.rm = TRUE), 2), collapse = " "))
+stopifnot(nrow(ONE) == nrow(OS))
 stopifnot(nrow(ONE) == nrow(OS), !anyDuplicated(ONE[, .(dispnum, ccode)]))
 ## reference one-shot: availability columns (S2_AVAIL) define the estimation cohort; S2_REF_DESIGN is the frozen model (recheck finding 3)
 TERMS <- unique(unlist(S2_REF_DESIGN)); stopifnot(all(S2_AVAIL %in% names(ONE)), all(TERMS %in% names(ONE)))
@@ -269,7 +297,7 @@ MON <- merge(MON, DT[, .(dispnum, fold, end_source, end_imputed, onset_year)], b
 stopifnot(all(MON$fold == s2_fold(MON$onset_year)))                  # every monthly row carries its dispute's onset fold (recheck finding 6)
 MON[, onset_year := NULL]
 META <- list(built = format(Sys.time()), git = GIT, mode = MODE, fatal_def = FATAL_DEF, fatal_label = if (FATAL_DEF == "stage1") "primary disputes represented by stage-1 fatal-event flags" else "GML dispute fatality > 0",
-             window = W_REF, positions = POSF, poscol = POSCOL, avail_cols = S2_AVAIL, ref_design = S2_REF_DESIGN, monthly_covariates = "ties and frozen tier only (monthly non-tie covariates not built)")
+             window = W_REF, positions = POSF, poscol = POSCOL, avail_cols = S2_AVAIL, ref_design = S2_REF_DESIGN, ref_design_linear = S2_REF_DESIGN_LINEAR, monthly_covariates = "ties and frozen tier only (monthly non-tie covariates not built)")
 for (o in c("DT", "ONE", "MON")) { x <- get(o); setattr(x, "s2_meta", META); assign(o, x) }
 saveRDS(META, file.path(OUT, "s2_meta.rds")); saveRDS(DT, file.path(OUT, "s2_disputes.rds")); saveRDS(PT, file.path(OUT, "s2_participant_spells.rds"))
 saveRDS(CLW, file.path(OUT, "s2_classification_w0_6.rds")); saveRDS(ONE, file.path(OUT, sprintf("s2_oneshot_w%d.rds", W_REF))); saveRDS(MON, file.path(OUT, sprintf("s2_monthly_w%d.rds", W_REF)))

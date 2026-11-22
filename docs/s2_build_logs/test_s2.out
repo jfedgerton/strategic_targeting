@@ -61,5 +61,12 @@
 30 strict sum/min/any: a missing member gives NA; complete inputs aggregate                  PASS
 31 precedence: incomplete horizon first, then the first missing column in list order         PASS
 31 census counts every missing value (a: 2 rows, 1 complete; b: 2 rows, 2 complete)          PASS
-32 frozen design: every model term is an availability column or a fixed transform of one (lcap_s = log1p(min_capdist_s), share_B = 1 - share_A); no tie maxima, no standalone own CINC PASS
+32 frozen design: every model term is an availability column or a fixed transform of one (lcap_s, share_B, surface squares/products); no tie maxima, no standalone own CINC PASS
+33 dM_kA = (-3 - mean(-2, -4)) / 2 = 0; dR_kA = (-4 - (-4)) / 0.5 = 0; dM_kB = (-3 + 5) / 2 = 1; dR_kB = (-4 + 6) / 0.5 = 4 PASS
+33 join A uses gaps to B (sA_dR = 4, sA_dR2 = 16, sA_dMR = 4); join B uses gaps to A (all 0) PASS
+33 min aggregation: weakest / most isolated A member (-4, -5) -> dM_kA = 0.5, dR_kA = 2      PASS
+33 a side member without a position makes that side's gaps NA (strict)                       PASS
+33 frozen surface design: each alternative carries its 5 surface terms, no linear position terms (own_cent, tgt_cent_mean, log_cinc_ratio) PASS
+33 mirroring: join A / originator take the stage-1 controls toward B (the side they fight); join B toward A; recruitment terms toward the joined side PASS
+33 sweep dimensions: opposing-side position mean/min and design surface/linear; reference = mean, surface PASS
 ALL PASS

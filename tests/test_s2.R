@@ -184,7 +184,23 @@ O31 <- data.table(complete = c(FALSE, TRUE, TRUE, TRUE), a = c(NA, NA, 1, 1), b 
 R31 <- s2_ref_cohort(O31, c("a", "b"))
 check("31 precedence: incomplete horizon first, then the first missing column in list order", identical(R31$excl_reason, c("incomplete horizon", "missing a", "missing b", "")) && identical(R31$in_ref, c(FALSE, FALSE, FALSE, TRUE)))
 check("31 census counts every missing value (a: 2 rows, 1 complete; b: 2 rows, 2 complete)", identical(attr(R31, "census")$n_missing_any_row, c(2L, 2L)) && identical(attr(R31, "census")$n_missing_complete_rows, c(1L, 2L)))
-check("32 frozen design: every model term is an availability column or a fixed transform of one (lcap_s = log1p(min_capdist_s), share_B = 1 - share_A); no tie maxima, no standalone own CINC",
-      all(setdiff(unique(unlist(S2_REF_DESIGN)), c("lcap_A", "lcap_B", "share_B")) %in% S2_AVAIL) && !any(grepl("tie_max|log_cinc_k", unlist(S2_REF_DESIGN))))
+check("32 frozen design: every model term is an availability column or a fixed transform of one (lcap_s, share_B, surface squares/products); no tie maxima, no standalone own CINC",
+      all(setdiff(unique(unlist(S2_REF_DESIGN)), c("lcap_A", "lcap_B", "share_B", S2_SURF_A, S2_SURF_B, "dem_x_A", "dem_x_B", "major_x_A", "major_x_B")) %in% S2_AVAIL) && !any(grepl("tie_max|log_cinc_k", unlist(S2_REF_DESIGN))))
+
+## 33. stage-2 surface: gaps to the opposing side, stage-1 scaling, strict, side mean vs min
+ROWS33 <- data.table(dispnum = 1L, ccode = 9L, ty = 1950L, t = 1951L)
+MEM33 <- data.table(dispnum = 1L, side_rel = c("A", "A", "B"), j = c(1L, 2L, 3L))
+PV33 <- data.table(ccode = c(9L, 1L, 2L, 3L), year = 1950L, M = c(-3, -2, -4, -5), R = c(-4, -3, -5, -6))
+S33 <- s2_surface(ROWS33, MEM33, PV33, sM = 2, sR = c("1951" = 0.5))
+check("33 dM_kA = (-3 - mean(-2, -4)) / 2 = 0; dR_kA = (-4 - (-4)) / 0.5 = 0; dM_kB = (-3 + 5) / 2 = 1; dR_kB = (-4 + 6) / 0.5 = 4",
+      isTRUE(all.equal(c(S33$dM_kA, S33$dR_kA, S33$dM_kB, S33$dR_kB), c(0, 0, 1, 4))))
+check("33 join A uses gaps to B (sA_dR = 4, sA_dR2 = 16, sA_dMR = 4); join B uses gaps to A (all 0)", S33$sA_dR == 4 && S33$sA_dR2 == 16 && S33$sA_dMR == 4 && S33$sB_dM == 0 && S33$sB_dR == 0)
+check("33 min aggregation: weakest / most isolated A member (-4, -5) -> dM_kA = 0.5, dR_kA = 2", { s <- s2_surface(ROWS33, MEM33, PV33, 2, c("1951" = 0.5), agg = "min"); isTRUE(all.equal(c(s$dM_kA, s$dR_kA), c(0.5, 2))) })
+check("33 a side member without a position makes that side's gaps NA (strict)", { pv <- copy(PV33); pv[ccode == 2L, R := NA]; s <- s2_surface(ROWS33, MEM33, pv, 2, c("1951" = 0.5)); is.na(s$dR_kA) && !is.na(s$dR_kB) })
+check("33 frozen surface design: each alternative carries its 5 surface terms, no linear position terms (own_cent, tgt_cent_mean, log_cinc_ratio)",
+      all(S2_SURF_A %in% S2_REF_DESIGN$A) && all(S2_SURF_B %in% S2_REF_DESIGN$B) && all(S2_SURF_A %in% S2_REF_DESIGN$O) && !any(grepl("own_cent|tgt_cent|log_cinc_ratio", unlist(S2_REF_DESIGN))))
+check("33 mirroring: join A / originator take the stage-1 controls toward B (the side they fight); join B toward A; recruitment terms toward the joined side",
+      all(S2_Z_TOWARD("B") %in% S2_REF_DESIGN$A) && all(S2_Z_TOWARD("A") %in% S2_REF_DESIGN$B) && identical(S2_REF_DESIGN$O, S2_REF_DESIGN$A) && "tie_sum_A" %in% S2_REF_DESIGN$A && "tie_sum_B" %in% S2_REF_DESIGN$B)
+check("33 sweep dimensions: opposing-side position mean/min and design surface/linear; reference = mean, surface", S2_REF[["opp_side"]] == "mean" && S2_REF[["design"]] == "surface" && is.null(S2_DIMS$target))
 
 cat(if (ok_all) "ALL PASS\n" else "SOME TESTS FAILED\n"); quit(status = if (ok_all) 0 else 1)

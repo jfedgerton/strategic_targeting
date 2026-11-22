@@ -347,3 +347,50 @@ S2_REF_DESIGN <- list(
         "n_side_A", "n_side_B", "major_side_A", "major_side_B"))
 S2_AVAIL <- c("tie_sum_A", "tie_sum_B", "tgt_cent_mean", "own_cent", "log_cinc_ratio_A", "log_cinc_ratio_B", "share_A", "min_capdist_A", "min_capdist_B",
               "contig_side_A", "contig_side_B", "ally_side_A", "ally_side_B", "prior_side_A", "prior_side_B", "n_side_A", "n_side_B", "major_side_A", "major_side_B", "likely")
+
+## ---- stage-2 targeting surface (PI 2026-11-22: "stage 2 should have the same surface") ------------------------------------------------
+## Joining a side means fighting the other side, so each join alternative gets the stage-1 quadratic surface in the joiner's gaps to the
+## OPPOSING side: join A and originator entry -> gaps to B (the original target set); join B -> gaps to A (the initiating side at onset).
+## Gaps follow stage 1 exactly (R/05, R/07): dM = (M_k - M_side) / s_M with M = log CINC share and s_M the pooled gap scale over all
+## state-years; dR = (R_k - R_side) / s_R(t) with R the relational position and s_R(t) the gap scale of positions in year t; positions and
+## shares at t - 1, t = onset year. Side value = mean over the side's month-0 roster (default; "min" = the most isolated / weakest member,
+## a sweep level). Strict: NA if any member or the candidate lacks a value.
+## ROWS: (dispnum, ccode, ty, t); MEM: (dispnum, side_rel, j); PV: (ccode, year, M, R); sM scalar; sR named by year (character).
+s2_gap_scale <- function(v) { n <- length(v); stopifnot(n > 1, !anyNA(v)); sqrt(2 * n * sum((v - mean(v))^2) / (n * (n - 1))) }
+s2_gap_scale_pooled <- function(v, yr) { ss <- tapply(v, yr, function(z) sum((z - mean(z))^2)); n <- tapply(v, yr, length); sqrt(sum(2 * n * ss) / sum(n * (n - 1))) }
+s2_surface <- function(ROWS, MEM, PV, sM, sR, agg = "mean") {
+  stopifnot(agg %in% c("mean", "min"), is.finite(sM), sM > 0, all(sR > 0))
+  ROWS <- as.data.table(ROWS); MEM <- as.data.table(MEM); PV <- as.data.table(PV)
+  f <- if (agg == "mean") mean else min
+  ms <- merge(merge(MEM, unique(ROWS[, .(dispnum, ty)]), by = "dispnum"), PV[, .(j = ccode, ty = year, Mj = M, Rj = R)], by = c("j", "ty"), all.x = TRUE)
+  SV <- ms[, .(M_side = if (anyNA(Mj)) NA_real_ else f(Mj), R_side = if (anyNA(Rj)) NA_real_ else f(Rj)), by = .(dispnum, side_rel)]
+  SV <- dcast(SV, dispnum ~ side_rel, value.var = c("M_side", "R_side"))
+  X <- merge(merge(ROWS, PV[, .(ccode, ty = year, Mk = M, Rk = R)], by = c("ccode", "ty"), all.x = TRUE), SV, by = "dispnum", all.x = TRUE)
+  s_r <- unname(sR[as.character(X$t)]); stopifnot(!anyNA(s_r))
+  X[, `:=`(dM_kA = (Mk - M_side_A) / sM, dR_kA = (Rk - R_side_A) / s_r, dM_kB = (Mk - M_side_B) / sM, dR_kB = (Rk - R_side_B) / s_r)]
+  ## per alternative: sA_* (join A: vs B), sB_* (join B: vs A); the originator alternative uses sA_*
+  X[, `:=`(sA_dM = dM_kB, sA_dM2 = dM_kB^2, sA_dR = dR_kB, sA_dR2 = dR_kB^2, sA_dMR = dM_kB * dR_kB,
+           sB_dM = dM_kA, sB_dM2 = dM_kA^2, sB_dR = dR_kA, sB_dR2 = dR_kA^2, sB_dMR = dM_kA * dR_kA)]
+  X[order(dispnum, ccode), .(dispnum, ccode, dM_kA, dR_kA, dM_kB, dR_kB, sA_dM, sA_dM2, sA_dR, sA_dR2, sA_dMR, sB_dM, sB_dM2, sB_dR, sB_dR2, sB_dMR)]
+}
+S2_SURF_A <- c("sA_dM", "sA_dM2", "sA_dR", "sA_dR2", "sA_dMR"); S2_SURF_B <- c("sB_dM", "sB_dM2", "sB_dR", "sB_dR2", "sB_dMR")
+## Surface reference design (PI 2026-11-22: "stage 2 should mirror stage 1"; supersedes the linear S2_REF_DESIGN as the reference, which
+## stays a labelled sweep level "linear"). Each join alternative mirrors the stage-1 directed utility toward the side it FIGHTS:
+##   surface (5 terms) + the stage-1 directed controls Z_DIRECTED toward the opposing side o (land contiguity, log distance, o's democracy,
+##   democracy of k x o, defense/offense pact with o, major power on o, major k x o, MID with o at t - 1, log prior MIDs with o)
+## plus the stage-2 recruitment terms toward the JOINED side s (tie sum, any ATOP pact) and the dispute-level balance and sizes.
+## Side aggregation: geography = closest member; democracy = share of democratic members; binary = any member. The originator alternative
+## mirrors join A. The linear position and relative-power terms (own and target-set centrality, CINC ratio) are nested in the surface.
+S2_REF_DESIGN_LINEAR <- S2_REF_DESIGN
+S2_Z_TOWARD <- function(o) c(paste0("land_side_", o), paste0("lcap_", o), paste0("dem_side_", o), paste0("dem_x_", o), paste0("defoff_side_", o),
+                              paste0("major_side_", o), paste0("major_x_", o), paste0("mid_tm1_side_", o), paste0("prior_side_", o))
+S2_REF_DESIGN <- list(
+  A = c("likely", S2_SURF_A, S2_Z_TOWARD("B"), "tie_sum_A", "ally_side_A", "share_A", "n_side_A", "n_side_B"),
+  B = c("likely", S2_SURF_B, S2_Z_TOWARD("A"), "tie_sum_B", "ally_side_B", "share_B", "n_side_A", "n_side_B"),
+  O = c("likely", S2_SURF_A, S2_Z_TOWARD("B"), "tie_sum_A", "ally_side_A", "share_A", "n_side_A", "n_side_B"))
+S2_AVAIL <- unique(c(S2_AVAIL, "dM_kA", "dR_kA", "dM_kB", "dR_kB", "land_side_A", "land_side_B", "defoff_side_A", "defoff_side_B",
+                     "dem_side_A", "dem_side_B", "mid_tm1_side_A", "mid_tm1_side_B"))
+## sweep dimensions added by the surface amendment: opposing-side position (mean of the side / its most isolated, weakest member) and design
+S2_DIMS$target <- NULL
+S2_DIMS$opp_side <- c("mean", "min"); S2_DIMS$design <- c("surface", "linear")
+S2_REF <- vapply(S2_DIMS, `[`, "", 1)
