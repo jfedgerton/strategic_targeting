@@ -26,14 +26,16 @@ add <- function(file, spec, W, smp, rule) C[[length(C) + 1L]] <<- data.table(fil
 for (W in WS) for (s in c("fmid", "mid")) add(MF, MAIN, W, s, "1 main measure, window x sample")
 for (f in setdiff(unique(SP$file), MF)) { S <- SP[file == f]
   if (grepl("igo_arm", f)) { for (sp in S[cent == MC, spec_id]) add(f, sp, WM, "fmid", "2 IGO arm, main centrality"); next }
-  S <- S[cent == MC]; if (!nrow(S)) next
+  MCf <- if (MC %in% S$cent) MC else "pr"   # the book measure's centralities (prpos / prsigned) exist only in its own file; others use PageRank
+  S <- S[cent == MCf]; if (!nrow(S)) next
   S[, j := vapply(lay, jac, 0)]; add(f, S[order(-j, spec_id)][1, spec_id], WM, "fmid", if (max(S$j) == 1) "2 main layers, other file" else "2 closest layers, other file") }
 for (sp in SP[file == MF & cent != MC & vapply(lay, function(x) setequal(strsplit(x, "+", fixed = TRUE)[[1]], ML), TRUE), spec_id]) add(MF, sp, WM, "fmid", "3 main layers, other centrality")
 MW0 <- sub("_pta[a-z]+$", "", mp[1])
 for (l in ML) { keep <- setdiff(ML, l)
   ## a set without PTA lives only in the weighting's ptaall file (in force / any files hold PTA combinations only)
-  f4 <- if ("pta" %in% keep) MF else sprintf("positions_core_%s_ptaall.rds", MW0)
-  sp <- SP[file == f4 & cent == MC & vapply(lay, function(x) setequal(strsplit(x, "+", fixed = TRUE)[[1]], keep), TRUE), spec_id]
+  hit <- function(f) SP[file == f & cent == MC & vapply(lay, function(x) setequal(strsplit(x, "+", fixed = TRUE)[[1]], keep), TRUE), spec_id]
+  f4 <- MF; sp <- hit(f4)   # the main file first (the book measure file holds its own drop-one sets)
+  if (!length(sp) && !("pta" %in% keep)) { f4 <- sprintf("positions_core_%s_ptaall.rds", MW0); sp <- hit(f4) }
   if (length(sp)) add(f4, sp[1], WM, "fmid", paste0("4 drop layer ", l)) else cat(sprintf("rule 4: no spec for main layers minus %s in %s\n", l, f4)) }
 ## (5) GPT P2-6, matched PTA comparison: the main layers + pta, main weighting and centrality, under each PTA coding (all / inforce / any), so
 ##     the PTA comparison changes only the PTA coding, not the layer set

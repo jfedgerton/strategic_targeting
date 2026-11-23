@@ -8,6 +8,11 @@ suppressPackageStartupMessages(library(survival))
 .edge_cache <- new.env()
 s2_spec_edges <- function(arm, spec_id, edges_dir) {
   p <- strsplit(spec_id, "|", fixed = TRUE)[[1]]
+  if (startsWith(p[1], "BOOKc12_")) {   # the book / JOP measure (R/book_measure_c12.R; main measure PI 2026-11-23): edges stored per spec
+    f <- file.path(edges_dir, "edges_book_c12.rds"); if (is.null(.edge_cache[[f]])) { if (!file.exists(f)) stop("missing edge file ", basename(f)); .edge_cache[[f]] <- readRDS(f) }
+    E <- .edge_cache[[f]]$edges[[spec_id]]; if (is.null(E)) stop("no book-measure edges for ", spec_id)
+    stopifnot(all(E$w > 0 & E$w <= 1 + 1e-12)); return(E[, .(a, b, year, w = pmin(w, 1))])
+  }
   if (arm == "igo") { f <- file.path(edges_dir, "edges_igo_arm.rds"); key <- f
     if (is.null(.edge_cache[[key]])) .edge_cache[[key]] <- readRDS(f); e <- .edge_cache[[key]]
     E <- e$E[, p[2]]; dy <- e$dy

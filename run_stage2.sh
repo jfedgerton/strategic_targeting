@@ -28,7 +28,7 @@ wtag() { [ "$1" -gt 0 ] && echo "_w${1}d" || echo ""; }
 [ "${S2_FORCE:-0}" = "1" ] || ! pgrep -f "run_all.sh|R/07_fit_sweep.R" > /dev/null || die "run_all.sh (or a stage-1 fit) looks still running; start stage 2 after it finishes (S2_FORCE=1 overrides)"
 [ -s $O/layers_dy.rds ] || die "missing $O/layers_dy.rds"
 [ -e data_entry ] || die "data_entry link missing (made by run_all.sh)"
-POSD=$O/positions; MAINF=$POSD/positions_core_${MAIN_SPEC%%|*}.rds; [ -s $MAINF ] || die "missing $MAINF (positions file of MAIN_SPEC $MAIN_SPEC)"
+POSD=$O/positions; MAINF=$POSD/positions_core_${MAIN_SPEC%%|*}.rds   # the book measure file is written by step 1
 ## exit 3 from the sweep or bootstrap = finished with transient ERROR cells: warn, continue with later steps, report at the end (rerun retries)
 GAPS=""; gap() { local rc=$1 NM=$2; [ $rc -eq 0 ] && return 0; [ $rc -eq 3 ] && { say "WARNING: $NM finished with ERROR cells (rerun to retry)"; GAPS="$GAPS $NM"; return 0; }; die "$NM failed (exit $rc)"; }
 [ "$TYPES" = "init" ] || say "note: config TYPES=$TYPES; stage 2 always uses the init dumps"
@@ -51,11 +51,18 @@ if has 1; then
   done
   ed dipl "edges_dipl_W1raw_ptaall edges_dipl_W2contig_ptaall edges_dipl_W3dist_ptaall edges_dipl_W4fe_ptaall" --arm=dipl --pta=all --cores=$CORES
   ed igo "edges_igo_arm" --arm=igo
+  ## the book / JOP main measure (R/book_measure_c12.R): positions file into $POSD (so the sweeps include it) and its edges into $S2/edges
+  BKP=$POSD/positions_core_BOOKc12_ptaany.rds; BKE=$S2/edges/edges_book_c12.rds
+  BKS="$(h R/book_measure_c12.R) $(h $O/layers_dy.rds) $(h $POSD/positions_core_W2contig_ptaall.rds)"
+  if ! { [ -s $BKP ] && [ -s $BKE ] && fresh $S2/edges/.book_c12 "$BKS"; }; then
+    runR "BOOK_MEASURE_DONE|contig12|Error" R/book_measure_c12.R $O/layers_dy.rds $POSD/positions_core_W2contig_ptaall.rds $BKP $BKE || die "book measure failed"
+    stamp $S2/edges/.book_c12 "$BKS"; fi
   say "1 edges done: $(ls $S2/edges | wc -l | tr -d ' ') files"
 fi
 
 ## ---- 2. builds ----
 if has 2; then
+  [ -s $MAINF ] || die "missing $MAINF (positions file of MAIN_SPEC $MAIN_SPEC; step 1 builds the book measure)"
   for W in $WINDOWS; do for SM in fmid mid; do
     BD=$S2/builds/w${W}_${SM}; DP=$O/dumps/long_init_bon$(wtag $W)_relyear_${SM}.rds; [ -s $DP ] || die "missing stage-1 dump $DP"
     BST="$(h R/s2_01_build_riskset.R) $(h R/lib/s2.R) $(h R/lib/s2_cell.R) $(h R/lib/sry.R) $(ls $S2/edges/*.rds | while read f; do h $f; done | shasum -a 256 | cut -c1-16) $(h $DP) $(h $MAINF) $(h $O/layers_dy.rds) $(h data_entry/manifest.csv) $MAIN_SPEC $W $SM"
