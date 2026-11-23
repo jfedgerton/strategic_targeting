@@ -113,7 +113,7 @@ S <- rbindlist(OUTT); S[, cell := CELL]
 fs <- if (CELL == "cut") c(list(FITS$stage1), FITS$stage2) else list(FITS$joint)
 ## convergence over everything the gate names (audit P1-2): bulk / tail ESS and rank-normalized Rhat (rstan::monitor)
 GP <- c("beta1", "theta", "sigma_b", "sigma_del", "sigma_eta", "alpha", "betaA", "betaB", "betaO", "sigma_eps", "lam1_raw", "lam2_raw")
-mon <- rbindlist(lapply(fs, function(f) { pp <- intersect(GP, f@model_pars); m <- rstan::monitor(as.array(f, pars = pp), print = FALSE, warmup = 0)
+mon <- rbindlist(lapply(fs, function(f) { pp <- intersect(GP, f@sim$pars_oi); pp <- pp[vapply(pp, function(p) prod(f@par_dims[[p]]) > 0 || length(f@par_dims[[p]]) == 0, TRUE)]; m <- rstan::monitor(as.array(f, pars = pp), print = FALSE, warmup = 0)
   data.table(par = rownames(m), Rhat = m$Rhat, ess_bulk = m$Bulk_ESS, ess_tail = m$Tail_ESS) }))
 fwrite(mon, file.path(OUT, sprintf("ame_%s_convergence.csv", CELL)))
 rh <- max(mon$Rhat, na.rm = TRUE); ne <- min(pmin(mon$ess_bulk, mon$ess_tail), na.rm = TRUE)
