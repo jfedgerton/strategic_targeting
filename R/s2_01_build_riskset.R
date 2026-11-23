@@ -364,7 +364,7 @@ MON <- merge(MON, TIER[, .(dispnum, ccode, likely)], by = c("dispnum", "ccode"))
 MON <- merge(MON, DT[, .(dispnum, fold, end_source, end_imputed, onset_year)], by = "dispnum")
 stopifnot(all(MON$fold == s2_fold(MON$onset_year)))                  # every monthly row carries its dispute's onset fold (recheck finding 6)
 MON[, onset_year := NULL]
-META <- list(built = format(Sys.time()), git = GIT, mode = MODE, fatal_def = FATAL_DEF, fatal_label = switch(FATAL_DEF, stage1 = "primary disputes represented by stage-1 fatal-event flags", gml = "GML dispute fatality > 0", mid = "primary disputes of stage-1 all-MID events (in_mid)"),
+META <- list(cover = COVER, built = format(Sys.time()), git = GIT, mode = MODE, fatal_def = FATAL_DEF, fatal_label = switch(FATAL_DEF, stage1 = "primary disputes represented by stage-1 fatal-event flags", gml = "GML dispute fatality > 0", mid = "primary disputes of stage-1 all-MID events (in_mid)"),
              window = W_REF, positions = POSF, poscol = POSCOL, avail_cols = S2_AVAIL, ref_design = S2_REF_DESIGN, ref_design_linear = S2_REF_DESIGN_LINEAR, monthly_covariates = "ties and frozen tier only (monthly non-tie covariates not built)")
 for (o in c("DT", "ONE", "MON")) { x <- get(o); setattr(x, "s2_meta", META); assign(o, x) }
 saveRDS(META, file.path(OUT, "s2_meta.rds")); saveRDS(DT, file.path(OUT, "s2_disputes.rds")); saveRDS(PT, file.path(OUT, "s2_participant_spells.rds"))

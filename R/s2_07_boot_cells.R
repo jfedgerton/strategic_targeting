@@ -17,11 +17,16 @@ wtag <- function(W) if (W > 0) sprintf("_w%dd", W) else ""
 arm_of <- function(b) if (grepl("^positions_igo_arm", b)) "igo" else if (grepl("^positions_core_", b)) "core" else if (grepl("^positions_dipl_", b)) "dipl" else stop("arm of ", b)
 logf("two-stage bootstrap of %d cells %s | cores %d | block %d", nrow(CELLS), format(Sys.time()), CORES, BLOCK)
 
-for (r in seq_len(nrow(CELLS))) {
-  cl <- CELLS[r]; cd <- file.path(OUT, cl$cell_id); dir.create(cd, showWarnings = FALSE)
-  if (file.exists(file.path(cd, "summary.csv"))) next
-  B <- s2_base(file.path(BR, sprintf("w%d_%s", cl$window, cl$sample))); W_REF <- B$window; stopifnot(W_REF == cl$window)
+run_cell <- function(cl) {
+  cd <- file.path(OUT, cl$cell_id); dir.create(cd, showWarnings = FALSE)
+  ## a cell folder belongs to exactly one (file, spec, window, sample, n_boot, block); a regenerated cells.csv or changed --block stops loudly
+  idf <- file.path(cd, "cell_identity.txt"); idv <- paste(cl$file, cl$spec_id, cl$window, cl$sample, cl$n_boot, BLOCK, sep = " | ")
+  if (file.exists(idf)) { if (!identical(readLines(idf), idv)) stop(sprintf("%s holds a different cell (%s); use a new --out", cd, readLines(idf))) } else writeLines(idv, idf)
+  if (file.exists(file.path(cd, "summary.csv"))) return(invisible(NULL))
+  B <- s2_base(file.path(BR, sprintf("w%d_%s", cl$window, cl$sample))); W_REF <<- B$window; stopifnot(W_REF == cl$window)
   dump <- readRDS(file.path(DD, sprintf("long_init_bon%s_relyear_%s.rds", wtag(cl$window), cl$sample)))
+  cm <- if (is.null(dump$coorig_months)) 0L else as.integer(dump$coorig_months); smp <- c(stage1 = "fmid", gml = "fmid", mid = "mid")[[B$meta$fatal_def]]
+  if (dump$types != "init" || cm != cl$window || dump$sample != cl$sample || smp != cl$sample) stop("dump/build/cell mismatch for ", cl$cell_id)
   pz <- readRDS(file.path(PD, cl$file)); key <- as.data.table(pz$key); R <- pz$R[, cl$spec_id]; arm <- arm_of(cl$file)
   D <- s1_prepare(dump, key, R); X <- s2_prepare(B, key, R, s2_spec_edges(arm, cl$spec_id, EDIR))
   ref_order <- names(sort(table(D[chosen == 1L, c2]), decreasing = TRUE))
@@ -30,12 +35,13 @@ for (r in seq_len(nrow(CELLS))) {
   disp_all <- sort(unique(c(as.data.table(dump$D)$disp, B$X$dispnum)))
   set.seed(123); MM <- lapply(seq_len(cl$n_boot), function(b) { m <- tabulate(sample.int(length(disp_all), length(disp_all), replace = TRUE), length(disp_all)); names(m) <- disp_all; m })
   nb <- ceiling(cl$n_boot / BLOCK); t0 <- Sys.time()
-  for (k in seq_len(nb)) { bf <- file.path(cd, sprintf("draws_%03d.rds", k)); if (file.exists(bf)) next
-    ix <- ((k - 1) * BLOCK + 1):min(k * BLOCK, cl$n_boot)
+  for (k in seq_len(nb)) { bf <- file.path(cd, sprintf("draws_%03d.rds", k)); ix <- ((k - 1) * BLOCK + 1):min(k * BLOCK, cl$n_boot)
+    if (file.exists(bf)) { if (!identical(readRDS(bf)$ix, ix)) stop("draw block ", bf, " does not hold draws ", min(ix), "-", max(ix)); next }
     DR <- mclapply(MM[ix], function(m) tryCatch(joint_fe_draw(D, dump, X, B$TS, m, ref_order), error = function(e) conditionMessage(e)), mc.cores = CORES, mc.preschedule = FALSE)
     saveRDS(list(ix = ix, draws = DR), paste0(bf, ".tmp")); file.rename(paste0(bf, ".tmp"), bf) }
   DRA <- unlist(lapply(sort(list.files(cd, pattern = "^draws_.*\\.rds$", full.names = TRUE)), function(f) readRDS(f)$draws), recursive = FALSE)
-  okd <- vapply(DRA, is.numeric, TRUE); M <- do.call(rbind, DRA[okd])
+  okd <- vapply(DRA, is.numeric, TRUE); if (!any(okd)) stop("no usable draws for ", cl$cell_id, ": ", paste(unique(unlist(DRA)), collapse = " | "))
+  M <- do.call(rbind, DRA[okd])
   pt <- c(setNames(P[stage == "S1", est], paste("S1", P[stage == "S1", alt], P[stage == "S1", axis], P[stage == "S1", gap], sep = ".")),
           setNames(P[stage == "S2" & axis %in% c("M", "R"), est], paste("S2", P[stage == "S2" & axis %in% c("M", "R"), alt], P[stage == "S2" & axis %in% c("M", "R"), axis], P[stage == "S2" & axis %in% c("M", "R"), gap], sep = ".")),
           setNames(P[axis == "theta", est], paste0(P[axis == "theta", alt], ":bbar")),
@@ -50,5 +56,12 @@ for (r in seq_len(nrow(CELLS))) {
   logf("%s %s w%d %s: %d/%d draws ok, %.1f min | theta A %.2f [%.2f, %.2f]", cl$cell_id, cl$spec_id, cl$window, cl$sample, sum(okd), cl$n_boot,
        as.numeric(difftime(Sys.time(), t0, units = "mins")), S[q == "A:bbar", est], S[q == "A:bbar", lo], S[q == "A:bbar", hi])
 }
-fwrite(rbindlist(lapply(file.path(OUT, CELLS$cell_id, "summary.csv"), function(f) if (file.exists(f)) fread(f)), fill = TRUE), file.path(OUT, "boot_cells_summary.csv"))
+## a failing cell is recorded (ERROR summary) and the run moves on; rerunning retries it
+for (r in seq_len(nrow(CELLS))) { cl <- CELLS[r]
+  tryCatch(run_cell(cl), error = function(e) { m <- conditionMessage(e); logf("%s %s: ERROR %s", cl$cell_id, cl$spec_id, m)
+    if (grepl("holds a different|does not hold draws|mismatch", m)) stop(m)   # identity and resume errors stop the run
+    fwrite(data.table(cell_id = cl$cell_id, file = cl$file, spec_id = cl$spec_id, window = cl$window, sample = cl$sample, rule = cl$rule, status = "ERROR", msg = m),
+           file.path(OUT, cl$cell_id, "error.csv")) }) }
+fwrite(rbindlist(lapply(file.path(OUT, CELLS$cell_id), function(d) if (file.exists(file.path(d, "summary.csv"))) fread(file.path(d, "summary.csv"))[, status := "OK"]
+  else if (file.exists(file.path(d, "error.csv"))) fread(file.path(d, "error.csv"))), fill = TRUE), file.path(OUT, "boot_cells_summary.csv"))
 logf("S2_BOOT_DONE")

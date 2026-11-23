@@ -2,7 +2,7 @@
 ## cells chosen before any result is seen, each refitted by the two-stage dispute bootstrap (R/s2_07_boot_cells.R).
 ##   (1) the main measure at every window x sample (fmid, mid)
 ##   (2) main window, fmid: the main measure's layer set and centrality in every other positions file (weighting x PTA rule x arm); where a
-##       file lacks that exact layer set, the same-centrality spec with the closest layer set (Jaccard); the IGO arm: its specs with the main centrality
+##       file lacks that exact layer set, the same-centrality spec with the closest layer set (Jaccard; ties broken alphabetically by spec id); the IGO arm: its specs with the main centrality
 ##   (3) main window, fmid, main file: the main layer set under every other centrality
 ##   (4) main window, fmid, main file, main centrality: the main layer set minus one layer (each layer in turn)
 ## Draws: B_MAIN for the main cell, B_CELL for the rest.
@@ -26,7 +26,7 @@ for (f in setdiff(unique(SP$file), MF)) { S <- SP[file == f]
   if (grepl("igo_arm", f)) { for (sp in S[cent == MC, spec_id]) add(f, sp, WM, "fmid", "2 IGO arm, main centrality"); next }
   S <- S[cent == MC]; if (!nrow(S)) next
   S[, j := vapply(lay, jac, 0)]; add(f, S[order(-j, spec_id)][1, spec_id], WM, "fmid", if (max(S$j) == 1) "2 main layers, other file" else "2 closest layers, other file") }
-for (sp in SP[file == MF & lay == mp[2] & cent != MC, spec_id]) add(MF, sp, WM, "fmid", "3 main layers, other centrality")
+for (sp in SP[file == MF & cent != MC & vapply(lay, function(x) setequal(strsplit(x, "+", fixed = TRUE)[[1]], ML), TRUE), spec_id]) add(MF, sp, WM, "fmid", "3 main layers, other centrality")
 for (l in ML) { L2 <- paste(setdiff(ML, l), collapse = "+"); sp <- SP[file == MF & cent == MC & vapply(lay, function(x) setequal(strsplit(x, "+", fixed = TRUE)[[1]], setdiff(ML, l)), TRUE), spec_id]
   if (length(sp)) add(MF, sp[1], WM, "fmid", paste0("4 drop layer ", l)) }
 C <- unique(rbindlist(C), by = c("file", "spec_id", "window", "sample"))

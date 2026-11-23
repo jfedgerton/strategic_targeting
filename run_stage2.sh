@@ -20,7 +20,8 @@ runR() { local PAT=$1; shift; local T; T=$(mktemp); local rc=0; Rscript "$@" > "
 has() { [[ " $STEPS " == *" $1 "* ]]; }
 wtag() { [ "$1" -gt 0 ] && echo "_w${1}d" || echo ""; }
 [ -e $O/.created_by_run_all ] || die "$O is not a run_all.sh output folder"
-pgrep -f "run_all.sh" > /dev/null && die "run_all.sh is still running; start stage 2 after it finishes"
+## audit P2: pgrep also matches a parent shell that chains the two scripts; S2_FORCE=1 skips this check when you know stage 1 is done
+[ "${S2_FORCE:-0}" = "1" ] || ! pgrep -f "run_all.sh|R/07_fit_sweep.R" > /dev/null || die "run_all.sh (or a stage-1 fit) looks still running; start stage 2 after it finishes (S2_FORCE=1 overrides)"
 [ -s $O/layers_dy.rds ] || die "missing $O/layers_dy.rds"
 [ -e data_entry ] || die "data_entry link missing (made by run_all.sh)"
 POSD=$O/positions; MAINF=$POSD/positions_core_W2contig_ptaall.rds
@@ -55,7 +56,8 @@ if has 2; then
   say "2 builds done"
 fi
 
-ALLPOS=$(ls $POSD/positions_*.rds | grep -v positions_cmp | paste -sd, -)
+ALLPOS=$(ls "$POSD"/positions_*.rds 2>/dev/null | grep -v positions_cmp | paste -sd, - || true)
+{ has 3 || has 5; } && [ -z "$ALLPOS" ] && die "no positions files in $POSD"
 MAINB=$S2/builds/w${WINDOW_MAIN}_fmid
 ## ---- 3. layer 1a: all measures x main window x fmid ----
 if has 3; then

@@ -1,7 +1,7 @@
 ## R/s2_05_sweep.R -- the stage-2 parallel multiverse (PI 2026-11-22): the joint two-stage FE model (R/lib/s2_cell.R) for every relational
 ## measure in the given positions files, on one window x sample (one stage-2 build + its stage-1 init dump). Each measure uses its OWN
 ## positions (stage-1 dR, stage-2 surface gaps) and its OWN edges (stage-2 ties; option A, measure-specific ties).
-## Point fits only (two-way clustered SEs); the bootstrapped sub-multiverse is R/s2_06_boot_cells.R.
+## Point fits only (two-way clustered SEs); the bootstrapped sub-multiverse is R/s2_07_boot_cells.R (cells picked by R/s2_06_pick_boot_cells.R).
 ## Resumable: one CSV per (positions file x chunk); a chunk whose CSV exists is skipped. A failing cell is written as status ERROR, never dropped.
 ## Usage:
 ##   Rscript R/s2_05_sweep.R --build=DIR --dump=long_init_...rds --edges_dir=DIR --out=DIR --positions=f1.rds,f2.rds,...
@@ -34,7 +34,8 @@ one_cell <- function(spec, R, key, arm) {
   r <- tryCatch({
     D <- s1_prepare(dump, key, R); E <- s2_spec_edges(arm, spec, EDIR); X <- s2_prepare(B, key, R, E)
     o <- joint_fe_cell(D, dump, X, B$TS); o[, `:=`(status = "OK", s2_rows_dropped = attr(X, "dropped"), msg = "")]; o
-  }, error = function(e) data.table(stage = NA_character_, alt = NA_character_, axis = NA_character_, gap = NA_real_, est = NA_real_, se = NA_real_, status = "ERROR", msg = conditionMessage(e)))
+  }, error = function(e) data.table(stage = NA_character_, alt = NA_character_, axis = NA_character_, gap = NA_real_, est = NA_real_, se = NA_real_,
+                                    status = if (grepl("^position constant", conditionMessage(e))) "SKIPPED" else "ERROR", msg = conditionMessage(e)))
   r[, `:=`(spec_id = spec, secs = round(proc.time()[[3]] - t0, 1))]; r
 }
 
@@ -46,19 +47,25 @@ for (pf in POSF) {
   if (!length(specs)) { logf("%s: no measures selected", basename(pf)); next }
   ch <- split(specs, ceiling(seq_along(specs) / CHUNK)); tag <- sub("\\.rds$", "", basename(pf))
   logf("%s (%s arm): %d measures in %d chunks", basename(pf), arm, length(specs), length(ch))
-  for (ci in seq_along(ch)) {
-    f <- file.path(OUT, sprintf("cells_%s_w%d_%s_c%03d.csv", tag, W_REF, smp, ci))
-    if (file.exists(f)) next
-    t0 <- Sys.time()
-    if (arm != "igo") invisible(s2_spec_edges(arm, ch[[ci]][1], EDIR))   # load this file's edge layers once, before forking
-    res <- mclapply(ch[[ci]], function(s) one_cell(s, pz$R[, s], key, arm), mc.cores = CORES, mc.preschedule = FALSE)
+  rm(list = ls(.edge_cache), envir = .edge_cache); invisible(s2_spec_edges(arm, specs[1], EDIR))   # one edge file per positions file: load once, before forking
+  run_specs <- function(sp) { res <- mclapply(sp, function(s) one_cell(s, pz$R[, s], key, arm), mc.cores = CORES, mc.preschedule = FALSE)
     bad <- vapply(res, function(x) !is.data.table(x), TRUE)
-    if (any(bad)) res[bad] <- lapply(which(bad), function(i) data.table(status = "ERROR", msg = paste("worker failed:", as.character(res[[i]])), spec_id = ch[[ci]][i]))
-    res <- rbindlist(res, fill = TRUE)
+    if (any(bad)) res[bad] <- lapply(which(bad), function(i) data.table(status = "ERROR", msg = paste("worker failed:", as.character(res[[i]])), spec_id = sp[i]))
+    rbindlist(res, fill = TRUE) }
+  for (ci in seq_along(ch)) {
+    f <- file.path(OUT, sprintf("cells_%s_w%d_%s_c%03d.csv", tag, W_REF, smp, ci)); fs <- sub("\\.csv$", ".specs", f)
+    if (file.exists(f)) { if (!file.exists(fs) || !identical(readLines(fs), ch[[ci]])) stop("chunk ", basename(f), " exists but holds a different spec list (changed set, --chunk or --max_cells); use a new --out")
+      prev <- fread(f); er <- unique(prev[status == "ERROR", spec_id]); if (!length(er)) next
+      ## one retry of ERROR cells (e.g. a worker killed for memory); SKIPPED cells (constant positions) are final
+      logf("  chunk %d: retrying %d ERROR cells", ci, length(er)); rr <- run_specs(er)
+      rr[, `:=`(positions_file = basename(pf), arm = arm, window = W_REF, sample = smp, fatal_def = B$meta$fatal_def)]
+      res <- rbind(prev[!spec_id %in% er], rr, fill = TRUE); fwrite(res, paste0(f, ".tmp")); file.rename(paste0(f, ".tmp"), f); next }
+    t0 <- Sys.time()
+    res <- run_specs(ch[[ci]])
     res[, `:=`(positions_file = basename(pf), arm = arm, window = W_REF, sample = smp, fatal_def = B$meta$fatal_def)]
-    fwrite(res, paste0(f, ".tmp")); file.rename(paste0(f, ".tmp"), f)
+    writeLines(ch[[ci]], fs); fwrite(res, paste0(f, ".tmp")); file.rename(paste0(f, ".tmp"), f)
     n_err <- uniqueN(res[status == "ERROR", spec_id]); n_done <- n_done + length(ch[[ci]])
-    logf("  chunk %d/%d: %d measures, %d errors, %.1f min", ci, length(ch), length(ch[[ci]]), n_err, as.numeric(difftime(Sys.time(), t0, units = "mins")))
+    logf("  chunk %d/%d: %d measures, %d errors, %d skipped (constant positions), %.1f min", ci, length(ch), length(ch[[ci]]), n_err, uniqueN(res[status == "SKIPPED", spec_id]), as.numeric(difftime(Sys.time(), t0, units = "mins")))
   }
 }
 logf("S2_SWEEP_DONE (%d measures fitted this call)", n_done)

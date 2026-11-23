@@ -22,6 +22,13 @@ th_ref <- J$F_t$b[c("A:bbar", "B:bbar", "O:bbar")]
 check("3 cell theta equals R/s2_03_joint_fe.R (main measure)", isTRUE(all.equal(unname(res[axis == "theta", est]), unname(th_ref), tolerance = 1e-5)))
 s1r <- J$S1C[model == "target FE"]
 check("3 cell stage-1 FE contrasts equal R/s2_03_joint_fe.R", isTRUE(all.equal(res[stage == "S1", est], s1r$est, tolerance = 1e-5)))
+## audit P1: a non-main measure must carry its OWN centrality controls and ties, not the main measure's
+alt <- setdiff(colnames(pz$R), col)[1]; Xa <- s2_prepare(B, key, pz$R[, alt], E)
+oa <- merge(Xa[, .(dispnum, ccode, oc = own_cent, tc = tgt_cent_mean)], B$X[, .(dispnum, ccode, oc0 = own_cent, tc0 = tgt_cent_mean)], by = c("dispnum", "ccode"))
+RA <- data.table(ccode = key$ccode, ty = key$year, Rv = pz$R[, alt]); chk <- merge(Xa[, .(dispnum, ccode, oc = own_cent)], unique(B$row0[, .(dispnum, ccode, ty = onset_year - 1L)]), by = c("dispnum", "ccode"))
+chk <- merge(chk, RA, by = c("ccode", "ty"))
+check(sprintf("5 measure '%s': own_cent equals its own position at onset - 1 and differs from the main measure's", alt), max(abs(chk$oc - chk$Rv)) < 1e-12 && max(abs(oa$oc - oa$oc0)) > 1e-6)
+check("5 main measure: rebuilt own_cent and tgt_cent_mean equal the build's", { o <- merge(X[, .(dispnum, ccode, oc = own_cent, tc = tgt_cent_mean)], B$X[, .(dispnum, ccode, oc0 = own_cent, tc0 = tgt_cent_mean)], by = c("dispnum", "ccode")); max(abs(o$oc - o$oc0)) < 1e-12 && max(abs(o$tc - o$tc0)) < 1e-12 })
 bf <- file.path(a[5], "boot_draws_raw.rds")
 if (file.exists(bf)) { DR0 <- readRDS(bf); disp_all <- sort(unique(c(as.data.table(dump$D)$disp, B$X$dispnum)))
   set.seed(123); MM <- lapply(1:2, function(b) { m <- tabulate(sample.int(length(disp_all), length(disp_all), replace = TRUE), length(disp_all)); names(m) <- disp_all; m })

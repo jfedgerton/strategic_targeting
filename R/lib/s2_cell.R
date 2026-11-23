@@ -11,7 +11,7 @@ s2_spec_edges <- function(arm, spec_id, edges_dir) {
   if (arm == "igo") { f <- file.path(edges_dir, "edges_igo_arm.rds"); key <- f
     if (is.null(.edge_cache[[key]])) .edge_cache[[key]] <- readRDS(f); e <- .edge_cache[[key]]
     E <- e$E[, p[2]]; dy <- e$dy
-    if (p[2] == "raw_count") { yr <- split(seq_len(nrow(dy)), dy$year); En <- numeric(length(E)); for (ix in yr) { m <- max(E[ix]); if (m > 0) En[ix] <- E[ix] / m }; E <- En }   # the IGO arm's centrality takes raw weights; scale to [0,1] for ties
+    if (p[2] %in% c("raw_count", "bip_newman")) { yr <- split(seq_len(nrow(dy)), dy$year); En <- numeric(length(E)); for (ix in yr) { m <- max(E[ix]); if (m > 0) En[ix] <- E[ix] / m }; E <- En }   # raw_count and bip_newman (sum of 1/(k_g - 1), can exceed 1) are scaled by the year maximum for ties; cosine is already in [0,1]
   } else {
     wt <- sub("_pta.*$", "", p[1]); tag <- sub("^.*_(pta[a-z]+)$", "\\1", p[1]); L <- strsplit(p[2], "+", fixed = TRUE)[[1]]
     f <- file.path(edges_dir, sprintf("edges_%s_%s_%s.rds", arm, wt, tag)); key <- f
@@ -33,6 +33,7 @@ s1_prepare <- function(dump, key, R) {
   i <- match(paste(D$c1, D$yr - 1L), kk); j <- match(paste(D$c2, D$yr - 1L), kk)
   if (anyNA(i) || anyNA(j)) stop("stage 1: positions missing for event rows")
   D[, dR := (R[i] - R[j]) / sc[as.character(yr)]]
+  if (any(!is.finite(D$dR))) stop(sprintf("position constant in stage-1 year(s) %s", paste(sort(unique(D$yr[!is.finite(D$dR)])), collapse = " ")))
   D[, `:=`(dM2 = dM^2, dR2 = dR^2, dMR = dM * dR)]
   for (g in 0:1) for (v in c("dM", "dM2", "dR", "dR2", "dMR")) D[, paste0(v, "_", ROLES[g + 1]) := get(v) * (type == g)]
   D[]
@@ -56,12 +57,21 @@ s1_contrasts <- function(b, V, roles) { out <- list()
 s2_prepare <- function(B, key, R, EDGE) {
   PV <- merge(as.data.table(B$SI$PV)[, .(ccode, year, M)], data.table(ccode = key$ccode, year = key$year, R = R), by = c("ccode", "year"), all = TRUE)
   sR <- vapply(split(R, key$year), s2_gap_scale, 0)
+  z <- names(sR)[sR <= 0]
+  if (length(z)) { used <- intersect(z, as.character(unique(B$SI$rows$t))); if (length(used)) stop("position constant in stage-2 year(s) ", paste(used, collapse = " ")); sR <- sR[sR > 0] }
   sv <- s2_surface(B$SI$rows, B$SI$mem_roster, PV, B$SI$sM, sR, "mean")
-  X <- merge(B$X[, !c("dM_kA", "dR_kA", "dM_kB", "dR_kB", "tie_sum_A", "tie_sum_B", "tie_max_A", "tie_max_B"), with = FALSE], sv[, .(dispnum, ccode, dM_kA, dR_kA, dM_kB, dR_kB)], by = c("dispnum", "ccode"))
-  cover <- sort(unique(B$cover))
-  T1 <- s2_ties(B$row0[, .(dispnum, ccode, m = 0L, year_tie = onset_year - 1L)], B$R0, EDGE, cover)
+  ## the measure's OWN centrality controls (audit P1, 2026-11-22): own_cent = R of the candidate at onset - 1; tgt_cent_mean / _min over the
+  ## baseline target set at onset - 1 (NA if any target lacks a position), exactly as R/s2_01_build_riskset.R builds them from the main measure
+  RK <- data.table(ccode = key$ccode, ty = key$year, Rv = R)
+  own <- merge(unique(B$row0[, .(dispnum, ccode, ty = onset_year - 1L)]), RK, by = c("ccode", "ty"), all.x = TRUE)[, .(dispnum, ccode, own_cent = Rv)]
+  tg <- merge(merge(B$TS, unique(B$row0[, .(dispnum, ty = onset_year - 1L)]), by = "dispnum"), RK, by = c("ccode", "ty"), all.x = TRUE)
+  tc <- tg[, .(tgt_cent_mean = if (anyNA(Rv)) NA_real_ else mean(Rv), tgt_cent_min = if (anyNA(Rv)) NA_real_ else min(Rv)), by = dispnum]
+  drop <- intersect(c("dM_kA", "dR_kA", "dM_kB", "dR_kB", "tie_sum_A", "tie_sum_B", "tie_max_A", "tie_max_B", "own_cent", "tgt_cent_mean", "tgt_cent_min"), names(B$X))
+  X <- merge(B$X[, !drop, with = FALSE], sv[, .(dispnum, ccode, dM_kA, dR_kA, dM_kB, dR_kB)], by = c("dispnum", "ccode"))
+  X <- merge(merge(X, own, by = c("dispnum", "ccode"), all.x = TRUE), tc, by = "dispnum", all.x = TRUE)
+  T1 <- s2_ties(B$row0[, .(dispnum, ccode, m = 0L, year_tie = onset_year - 1L)], B$R0, EDGE, B$cover)
   X <- merge(X, T1[, .(dispnum, ccode, tie_sum_A, tie_sum_B, tie_max_A, tie_max_B)], by = c("dispnum", "ccode"))
-  n0 <- nrow(X); X <- X[is.finite(dM_kA) & is.finite(dR_kA) & is.finite(dM_kB) & is.finite(dR_kB) & is.finite(tie_sum_A) & is.finite(tie_sum_B)]
+  n0 <- nrow(X); X <- X[is.finite(dM_kA) & is.finite(dR_kA) & is.finite(dM_kB) & is.finite(dR_kB) & is.finite(tie_sum_A) & is.finite(tie_sum_B) & is.finite(own_cent) & is.finite(tgt_cent_mean)]
   add_surface(X); attr(X, "dropped") <- n0 - nrow(X); X
 }
 
@@ -70,7 +80,7 @@ s2_prepare <- function(B, key, R, EDGE) {
 joint_fe_cell <- function(D, dump, X, TS, design = S2_REF_DESIGN) {
   ch <- D[chosen == 1L]; NCH0 <- sort(table(ch$c2), decreasing = TRUE); REP <- names(NCH0)[NCH0 >= 2]
   s1 <- s1_fit_fe(D, dump, names(NCH0)); b1 <- coef(s1$m); keep <- !grepl("^tfe", names(b1)); V1 <- s1_vc2w(s1$m, s1$dd)
-  bfe <- b1[!keep]; names(bfe) <- sub("^tfe", "", names(bfe)); bfe <- c(setNames(0, names(NCH0)[1]), bfe)
+  bfe <- b1[!keep]; names(bfe) <- sub("^tfe", "", names(bfe)); bfe <- c(setNames(0, levels(s1$dd$tfe)[1]), bfe)   # the reference level actually used by the fit
   b <- bfe[names(bfe) %in% REP & is.finite(bfe)]; b <- pmin(pmax(b - mean(b), -5), 5)
   bb <- TS[, .(dispnum, b = b[as.character(ccode)])][, .(bbar = mean(b, na.rm = TRUE)), by = dispnum][is.finite(bbar)]
   X1 <- merge(X, bb, by = "dispnum")
@@ -111,10 +121,10 @@ joint_fe_draw <- function(D, dump, X, TS, m, ref_order, design = S2_REF_DESIGN) 
 s2_base <- function(build_dir) {
   META <- readRDS(file.path(build_dir, "s2_meta.rds")); W <- as.integer(META$window)
   ONE <- as.data.table(readRDS(file.path(build_dir, sprintf("s2_oneshot_w%d.rds", W))))
-  CL <- as.data.table(readRDS(file.path(build_dir, "s2_classification_w0_6.rds")))[W == W]
+  w0 <- W; CL <- as.data.table(readRDS(file.path(build_dir, "s2_classification_w0_6.rds")))[W == w0]   # (audit P2: `W == W` filtered nothing)
   X <- ONE[in_ref == TRUE]; for (v in names(X)) if (is.logical(X[[v]])) X[, (v) := as.numeric(get(v))]
   ROS <- as.data.table(readRDS(file.path(build_dir, "s2_rosters_carry.rds")))
   E <- as.data.table(readRDS(file.path(build_dir, "s2_main_edges.rds")))
   list(meta = META, window = W, X = X, SI = readRDS(file.path(build_dir, "s2_surface_inputs.rds")), row0 = ONE[, .(dispnum, ccode, onset_year)],
-       R0 = ROS[m == 0L], cover = sort(unique(E$year)), TS = CL[baseline == TRUE & side_rel == "B", .(dispnum, ccode)], main_edges = E)
+       R0 = ROS[m == 0L], cover = if (!is.null(META$cover)) sort(META$cover) else { warning("build predates META$cover; using main-edge years"); sort(unique(E$year)) }, TS = CL[baseline == TRUE & side_rel == "B", .(dispnum, ccode)], main_edges = E)
 }
