@@ -19,7 +19,7 @@ known <- c("data_entry", "layers", "positions", "poscol", "out", "dump_bcjs", "m
 fl <- sub("^--([a-z_]+)=.*$", "\\1", args); if (any(!fl %in% known) || anyDuplicated(fl)) stop("unknown or duplicated option: ", paste(fl, collapse = " "))
 DE <- opt("data_entry"); LAYERS_RDS <- opt("layers"); POSF <- opt("positions"); POSCOL <- opt("poscol"); OUT <- opt("out")
 W_REF <- as.integer(opt("window", "1")); FATAL_DEF <- opt("fatal_def", "stage1"); MODE <- opt("mode", "release"); DUMP <- opt("dump_bcjs")
-stopifnot(!is.null(DE), !is.null(LAYERS_RDS), !is.null(POSF), !is.null(POSCOL), !is.null(OUT), W_REF %in% 0:6, FATAL_DEF %in% c("gml", "stage1"),
+stopifnot(!is.null(DE), !is.null(LAYERS_RDS), !is.null(POSF), !is.null(POSCOL), !is.null(OUT), W_REF %in% 0:6, FATAL_DEF %in% c("gml", "stage1", "mid"),
           MODE %in% c("release", "exploratory"))
 if (MODE == "release" && is.null(DUMP)) stop("--mode=release requires --dump_bcjs (acceptance is mandatory for a release build)")
 dir.create(OUT, showWarnings = FALSE, recursive = TRUE)
@@ -47,7 +47,8 @@ SETS <- data.table(dispnum = sort(unique(c(fat_g, fat_s1))))[, `:=`(in_gml = dis
 fwrite(SETS, file.path(OUT, "fatal_sets.csv"))
 logf("population: GML-fatal %d; stage-1 fatal-event primary disputes %d; intersection %d; GML only %d; stage-1 only %d (ID lists in fatal_sets.csv); using %s",
      length(fat_g), length(fat_s1), sum(SETS$in_gml & SETS$in_stage1), sum(SETS$in_gml & !SETS$in_stage1), sum(!SETS$in_gml & SETS$in_stage1), FATAL_DEF)
-fat_d <- if (FATAL_DEF == "gml") fat_g else fat_s1
+fat_mid <- unique(as.integer(EV[in_mid == TRUE, dispnum]))   # all-MID sample (stage-1 in_mid), for the parallel multiverse
+fat_d <- if (FATAL_DEF == "gml") fat_g else if (FATAL_DEF == "mid") fat_mid else fat_s1
 miss <- setdiff(fat_d, P$dispnum); if (length(miss)) logf("availability exclusion: disputes absent from participants_timing %d [%s]", length(miss), paste(miss, collapse = " "))
 fat_d <- intersect(fat_d, P$dispnum)
 ## fatality-code comparison: events.rds dispute fatality (stage-1 source chain) vs GML dispute fatality, single-source disputes
@@ -112,7 +113,8 @@ logf("uncertain dates: initiating-side entrants promoted under the possible boun
      paste(PB[, .(n = sum(poss & cat != "orig")), by = W][order(W), sprintf("W%d %d", W, n)], collapse = " "))
 ## (iii) reconciliation of every stage-1 projection record (initiator x dispute x event year x type)
 if (!is.null(DUMP)) {
-  d <- readRDS(DUMP); stopifnot(d$types == "bcjs", as.integer(d$coorig_months) == W_REF)
+  d <- readRDS(DUMP); cm <- if (is.null(d$coorig_months)) 0L else as.integer(d$coorig_months)
+  stopifnot(d$types %in% c("bcjs", "init"), cm == W_REF)   # init dumps (stage-1 main run): baseline roles and promotions checked; no joiner sides to check
   pr1 <- unique(as.data.table(d$D)[chosen == 1L, .(c1, disp, yr, type, orig_joiner)])
   cov <- PT[pr1, on = .(dispnum = disp, ccode = c1, spell_first <= yr, spell_last >= yr), nomatch = NA, .(disp = i.disp, c1 = i.c1, yr = i.yr, type = i.type, spell = x.spell)]
   cov <- cov[, .(n_spell = sum(!is.na(spell)), spell = if (all(is.na(spell))) NA_integer_ else min(spell, na.rm = TRUE)), by = .(disp, c1, yr, type)]
@@ -362,7 +364,7 @@ MON <- merge(MON, TIER[, .(dispnum, ccode, likely)], by = c("dispnum", "ccode"))
 MON <- merge(MON, DT[, .(dispnum, fold, end_source, end_imputed, onset_year)], by = "dispnum")
 stopifnot(all(MON$fold == s2_fold(MON$onset_year)))                  # every monthly row carries its dispute's onset fold (recheck finding 6)
 MON[, onset_year := NULL]
-META <- list(built = format(Sys.time()), git = GIT, mode = MODE, fatal_def = FATAL_DEF, fatal_label = if (FATAL_DEF == "stage1") "primary disputes represented by stage-1 fatal-event flags" else "GML dispute fatality > 0",
+META <- list(built = format(Sys.time()), git = GIT, mode = MODE, fatal_def = FATAL_DEF, fatal_label = switch(FATAL_DEF, stage1 = "primary disputes represented by stage-1 fatal-event flags", gml = "GML dispute fatality > 0", mid = "primary disputes of stage-1 all-MID events (in_mid)"),
              window = W_REF, positions = POSF, poscol = POSCOL, avail_cols = S2_AVAIL, ref_design = S2_REF_DESIGN, ref_design_linear = S2_REF_DESIGN_LINEAR, monthly_covariates = "ties and frozen tier only (monthly non-tie covariates not built)")
 for (o in c("DT", "ONE", "MON")) { x <- get(o); setattr(x, "s2_meta", META); assign(o, x) }
 saveRDS(META, file.path(OUT, "s2_meta.rds")); saveRDS(DT, file.path(OUT, "s2_disputes.rds")); saveRDS(PT, file.path(OUT, "s2_participant_spells.rds"))

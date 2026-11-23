@@ -84,6 +84,29 @@ joint_fe_cell <- function(D, dump, X, TS, design = S2_REF_DESIGN) {
   out[]
 }
 
+## ---- one two-stage bootstrap draw of a cell (as R/s2_03_joint_fe.R): dispute multiplicities m (named by dispnum) reweight BOTH steps;
+## step 1 refits the target-FE model (reference = most-chosen target present in the draw, b = 0), bbar is rebuilt, step 2 refits with row
+## weights (equal to row replication, tests/test_s2_fit.R 4). Returns a named vector of the cell's quantities (names as boot_names()).
+boot_names <- function(dump) { r <- dump$roles; ax <- rep(c("M", "R"), each = 2); sg <- c(1, -1)
+  c(paste("S1", rep(r, each = 4), ax, sg, sep = "."), paste("S2", rep(c("A", "B", "O"), each = 4), ax, sg, sep = "."),
+    "A:bbar", "B:bbar", "O:bbar", "A:tie_sum_A", "B:tie_sum_B", "O:tie_sum_A") }
+joint_fe_draw <- function(D, dump, X, TS, m, ref_order, design = S2_REF_DESIGN) {
+  ch <- D[chosen == 1L]; NCH <- table(ch$c2); REP <- names(NCH)[NCH >= 2]   # repeat targets of the full sample (as R/s2_03)
+  Db <- copy(D); Db[, w := w * m[as.character(disp)]]; Db <- Db[w > 0]
+  s1 <- s1_fit_fe(Db, dump, ref_order); bb <- coef(s1$m); be <- bb[grepl("^tfe", names(bb))]; names(be) <- sub("^tfe", "", names(be))
+  refb <- setdiff(intersect(ref_order, as.character(unique(Db[chosen == 1L, c2]))), names(be))[1]; be <- c(setNames(0, refb), be)
+  c1 <- s1_contrasts(bb[!grepl("^tfe", names(bb))], NULL, dump$roles)
+  b <- be[names(be) %in% REP & is.finite(be)]; b <- pmin(pmax(b - mean(b), -5), 5)
+  bbt <- TS[, .(dispnum, b = b[as.character(ccode)])][, .(bbar = mean(b, na.rm = TRUE)), by = dispnum][is.finite(bbar)]
+  Xb <- merge(X, bbt, by = "dispnum"); wt <- m[as.character(Xb$dispnum)]; Xb <- Xb[wt > 0]; wt <- wt[wt > 0]
+  ft <- fit_mnl(Xb, lapply(design, function(v) c(v, "bbar")), "boot", vc = FALSE, w = as.numeric(wt))
+  if (!"A:bbar" %in% names(ft$b)) stop("bbar dropped by the separation rule in this draw")
+  sc <- surf_contrasts(ft)
+  v <- c(setNames(c1$est, paste("S1", c1$alt, c1$axis, c1$gap, sep = ".")), setNames(sc$est, paste("S2", sc$alt, sc$axis, sc$gap, sep = ".")),
+         ft$b[c("A:bbar", "B:bbar", "O:bbar", "A:tie_sum_A", "B:tie_sum_B", "O:tie_sum_A")])
+  v[boot_names(dump)]
+}
+
 ## base build of one window x sample (measure-independent parts), from an R/s2_01_build_riskset.R output folder
 s2_base <- function(build_dir) {
   META <- readRDS(file.path(build_dir, "s2_meta.rds")); W <- as.integer(META$window)

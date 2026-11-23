@@ -1,0 +1,64 @@
+## R/s2_05_sweep.R -- the stage-2 parallel multiverse (PI 2026-11-22): the joint two-stage FE model (R/lib/s2_cell.R) for every relational
+## measure in the given positions files, on one window x sample (one stage-2 build + its stage-1 init dump). Each measure uses its OWN
+## positions (stage-1 dR, stage-2 surface gaps) and its OWN edges (stage-2 ties; option A, measure-specific ties).
+## Point fits only (two-way clustered SEs); the bootstrapped sub-multiverse is R/s2_06_boot_cells.R.
+## Resumable: one CSV per (positions file x chunk); a chunk whose CSV exists is skipped. A failing cell is written as status ERROR, never dropped.
+## Usage:
+##   Rscript R/s2_05_sweep.R --build=DIR --dump=long_init_...rds --edges_dir=DIR --out=DIR --positions=f1.rds,f2.rds,...
+##          [--validation=measure_validation.csv --set=all|plausible] [--chunk=50] [--cores=4] [--max_cells=0]
+suppressPackageStartupMessages({ library(data.table); library(parallel) })
+this_file <- sub("^--file=", "", grep("^--file=", commandArgs(FALSE), value = TRUE)[1]); RD <- dirname(normalizePath(this_file))
+for (f in c("s2.R", "s2_fit.R", "sry.R", "s2_cell.R")) source(file.path(RD, "lib", f))
+args <- commandArgs(trailingOnly = TRUE)
+opt <- function(name, default = NULL) { a <- grep(paste0("^--", name, "="), args, value = TRUE); if (length(a)) sub(paste0("^--", name, "="), "", a) else default }
+known <- c("build", "dump", "edges_dir", "out", "positions", "validation", "set", "chunk", "cores", "max_cells")
+fl <- sub("^--([a-z_]+)=.*$", "\\1", args); if (any(!fl %in% known) || anyDuplicated(fl)) stop("unknown or duplicated option: ", paste(fl, collapse = " "))
+BUILD <- opt("build"); DUMPF <- opt("dump"); EDIR <- opt("edges_dir"); OUT <- opt("out"); POSF <- strsplit(opt("positions", ""), ",")[[1]]
+VAL <- opt("validation"); SET <- opt("set", "all"); CHUNK <- as.integer(opt("chunk", "50")); CORES <- as.integer(opt("cores", "4")); MAXC <- as.integer(opt("max_cells", "0"))
+stopifnot(!is.null(BUILD), !is.null(DUMPF), !is.null(EDIR), !is.null(OUT), length(POSF) > 0, all(file.exists(POSF)), SET %in% c("all", "plausible"), SET == "all" || !is.null(VAL))
+dir.create(OUT, showWarnings = FALSE, recursive = TRUE)
+LOG <- file.path(OUT, "s2_sweep.log")
+logf <- function(...) { s <- sprintf(...); cat(s, "\n", sep = ""); cat(s, "\n", sep = "", file = LOG, append = TRUE) }
+
+B <- s2_base(BUILD); W_REF <- B$window; dump <- readRDS(DUMPF)
+## the stage-1 dump must be the init frame of the same window and sample as the stage-2 build
+cm <- if (is.null(dump$coorig_months)) 0L else as.integer(dump$coorig_months)
+smp <- c(stage1 = "fmid", gml = "fmid", mid = "mid")[[B$meta$fatal_def]]
+if (dump$types != "init" || cm != W_REF || dump$sample != smp) stop(sprintf("dump (%s, window %d, %s) does not match the build (init, window %d, %s)", dump$types, cm, dump$sample, W_REF, smp))
+logf("stage-2 sweep %s | build %s (window %d, fatal_def %s) | dump %s | set %s | cores %d", format(Sys.time()), BUILD, W_REF, B$meta$fatal_def, basename(DUMPF), SET, CORES)
+PLAUS <- if (SET == "plausible") { v <- fread(VAL); v[plausible == TRUE, paste(basename(file), spec_id)] } else NULL
+
+arm_of <- function(f) { b <- basename(f); if (grepl("^positions_igo_arm", b)) "igo" else if (grepl("^positions_core_", b)) "core" else if (grepl("^positions_dipl_", b)) "dipl" else stop("cannot tell arm of ", b) }
+one_cell <- function(spec, R, key, arm) {
+  t0 <- proc.time()[[3]]
+  r <- tryCatch({
+    D <- s1_prepare(dump, key, R); E <- s2_spec_edges(arm, spec, EDIR); X <- s2_prepare(B, key, R, E)
+    o <- joint_fe_cell(D, dump, X, B$TS); o[, `:=`(status = "OK", s2_rows_dropped = attr(X, "dropped"), msg = "")]; o
+  }, error = function(e) data.table(stage = NA_character_, alt = NA_character_, axis = NA_character_, gap = NA_real_, est = NA_real_, se = NA_real_, status = "ERROR", msg = conditionMessage(e)))
+  r[, `:=`(spec_id = spec, secs = round(proc.time()[[3]] - t0, 1))]; r
+}
+
+n_done <- 0L
+for (pf in POSF) {
+  arm <- arm_of(pf); pz <- readRDS(pf); key <- as.data.table(pz$key); specs <- colnames(pz$R)
+  if (!is.null(PLAUS)) specs <- specs[paste(basename(pf), specs) %in% PLAUS]
+  if (MAXC > 0) specs <- head(specs, MAXC)
+  if (!length(specs)) { logf("%s: no measures selected", basename(pf)); next }
+  ch <- split(specs, ceiling(seq_along(specs) / CHUNK)); tag <- sub("\\.rds$", "", basename(pf))
+  logf("%s (%s arm): %d measures in %d chunks", basename(pf), arm, length(specs), length(ch))
+  for (ci in seq_along(ch)) {
+    f <- file.path(OUT, sprintf("cells_%s_w%d_%s_c%03d.csv", tag, W_REF, smp, ci))
+    if (file.exists(f)) next
+    t0 <- Sys.time()
+    if (arm != "igo") invisible(s2_spec_edges(arm, ch[[ci]][1], EDIR))   # load this file's edge layers once, before forking
+    res <- mclapply(ch[[ci]], function(s) one_cell(s, pz$R[, s], key, arm), mc.cores = CORES, mc.preschedule = FALSE)
+    bad <- vapply(res, function(x) !is.data.table(x), TRUE)
+    if (any(bad)) res[bad] <- lapply(which(bad), function(i) data.table(status = "ERROR", msg = paste("worker failed:", as.character(res[[i]])), spec_id = ch[[ci]][i]))
+    res <- rbindlist(res, fill = TRUE)
+    res[, `:=`(positions_file = basename(pf), arm = arm, window = W_REF, sample = smp, fatal_def = B$meta$fatal_def)]
+    fwrite(res, paste0(f, ".tmp")); file.rename(paste0(f, ".tmp"), f)
+    n_err <- uniqueN(res[status == "ERROR", spec_id]); n_done <- n_done + length(ch[[ci]])
+    logf("  chunk %d/%d: %d measures, %d errors, %.1f min", ci, length(ch), length(ch[[ci]]), n_err, as.numeric(difftime(Sys.time(), t0, units = "mins")))
+  }
+}
+logf("S2_SWEEP_DONE (%d measures fitted this call)", n_done)

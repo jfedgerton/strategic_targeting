@@ -22,5 +22,12 @@ th_ref <- J$F_t$b[c("A:bbar", "B:bbar", "O:bbar")]
 check("3 cell theta equals R/s2_03_joint_fe.R (main measure)", isTRUE(all.equal(unname(res[axis == "theta", est]), unname(th_ref), tolerance = 1e-5)))
 s1r <- J$S1C[model == "target FE"]
 check("3 cell stage-1 FE contrasts equal R/s2_03_joint_fe.R", isTRUE(all.equal(res[stage == "S1", est], s1r$est, tolerance = 1e-5)))
+bf <- file.path(a[5], "boot_draws_raw.rds")
+if (file.exists(bf)) { DR0 <- readRDS(bf); disp_all <- sort(unique(c(as.data.table(dump$D)$disp, B$X$dispnum)))
+  set.seed(123); MM <- lapply(1:2, function(b) { m <- tabulate(sample.int(length(disp_all), length(disp_all), replace = TRUE), length(disp_all)); names(m) <- disp_all; m })
+  ro <- names(sort(table(D[chosen == 1L, c2]), decreasing = TRUE))
+  dd <- lapply(MM, function(m) joint_fe_draw(D, dump, X, B$TS, m, ro))
+  check("4 bootstrap draws 1-2 (weights, common seed) equal R/s2_03_joint_fe.R's draws (row replication)",
+        all(vapply(1:2, function(i) isTRUE(all.equal(unname(dd[[i]]), unname(DR0[[i]][names(dd[[i]])]), tolerance = 1e-5)), TRUE))) }
 print(res[, .(stage, alt, axis, gap, est = round(est, 3), se = round(se, 3))])
 cat(if (ok_all) "ALL PASS\n" else "SOME TESTS FAILED\n"); quit(status = if (ok_all) 0 else 1)
