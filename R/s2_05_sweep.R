@@ -36,7 +36,7 @@ PLAUS <- if (SET == "plausible") { v <- fread(VAL); v[plausible == TRUE, paste(b
 one_cell <- function(spec, R, key, arm) {
   t0 <- proc.time()[[3]]
   r <- tryCatch({
-    D <- s1_prepare(dump, key, R); E <- s2_spec_edges(arm, spec, EDIR); X <- s2_prepare(B, key, R, E)
+    E <- s2_spec_edges(arm, spec, EDIR); D <- s1_add_tie(s1_prepare(dump, key, R), E, dump$roles); X <- s2_prepare(B, key, R, E)
     o <- joint_fe_cell(D, dump, X, B$TS); o[, `:=`(status = "OK", s2_rows_dropped = attr(X, "dropped"), msg = "")]; o
   }, error = function(e) data.table(stage = NA_character_, alt = NA_character_, axis = NA_character_, gap = NA_real_, est = NA_real_, se = NA_real_,
                                     status = if (grepl("^position constant", conditionMessage(e))) "SKIPPED" else if (grepl("fit invalid|no convergence", conditionMessage(e))) "INVALID" else "ERROR",

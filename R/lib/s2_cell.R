@@ -46,6 +46,14 @@ s1_prepare <- function(dump, key, R) {
   for (g in 0:1) for (v in c("dM", "dM2", "dR", "dR2", "dMR")) D[, paste0(v, "_", ROLES[g + 1]) := get(v) * (type == g)]
   D[]
 }
+## robustness term (PI 2026-11-23): the initiator-target composite tie from the measure's OWN edges at t-1 (the year of the positions),
+## by initiator type (tie_bil, tie_coal); a pair with no positive edge has tie 0. Used only by the S1NFT variant (between targets + tie).
+s1_add_tie <- function(D, EDGE, roles) {
+  D <- copy(D); E <- EDGE[, .(k = paste(pmin(a, b), pmax(a, b), year), w)]; stopifnot(!anyDuplicated(E$k))
+  D[, tie_it := E$w[match(paste(pmin(c1, c2), pmax(c1, c2), yr - 1L), E$k)]][is.na(tie_it), tie_it := 0]
+  for (g in 0:1) D[, paste0("tie_", roles[g + 1]) := tie_it * (type == g)]
+  D[]
+}
 s1_terms <- function(dump) as.vector(outer(c("dM", "dM2", "dR", "dR2", "dMR"), dump$roles, paste, sep = "_"))
 s1_fit_fe <- function(D, dump, ref_order) {   # target FE on the rows of chosen targets only (exact limit; never-chosen FE -> -Inf)
   tgb <- unique(D[chosen == 1L, c2]); dd <- D[c2 %in% tgb]; dd <- dd[dd[, .(k = .N), by = ev_id][k > 1L], on = "ev_id"]
@@ -64,8 +72,8 @@ s1_fit_fe <- function(D, dump, ref_order) {   # target FE on the rows of chosen 
 ## stage 1 WITHOUT target FE (PI 2026-11-23: the between-target comparison is the main stage-1 question; the target-FE fit is the
 ## within-target appendix test and supplies bbar). Same validity policy as s1_fit_fe. Inference: three-way clustered covariance over
 ## initiator, dispute and target (inclusion-exclusion; repeated targets make target clustering the honest between-target choice)
-s1_fit_nofe <- function(D, dump) {
-  f <- as.formula(paste("Surv(rep(1, nrow(D)), chosen) ~", paste(c(s1_terms(dump), dump$Z_cols), collapse = " + "), "+ strata(ev_id)"))
+s1_fit_nofe <- function(D, dump, extra = character(0)) {
+  f <- as.formula(paste("Surv(rep(1, nrow(D)), chosen) ~", paste(c(s1_terms(dump), extra, dump$Z_cols), collapse = " + "), "+ strata(ev_id)"))
   w_ <- character(0)
   m <- withCallingHandlers(coxph(f, data = D, weights = w, method = "breslow", control = coxph.control(iter.max = 50)),
                            warning = function(e) { w_ <<- c(w_, conditionMessage(e)); invokeRestart("muffleWarning") })
@@ -130,7 +138,12 @@ joint_fe_cell <- function(D, dump, X, TS, design = S2_REF_DESIGN) {
                     se = sqrt(diag(F_t$V))[c("A:tie_sum_A", "B:tie_sum_B", "O:tie_sum_A")])
   mN <- s1_fit_nofe(D, dump); kN <- names(coef(mN)) %in% s1_terms(dump)
   nf <- s1_contrasts(coef(mN)[kN], s1_vc3w(mN, D)[kN, kN], dump$roles)[, stage := "S1NF"]   # between targets (main stage-1 comparison)
-  out <- rbind(s1_contrasts(b1[keep], V1[keep, keep], dump$roles), nf, sc, th, tie)
+  TT <- paste0("tie_", dump$roles); nft <- NULL
+  if (all(TT %in% names(D))) {   # robustness: between targets + the initiator-target composite tie
+    mT <- s1_fit_nofe(D, dump, TT); VT <- s1_vc3w(mT, D); kT <- names(coef(mT)) %in% s1_terms(dump)
+    nft <- rbind(s1_contrasts(coef(mT)[kT], VT[kT, kT], dump$roles)[, stage := "S1NFT"],
+                 data.table(stage = "S1NFT", alt = dump$roles, axis = "tie", gap = NA_real_, est = coef(mT)[TT], se = sqrt(diag(VT))[TT])) }
+  out <- rbind(s1_contrasts(b1[keep], V1[keep, keep], dump$roles), nf, nft, sc, th, tie)
   out[, `:=`(n_s1_events = nrow(ch), n_s2_rows = F_t$n, n_s2_A = sum(X1$y == "A"), n_s2_B = sum(X1$y == "B"), n_s2_O = sum(X1$y == "orig"))]
   out[]
 }
@@ -139,7 +152,8 @@ joint_fe_cell <- function(D, dump, X, TS, design = S2_REF_DESIGN) {
 ## step 1 refits the target-FE model (reference = most-chosen target present in the draw, b = 0), bbar is rebuilt, step 2 refits with row
 ## weights (equal to row replication, tests/test_s2_fit.R 4). Returns a named vector of the cell's quantities (names as boot_names()).
 boot_names <- function(dump) { r <- dump$roles; ax <- rep(c("M", "R"), each = 2); sg <- c(1, -1)
-  c(paste("S1", rep(r, each = 4), ax, sg, sep = "."), paste("S1NF", rep(r, each = 4), ax, sg, sep = "."), paste("S2", rep(c("A", "B", "O"), each = 4), ax, sg, sep = "."),
+  c(paste("S1", rep(r, each = 4), ax, sg, sep = "."), paste("S1NF", rep(r, each = 4), ax, sg, sep = "."), paste("S1NFT", rep(r, each = 4), ax, sg, sep = "."),
+    paste0("S1NFT.", r, ".tie"), paste("S2", rep(c("A", "B", "O"), each = 4), ax, sg, sep = "."),
     "A:bbar", "B:bbar", "O:bbar", "A:tie_sum_A", "B:tie_sum_B", "O:tie_sum_A") }
 joint_fe_draw <- function(D, dump, X, TS, m, ref_order, design = S2_REF_DESIGN) {
   ch <- D[chosen == 1L]; NCH <- table(ch$c2); REP <- names(NCH)[NCH >= 2]   # repeat targets of the full sample (as R/s2_03)
@@ -148,13 +162,16 @@ joint_fe_draw <- function(D, dump, X, TS, m, ref_order, design = S2_REF_DESIGN) 
   refb <- setdiff(intersect(ref_order, as.character(unique(Db[chosen == 1L, c2]))), names(be))[1]; be <- c(setNames(0, refb), be)
   c1 <- s1_contrasts(bb[!grepl("^tfe", names(bb))], NULL, dump$roles)
   mN <- s1_fit_nofe(Db, dump); kN <- names(coef(mN)) %in% s1_terms(dump); cN <- s1_contrasts(coef(mN)[kN], NULL, dump$roles)
+  TT <- paste0("tie_", dump$roles); vT <- NULL
+  if (all(TT %in% names(Db))) { mT <- s1_fit_nofe(Db, dump, TT); kT <- names(coef(mT)) %in% s1_terms(dump); cT <- s1_contrasts(coef(mT)[kT], NULL, dump$roles)
+    vT <- c(setNames(cT$est, paste("S1NFT", cT$alt, cT$axis, cT$gap, sep = ".")), setNames(coef(mT)[TT], paste0("S1NFT.", dump$roles, ".tie"))) }
   b <- be[names(be) %in% REP & is.finite(be)]; b <- pmin(pmax(b - mean(b), -5), 5)
   bbt <- TS[, .(dispnum, b = b[as.character(ccode)])][, .(bbar = mean(b, na.rm = TRUE)), by = dispnum][is.finite(bbar)]
   Xb <- merge(X, bbt, by = "dispnum"); wt <- m[as.character(Xb$dispnum)]; Xb <- Xb[wt > 0]; wt <- wt[wt > 0]
   ft <- fit_mnl(Xb, lapply(design, function(v) c(v, "bbar")), "boot", vc = FALSE, w = as.numeric(wt))
   if (!"A:bbar" %in% names(ft$b)) stop("bbar dropped by the separation rule in this draw")
   sc <- surf_contrasts(ft)
-  v <- c(setNames(c1$est, paste("S1", c1$alt, c1$axis, c1$gap, sep = ".")), setNames(cN$est, paste("S1NF", cN$alt, cN$axis, cN$gap, sep = ".")), setNames(sc$est, paste("S2", sc$alt, sc$axis, sc$gap, sep = ".")),
+  v <- c(setNames(c1$est, paste("S1", c1$alt, c1$axis, c1$gap, sep = ".")), setNames(cN$est, paste("S1NF", cN$alt, cN$axis, cN$gap, sep = ".")), vT, setNames(sc$est, paste("S2", sc$alt, sc$axis, sc$gap, sep = ".")),
          ft$b[c("A:bbar", "B:bbar", "O:bbar", "A:tie_sum_A", "B:tie_sum_B", "O:tie_sum_A")])
   bn <- boot_names(dump); setNames(v[bn], bn)   # a dropped term gives NA for that quantity only, never a misnamed draw (recheck P2)
 }

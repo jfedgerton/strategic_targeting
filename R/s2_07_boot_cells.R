@@ -38,7 +38,7 @@ run_cell <- function(cl) {
   cm <- if (is.null(dump$coorig_months)) 0L else as.integer(dump$coorig_months); smp <- c(stage1 = "fmid", gml = "fmid", mid = "mid")[[B$meta$fatal_def]]
   if (dump$types != "init" || cm != cl$window || dump$sample != cl$sample || smp != cl$sample) stop("dump/build/cell mismatch for ", cl$cell_id)
   pz <- readRDS(file.path(PD, cl$file)); key <- as.data.table(pz$key); R <- pz$R[, cl$spec_id]; arm <- arm_of(cl$file)
-  D <- s1_prepare(dump, key, R); X <- s2_prepare(B, key, R, s2_spec_edges(arm, cl$spec_id, EDIR))
+  E <- s2_spec_edges(arm, cl$spec_id, EDIR); D <- s1_add_tie(s1_prepare(dump, key, R), E, dump$roles); X <- s2_prepare(B, key, R, E)
   ref_order <- names(sort(table(D[chosen == 1L, c2]), decreasing = TRUE))
   pf <- file.path(cd, "point.csv")
   if (!file.exists(pf)) { P <- joint_fe_cell(D, dump, X, B$TS); s2_write_atomic(P, pf) } else P <- fread(pf)   # an invalid point fit stops here (cell INVALID)
@@ -63,6 +63,8 @@ run_cell <- function(cl) {
   M <- do.call(rbind, DRA[okd])
   pt <- c(setNames(P[stage == "S1", est], paste("S1", P[stage == "S1", alt], P[stage == "S1", axis], P[stage == "S1", gap], sep = ".")),
           setNames(P[stage == "S1NF", est], paste("S1NF", P[stage == "S1NF", alt], P[stage == "S1NF", axis], P[stage == "S1NF", gap], sep = ".")),
+          setNames(P[stage == "S1NFT" & axis != "tie", est], paste("S1NFT", P[stage == "S1NFT" & axis != "tie", alt], P[stage == "S1NFT" & axis != "tie", axis], P[stage == "S1NFT" & axis != "tie", gap], sep = ".")),
+          setNames(P[stage == "S1NFT" & axis == "tie", est], paste0("S1NFT.", P[stage == "S1NFT" & axis == "tie", alt], ".tie")),
           setNames(P[stage == "S2" & axis %in% c("M", "R"), est], paste("S2", P[stage == "S2" & axis %in% c("M", "R"), alt], P[stage == "S2" & axis %in% c("M", "R"), axis], P[stage == "S2" & axis %in% c("M", "R"), gap], sep = ".")),
           setNames(P[axis == "theta", est], paste0(P[axis == "theta", alt], ":bbar")),
           setNames(P[axis == "tie_sum", est], c("A:tie_sum_A", "B:tie_sum_B", "O:tie_sum_A")))
