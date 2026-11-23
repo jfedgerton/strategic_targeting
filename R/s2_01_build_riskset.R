@@ -296,14 +296,51 @@ sRp <- setNames(rep(s2_gap_scale_pooled(POS$R, POS$year), length(sR)), names(sR)
 VAR <- CJ(agg = c("mean", "min", "max", "lead", "total"), members = c("roster", "primary"), lag = c(1L, 5L), scale = c("year", "pooled"), sorted = FALSE)
 VARS <- rows_s[, .(dispnum, ccode)]
 for (i in seq_len(nrow(VAR))) { v <- VAR[i]; key <- paste(v$agg, v$members, paste0("l", v$lag), v$scale, sep = "_")
-  sv <- s2_surface(rows_s[, .(dispnum, ccode, ty = t - v$lag, t)], if (v$members == "roster") mem_s else mem_p, PV, sM, if (v$scale == "year") sR else sRp, v$agg)
+  ## dR scale year (GPT surface review P2-7): the reference (lag 1) uses year t, as stage 1's main spec; the lag-5 variant uses the positions'
+  ## year t - 5, as stage 1's lagged sensitivity (R/07)
+  sv <- s2_surface(rows_s[, .(dispnum, ccode, ty = t - v$lag, t = if (v$lag == 1L) t else t - v$lag)], if (v$members == "roster") mem_s else mem_p, PV, sM, if (v$scale == "year") sR else sRp, v$agg)
   setnames(sv, c("dM_kA", "dR_kA", "dM_kB", "dR_kB"), paste0(c("dM_kA", "dR_kA", "dM_kB", "dR_kB"), "__", key))
   VARS <- merge(VARS, sv[, c("dispnum", "ccode", paste0(c("dM_kA", "dR_kA", "dM_kB", "dR_kB"), "__", key)), with = FALSE], by = c("dispnum", "ccode"), all.x = TRUE) }
 ref_key <- "mean_roster_l1_year"
 stopifnot(isTRUE(all.equal(VARS[order(dispnum, ccode)][[paste0("dR_kB__", ref_key)]], ONE[order(dispnum, ccode)]$dR_kB)))   # reference variant = the built surface
 nv <- VARS[, lapply(.SD, function(x) sum(is.na(x))), .SDcols = grep("^dR_kB__", names(VARS), value = TRUE)]
 logf("surface variants: %d (aggregation x members x lag x dR scale); missing gap to B by variant ranges %d-%d rows (primary-pair and lag-5 coverage)", nrow(VAR), min(unlist(nv)), max(unlist(nv)))
+gk <- grep("^dR_kB__|^dM_kB__|^dR_kA__|^dM_kA__", names(VARS), value = TRUE)
+sig <- vapply(unique(sub("^d[MR]_k[AB]__", "", gk)), function(key) digest_sig <- paste(round(unlist(VARS[, paste0(c("dM_kA", "dR_kA", "dM_kB", "dR_kB"), "__", key), with = FALSE]), 10), collapse = ","), "")
+logf("surface variants: %d nominal, %d effectively distinct (identical gap vectors collapse, e.g. aggregations over singleton primary sides)", length(sig), length(unique(sig)))
 saveRDS(VARS, file.path(OUT, "s2_surface_variants.rds"))
+## opposing-side CONTROLS rebuilt for the membership and timing variants (GPT surface review P2-7): the stage-1 controls toward the opponent
+## follow the variant's opposing members (onset roster / primary pair) and timing (t - 1 / t - 5); aggregation variants change the surface only
+opp_controls <- function(rows, mem) {
+  q <- merge(rows[, .(dispnum, ccode, ty)], mem[, .(dispnum, j, side_rel)], by = "dispnum", allow.cartesian = TRUE)[ccode != j]
+  q <- merge(q, DYk[, .(ccode = k, j, ty = year, capdist, conttype, defoff)], by = c("ccode", "j", "ty"), all.x = TRUE)
+  q <- merge(q, DEMY[, .(j = ccode, ty = year, dem_j = dem)], by = c("j", "ty"), all.x = TRUE); q[is.na(dem_j), dem_j := 0L]
+  g <- unique(CDY[, .(pdisp = dispnum, a = ccode1, b = ccode2, year)])
+  mt2 <- merge(q[, .(dispnum, ccode, j, ty)], g, by.x = c("ccode", "j", "ty"), by.y = c("a", "b", "year"))[pdisp != dispnum, .(mid = 1L), by = .(dispnum, ccode, j)]
+  q <- merge(q, mt2, by = c("dispnum", "ccode", "j"), all.x = TRUE); q[is.na(mid), mid := 0L]
+  mj <- unique(q[, .(dispnum, ccode = j, ty)])[, onset_lo := s2_mk(ty, 12L)]
+  mj <- MJ[mj, on = .(ccode, st_mk <= onset_lo, end_mk >= onset_lo), nomatch = 0L, .(dispnum = i.dispnum, j = x.ccode, ty = i.ty)][, maj := TRUE]
+  q <- merge(q, unique(mj), by = c("dispnum", "j", "ty"), all.x = TRUE); q[is.na(maj), maj := FALSE]
+  pr <- s2_prior_side(q[, .(dispnum, ccode, j, side_rel, ty)], pm)
+  S <- q[, .(land_side = s2_strict_any(ifelse(is.na(conttype), NA, conttype == 1L)), lcap = log1p(s2_strict_min(capdist)), dem_side = mean(dem_j),
+             defoff_side = s2_strict_any(ifelse(is.na(defoff), NA, defoff > 0)), major_side = as.integer(any(maj)), mid_tm1_side = as.integer(any(mid == 1L))), by = .(dispnum, ccode, side_rel, ty)]
+  S <- merge(S, pr[, .(dispnum, ccode, side_rel, prior_side = log1p(prior_n))], by = c("dispnum", "ccode", "side_rel"))
+  k2 <- merge(rows[, .(dispnum, ccode, ty)], DEMY[, .(ccode, ty = year, dem_k = dem)], by = c("ccode", "ty"), all.x = TRUE); k2[is.na(dem_k), dem_k := 0L]
+  mk <- MJ[k2[, .(dispnum, ccode, onset_lo = s2_mk(ty, 12L))], on = .(ccode, st_mk <= onset_lo, end_mk >= onset_lo), nomatch = 0L, .(dispnum = i.dispnum, ccode = x.ccode)][, major_k := 1L]
+  k2 <- merge(k2, unique(mk), by = c("dispnum", "ccode"), all.x = TRUE); k2[is.na(major_k), major_k := 0L]
+  S <- merge(S, k2[, .(dispnum, ccode, dem_k, major_k)], by = c("dispnum", "ccode"))
+  S[, `:=`(dem_x = dem_k * dem_side, major_x = major_k * major_side)]
+  W <- dcast(S, dispnum + ccode ~ side_rel, value.var = c("land_side", "lcap", "dem_side", "dem_x", "defoff_side", "major_side", "major_x", "mid_tm1_side", "prior_side"))
+  W
+}
+OCV <- list()
+for (mm in c("roster", "primary")) for (lg in c(1L, 5L)) {
+  key <- paste(mm, paste0("l", lg), sep = "_")
+  OCV[[key]] <- opp_controls(rows_s[, .(dispnum, ccode, ty = t - lg)], if (mm == "roster") mem_s else mem_p) }
+chk <- merge(ONE[, .(dispnum, ccode, a = prior_side_B, b = land_side_B, c = lcap_B)], OCV[["roster_l1"]][, .(dispnum, ccode, a2 = prior_side_B, b2 = land_side_B, c2 = lcap_B)], by = c("dispnum", "ccode"))
+stopifnot(isTRUE(all.equal(chk$a, chk$a2)), isTRUE(all.equal(chk$b, chk$b2)), isTRUE(all.equal(chk$c, chk$c2)))   # reference variant = the built controls
+logf("opposing-side control variants rebuilt: %s (reference roster_l1 reproduces the built controls)", paste(names(OCV), collapse = ", "))
+saveRDS(OCV, file.path(OUT, "s2_opp_control_variants.rds"))
 ## inputs the fitter needs to rebuild the surface under perturbed positions (robustness B3): positions, rosters, scales, confounder counts
 CONF <- rbind(DY[, .(ccode = ccode1, year, def, contig_land)], DY[, .(ccode = ccode2, year, def, contig_land)])[, .(n_def = sum(def > 0), n_contig = sum(contig_land > 0)), by = .(ccode, year)]
 saveRDS(list(PV = PV, rows = rows_s, mem_roster = mem_s, mem_primary = mem_p, sM = sM, sR = sR, sR_pooled = sRp, conf = CONF), file.path(OUT, "s2_surface_inputs.rds"))

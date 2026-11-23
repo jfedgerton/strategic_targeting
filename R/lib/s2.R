@@ -374,7 +374,8 @@ s2_surface <- function(ROWS, MEM, PV, sM, sR, agg = "mean") {
   SV <- ms[, agg_f(Mj, Rj), by = .(dispnum, ty, side_rel)]
   SV <- dcast(SV, dispnum + ty ~ side_rel, value.var = c("M_side", "R_side"))
   X <- merge(merge(ROWS, PV[, .(ccode, ty = year, Mk = M, Rk = R)], by = c("ccode", "ty"), all.x = TRUE), SV, by = c("dispnum", "ty"), all.x = TRUE)
-  s_r <- unname(sR[as.character(X$t)]); stopifnot(!anyNA(s_r))
+  s_r <- unname(sR[as.character(X$t)])
+  stopifnot(all(!is.na(s_r) | is.na(X$Rk) | is.na(X$R_side_A) | is.na(X$R_side_B)))   # a missing scale year only where positions are missing too (gaps NA)
   X[, `:=`(dM_kA = (Mk - M_side_A) / sM, dR_kA = (Rk - R_side_A) / s_r, dM_kB = (Mk - M_side_B) / sM, dR_kB = (Rk - R_side_B) / s_r)]
   ## per alternative: sA_* (join A: vs B), sB_* (join B: vs A); the originator alternative uses sA_*
   X[, `:=`(sA_dM = dM_kB, sA_dM2 = dM_kB^2, sA_dR = dR_kB, sA_dR2 = dR_kB^2, sA_dMR = dM_kB * dR_kB,
