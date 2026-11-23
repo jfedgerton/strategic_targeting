@@ -23,7 +23,8 @@ WINDOW_MAIN=1             # originator window in months (definite bound); window
 WINDOWS="0 1 2 3 4 5 6"
 SAMPLE_MAIN=fmid          # fatal MIDs; "mid" = all MID onsets (failed-bargain step A)
 INTENSITY="jf fd2 fd3 fd4 fd5 fd6"   # intensity samples run through the full multiverse (jointly fatal; dispute fatality level >= 2..6)
-MAIN_SPEC='W2contig_ptaall|igo+def+off+neu+nonagg+consul+dca+un|pr'   # the main relational measure (chosen 2026-11-18)
+MAIN_SPEC='W6srybook_ptaany|igo+def+off+pta+dca|pr'   # the main relational measure: the book measure (PI 2026-11-23; cites Edgerton 2024).
+# Was 'W2contig_ptaall|igo+def+off+neu+nonagg+consul+dca+un|pr' (2026-11-18) for the stage-1 run in output_init; that run holds every measure, but its main-measure bootstrap is the old one
 
 ## ---- resampling ----
 B_BOOT=2000               # pigeonhole bootstrap draws

@@ -15,10 +15,10 @@ this_file <- sub("^--file=", "", grep("^--file=", commandArgs(FALSE), value = TR
 source(file.path(dirname(normalizePath(this_file)), "lib", "s2.R"))
 args <- commandArgs(trailingOnly = TRUE)
 opt <- function(name, default = NULL) { a <- grep(paste0("^--", name, "="), args, value = TRUE); if (length(a)) sub(paste0("^--", name, "="), "", a) else default }
-known <- c("data_entry", "layers", "positions", "poscol", "out", "dump_bcjs", "mode", "window", "fatal_def")
+known <- c("data_entry", "layers", "positions", "poscol", "out", "dump_bcjs", "mode", "window", "fatal_def", "edges_dir")
 fl <- sub("^--([a-z_]+)=.*$", "\\1", args); if (any(!fl %in% known) || anyDuplicated(fl)) stop("unknown or duplicated option: ", paste(fl, collapse = " "))
 DE <- opt("data_entry"); LAYERS_RDS <- opt("layers"); POSF <- opt("positions"); POSCOL <- opt("poscol"); OUT <- opt("out")
-W_REF <- as.integer(opt("window", "1")); FATAL_DEF <- opt("fatal_def", "stage1"); MODE <- opt("mode", "release"); DUMP <- opt("dump_bcjs")
+EDIR <- opt("edges_dir"); W_REF <- as.integer(opt("window", "1")); FATAL_DEF <- opt("fatal_def", "stage1"); MODE <- opt("mode", "release"); DUMP <- opt("dump_bcjs")
 stopifnot(!is.null(DE), !is.null(LAYERS_RDS), !is.null(POSF), !is.null(POSCOL), !is.null(OUT), W_REF %in% 0:6, FATAL_DEF %in% c("gml", "stage1", "mid"),
           MODE %in% c("release", "exploratory"))
 if (MODE == "release" && is.null(DUMP)) stop("--mode=release requires --dump_bcjs (acceptance is mandatory for a release build)")
@@ -158,7 +158,17 @@ logf("rosters: dispute-months %d; carried side-months %d in %d disputes (A %d, B
      sum(emp$side_rel == "A"), sum(emp$side_rel == "B"), nrow(MON) - nrow(s2_truncate_end(MON, emp)))
 
 ## ---- 7. main-measure ties (section 4, N4; P2-4 coverage) ---------------------------------------------------------------------------
-## main measure (config.sh MAIN_SPEC) via R/02_build_positions.R's W2contig code path (copied), checked against the positions in EVERY year
+## main measure (config.sh MAIN_SPEC). With --edges_dir (PI 2026-11-23: main = the book measure, W6srybook_ptaany|igo+def+off+pta+dca|pr):
+## edges of POSCOL from the per-layer edge files of R/02_build_positions.R --edges_out, rebuilt by R/lib/s2_cell.R s2_spec_edges (the same
+## rules as R/02 for every weighting). Without it: the legacy W2contig 8-layer code path (copied from R/02). Either way the edges must
+## reproduce the stage-1 positions' log PageRank in EVERY year (check below)
+if (!is.null(EDIR)) {
+  source(file.path(dirname(normalizePath(this_file)), "lib", "sry.R")); source(file.path(dirname(normalizePath(this_file)), "lib", "s2_cell.R"))
+  pb <- basename(POSF); ARM <- if (grepl("^positions_igo_arm", pb)) "igo" else if (grepl("^positions_core_", pb)) "core" else if (grepl("^positions_dipl_", pb)) "dipl" else stop("cannot tell the arm of ", pb)
+  if (ARM != "igo") stopifnot(sub("\\|.*$", "", POSCOL) == sub("^positions_[a-z]+_(.*)\\.rds$", "\\1", pb))   # spec belongs to this positions file
+  EDGE <- s2_spec_edges(ARM, POSCOL, EDIR)
+  logf("main-measure edges from %s (%s arm, %s)", EDIR, ARM, POSCOL)
+} else {
 MAIN_L <- c("igo", "def", "off", "neu", "nonagg", "consul", "dca", "un")
 setorder(DY, year, ccode1, ccode2)
 V <- sapply(MAIN_L, function(l) { v <- as.numeric(DY[[l]]); if (l == "igo") v <- log1p(v); v })
@@ -175,6 +185,7 @@ EL <- sapply(MAIN_L, function(l) {
 S <- sqrt(rowSums(EL^2)); EW <- numeric(length(S))
 for (ix in yr_split) { r <- range(S[ix]); if (r[2] - r[1] >= 1e-12) EW[ix] <- (S[ix] - r[1]) / (r[2] - r[1]) }
 EDGE <- data.table(a = DY$ccode1, b = DY$ccode2, year = DY$year, w = EW)[w > 0]
+}
 COVER <- sort(unique(DY$year))
 dev <- vapply(COVER, function(y) { k <- POS$year == y; vs <- POS$ccode[k]; e <- EDGE[year == y]
   g <- graph_from_data_frame(e[, .(as.character(a), as.character(b), weight = w)], directed = FALSE, vertices = data.frame(name = as.character(vs)))

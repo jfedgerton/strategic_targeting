@@ -29,8 +29,12 @@ for (f in setdiff(unique(SP$file), MF)) { S <- SP[file == f]
   S <- S[cent == MC]; if (!nrow(S)) next
   S[, j := vapply(lay, jac, 0)]; add(f, S[order(-j, spec_id)][1, spec_id], WM, "fmid", if (max(S$j) == 1) "2 main layers, other file" else "2 closest layers, other file") }
 for (sp in SP[file == MF & cent != MC & vapply(lay, function(x) setequal(strsplit(x, "+", fixed = TRUE)[[1]], ML), TRUE), spec_id]) add(MF, sp, WM, "fmid", "3 main layers, other centrality")
-for (l in ML) { L2 <- paste(setdiff(ML, l), collapse = "+"); sp <- SP[file == MF & cent == MC & vapply(lay, function(x) setequal(strsplit(x, "+", fixed = TRUE)[[1]], setdiff(ML, l)), TRUE), spec_id]
-  if (length(sp)) add(MF, sp[1], WM, "fmid", paste0("4 drop layer ", l)) }
+MW0 <- sub("_pta[a-z]+$", "", mp[1])
+for (l in ML) { keep <- setdiff(ML, l)
+  ## a set without PTA lives only in the weighting's ptaall file (in force / any files hold PTA combinations only)
+  f4 <- if ("pta" %in% keep) MF else sprintf("positions_core_%s_ptaall.rds", MW0)
+  sp <- SP[file == f4 & cent == MC & vapply(lay, function(x) setequal(strsplit(x, "+", fixed = TRUE)[[1]], keep), TRUE), spec_id]
+  if (length(sp)) add(f4, sp[1], WM, "fmid", paste0("4 drop layer ", l)) else cat(sprintf("rule 4: no spec for main layers minus %s in %s\n", l, f4)) }
 ## (5) GPT P2-6, matched PTA comparison: the main layers + pta, main weighting and centrality, under each PTA coding (all / inforce / any), so
 ##     the PTA comparison changes only the PTA coding, not the layer set
 MW <- sub("_pta[a-z]+$", "", mp[1])

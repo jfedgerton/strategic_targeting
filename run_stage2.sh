@@ -28,7 +28,7 @@ wtag() { [ "$1" -gt 0 ] && echo "_w${1}d" || echo ""; }
 [ "${S2_FORCE:-0}" = "1" ] || ! pgrep -f "run_all.sh|R/07_fit_sweep.R" > /dev/null || die "run_all.sh (or a stage-1 fit) looks still running; start stage 2 after it finishes (S2_FORCE=1 overrides)"
 [ -s $O/layers_dy.rds ] || die "missing $O/layers_dy.rds"
 [ -e data_entry ] || die "data_entry link missing (made by run_all.sh)"
-POSD=$O/positions; MAINF=$POSD/positions_core_W2contig_ptaall.rds; [ -s $MAINF ] || die "missing $MAINF"
+POSD=$O/positions; MAINF=$POSD/positions_core_${MAIN_SPEC%%|*}.rds; [ -s $MAINF ] || die "missing $MAINF (positions file of MAIN_SPEC $MAIN_SPEC)"
 ## exit 3 from the sweep or bootstrap = finished with transient ERROR cells: warn, continue with later steps, report at the end (rerun retries)
 GAPS=""; gap() { local rc=$1 NM=$2; [ $rc -eq 0 ] && return 0; [ $rc -eq 3 ] && { say "WARNING: $NM finished with ERROR cells (rerun to retry)"; GAPS="$GAPS $NM"; return 0; }; die "$NM failed (exit $rc)"; }
 [ "$TYPES" = "init" ] || say "note: config TYPES=$TYPES; stage 2 always uses the init dumps"
@@ -58,12 +58,12 @@ fi
 if has 2; then
   for W in $WINDOWS; do for SM in fmid mid; do
     BD=$S2/builds/w${W}_${SM}; DP=$O/dumps/long_init_bon$(wtag $W)_relyear_${SM}.rds; [ -s $DP ] || die "missing stage-1 dump $DP"
-    BST="$(h R/s2_01_build_riskset.R) $(h R/lib/s2.R) $(h $DP) $(h $MAINF) $(h $O/layers_dy.rds) $(h data_entry/manifest.csv) $MAIN_SPEC $W $SM"
+    BST="$(h R/s2_01_build_riskset.R) $(h R/lib/s2.R) $(h R/lib/s2_cell.R) $(h R/lib/sry.R) $(ls $S2/edges/*.rds | while read f; do h $f; done | shasum -a 256 | cut -c1-16) $(h $DP) $(h $MAINF) $(h $O/layers_dy.rds) $(h data_entry/manifest.csv) $MAIN_SPEC $W $SM"
     [ -s $BD/s2_meta.rds ] && grep -q "written (release build)" $BD/s2_build.log 2>/dev/null && fresh $BD/.build "$BST" && continue
     rm -rf $BD
     FD=$([ $SM = fmid ] && echo stage1 || echo mid)
     runR "acceptance|FAILED|written|Error" R/s2_01_build_riskset.R --data_entry=data_entry --layers=$O/layers_dy.rds --positions=$MAINF --poscol="$MAIN_SPEC" \
-      --out=$BD --window=$W --fatal_def=$FD --dump_bcjs=$DP || die "build w$W $SM failed"
+      --out=$BD --window=$W --fatal_def=$FD --dump_bcjs=$DP --edges_dir=$S2/edges || die "build w$W $SM failed"
     stamp $BD/.build "$BST"
   done; done
   say "2 builds done"
