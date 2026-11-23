@@ -56,6 +56,6 @@ if (file.exists(bf)) { DR0 <- readRDS(bf); disp_all <- sort(unique(c(as.data.tab
   ro <- names(sort(table(D[chosen == 1L, c2]), decreasing = TRUE))
   dd <- lapply(MM, function(m) joint_fe_draw(D, dump, X, B$TS, m, ro))
   check("4 bootstrap draws 1-2 (weights, common seed) equal R/s2_03_joint_fe.R's draws (row replication)",
-        all(vapply(1:2, function(i) isTRUE(all.equal(unname(dd[[i]]), unname(DR0[[i]][names(dd[[i]])]), tolerance = 1e-5)), TRUE))) } else cat("4 bootstrap draws vs R/s2_03_joint_fe.R                                                    SKIP (no boot_draws_raw.rds)\n")
+        all(vapply(1:2, function(i) { k <- intersect(names(dd[[i]]), names(DR0[[i]])); length(k) >= 26 && isTRUE(all.equal(unname(dd[[i]][k]), unname(DR0[[i]][k]), tolerance = 1e-5)) }, TRUE))) }   # S1NF (added 2026-11-23) is not in the reference draws else cat("4 bootstrap draws vs R/s2_03_joint_fe.R                                                    SKIP (no boot_draws_raw.rds)\n")
 print(res[, .(stage, alt, axis, gap, est = round(est, 3), se = round(se, 3))])
 cat(if (ok_all) "ALL PASS\n" else "SOME TESTS FAILED\n"); quit(status = if (ok_all) 0 else 1)
