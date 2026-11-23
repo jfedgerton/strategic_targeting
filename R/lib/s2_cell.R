@@ -61,6 +61,23 @@ s1_fit_fe <- function(D, dump, ref_order) {   # target FE on the rows of chosen 
   if (length(bad)) stop("stage-1 fit invalid: ", paste(bad, collapse = "; "))
   list(m = m, dd = dd, warnings = w_)
 }
+## stage 1 WITHOUT target FE (PI 2026-11-23: the between-target comparison is the main stage-1 question; the target-FE fit is the
+## within-target appendix test and supplies bbar). Same validity policy as s1_fit_fe. Inference: three-way clustered covariance over
+## initiator, dispute and target (inclusion-exclusion; repeated targets make target clustering the honest between-target choice)
+s1_fit_nofe <- function(D, dump) {
+  f <- as.formula(paste("Surv(rep(1, nrow(D)), chosen) ~", paste(c(s1_terms(dump), dump$Z_cols), collapse = " + "), "+ strata(ev_id)"))
+  w_ <- character(0)
+  m <- withCallingHandlers(coxph(f, data = D, weights = w, method = "breslow", control = coxph.control(iter.max = 50)),
+                           warning = function(e) { w_ <<- c(w_, conditionMessage(e)); invokeRestart("muffleWarning") })
+  bad <- c(if (any(grepl("converge|infinite|singular", w_, ignore.case = TRUE))) paste(unique(sub(" variable.*$", "", w_)), collapse = " | "),
+           if (!all(is.finite(coef(m)))) "non-finite coefficients", if (m$iter >= 50L) "iteration limit")
+  if (length(bad)) stop("stage-1 fit invalid (no target FE): ", paste(bad, collapse = "; "))
+  m
+}
+s1_vc3w <- function(m, dd) { cl <- function(g) { Dd <- rowsum(residuals(m, type = "dfbeta", weighted = TRUE), g, reorder = FALSE); crossprod(Dd) }
+  V <- cl(dd$init) + cl(dd$disp) + cl(dd$c2) - cl(paste(dd$init, dd$disp)) - cl(paste(dd$init, dd$c2)) - cl(paste(dd$disp, dd$c2)) + cl(paste(dd$init, dd$disp, dd$c2))
+  e <- eigen(V, symmetric = TRUE); if (any(e$values < 0)) V <- e$vectors %*% diag(pmax(e$values, 0)) %*% t(e$vectors)
+  dimnames(V) <- list(names(coef(m)), names(coef(m))); V }
 s1_vc2w <- function(m, dd) { cl <- function(g) { Dd <- rowsum(residuals(m, type = "dfbeta", weighted = TRUE), g, reorder = FALSE); crossprod(Dd) }
   V <- cl(dd$init) + cl(dd$disp) - cl(dd$init_disp); e <- eigen(V, symmetric = TRUE)
   if (any(e$values < 0)) V <- e$vectors %*% diag(pmax(e$values, 0)) %*% t(e$vectors); dimnames(V) <- list(names(coef(m)), names(coef(m))); V }
@@ -111,7 +128,9 @@ joint_fe_cell <- function(D, dump, X, TS, design = S2_REF_DESIGN) {
   th <- data.table(stage = "S2", alt = c("A", "B", "O"), axis = "theta", gap = NA_real_, est = F_t$b[c("A:bbar", "B:bbar", "O:bbar")], se = sqrt(diag(F_t$V))[c("A:bbar", "B:bbar", "O:bbar")])
   tie <- data.table(stage = "S2", alt = c("A", "B", "O"), axis = "tie_sum", gap = NA_real_, est = F_t$b[c("A:tie_sum_A", "B:tie_sum_B", "O:tie_sum_A")],
                     se = sqrt(diag(F_t$V))[c("A:tie_sum_A", "B:tie_sum_B", "O:tie_sum_A")])
-  out <- rbind(s1_contrasts(b1[keep], V1[keep, keep], dump$roles), sc, th, tie)
+  mN <- s1_fit_nofe(D, dump); kN <- names(coef(mN)) %in% s1_terms(dump)
+  nf <- s1_contrasts(coef(mN)[kN], s1_vc3w(mN, D)[kN, kN], dump$roles)[, stage := "S1NF"]   # between targets (main stage-1 comparison)
+  out <- rbind(s1_contrasts(b1[keep], V1[keep, keep], dump$roles), nf, sc, th, tie)
   out[, `:=`(n_s1_events = nrow(ch), n_s2_rows = F_t$n, n_s2_A = sum(X1$y == "A"), n_s2_B = sum(X1$y == "B"), n_s2_O = sum(X1$y == "orig"))]
   out[]
 }
@@ -120,7 +139,7 @@ joint_fe_cell <- function(D, dump, X, TS, design = S2_REF_DESIGN) {
 ## step 1 refits the target-FE model (reference = most-chosen target present in the draw, b = 0), bbar is rebuilt, step 2 refits with row
 ## weights (equal to row replication, tests/test_s2_fit.R 4). Returns a named vector of the cell's quantities (names as boot_names()).
 boot_names <- function(dump) { r <- dump$roles; ax <- rep(c("M", "R"), each = 2); sg <- c(1, -1)
-  c(paste("S1", rep(r, each = 4), ax, sg, sep = "."), paste("S2", rep(c("A", "B", "O"), each = 4), ax, sg, sep = "."),
+  c(paste("S1", rep(r, each = 4), ax, sg, sep = "."), paste("S1NF", rep(r, each = 4), ax, sg, sep = "."), paste("S2", rep(c("A", "B", "O"), each = 4), ax, sg, sep = "."),
     "A:bbar", "B:bbar", "O:bbar", "A:tie_sum_A", "B:tie_sum_B", "O:tie_sum_A") }
 joint_fe_draw <- function(D, dump, X, TS, m, ref_order, design = S2_REF_DESIGN) {
   ch <- D[chosen == 1L]; NCH <- table(ch$c2); REP <- names(NCH)[NCH >= 2]   # repeat targets of the full sample (as R/s2_03)
@@ -128,13 +147,14 @@ joint_fe_draw <- function(D, dump, X, TS, m, ref_order, design = S2_REF_DESIGN) 
   s1 <- s1_fit_fe(Db, dump, ref_order); bb <- coef(s1$m); be <- bb[grepl("^tfe", names(bb))]; names(be) <- sub("^tfe", "", names(be))
   refb <- setdiff(intersect(ref_order, as.character(unique(Db[chosen == 1L, c2]))), names(be))[1]; be <- c(setNames(0, refb), be)
   c1 <- s1_contrasts(bb[!grepl("^tfe", names(bb))], NULL, dump$roles)
+  mN <- s1_fit_nofe(Db, dump); kN <- names(coef(mN)) %in% s1_terms(dump); cN <- s1_contrasts(coef(mN)[kN], NULL, dump$roles)
   b <- be[names(be) %in% REP & is.finite(be)]; b <- pmin(pmax(b - mean(b), -5), 5)
   bbt <- TS[, .(dispnum, b = b[as.character(ccode)])][, .(bbar = mean(b, na.rm = TRUE)), by = dispnum][is.finite(bbar)]
   Xb <- merge(X, bbt, by = "dispnum"); wt <- m[as.character(Xb$dispnum)]; Xb <- Xb[wt > 0]; wt <- wt[wt > 0]
   ft <- fit_mnl(Xb, lapply(design, function(v) c(v, "bbar")), "boot", vc = FALSE, w = as.numeric(wt))
   if (!"A:bbar" %in% names(ft$b)) stop("bbar dropped by the separation rule in this draw")
   sc <- surf_contrasts(ft)
-  v <- c(setNames(c1$est, paste("S1", c1$alt, c1$axis, c1$gap, sep = ".")), setNames(sc$est, paste("S2", sc$alt, sc$axis, sc$gap, sep = ".")),
+  v <- c(setNames(c1$est, paste("S1", c1$alt, c1$axis, c1$gap, sep = ".")), setNames(cN$est, paste("S1NF", cN$alt, cN$axis, cN$gap, sep = ".")), setNames(sc$est, paste("S2", sc$alt, sc$axis, sc$gap, sep = ".")),
          ft$b[c("A:bbar", "B:bbar", "O:bbar", "A:tie_sum_A", "B:tie_sum_B", "O:tie_sum_A")])
   bn <- boot_names(dump); setNames(v[bn], bn)   # a dropped term gives NA for that quantity only, never a misnamed draw (recheck P2)
 }

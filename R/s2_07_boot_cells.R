@@ -17,7 +17,7 @@ wtag <- function(W) if (W > 0) sprintf("_w%dd", W) else ""
 arm_of <- function(b) if (grepl("^positions_igo_arm", b)) "igo" else if (grepl("^positions_core_", b)) "core" else if (grepl("^positions_dipl_", b)) "dipl" else stop("arm of ", b)
 logf("two-stage bootstrap of %d cells %s | cores %d | block %d", nrow(CELLS), format(Sys.time()), CORES, BLOCK)
 ## provenance (GPT P1-2): code, cell list and every input the listed cells use
-edge_file_of <- function(f, spec) if (arm_of(f) == "igo") file.path(EDIR, "edges_igo_arm.rds") else file.path(EDIR, paste0(sub("^positions_", "edges_", sub("\\.rds$", "", f)), ".rds"))
+edge_file_of <- function(f, spec) if (startsWith(f, "positions_core_BOOKc12_")) file.path(EDIR, "edges_book_c12.rds") else if (arm_of(f) == "igo") file.path(EDIR, "edges_igo_arm.rds") else file.path(EDIR, paste0(sub("^positions_", "edges_", sub("\\.rds$", "", f)), ".rds"))
 bk <- unique(CELLS[, .(window, sample)])
 FPF <- c(s2_code_files(RD), script = normalizePath(this_file),   # cells.csv itself is not fingerprinted: cell_identity.txt protects each cell, so a regenerated list can add cells
          unlist(lapply(seq_len(nrow(bk)), function(i) s2_build_files(file.path(BR, sprintf("w%d_%s", bk$window[i], bk$sample[i])), sprintf("build_w%d_%s", bk$window[i], bk$sample[i])))),
@@ -62,6 +62,7 @@ run_cell <- function(cl) {
   if (!any(okd)) stop("no usable draws for ", cl$cell_id, ": ", paste(head(unique(unlist(DRA[numf])), 3), collapse = " | "))
   M <- do.call(rbind, DRA[okd])
   pt <- c(setNames(P[stage == "S1", est], paste("S1", P[stage == "S1", alt], P[stage == "S1", axis], P[stage == "S1", gap], sep = ".")),
+          setNames(P[stage == "S1NF", est], paste("S1NF", P[stage == "S1NF", alt], P[stage == "S1NF", axis], P[stage == "S1NF", gap], sep = ".")),
           setNames(P[stage == "S2" & axis %in% c("M", "R"), est], paste("S2", P[stage == "S2" & axis %in% c("M", "R"), alt], P[stage == "S2" & axis %in% c("M", "R"), axis], P[stage == "S2" & axis %in% c("M", "R"), gap], sep = ".")),
           setNames(P[axis == "theta", est], paste0(P[axis == "theta", alt], ":bbar")),
           setNames(P[axis == "tie_sum", est], c("A:tie_sum_A", "B:tie_sum_B", "O:tie_sum_A")))
