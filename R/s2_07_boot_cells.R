@@ -19,7 +19,7 @@ logf("two-stage bootstrap of %d cells %s | cores %d | block %d", nrow(CELLS), fo
 ## provenance (GPT P1-2): code, cell list and every input the listed cells use
 edge_file_of <- function(f, spec) if (arm_of(f) == "igo") file.path(EDIR, "edges_igo_arm.rds") else file.path(EDIR, paste0(sub("^positions_", "edges_", sub("\\.rds$", "", f)), ".rds"))
 bk <- unique(CELLS[, .(window, sample)])
-FPF <- c(s2_code_files(RD), script = normalizePath(this_file), cells = opt("cells"),
+FPF <- c(s2_code_files(RD), script = normalizePath(this_file),   # cells.csv itself is not fingerprinted: cell_identity.txt protects each cell, so a regenerated list can add cells
          unlist(lapply(seq_len(nrow(bk)), function(i) s2_build_files(file.path(BR, sprintf("w%d_%s", bk$window[i], bk$sample[i])), sprintf("build_w%d_%s", bk$window[i], bk$sample[i])))),
          unlist(lapply(seq_len(nrow(bk)), function(i) { f <- file.path(DD, sprintf("long_init_bon%s_relyear_%s.rds", wtag(bk$window[i]), bk$sample[i])); setNames(f, paste0("dump:", basename(f))) })),
          setNames(file.path(PD, unique(CELLS$file)), paste0("pos:", unique(CELLS$file))),
@@ -84,7 +84,9 @@ run_cell <- function(cl) {
 for (r in seq_len(nrow(CELLS))) { cl <- CELLS[r]
   tryCatch(run_cell(cl), error = function(e) { m <- conditionMessage(e)
     if (grepl("holds a different|does not hold draws|mismatch|could not write", m)) stop(m)   # identity, resume and I/O errors stop the run
-    stt <- if (grepl("^position constant", m)) "SKIPPED" else if (grepl("fit invalid|no convergence", m)) "INVALID" else "ERROR"
+    stt <- if (grepl("^position constant", m)) "SKIPPED" else if (grepl("fit invalid|no convergence|no usable draws", m)) "INVALID" else "ERROR"
+    ef <- file.path(OUT, cl$cell_id, "error.csv")   # an ERROR repeating with the same message is deterministic: FAILED (final, reported)
+    if (stt == "ERROR" && file.exists(ef) && identical(fread(ef)$msg[1], m)) stt <- "FAILED"
     logf("%s %s: %s %s", cl$cell_id, cl$spec_id, stt, m)
     s2_write_atomic(data.table(cell_id = cl$cell_id, file = cl$file, spec_id = cl$spec_id, window = cl$window, sample = cl$sample, rule = cl$rule, status = stt, msg = m),
                     file.path(OUT, cl$cell_id, "error.csv")) }) }

@@ -63,6 +63,9 @@ for (pf in POSF) {
       prev <- fread(f); er <- unique(prev[status == "ERROR", spec_id]); if (!length(er)) next
       ## one retry of ERROR cells (e.g. a worker killed for memory); SKIPPED cells (constant positions) are final
       logf("  chunk %d: retrying %d ERROR cells", ci, length(er)); rr <- run_specs(er)
+      ## an error that repeats with the same message is deterministic: FAILED (final, reported), not retried forever (recheck P1)
+      pm <- prev[status == "ERROR", .(pmsg = msg[1]), by = spec_id]; rr <- merge(rr, pm, by = "spec_id", all.x = TRUE)
+      rr[status == "ERROR" & !is.na(pmsg) & msg == pmsg, status := "FAILED"]; rr[, pmsg := NULL]
       rr[, `:=`(positions_file = basename(pf), arm = arm, window = W_REF, sample = smp, fatal_def = B$meta$fatal_def)]
       res <- rbind(prev[!spec_id %in% er], rr, fill = TRUE); s2_write_atomic(res, f); next }
     t0 <- Sys.time()

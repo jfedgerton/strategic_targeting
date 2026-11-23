@@ -131,7 +131,7 @@ joint_fe_draw <- function(D, dump, X, TS, m, ref_order, design = S2_REF_DESIGN) 
   sc <- surf_contrasts(ft)
   v <- c(setNames(c1$est, paste("S1", c1$alt, c1$axis, c1$gap, sep = ".")), setNames(sc$est, paste("S2", sc$alt, sc$axis, sc$gap, sep = ".")),
          ft$b[c("A:bbar", "B:bbar", "O:bbar", "A:tie_sum_A", "B:tie_sum_B", "O:tie_sum_A")])
-  v[boot_names(dump)]
+  bn <- boot_names(dump); setNames(v[bn], bn)   # a dropped term gives NA for that quantity only, never a misnamed draw (recheck P2)
 }
 
 ## base build of one window x sample (measure-independent parts), from an R/s2_01_build_riskset.R output folder
@@ -152,6 +152,7 @@ s2_fingerprint_check <- function(out, files) {   # files: named character vector
   stopifnot(length(files) > 0, !anyDuplicated(names(files)), all(file.exists(files)))
   cur <- data.table(role = names(files), file = unname(files), md5 = unname(tools::md5sum(files)))
   f <- file.path(out, "fingerprint.tsv")
+  if (!file.exists(f) && length(setdiff(list.files(out), c("s2_sweep.log", "s2_boot.log")))) stop(out, " holds outputs but no fingerprint (made before provenance checks); use a new output folder")
   if (file.exists(f)) { old <- fread(f, sep = "\t"); m <- merge(old, cur, by = "role", suffixes = c("_old", "_new"))
     bad <- m[md5_old != md5_new]
     if (nrow(bad)) stop(sprintf("%s was produced from different code or inputs (%s); use a new output folder", out, paste(head(bad$role, 5), collapse = ", ")))

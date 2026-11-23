@@ -36,7 +36,7 @@ for (l in ML) { L2 <- paste(setdiff(ML, l), collapse = "+"); sp <- SP[file == MF
 MW <- sub("_pta[a-z]+$", "", mp[1])
 for (pt in c("ptaall", "ptainforce", "ptaany")) { f <- sprintf("positions_core_%s_%s.rds", MW, pt)
   sp <- SP[file == f & cent == MC & vapply(lay, function(x) setequal(strsplit(x, "+", fixed = TRUE)[[1]], c(ML, "pta")), TRUE), spec_id]
-  if (length(sp)) add(f, sp[1], WM, "fmid", paste0("5 matched PTA: main layers + pta, ", pt)) }
+  if (length(sp)) add(f, sp[1], WM, "fmid", paste0("5 matched PTA: main layers + pta, ", pt)) else cat(sprintf("rule 5: no main layers + pta spec in %s\n", f)) }
 C <- unique(rbindlist(C), by = c("file", "spec_id", "window", "sample"))
 C[, n_boot := ifelse(spec_id == MAIN & file == MF & window == WM & sample == "fmid", BM, BC)]
 C[, cell_id := sprintf("b%03d", seq_len(.N))]
