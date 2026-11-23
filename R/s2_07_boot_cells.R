@@ -16,6 +16,16 @@ logf <- function(...) { s <- sprintf(...); cat(s, "\n", sep = ""); cat(s, "\n", 
 wtag <- function(W) if (W > 0) sprintf("_w%dd", W) else ""
 arm_of <- function(b) if (grepl("^positions_igo_arm", b)) "igo" else if (grepl("^positions_core_", b)) "core" else if (grepl("^positions_dipl_", b)) "dipl" else stop("arm of ", b)
 logf("two-stage bootstrap of %d cells %s | cores %d | block %d", nrow(CELLS), format(Sys.time()), CORES, BLOCK)
+## provenance (GPT P1-2): code, cell list and every input the listed cells use
+edge_file_of <- function(f, spec) if (arm_of(f) == "igo") file.path(EDIR, "edges_igo_arm.rds") else file.path(EDIR, paste0(sub("^positions_", "edges_", sub("\\.rds$", "", f)), ".rds"))
+bk <- unique(CELLS[, .(window, sample)])
+FPF <- c(s2_code_files(RD), script = normalizePath(this_file), cells = opt("cells"),
+         unlist(lapply(seq_len(nrow(bk)), function(i) s2_build_files(file.path(BR, sprintf("w%d_%s", bk$window[i], bk$sample[i])), sprintf("build_w%d_%s", bk$window[i], bk$sample[i])))),
+         unlist(lapply(seq_len(nrow(bk)), function(i) { f <- file.path(DD, sprintf("long_init_bon%s_relyear_%s.rds", wtag(bk$window[i]), bk$sample[i])); setNames(f, paste0("dump:", basename(f))) })),
+         setNames(file.path(PD, unique(CELLS$file)), paste0("pos:", unique(CELLS$file))),
+         { e <- unique(vapply(unique(CELLS$file), edge_file_of, "", spec = "")); setNames(e, paste0("edges:", basename(e))) })
+s2_fingerprint_check(OUT, FPF)
+QMIN <- 0.8   # prespecified usable-draw threshold, per quantity
 
 run_cell <- function(cl) {
   cd <- file.path(OUT, cl$cell_id); dir.create(cd, showWarnings = FALSE)
@@ -30,38 +40,57 @@ run_cell <- function(cl) {
   pz <- readRDS(file.path(PD, cl$file)); key <- as.data.table(pz$key); R <- pz$R[, cl$spec_id]; arm <- arm_of(cl$file)
   D <- s1_prepare(dump, key, R); X <- s2_prepare(B, key, R, s2_spec_edges(arm, cl$spec_id, EDIR))
   ref_order <- names(sort(table(D[chosen == 1L, c2]), decreasing = TRUE))
-  if (!file.exists(file.path(cd, "point.csv"))) { P <- joint_fe_cell(D, dump, X, B$TS); fwrite(P, file.path(cd, "point.csv")) } else P <- fread(file.path(cd, "point.csv"))
+  pf <- file.path(cd, "point.csv")
+  if (!file.exists(pf)) { P <- joint_fe_cell(D, dump, X, B$TS); s2_write_atomic(P, pf) } else P <- fread(pf)   # an invalid point fit stops here (cell INVALID)
   ## common draws: multiplicities over the build's disputes (measure-independent), generated sequentially from seed 123
   disp_all <- sort(unique(c(as.data.table(dump$D)$disp, B$X$dispnum)))
   set.seed(123); MM <- lapply(seq_len(cl$n_boot), function(b) { m <- tabulate(sample.int(length(disp_all), length(disp_all), replace = TRUE), length(disp_all)); names(m) <- disp_all; m })
   nb <- ceiling(cl$n_boot / BLOCK); t0 <- Sys.time()
   for (k in seq_len(nb)) { bf <- file.path(cd, sprintf("draws_%03d.rds", k)); ix <- ((k - 1) * BLOCK + 1):min(k * BLOCK, cl$n_boot)
-    if (file.exists(bf)) { if (!identical(readRDS(bf)$ix, ix)) stop("draw block ", bf, " does not hold draws ", min(ix), "-", max(ix)); next }
-    DR <- mclapply(MM[ix], function(m) tryCatch(joint_fe_draw(D, dump, X, B$TS, m, ref_order), error = function(e) conditionMessage(e)), mc.cores = CORES, mc.preschedule = FALSE)
-    saveRDS(list(ix = ix, draws = DR), paste0(bf, ".tmp")); file.rename(paste0(bf, ".tmp"), bf) }
+    one <- function(m) tryCatch(joint_fe_draw(D, dump, X, B$TS, m, ref_order), error = function(e) paste("numerical:", conditionMessage(e)))
+    if (file.exists(bf)) { old <- readRDS(bf); if (!identical(old$ix, ix)) stop("draw block ", bf, " does not hold draws ", min(ix), "-", max(ix))
+      ## GPT P2-4: draws lost to a worker (killed fork: try-error / NULL) are retried; numerical failures are final
+      rt <- which(!vapply(old$draws, function(x) (is.numeric(x) && identical(names(x), boot_names(dump))) || (is.character(x) && !inherits(x, "try-error") && startsWith(x, "numerical:")), TRUE))
+      if (!length(rt)) next
+      old$draws[rt] <- mclapply(MM[ix[rt]], one, mc.cores = CORES, mc.preschedule = FALSE); DR <- old$draws
+    } else DR <- mclapply(MM[ix], one, mc.cores = CORES, mc.preschedule = FALSE)
+    saveRDS(list(ix = ix, draws = DR), paste0(bf, ".tmp")); if (!file.rename(paste0(bf, ".tmp"), bf)) stop("could not write ", bf) }
   DRA <- unlist(lapply(sort(list.files(cd, pattern = "^draws_.*\\.rds$", full.names = TRUE)), function(f) readRDS(f)$draws), recursive = FALSE)
-  okd <- vapply(DRA, is.numeric, TRUE); if (!any(okd)) stop("no usable draws for ", cl$cell_id, ": ", paste(unique(unlist(DRA)), collapse = " | "))
+  stopifnot(length(DRA) == cl$n_boot)
+  okd <- vapply(DRA, function(x) is.numeric(x) && identical(names(x), boot_names(dump)), TRUE)
+  numf <- vapply(DRA, function(x) is.character(x) && !inherits(x, "try-error") && startsWith(x, "numerical:"), TRUE)
+  if (!any(okd)) stop("no usable draws for ", cl$cell_id, ": ", paste(head(unique(unlist(DRA[numf])), 3), collapse = " | "))
   M <- do.call(rbind, DRA[okd])
   pt <- c(setNames(P[stage == "S1", est], paste("S1", P[stage == "S1", alt], P[stage == "S1", axis], P[stage == "S1", gap], sep = ".")),
           setNames(P[stage == "S2" & axis %in% c("M", "R"), est], paste("S2", P[stage == "S2" & axis %in% c("M", "R"), alt], P[stage == "S2" & axis %in% c("M", "R"), axis], P[stage == "S2" & axis %in% c("M", "R"), gap], sep = ".")),
           setNames(P[axis == "theta", est], paste0(P[axis == "theta", alt], ":bbar")),
           setNames(P[axis == "tie_sum", est], c("A:tie_sum_A", "B:tie_sum_B", "O:tie_sum_A")))
-  q <- intersect(boot_names(dump), names(pt))
-  S <- data.table(cell_id = cl$cell_id, file = cl$file, spec_id = cl$spec_id, window = cl$window, sample = cl$sample, rule = cl$rule, q = q, est = pt[q],
-                  lo = apply(M[, q, drop = FALSE], 2, quantile, .025, na.rm = TRUE), hi = apply(M[, q, drop = FALSE], 2, quantile, .975, na.rm = TRUE),
-                  share_pos = colMeans(M[, q, drop = FALSE] > 0, na.rm = TRUE), n_ok = sum(okd), n_boot = cl$n_boot,
-                  fail_msgs = paste(unique(unlist(DRA[!okd])), collapse = " | "))
-  if (sum(okd) < 0.8 * cl$n_boot) S[, flag := "fewer than 80% usable draws"] else S[, flag := ""]
-  fwrite(S, file.path(cd, "summary.csv"))
+  q <- boot_names(dump); stopifnot(all(q %in% names(pt)))
+  ## GPT P1-3: usable draws counted PER QUANTITY; an interval is reported only with a finite point estimate and >= QMIN x n_boot finite draws
+  nf <- colSums(is.finite(M[, q, drop = FALSE]))
+  qok <- is.finite(pt[q]) & nf >= QMIN * cl$n_boot
+  qf <- function(k, pr) if (qok[k]) unname(quantile(M[is.finite(M[, k]), k], pr)) else NA_real_
+  S <- data.table(cell_id = cl$cell_id, file = cl$file, spec_id = cl$spec_id, window = cl$window, sample = cl$sample, rule = cl$rule, q = q, est = unname(pt[q]),
+                  lo = vapply(q, qf, 0, pr = .025), hi = vapply(q, qf, 0, pr = .975),
+                  share_pos = vapply(q, function(k) if (qok[k]) mean(M[is.finite(M[, k]), k] > 0) else NA_real_, 0),
+                  n_finite = unname(nf), n_draws_ok = sum(okd), n_draws_numerical_fail = sum(numf), n_draws_other_fail = sum(!okd & !numf), n_boot = cl$n_boot,
+                  flag = ifelse(qok, "", ifelse(is.finite(pt[q]), sprintf("fewer than %d%% finite draws", round(100 * QMIN)), "no finite point estimate")),
+                  fail_msgs = paste(head(unique(unlist(DRA[numf])), 5), collapse = " | "))
+  s2_write_atomic(S, file.path(cd, "summary.csv")); unlink(file.path(cd, "error.csv"))
   logf("%s %s w%d %s: %d/%d draws ok, %.1f min | theta A %.2f [%.2f, %.2f]", cl$cell_id, cl$spec_id, cl$window, cl$sample, sum(okd), cl$n_boot,
        as.numeric(difftime(Sys.time(), t0, units = "mins")), S[q == "A:bbar", est], S[q == "A:bbar", lo], S[q == "A:bbar", hi])
 }
 ## a failing cell is recorded (ERROR summary) and the run moves on; rerunning retries it
 for (r in seq_len(nrow(CELLS))) { cl <- CELLS[r]
-  tryCatch(run_cell(cl), error = function(e) { m <- conditionMessage(e); logf("%s %s: ERROR %s", cl$cell_id, cl$spec_id, m)
-    if (grepl("holds a different|does not hold draws|mismatch", m)) stop(m)   # identity and resume errors stop the run
-    fwrite(data.table(cell_id = cl$cell_id, file = cl$file, spec_id = cl$spec_id, window = cl$window, sample = cl$sample, rule = cl$rule, status = "ERROR", msg = m),
-           file.path(OUT, cl$cell_id, "error.csv")) }) }
-fwrite(rbindlist(lapply(file.path(OUT, CELLS$cell_id), function(d) if (file.exists(file.path(d, "summary.csv"))) fread(file.path(d, "summary.csv"))[, status := "OK"]
-  else if (file.exists(file.path(d, "error.csv"))) fread(file.path(d, "error.csv"))), fill = TRUE), file.path(OUT, "boot_cells_summary.csv"))
+  tryCatch(run_cell(cl), error = function(e) { m <- conditionMessage(e)
+    if (grepl("holds a different|does not hold draws|mismatch|could not write", m)) stop(m)   # identity, resume and I/O errors stop the run
+    stt <- if (grepl("^position constant", m)) "SKIPPED" else if (grepl("fit invalid|no convergence", m)) "INVALID" else "ERROR"
+    logf("%s %s: %s %s", cl$cell_id, cl$spec_id, stt, m)
+    s2_write_atomic(data.table(cell_id = cl$cell_id, file = cl$file, spec_id = cl$spec_id, window = cl$window, sample = cl$sample, rule = cl$rule, status = stt, msg = m),
+                    file.path(OUT, cl$cell_id, "error.csv")) }) }
+ALL <- rbindlist(lapply(file.path(OUT, CELLS$cell_id), function(d) if (file.exists(file.path(d, "summary.csv"))) fread(file.path(d, "summary.csv"))[, status := "OK"]
+  else if (file.exists(file.path(d, "error.csv"))) fread(file.path(d, "error.csv")) else data.table(cell_id = basename(d), status = "ERROR", msg = "not run")), fill = TRUE)
+s2_write_atomic(ALL, file.path(OUT, "boot_cells_summary.csv"))
+st <- ALL[, .(status = status[1]), by = cell_id]; logf("census: %s", paste(sprintf("%s %d", names(table(st$status)), table(st$status)), collapse = ", "))
+if (any(st$status == "ERROR")) { logf("S2_BOOT_GAPS: %d cells in ERROR (rerun to retry)", sum(st$status == "ERROR")); quit(status = 3) }
 logf("S2_BOOT_DONE")

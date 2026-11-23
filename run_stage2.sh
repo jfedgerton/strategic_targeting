@@ -18,6 +18,10 @@ say() { echo "[$(date +%H:%M:%S)] $*" | tee -a "$LOG"; }
 die() { say "STOP: $*"; exit 1; }
 runR() { local PAT=$1; shift; local T; T=$(mktemp); local rc=0; Rscript "$@" > "$T" 2>&1 || rc=$?; cat "$T" >> "$LOG"; grep -E "$PAT" "$T" | cut -c1-250 || true; rm -f "$T"; return $rc; }
 has() { [[ " $STEPS " == *" $1 "* ]]; }
+h() { shasum -a 256 "$1" | cut -c1-16; }
+## provenance (GPT P1-2): edge files and builds are reused only if their stamp (hash of code, inputs and arguments) is unchanged
+fresh() { [ -s "$1.stamp" ] && [ "$(cat "$1.stamp")" = "$2" ]; }
+stamp() { echo "$2" > "$1.stamp.tmp" && mv "$1.stamp.tmp" "$1.stamp"; }
 wtag() { [ "$1" -gt 0 ] && echo "_w${1}d" || echo ""; }
 [ -e $O/.created_by_run_all ] || die "$O is not a run_all.sh output folder"
 ## audit P2: pgrep also matches a parent shell that chains the two scripts; S2_FORCE=1 skips this check when you know stage 1 is done
@@ -30,9 +34,12 @@ say "stage-2 appendix run | commit $(git rev-parse --short HEAD) | out $S2 | cor
 
 ## ---- 1. edges (mirrors the arms of run_all.sh) ----
 if has 1; then
-  ed() { local NM=$1 FILES=$2; shift 2; local ok=1 f; for f in $FILES; do [ -s $S2/edges/$f.rds ] || ok=0; done; [ $ok = 1 ] && return 0
+  EST="$(h R/02_build_positions.R) $(h R/lib/sry.R) $(h $O/layers_dy.rds)"
+  ed() { local NM=$1 FILES=$2; shift 2; local ok=1 f; for f in $FILES; do [ -s $S2/edges/$f.rds ] || ok=0; done
+    [ $ok = 1 ] && fresh $S2/edges/.arm_$NM "$EST $*" && return 0
+    for f in $FILES; do rm -f $S2/edges/$f.rds; done
     runR "Error|edges" R/02_build_positions.R $O/layers_dy.rds $S2/edges "$@" --edges_out=$S2/edges || die "edges $NM failed"
-    for f in $FILES; do [ -s $S2/edges/$f.rds ] || die "edges $NM did not write $f.rds"; done; }
+    for f in $FILES; do [ -s $S2/edges/$f.rds ] || die "edges $NM did not write $f.rds"; done; stamp $S2/edges/.arm_$NM "$EST $*"; }
   ed core_all "edges_core_W1raw_ptaall edges_core_W2contig_ptaall edges_core_W3dist_ptaall edges_core_W4fe_ptaall" --arm=core --pta=all --cores=$CORES
   ed core_inforce "edges_core_W1raw_ptainforce edges_core_W2contig_ptainforce edges_core_W3dist_ptainforce edges_core_W4fe_ptainforce" --arm=core --pta=inforce --cores=$CORES
   ed core_any "edges_core_W1raw_ptaany edges_core_W2contig_ptaany edges_core_W3dist_ptaany edges_core_W4fe_ptaany" --arm=core --pta=any --cores=$CORES
@@ -47,11 +54,14 @@ fi
 ## ---- 2. builds ----
 if has 2; then
   for W in $WINDOWS; do for SM in fmid mid; do
-    BD=$S2/builds/w${W}_${SM}; [ -s $BD/s2_meta.rds ] && grep -q "written (release build)" $BD/s2_build.log 2>/dev/null && continue
-    DP=$O/dumps/long_init_bon$(wtag $W)_relyear_${SM}.rds; [ -s $DP ] || die "missing stage-1 dump $DP"
+    BD=$S2/builds/w${W}_${SM}; DP=$O/dumps/long_init_bon$(wtag $W)_relyear_${SM}.rds; [ -s $DP ] || die "missing stage-1 dump $DP"
+    BST="$(h R/s2_01_build_riskset.R) $(h R/lib/s2.R) $(h $DP) $(h $MAINF) $(h $O/layers_dy.rds) $(h data_entry/manifest.csv) $MAIN_SPEC $W $SM"
+    [ -s $BD/s2_meta.rds ] && grep -q "written (release build)" $BD/s2_build.log 2>/dev/null && fresh $BD/.build "$BST" && continue
+    rm -rf $BD
     FD=$([ $SM = fmid ] && echo stage1 || echo mid)
     runR "acceptance|FAILED|written|Error" R/s2_01_build_riskset.R --data_entry=data_entry --layers=$O/layers_dy.rds --positions=$MAINF --poscol="$MAIN_SPEC" \
       --out=$BD --window=$W --fatal_def=$FD --dump_bcjs=$DP || die "build w$W $SM failed"
+    stamp $BD/.build "$BST"
   done; done
   say "2 builds done"
 fi
@@ -61,8 +71,8 @@ ALLPOS=$(ls "$POSD"/positions_*.rds 2>/dev/null | grep -v positions_cmp | paste 
 MAINB=$S2/builds/w${WINDOW_MAIN}_fmid
 ## ---- 3. layer 1a: all measures x main window x fmid ----
 if has 3; then
-  runR "chunk|measures|S2_SWEEP_DONE|Error" R/s2_05_sweep.R --build=$MAINB --dump=$O/dumps/long_init_bon$(wtag $WINDOW_MAIN)_relyear_fmid.rds \
-    --edges_dir=$S2/edges --out=$S2/sweep/w${WINDOW_MAIN}_fmid_all --positions=$ALLPOS --cores=$CORES || die "sweep (all, fmid) failed"
+  runR "chunk|measures|census|S2_SWEEP_DONE|S2_SWEEP_GAPS|Error" R/s2_05_sweep.R --build=$MAINB --dump=$O/dumps/long_init_bon$(wtag $WINDOW_MAIN)_relyear_fmid.rds \
+    --edges_dir=$S2/edges --out=$S2/sweep/w${WINDOW_MAIN}_fmid_all --positions=$ALLPOS --cores=$CORES || die "sweep (all, fmid) failed or finished with ERROR cells (see log); rerun to retry"
   say "3 layer 1a done"
 fi
 
@@ -70,15 +80,15 @@ fi
 if has 4; then
   [ -s $S2/boot/cells.csv ] || runR "wrote|Error" R/s2_06_pick_boot_cells.R --posdir=$POSD --main_spec="$MAIN_SPEC" --main_window=$WINDOW_MAIN --windows="$WINDOWS" \
     --b_main=$B_MAIN --b_cell=$B_CELL --out=$S2/boot/cells.csv || die "cell list failed"
-  runR "draws ok|S2_BOOT_DONE|Error" R/s2_07_boot_cells.R --cells=$S2/boot/cells.csv --posdir=$POSD --builds_root=$S2/builds --dumps_dir=$O/dumps \
-    --edges_dir=$S2/edges --out=$S2/boot --cores=$CORES || die "bootstrap cells failed"
+  runR "draws ok|census|INVALID|SKIPPED|S2_BOOT_DONE|S2_BOOT_GAPS|Error" R/s2_07_boot_cells.R --cells=$S2/boot/cells.csv --posdir=$POSD --builds_root=$S2/builds --dumps_dir=$O/dumps \
+    --edges_dir=$S2/edges --out=$S2/boot --cores=$CORES || die "bootstrap failed or finished with ERROR cells (see log); rerun to retry"
   say "4 layer 2 done"
 fi
 
 ## ---- 5. layer 1b: plausible measures x main window x mid ----
 if has 5; then
-  runR "chunk|measures|S2_SWEEP_DONE|Error" R/s2_05_sweep.R --build=$S2/builds/w${WINDOW_MAIN}_mid --dump=$O/dumps/long_init_bon$(wtag $WINDOW_MAIN)_relyear_mid.rds \
-    --edges_dir=$S2/edges --out=$S2/sweep/w${WINDOW_MAIN}_mid_plausible --positions=$ALLPOS --validation=$O/validation/measure_validation.csv --set=plausible --cores=$CORES || die "sweep (plausible, mid) failed"
+  runR "chunk|measures|census|S2_SWEEP_DONE|S2_SWEEP_GAPS|Error" R/s2_05_sweep.R --build=$S2/builds/w${WINDOW_MAIN}_mid --dump=$O/dumps/long_init_bon$(wtag $WINDOW_MAIN)_relyear_mid.rds \
+    --edges_dir=$S2/edges --out=$S2/sweep/w${WINDOW_MAIN}_mid_plausible --positions=$ALLPOS --validation=$O/validation/measure_validation.csv --set=plausible --cores=$CORES || die "sweep (plausible, mid) failed or finished with ERROR cells (see log); rerun to retry"
   say "5 layer 1b done"
 fi
 

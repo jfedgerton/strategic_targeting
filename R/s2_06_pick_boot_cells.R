@@ -5,6 +5,8 @@
 ##       file lacks that exact layer set, the same-centrality spec with the closest layer set (Jaccard; ties broken alphabetically by spec id); the IGO arm: its specs with the main centrality
 ##   (3) main window, fmid, main file: the main layer set under every other centrality
 ##   (4) main window, fmid, main file, main centrality: the main layer set minus one layer (each layer in turn)
+##   (5) main window, fmid: main layers + pta under each PTA coding (all / inforce / any), main weighting and centrality
+## Centrality is crossed only in the main file (rule 3); other files and the IGO arm use the main centrality. A selected sub-multiverse, not a factorial sample.
 ## Draws: B_MAIN for the main cell, B_CELL for the rest.
 ## Usage: Rscript R/s2_06_pick_boot_cells.R --posdir=DIR --main_spec=SPEC --main_window=1 --windows="0 1 2" --b_main=2000 --b_cell=500 --out=cells.csv
 suppressPackageStartupMessages(library(data.table))
@@ -29,6 +31,12 @@ for (f in setdiff(unique(SP$file), MF)) { S <- SP[file == f]
 for (sp in SP[file == MF & cent != MC & vapply(lay, function(x) setequal(strsplit(x, "+", fixed = TRUE)[[1]], ML), TRUE), spec_id]) add(MF, sp, WM, "fmid", "3 main layers, other centrality")
 for (l in ML) { L2 <- paste(setdiff(ML, l), collapse = "+"); sp <- SP[file == MF & cent == MC & vapply(lay, function(x) setequal(strsplit(x, "+", fixed = TRUE)[[1]], setdiff(ML, l)), TRUE), spec_id]
   if (length(sp)) add(MF, sp[1], WM, "fmid", paste0("4 drop layer ", l)) }
+## (5) GPT P2-6, matched PTA comparison: the main layers + pta, main weighting and centrality, under each PTA coding (all / inforce / any), so
+##     the PTA comparison changes only the PTA coding, not the layer set
+MW <- sub("_pta[a-z]+$", "", mp[1])
+for (pt in c("ptaall", "ptainforce", "ptaany")) { f <- sprintf("positions_core_%s_%s.rds", MW, pt)
+  sp <- SP[file == f & cent == MC & vapply(lay, function(x) setequal(strsplit(x, "+", fixed = TRUE)[[1]], c(ML, "pta")), TRUE), spec_id]
+  if (length(sp)) add(f, sp[1], WM, "fmid", paste0("5 matched PTA: main layers + pta, ", pt)) }
 C <- unique(rbindlist(C), by = c("file", "spec_id", "window", "sample"))
 C[, n_boot := ifelse(spec_id == MAIN & file == MF & window == WM & sample == "fmid", BM, BC)]
 C[, cell_id := sprintf("b%03d", seq_len(.N))]

@@ -114,7 +114,7 @@ logf("uncertain dates: initiating-side entrants promoted under the possible boun
 ## (iii) reconciliation of every stage-1 projection record (initiator x dispute x event year x type)
 if (!is.null(DUMP)) {
   d <- readRDS(DUMP); cm <- if (is.null(d$coorig_months)) 0L else as.integer(d$coorig_months)
-  stopifnot(d$types %in% c("bcjs", "init"), cm == W_REF)   # init dumps (stage-1 main run): baseline roles and promotions checked; no joiner sides to check
+  stopifnot(d$types %in% c("bcjs", "init"), cm == W_REF, d$sample == c(stage1 = "fmid", gml = "fmid", mid = "mid")[[FATAL_DEF]])   # window AND sample must match (GPT)   # init dumps (stage-1 main run): baseline roles and promotions checked; no joiner sides to check
   pr1 <- unique(as.data.table(d$D)[chosen == 1L, .(c1, disp, yr, type, orig_joiner)])
   cov <- PT[pr1, on = .(dispnum = disp, ccode = c1, spell_first <= yr, spell_last >= yr), nomatch = NA, .(disp = i.disp, c1 = i.c1, yr = i.yr, type = i.type, spell = x.spell)]
   cov <- cov[, .(n_spell = sum(!is.na(spell)), spell = if (all(is.na(spell))) NA_integer_ else min(spell, na.rm = TRUE)), by = .(disp, c1, yr, type)]

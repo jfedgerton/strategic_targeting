@@ -26,16 +26,21 @@ cm <- if (is.null(dump$coorig_months)) 0L else as.integer(dump$coorig_months)
 smp <- c(stage1 = "fmid", gml = "fmid", mid = "mid")[[B$meta$fatal_def]]
 if (dump$types != "init" || cm != W_REF || dump$sample != smp) stop(sprintf("dump (%s, window %d, %s) does not match the build (init, window %d, %s)", dump$types, cm, dump$sample, W_REF, smp))
 logf("stage-2 sweep %s | build %s (window %d, fatal_def %s) | dump %s | set %s | cores %d", format(Sys.time()), BUILD, W_REF, B$meta$fatal_def, basename(DUMPF), SET, CORES)
+arm_of <- function(f) { b <- basename(f); if (grepl("^positions_igo_arm", b)) "igo" else if (grepl("^positions_core_", b)) "core" else if (grepl("^positions_dipl_", b)) "dipl" else stop("cannot tell arm of ", b) }
+edge_file_of <- function(f) { b <- sub("\\.rds$", "", basename(f)); if (arm_of(f) == "igo") file.path(EDIR, "edges_igo_arm.rds") else file.path(EDIR, paste0(sub("^positions_", "edges_", b), ".rds")) }
+FPF <- c(s2_code_files(RD), script = normalizePath(this_file), s2_build_files(BUILD, "build"), dump = DUMPF, setNames(POSF, paste0("pos:", basename(POSF))),
+         setNames(vapply(POSF, edge_file_of, ""), paste0("edges:", basename(vapply(POSF, edge_file_of, "")))), if (!is.null(VAL)) c(validation = VAL))
+s2_fingerprint_check(OUT, FPF[!duplicated(names(FPF))])
 PLAUS <- if (SET == "plausible") { v <- fread(VAL); v[plausible == TRUE, paste(basename(file), spec_id)] } else NULL
 
-arm_of <- function(f) { b <- basename(f); if (grepl("^positions_igo_arm", b)) "igo" else if (grepl("^positions_core_", b)) "core" else if (grepl("^positions_dipl_", b)) "dipl" else stop("cannot tell arm of ", b) }
 one_cell <- function(spec, R, key, arm) {
   t0 <- proc.time()[[3]]
   r <- tryCatch({
     D <- s1_prepare(dump, key, R); E <- s2_spec_edges(arm, spec, EDIR); X <- s2_prepare(B, key, R, E)
     o <- joint_fe_cell(D, dump, X, B$TS); o[, `:=`(status = "OK", s2_rows_dropped = attr(X, "dropped"), msg = "")]; o
   }, error = function(e) data.table(stage = NA_character_, alt = NA_character_, axis = NA_character_, gap = NA_real_, est = NA_real_, se = NA_real_,
-                                    status = if (grepl("^position constant", conditionMessage(e))) "SKIPPED" else "ERROR", msg = conditionMessage(e)))
+                                    status = if (grepl("^position constant", conditionMessage(e))) "SKIPPED" else if (grepl("fit invalid|no convergence", conditionMessage(e))) "INVALID" else "ERROR",
+                                    msg = conditionMessage(e)))   # SKIPPED and INVALID are final results (as in R/07); ERROR is retried once
   r[, `:=`(spec_id = spec, secs = round(proc.time()[[3]] - t0, 1))]; r
 }
 
@@ -59,13 +64,19 @@ for (pf in POSF) {
       ## one retry of ERROR cells (e.g. a worker killed for memory); SKIPPED cells (constant positions) are final
       logf("  chunk %d: retrying %d ERROR cells", ci, length(er)); rr <- run_specs(er)
       rr[, `:=`(positions_file = basename(pf), arm = arm, window = W_REF, sample = smp, fatal_def = B$meta$fatal_def)]
-      res <- rbind(prev[!spec_id %in% er], rr, fill = TRUE); fwrite(res, paste0(f, ".tmp")); file.rename(paste0(f, ".tmp"), f); next }
+      res <- rbind(prev[!spec_id %in% er], rr, fill = TRUE); s2_write_atomic(res, f); next }
     t0 <- Sys.time()
     res <- run_specs(ch[[ci]])
     res[, `:=`(positions_file = basename(pf), arm = arm, window = W_REF, sample = smp, fatal_def = B$meta$fatal_def)]
-    writeLines(ch[[ci]], fs); fwrite(res, paste0(f, ".tmp")); file.rename(paste0(f, ".tmp"), f)
+    writeLines(ch[[ci]], paste0(fs, ".tmp")); if (!file.rename(paste0(fs, ".tmp"), fs)) stop("could not write ", fs); s2_write_atomic(res, f)
     n_err <- uniqueN(res[status == "ERROR", spec_id]); n_done <- n_done + length(ch[[ci]])
-    logf("  chunk %d/%d: %d measures, %d errors, %d skipped (constant positions), %.1f min", ci, length(ch), length(ch[[ci]]), n_err, uniqueN(res[status == "SKIPPED", spec_id]), as.numeric(difftime(Sys.time(), t0, units = "mins")))
+    logf("  chunk %d/%d: %d measures, %d errors, %d skipped (constant positions), %d invalid fits, %.1f min", ci, length(ch), length(ch[[ci]]), n_err, uniqueN(res[status == "SKIPPED", spec_id]), uniqueN(res[status == "INVALID", spec_id]), as.numeric(difftime(Sys.time(), t0, units = "mins")))
   }
 }
+## completion (GPT P2-4): DONE only if no ERROR cell remains in this call's chunks; otherwise exit 3 ("finished with gaps"; rerun retries them)
+ALLC <- rbindlist(lapply(list.files(OUT, pattern = "^cells_.*\\.csv$", full.names = TRUE), fread), fill = TRUE)
+ALLC <- ALLC[positions_file %in% basename(POSF) & window == W_REF & sample == smp]
+st <- ALLC[, .(status = status[1]), by = .(positions_file, spec_id)]
+logf("census: %s", paste(sprintf("%s %d", names(table(st$status)), table(st$status)), collapse = ", "))
+if (any(st$status == "ERROR")) { logf("S2_SWEEP_GAPS: %d ERROR cells remain (rerun to retry)", sum(st$status == "ERROR")); quit(status = 3) }
 logf("S2_SWEEP_DONE (%d measures fitted this call)", n_done)

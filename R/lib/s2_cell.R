@@ -33,7 +33,10 @@ s1_prepare <- function(dump, key, R) {
   i <- match(paste(D$c1, D$yr - 1L), kk); j <- match(paste(D$c2, D$yr - 1L), kk)
   if (anyNA(i) || anyNA(j)) stop("stage 1: positions missing for event rows")
   D[, dR := (R[i] - R[j]) / sc[as.character(yr)]]
-  if (any(!is.finite(D$dR))) stop(sprintf("position constant in stage-1 year(s) %s", paste(sort(unique(D$yr[!is.finite(D$dR)])), collapse = " ")))
+  ## constant positions (GPT P2-5): the R/07 rule, sd < 1e-8 in any year the fit uses (positions at t-1, scale of year t)
+  uy <- sort(unique(c(D$yr, D$yr - 1L))); uy <- uy[uy >= min(key$year)]; sds <- vapply(split(R, key$year)[as.character(uy)], sd, 0)
+  if (any(!(sds >= 1e-8))) stop(sprintf("position constant in stage-1 year(s) %s", paste(uy[!(sds >= 1e-8)], collapse = " ")))
+  if (any(!is.finite(D$dR))) stop("stage 1: non-finite dR")
   D[, `:=`(dM2 = dM^2, dR2 = dR^2, dMR = dM * dR)]
   for (g in 0:1) for (v in c("dM", "dM2", "dR", "dR2", "dMR")) D[, paste0(v, "_", ROLES[g + 1]) := get(v) * (type == g)]
   D[]
@@ -43,7 +46,15 @@ s1_fit_fe <- function(D, dump, ref_order) {   # target FE on the rows of chosen 
   tgb <- unique(D[chosen == 1L, c2]); dd <- D[c2 %in% tgb]; dd <- dd[dd[, .(k = .N), by = ev_id][k > 1L], on = "ev_id"]
   dd[, tfe := droplevels(factor(as.character(c2), levels = intersect(ref_order, as.character(tgb))))]
   f <- as.formula(paste("Surv(rep(1, nrow(dd)), chosen) ~", paste(c(s1_terms(dump), dump$Z_cols, "tfe"), collapse = " + "), "+ strata(ev_id)"))
-  list(m = suppressWarnings(coxph(f, data = dd, weights = w, method = "breslow", control = coxph.control(iter.max = 50))), dd = dd)
+  ## validity (GPT P1-1), the R/07 policy: a convergence / infinite / singular warning, a non-finite coefficient or the iteration limit makes
+  ## the fit INVALID; callers stop with "stage-1 fit invalid" (cell status INVALID; a bootstrap draw counts as a numerical failure)
+  w_ <- character(0)
+  m <- withCallingHandlers(coxph(f, data = dd, weights = w, method = "breslow", control = coxph.control(iter.max = 50)),
+                           warning = function(e) { w_ <<- c(w_, conditionMessage(e)); invokeRestart("muffleWarning") })
+  bad <- c(if (any(grepl("converge|infinite|singular", w_, ignore.case = TRUE))) paste(unique(sub(" variable.*$", "", w_)), collapse = " | "),
+           if (!all(is.finite(coef(m)))) "non-finite coefficients", if (m$iter >= 50L) "iteration limit")
+  if (length(bad)) stop("stage-1 fit invalid: ", paste(bad, collapse = "; "))
+  list(m = m, dd = dd, warnings = w_)
 }
 s1_vc2w <- function(m, dd) { cl <- function(g) { Dd <- rowsum(residuals(m, type = "dfbeta", weighted = TRUE), g, reorder = FALSE); crossprod(Dd) }
   V <- cl(dd$init) + cl(dd$disp) - cl(dd$init_disp); e <- eigen(V, symmetric = TRUE)
@@ -56,10 +67,16 @@ s1_contrasts <- function(b, V, roles) { out <- list()
 ## ---- stage 2 inputs for a measure: gaps from its positions, ties from its edges (one-shot, month-0 rosters, onset year - 1) ----------
 s2_prepare <- function(B, key, R, EDGE) {
   PV <- merge(as.data.table(B$SI$PV)[, .(ccode, year, M)], data.table(ccode = key$ccode, year = key$year, R = R), by = c("ccode", "year"), all = TRUE)
-  sR <- vapply(split(R, key$year), s2_gap_scale, 0)
-  z <- names(sR)[sR <= 0]
-  if (length(z)) { used <- intersect(z, as.character(unique(B$SI$rows$t))); if (length(used)) stop("position constant in stage-2 year(s) ", paste(used, collapse = " ")); sR <- sR[sR > 0] }
-  sv <- s2_surface(B$SI$rows, B$SI$mem_roster, PV, B$SI$sM, sR, "mean")
+  ## common cohort (GPT P2-7): B$X is the main build's eligible cohort. Position-dependent eligibility is identical for this measure only if it
+  ## has a finite position on exactly the same state-years as the main measure; stop otherwise (never a silently different cohort)
+  pk <- as.data.table(B$SI$PV)[is.finite(R), paste(ccode, year)]; mk <- paste(key$ccode, key$year)[is.finite(R)]
+  if (!setequal(pk, mk)) stop(sprintf("measure covers different state-years than the main measure (%d vs %d); the main-defined cohort would not apply", length(mk), length(pk)))
+  ## constant positions (GPT P2-5): sd < 1e-8 in a year that eligible rows use (positions at ty, scale of year t); unused years are dropped
+  ER <- merge(as.data.table(B$SI$rows), unique(B$X[, .(dispnum, ccode)]), by = c("dispnum", "ccode"))
+  uy <- intersect(as.character(unique(c(ER$ty, ER$t))), unique(as.character(key$year)))
+  sds <- vapply(split(R, key$year)[uy], sd, 0); if (any(!(sds >= 1e-8))) stop("position constant in stage-2 year(s) ", paste(uy[!(sds >= 1e-8)], collapse = " "))
+  sR <- vapply(split(R, key$year), function(v) if (sd(v) >= 1e-8) s2_gap_scale(v) else NA_real_, 0); sR <- sR[is.finite(sR)]
+  sv <- s2_surface(ER, B$SI$mem_roster, PV, B$SI$sM, sR, "mean")   # eligible rows only
   ## the measure's OWN centrality controls (audit P1, 2026-11-22): own_cent = R of the candidate at onset - 1; tgt_cent_mean / _min over the
   ## baseline target set at onset - 1 (NA if any target lacks a position), exactly as R/s2_01_build_riskset.R builds them from the main measure
   RK <- data.table(ccode = key$ccode, ty = key$year, Rv = R)
@@ -128,3 +145,20 @@ s2_base <- function(build_dir) {
   list(meta = META, window = W, X = X, SI = readRDS(file.path(build_dir, "s2_surface_inputs.rds")), row0 = ONE[, .(dispnum, ccode, onset_year)],
        R0 = ROS[m == 0L], cover = if (!is.null(META$cover)) sort(META$cover) else { warning("build predates META$cover; using main-edge years"); sort(unique(E$year)) }, TS = CL[baseline == TRUE & side_rel == "B", .(dispnum, ccode)], main_edges = E)
 }
+
+## ---- provenance (GPT P1-2): an output folder is bound to the contents of its code and inputs. fingerprint.tsv lists (role, file, md5);
+## on a rerun every listed role must have the same md5 (new roles may be added, e.g. more positions files), otherwise the run stops.
+s2_fingerprint_check <- function(out, files) {   # files: named character vector, names = role, values = paths
+  stopifnot(length(files) > 0, !anyDuplicated(names(files)), all(file.exists(files)))
+  cur <- data.table(role = names(files), file = unname(files), md5 = unname(tools::md5sum(files)))
+  f <- file.path(out, "fingerprint.tsv")
+  if (file.exists(f)) { old <- fread(f, sep = "\t"); m <- merge(old, cur, by = "role", suffixes = c("_old", "_new"))
+    bad <- m[md5_old != md5_new]
+    if (nrow(bad)) stop(sprintf("%s was produced from different code or inputs (%s); use a new output folder", out, paste(head(bad$role, 5), collapse = ", ")))
+    cur <- unique(rbind(old, cur[!role %in% old$role]), by = "role") }
+  fwrite(cur, paste0(f, ".tmp"), sep = "\t"); if (!file.rename(paste0(f, ".tmp"), f)) stop("could not write ", f)
+  invisible(cur)
+}
+s2_code_files <- function(rd) c(lib_s2 = file.path(rd, "lib", "s2.R"), lib_s2_fit = file.path(rd, "lib", "s2_fit.R"), lib_sry = file.path(rd, "lib", "sry.R"), lib_s2_cell = file.path(rd, "lib", "s2_cell.R"))
+s2_build_files <- function(bd, tag) { f <- sort(list.files(bd, pattern = "\\.rds$", full.names = TRUE)); setNames(f, paste0(tag, ":", basename(f))) }
+s2_write_atomic <- function(x, f) { fwrite(x, paste0(f, ".tmp")); if (!file.rename(paste0(f, ".tmp"), f)) stop("could not write ", f) }
