@@ -52,6 +52,9 @@ ARM <- opt("arm", "core"); CORES <- as.integer(opt("cores", "1"))
 PTA <- opt("pta", "all"); stopifnot(PTA %in% c("all", "inforce", "any"))   # PI 2026-11-18: PTAs both ways; PI 2026-11-22: + unweighted (any)
 TAG <- paste0("pta", PTA)
 ONLY_W <- opt("weightings", ""); MAX_COMBOS <- as.integer(opt("max_combos", "0"))   # smoke-test options; a full run uses neither
+## stage-2 parallel multiverse (PI 2026-11-22): --edges_out=DIR saves the per-layer edge matrix of each weighting (dyad-year x layer, exactly
+## the EL the combos are built from) and skips centrality, so stage 2 can rebuild any measure's edges; default off (stage-1 runs unchanged)
+EDGES_OUT <- opt("edges_out", "")
 stopifnot(ARM %in% c("core", "dipl", "igo"), CORES >= 1)
 dir.create(OUT_DIR, showWarnings = FALSE, recursive = TRUE)
 logf <- function(...) cat(sprintf("[%s] ", format(Sys.time(), "%H:%M:%S")), sprintf(...), "\n", sep = "")
@@ -220,6 +223,10 @@ if (ARM %in% c("core", "dipl")) {
     stopifnot(!anyNA(EL), all(EL >= 0), all(EL <= 1 + 1e-12))
     logf("%s: per-layer edge weights built (mean weight by layer: %s)", W, paste(sprintf("%s %.3f", LAYERS, colMeans(EL)), collapse = ", "))
     }
+    if (nzchar(EDGES_OUT)) { dir.create(EDGES_OUT, showWarnings = FALSE, recursive = TRUE)
+      saveRDS(list(EL = EL, dy = data.frame(ccode1 = dy$ccode1, ccode2 = dy$ccode2, year = dy$year), W = W, tag = TAG, arm = ARM, layers = colnames(EL), built = format(Sys.time())),
+              file.path(EDGES_OUT, sprintf("edges_%s_%s_%s.rds", ARM, W, TAG)))
+      logf("%s: per-layer edges saved for stage 2 (%d dyad-years x %d layers)", W, nrow(EL), ncol(EL)); next }
     one <- function(k) {
       L <- combos[[k]]
       if (W %in% SRY) { E <- sry_combo(EL[, L, drop = FALSE], yr_split, edge = if (grepl("mm$", W)) "minmax" else "clip")
@@ -243,7 +250,7 @@ if (ARM %in% c("core", "dipl")) {
     spec_rows[[W]] <- specs
     logf("%s: %d specs in %.1f min; not identified (constant in >= 5%% of years): %d", W, ncol(Rm), as.numeric(difftime(Sys.time(), t0, units = "mins")), sum(!specs$identified))
   }
-  write.csv(bind_rows(spec_rows), file.path(OUT_DIR, sprintf("specs_%s_%s%s.csv", ARM, TAG, if (all(WEIGHTINGS %in% SRY)) "_sry" else "")), row.names = FALSE)
+  if (!nzchar(EDGES_OUT)) write.csv(bind_rows(spec_rows), file.path(OUT_DIR, sprintf("specs_%s_%s%s.csv", ARM, TAG, if (all(WEIGHTINGS %in% SRY)) "_sry" else "")), row.names = FALSE)
 }
 
 ## ---- 5. IGO arm: bipartite (Newman) and cosine-normalised shared-IGO ties --------------------------------------------
@@ -266,6 +273,9 @@ if (ARM == "igo") {
     Enew[ei[okp]] <- N[cbind(i1[okp], i2[okp])]; Ecos[ei[okp]] <- C[cbind(i1[okp], i2[okp])]
   }
   logf("IGO arm: dyad-years with a positive Newman tie %.3f, cosine tie %.3f", mean(Enew > 0), mean(Ecos > 0))
+  if (nzchar(EDGES_OUT)) { dir.create(EDGES_OUT, showWarnings = FALSE, recursive = TRUE)
+    saveRDS(list(E = cbind(bip_newman = Enew, cosine = Ecos, raw_count = as.numeric(dy$igo)), dy = data.frame(ccode1 = dy$ccode1, ccode2 = dy$ccode2, year = dy$year), arm = "igo", built = format(Sys.time())),
+            file.path(EDGES_OUT, "edges_igo_arm.rds")); logf("IGO arm: edges saved for stage 2"); quit(status = 0) }
   cN <- cent(Enew); cC <- cent(Ecos)
   cR <- cent(as.numeric(dy$igo))                                  # anchor: raw shared-IGO counts, as 01_build_data.R (the current measure)
   Rm <- cbind(cN$pr, cN$deg, cC$pr, cC$deg, cR$pr, cR$deg)
