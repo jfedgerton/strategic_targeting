@@ -5,9 +5,9 @@
 ## Williams-Savitsky adjustment of rev 2 section 6 is NOT applied yet; reported as raw weighted posteriors).
 ## Usage: Rscript R/ame/ame_cell.R --cell=main|cut|k1 --build=DIR --dump=FILE --positions=FILE --spec=SPEC --edges_dir=DIR --out=DIR
 ##          [--chains=4] [--warmup=1000] [--iter=1000] [--threads=2] [--sub=1] [--M=10] [--seed=123]
+## Two-machine mode: --prep_only --bundle=FILE (where the builds live; no Stan) then --bundle=FILE (fit only, e.g. on Roar; no build inputs needed).
 suppressPackageStartupMessages({ library(data.table); library(rstan) })
 this_file <- sub("^--file=", "", grep("^--file=", commandArgs(FALSE), value = TRUE)[1]); RD <- dirname(dirname(normalizePath(this_file)))
-for (f in c("s2.R", "s2_fit.R", "sry.R", "s2_cell.R")) source(file.path(RD, "lib", f))
 args <- commandArgs(trailingOnly = TRUE)
 opt <- function(name, default = NULL) { a <- grep(paste0("^--", name, "="), args, value = TRUE); if (length(a)) sub(paste0("^--", name, "="), "", a) else default }
 CELL <- opt("cell", "main"); stopifnot(CELL %in% c("main", "cut", "k1"))
@@ -17,6 +17,15 @@ SUB <- as.numeric(opt("sub", "1")); MCUT <- as.integer(opt("M", "10")); SEED <- 
 LOG <- file.path(OUT, sprintf("ame_%s.log", CELL)); logf <- function(...) { s <- sprintf(...); cat(s, "\n"); cat(s, "\n", file = LOG, append = TRUE) }
 rstan_options(auto_write = TRUE, threads_per_chain = TH); set.seed(SEED)
 
+BUNDLE <- opt("bundle"); PREP_ONLY <- !is.null(opt("prep_only"))
+if (!is.null(BUNDLE) && file.exists(BUNDLE) && !PREP_ONLY) {
+  ## Roar / fit-only mode: the data bundle written by --prep_only on the machine that holds the builds (PI 2026-11-23: run on Roar)
+  BN <- readRDS(BUNDLE); BASE <- BN$base; sc1 <- BN$sc1; X1N <- BN$X1N; ROLES <- BN$ROLES; alts <- BN$alts
+  stopifnot(identical(BN$spec, SPEC) || is.null(SPEC)); SPEC <- BN$spec
+  logf("AME cell %s | bundle %s (%s, built %s) | chains %d x (%d + %d) | threads %d | seed %d", CELL, BUNDLE, SPEC, BN$built, CH, WU, IT, TH, SEED)
+  mk <- function(use_s1, use_s2, fix_bbar, K, bbar = rep(0, BASE$ND)) modifyList(BASE, list(use_s1 = use_s1, use_s2 = use_s2, fix_bbar = fix_bbar, K = K, bbar_data = bbar))
+} else {
+  for (f in c("s2.R", "s2_fit.R", "sry.R", "s2_cell.R")) source(file.path(RD, "lib", f))   # build-side only; fit-only mode needs rstan and data.table
 ## ---- inputs (identical to the FE cells) -------------------------------------------------------------------------------------------
 B <- s2_base(opt("build")); W_REF <- B$window; dump <- readRDS(opt("dump")); ROLES <- dump$roles
 pz <- readRDS(opt("positions")); key <- as.data.table(pz$key); R <- pz$R[, SPEC]; stopifnot(!anyNA(R))
@@ -63,9 +72,14 @@ mk <- function(use_s1, use_s2, fix_bbar, K, bbar = rep(0, length(DISP))) list(
   N2 = nrow(X), PA = ncol(XS$A$M), PB = ncol(XS$B$M), PO = ncol(XS$O$M), XA = XS$A$M, XB = XS$B$M, XO = XS$O$M,
   y2 = y2, av2 = matrix(as.integer(AV), ncol = 3), k2 = match(X$ccode, ST), ND = length(DISP), d2 = d2,
   NT = nrow(TS), ts_j = match(TS$ccode, ST), ts_d = match(TS$dispnum, DISP), era_d = era_d, ts_n = as.numeric(tabulate(match(TS$dispnum, DISP), length(DISP))),
-  bbar_data = bbar, W_oppA = Wopp("B"), W_oppB = Wopp("A"), Pv = Pv, grainsize = 1L, grainsize2 = 500L)
+  bbar_data = bbar, W_oppA = Wopp("B"), W_oppB = Wopp("A"), Pv = Pv, grainsize = 25L, grainsize2 = 2000L)
 stopifnot(all(mk(1, 1, 0, 0)$ts_n > 0))
 logf("stage 1: %d events, %d rows, %d terms | stage 2: %d rows, %d disputes, terms A %d B %d O %d | states %d", nrow(ev), nrow(X1), ncol(X1), nrow(X), length(DISP), ncol(XS$A$M), ncol(XS$B$M), ncol(XS$O$M), J)
+  BASE <- mk(1, 1, 0, 0)
+  if (PREP_ONLY) { stopifnot(!is.null(BUNDLE)); saveRDS(list(base = BASE, sc1 = sc1, X1N = X1N, ROLES = ROLES, alts = alts, spec = SPEC, built = format(Sys.time()),
+                                                    window = W_REF, fatal_def = B$meta$fatal_def), BUNDLE)
+    logf("AME_BUNDLE_WRITTEN %s (%.1f MB)", BUNDLE, file.size(BUNDLE) / 1e6); quit(status = 0) }
+}
 mod <- stan_model(file.path(dirname(RD), "stan", "ame_joint.stan"))
 fit1 <- function(dat, tag, ch = CH, wu = WU, it = IT) { t0 <- Sys.time()
   f <- sampling(mod, data = dat, chains = ch, cores = ch, warmup = wu, iter = wu + it, seed = SEED, refresh = max(1, (wu + it) %/% 10),
