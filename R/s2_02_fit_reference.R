@@ -117,17 +117,22 @@ if (!is.null(FL)) { cl <- data.table(term = names(FL$b), est = FL$b, se = sqrt(d
 
 ## ---- 4. B1 / B2 diagnostics and B4 model-based null ------------------------------------------------------------------------------------
 NULL_DESIGN <- lapply(S2_REF_DESIGN, function(v) setdiff(v, c(S2_SURF_A, S2_SURF_B)))
-SIDE_DESIGN <- lapply(names(S2_REF_DESIGN), function(al) if (al == "O") S2_REF_DESIGN$O else setdiff(S2_REF_DESIGN[[al]], c(S2_SURF_A, S2_SURF_B))); names(SIDE_DESIGN) <- names(S2_REF_DESIGN)
-F_null <- fit_mnl(X0, NULL_DESIGN, "null", vc = FALSE); F_side0 <- fit_mnl(X0, SIDE_DESIGN, "side-null", vc = FALSE)
-LR_OBS <- 2 * (F0$ll - F_null$ll); LR_SIDE_OBS <- 2 * (F0$ll - F_side0$ll)
-logf("surface-block LR (15 df) %.2f; A/B surface LR (10 df) %.2f", LR_OBS, LR_SIDE_OBS)
+F_null <- fit_mnl(X0, NULL_DESIGN, "null", vc = FALSE)
+LR_OBS <- 2 * (F0$ll - F_null$ll)
+logf("surface-block LR (15 df) %.2f", LR_OBS)
 P1 <- unlist(pmap(seq_len(N_PERM), function(b) tryCatch({ Xp <- copy(X0); ord <- Xp[, .(i = .I, j = .I[sample.int(.N)]), by = dispnum]
   Xp[ord$i, (GCOLS) := X0[ord$j, ..GCOLS]]; add_surface(Xp); 2 * (fit_mnl(Xp, S2_REF_DESIGN, "B1", vc = FALSE, start = F0$par_scaled)$ll - F_null$ll) }, error = function(e) NA_real_)))
-P2 <- unlist(pmap(seq_len(N_PERM), function(b) tryCatch({ Xq <- copy(X0); ent <- Xq[y %in% c("A", "B"), which = TRUE]
-  Xq[ent, y := sample(y), by = dispnum]; Xq <- Xq[!(y == "A" & H <= W_REF)]                   # a shuffled A that is unavailable is not a valid assignment
-  2 * (fit_mnl(Xq, S2_REF_DESIGN, "B2", vc = FALSE)$ll - fit_mnl(Xq, SIDE_DESIGN, "B2-null", vc = FALSE)$ll) }, error = function(e) NA_real_)))
+## B2 side-choice statistic (GPT P2-6): among third-party entrants (A or B) whose two sides were both available, a binary logit of A vs B on
+## both surface blocks (sA_*, sB_*); statistic = LR of those 10 terms. Labels are shuffled among those entrants within dispute.
+ENT <- X0[y %in% c("A", "B") & H > W_REF]
+side_lr <- function(E) { E <- copy(E); E[, yA := as.integer(y == "A")]
+  g1 <- suppressWarnings(glm(reformulate(SURFC, "yA"), data = E, family = binomial())); g0 <- glm(yA ~ 1, data = E, family = binomial())
+  if (!g1$converged) return(NA_real_); 2 * as.numeric(logLik(g1) - logLik(g0)) }
+LR_SIDE_OBS <- side_lr(ENT)
+logf("B2 side-choice statistic: %d entrants with both sides available (A %d, B %d); observed LR (10 df) %.2f", nrow(ENT), sum(ENT$y == "A"), sum(ENT$y == "B"), LR_SIDE_OBS)
+P2 <- unlist(pmap(seq_len(N_PERM), function(b) tryCatch({ E <- copy(ENT); E[, y := sample(y), by = dispnum]; side_lr(E) }, error = function(e) NA_real_)))
 fwrite(data.table(draw = seq_len(N_PERM), B1_gaps_within_dispute = P1, B2_side_labels = P2), file.path(OUT, "diagnostic_permutations.csv"))
-for (pp in list(list("B1 (gap vectors shuffled within dispute; surface-block LR)", P1, LR_OBS), list("B2 (A/B labels shuffled among entrants; A/B surface LR)", P2, LR_SIDE_OBS))) {
+for (pp in list(list("B1 (gap vectors shuffled within dispute; surface-block LR)", P1, LR_OBS), list("B2 (A/B labels shuffled among entrants within dispute; side-choice LR)", P2, LR_SIDE_OBS))) {
   u <- usable(pp[[2]], N_PERM)
   if (u$ok) logf("%s DIAGNOSTIC: observed %.2f; share of %d usable draws >= observed %.3f; draw median %.2f", pp[[1]], pp[[3]], u$k, mean(pp[[2]] >= pp[[3]], na.rm = TRUE), median(pp[[2]], na.rm = TRUE))
   else logf("%s DIAGNOSTIC: UNAVAILABLE (%d of %d usable)", pp[[1]], u$k, N_PERM) }
