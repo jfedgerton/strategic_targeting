@@ -72,7 +72,7 @@ mk <- function(use_s1, use_s2, fix_bbar, K, bbar = rep(0, length(DISP))) list(
   N2 = nrow(X), PA = ncol(XS$A$M), PB = ncol(XS$B$M), PO = ncol(XS$O$M), XA = XS$A$M, XB = XS$B$M, XO = XS$O$M,
   y2 = y2, av2 = matrix(as.integer(AV), ncol = 3), k2 = match(X$ccode, ST), ND = length(DISP), d2 = d2,
   NT = nrow(TS), ts_j = match(TS$ccode, ST), ts_d = match(TS$dispnum, DISP), era_d = era_d, ts_n = as.numeric(tabulate(match(TS$dispnum, DISP), length(DISP))),
-  bbar_data = bbar, W_oppA = Wopp("B"), W_oppB = Wopp("A"), Pv = Pv, grainsize = 25L, grainsize2 = 2000L)
+  bbar_data = bbar, W_oppA = Wopp("B"), W_oppB = Wopp("A"), Pv = Pv, u_set = as.numeric(ST %in% c(D$c1, X$ccode)), grainsize = 25L, grainsize2 = 2000L)
 stopifnot(all(mk(1, 1, 0, 0)$ts_n > 0))
 logf("stage 1: %d events, %d rows, %d terms | stage 2: %d rows, %d disputes, terms A %d B %d O %d | states %d", nrow(ev), nrow(X1), ncol(X1), nrow(X), length(DISP), ncol(XS$A$M), ncol(XS$B$M), ncol(XS$O$M), J)
   BASE <- mk(1, 1, 0, 0)
@@ -80,11 +80,12 @@ logf("stage 1: %d events, %d rows, %d terms | stage 2: %d rows, %d disputes, ter
                                                     window = W_REF, fatal_def = B$meta$fatal_def), BUNDLE)
     logf("AME_BUNDLE_WRITTEN %s (%.1f MB)", BUNDLE, file.size(BUNDLE) / 1e6); quit(status = 0) }
 }
-mod <- stan_model(file.path(dirname(RD), "stan", "ame_joint.stan"))
+STANF <- opt("stan", file.path(dirname(RD), "stan", "ame_joint.stan")); mod <- stan_model(STANF)   # per-task copy on Roar (no shared compile cache)
 fit1 <- function(dat, tag, ch = CH, wu = WU, it = IT) { t0 <- Sys.time()
   f <- sampling(mod, data = dat, chains = ch, cores = ch, warmup = wu, iter = wu + it, seed = SEED, refresh = max(1, (wu + it) %/% 10),
                 control = list(adapt_delta = 0.9, max_treedepth = 11),
-                pars = c("beta1", "sigma_b", "sigma_del", "sigma_eta", "alpha", "theta", "sigma_eps", "b", "eta", "bbar", if (dat$K) c("lam", "u_out", "v_out")))
+                pars = c("beta1", "sigma_b", "sigma_del", "sigma_eta", "alpha", "betaA", "betaB", "betaO", "theta", "sigma_eps", "b", "del", "eta", "bbar",
+                         if (dat$K) c("lam1_raw", "lam2_raw", "u_out", "v_out")))
   saveRDS(f, file.path(OUT, sprintf("fit_%s.rds", tag))); logf("%s: %.1f min; divergences %d; max treedepth hits %d", tag, as.numeric(difftime(Sys.time(), t0, units = "mins")),
     sum(get_divergent_iterations(f)), sum(get_max_treedepth_iterations(f))); f }
 
@@ -94,7 +95,7 @@ if (CELL == "k1")   FITS <- list(joint = fit1(mk(1, 1, 0, 1), "k1_joint_K1"))
 if (CELL == "cut") {
   f1 <- fit1(mk(1, 0, 0, 0), "cut_stage1")
   bb <- rstan::extract(f1, "bbar")$bbar; pick <- sample(nrow(bb), MCUT)
-  f2 <- lapply(seq_along(pick), function(m) fit1(mk(0, 1, 1, 0, bb[pick[m], ]), sprintf("cut_stage2_m%02d", m), ch = 2, wu = max(250, WU %/% 2), it = max(250, IT %/% 2)))
+  f2 <- lapply(seq_along(pick), function(m) fit1(mk(0, 1, 1, 0, bb[pick[m], ]), sprintf("cut_stage2_m%02d", m), ch = CH, wu = max(250, WU %/% 2), it = max(250, IT %/% 2)))
   FITS <- list(stage1 = f1, stage2 = f2)
 }
 
@@ -110,9 +111,13 @@ for (c in 1:3) OUTT[[length(OUTT) + 1]] <- summ(th[, c], sprintf("S2 theta_%s", 
 for (p in c("sigma_b", "sigma_del", "sigma_eta")) OUTT[[length(OUTT) + 1]] <- summ(rstan::extract(S1f, p)[[1]], p)
 S <- rbindlist(OUTT); S[, cell := CELL]
 fs <- if (CELL == "cut") c(list(FITS$stage1), FITS$stage2) else list(FITS$joint)
-rh <- max(unlist(lapply(fs, function(f) { s <- summary(f, pars = c("beta1", "theta", "sigma_b", "sigma_del", "sigma_eta"))$summary; s[, "Rhat"] })), na.rm = TRUE)
-ne <- min(unlist(lapply(fs, function(f) { s <- summary(f, pars = c("beta1", "theta", "sigma_b", "sigma_del", "sigma_eta"))$summary; s[, "n_eff"] })), na.rm = TRUE)
-S[, `:=`(max_rhat = rh, min_neff = ne)]
-fwrite(S, file.path(OUT, sprintf("ame_%s_summary.csv", CELL))); logf("max Rhat %.3f, min n_eff %.0f", rh, ne)
+## convergence over everything the gate names (audit P1-2): bulk / tail ESS and rank-normalized Rhat (rstan::monitor)
+GP <- c("beta1", "theta", "sigma_b", "sigma_del", "sigma_eta", "alpha", "betaA", "betaB", "betaO", "sigma_eps", "lam1_raw", "lam2_raw")
+mon <- rbindlist(lapply(fs, function(f) { pp <- intersect(GP, f@model_pars); m <- rstan::monitor(as.array(f, pars = pp), print = FALSE, warmup = 0)
+  data.table(par = rownames(m), Rhat = m$Rhat, ess_bulk = m$Bulk_ESS, ess_tail = m$Tail_ESS) }))
+fwrite(mon, file.path(OUT, sprintf("ame_%s_convergence.csv", CELL)))
+rh <- max(mon$Rhat, na.rm = TRUE); ne <- min(pmin(mon$ess_bulk, mon$ess_tail), na.rm = TRUE)
+S[, `:=`(max_rhat = rh, min_ess = ne, gate_pass = rh <= 1.01 & ne >= 400)]
+fwrite(S, file.path(OUT, sprintf("ame_%s_summary.csv", CELL))); logf("max Rhat %.3f, min bulk/tail ESS %.0f (gate: Rhat <= 1.01, ESS >= 400)", rh, ne)
 print(S[, .(q, mean = round(mean, 2), ci = sprintf("[%.2f, %.2f]", lo, hi))])
 logf("AME_CELL_DONE %s", CELL)
