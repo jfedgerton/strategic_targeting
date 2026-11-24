@@ -107,14 +107,15 @@ S5[, role_lab := factor(role, levels = c("bil", "coal"), labels = c("Bilateral i
 S5[, lor_c := pmin(pmax(lor, -4), 4)]
 p5 <- ggplot(S5, aes(dM, dR)) + geom_raster(aes(fill = lor_c)) + geom_contour(data = S5[!is.na(lor)], aes(z = lor), breaks = seq(-4, 4, 1), colour = "grey30", linewidth = .25, na.rm = TRUE) +
   geom_hline(yintercept = 0, linetype = 3) + geom_vline(xintercept = 0, linetype = 3) + facet_wrap(~ role_lab, ncol = 2) +
-  scale_fill_gradient2(low = D2[1], mid = "white", high = D2[2], midpoint = 0, limits = c(-4, 4), na.value = "white", name = "Log odds vs\na peer target") +
+  scale_fill_gradient2(low = D2[3], mid = "white", high = D2[2], midpoint = 0, limits = c(-4, 4), na.value = "white", name = "Log odds vs\na peer target") +
   labs(x = xl, y = yl, caption = "Stage 1, between targets (no target FE), fatal MIDs. Log odds truncated at +/-4; contours every 1; blank where available targets are sparse.") + th + theme(legend.key.width = unit(1.6, "cm"))
 sv(p5, "F5_attack_plane_stage1_surface", w = 9.5, h = 4.8)
 ## F6: joiners on the plane of their gaps to the attacking side (candidate minus attacking side), over all candidates
 X6 <- copy(X1); X6 <- X6[is.finite(dM_kA) & is.finite(dR_kA)]; XR6 <- lim(X6$dM_kA); YR6 <- lim(X6$dR_kA)
 X6[, out_lab := factor(fifelse(y == "orig", "O", as.character(y)), levels = c("A", "B", "O", "out"), labels = c("Joins attacker (A)", "Joins target (B)", "Joins as originator (O)", "Does not join"))]
 J6 <- X6[y != "out" & dM_kA %between% XR6 & dR_kA %between% YR6]; J6[, out_lab := droplevels(out_lab)]
-CJ6 <- c("Joins attacker (A)" = D2[2], "Joins target (B)" = D2[1], "Joins as originator (O)" = D2[3]); SH6 <- c("Joins attacker (A)" = 16, "Joins target (B)" = 17, "Joins as originator (O)" = 15)
+## colours: orange (A) vs purple (B) is the main contrast and stays distinct under deutan/protan/tritan simulation; shapes add a second cue
+CJ6 <- c("Joins attacker (A)" = D2[2], "Joins target (B)" = D2[3], "Joins as originator (O)" = D2[1]); SH6 <- c("Joins attacker (A)" = 16, "Joins target (B)" = 17, "Joins as originator (O)" = 15)
 xl6 <- "Material gap (candidate minus attacking side)"; yl6 <- "Relational gap (candidate minus attacking side)"
 ## F6: joiners (larger, translucent, one shape per type) over the density of all candidates (grey)
 p6 <- ggplot(X6[dM_kA %between% XR6 & dR_kA %between% YR6], aes(dM_kA, dR_kA)) +
