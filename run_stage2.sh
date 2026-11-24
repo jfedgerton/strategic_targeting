@@ -52,11 +52,18 @@ if has 1; then
   ed dipl "edges_dipl_W1raw_ptaall edges_dipl_W2contig_ptaall edges_dipl_W3dist_ptaall edges_dipl_W4fe_ptaall" --arm=dipl --pta=all --cores=$CORES
   ed igo "edges_igo_arm" --arm=igo
   ## the book / JOP main measure (R/book_measure_c12.R): positions file into $POSD (so the sweeps include it) and its edges into $S2/edges
-  BKP=$POSD/positions_core_BOOKc12_ptaany.rds; BKE=$S2/edges/edges_book_c12.rds
-  BKS="$(h R/book_measure_c12.R) $(h $O/layers_dy.rds) $(h $POSD/positions_core_W2contig_ptaall.rds)"
+  ## PI 2026-11-24: book PTA (layer_pta_desta) and DCA (dcaAnyV2) layers first (R/book_layers.R; inputs in data_book/ and $NETDATA/dca_dyad.csv)
+  BL=$S2/edges/book_layers.rds
+  BLS="$(h R/book_layers.R) $(h $O/layers_dy.rds) $(h data_book/desta_list_of_treaties_02_02.txt) $(h data_book/desta23_dyadic_withdrawal.csv) $(h $NETDATA/dca_dyad.csv)"
+  if ! { [ -s $BL ] && fresh $BL "$BLS"; }; then
+    runR "BOOK_LAYERS_DONE|linked|Error" R/book_layers.R $O/layers_dy.rds data_book/desta_list_of_treaties_02_02.txt data_book/desta23_dyadic_withdrawal.csv $NETDATA/dca_dyad.csv $BL || die "book layers failed"
+    stamp $BL "$BLS"; fi
+  BKP=$POSD/positions_core_BOOKc12_ptadesta.rds; BKE=$S2/edges/edges_book_c12.rds
+  BKS="$(h R/book_measure_c12.R) $(h $O/layers_dy.rds) $(h $POSD/positions_core_W2contig_ptaall.rds) $(h $BL)"
   if ! { [ -s $BKP ] && [ -s $BKE ] && fresh $S2/edges/.book_c12 "$BKS"; }; then
-    runR "BOOK_MEASURE_DONE|contig12|Error" R/book_measure_c12.R $O/layers_dy.rds $POSD/positions_core_W2contig_ptaall.rds $BKP $BKE || die "book measure failed"
+    runR "BOOK_MEASURE_DONE|contig12|Error" R/book_measure_c12.R $O/layers_dy.rds $POSD/positions_core_W2contig_ptaall.rds $BKP $BKE $BL || die "book measure failed"
     stamp $S2/edges/.book_c12 "$BKS"; fi
+  rm -f $POSD/positions_core_BOOKc12_ptaany.rds   # superseded (dyadic PTA / DCA v1); would otherwise enter the sweeps
   say "1 edges done: $(ls $S2/edges | wc -l | tr -d ' ') files"
 fi
 

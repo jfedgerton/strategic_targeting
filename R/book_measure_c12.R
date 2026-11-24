@@ -1,7 +1,7 @@
 ## R/book_measure_c12.R -- the book / JOP 2024 main measure built exactly to the PI's specification (2026-11-23), standalone (not yet a grid
 ## weighting). Output is in positions format (list(R = matrix, key)) plus edge tables, so the stage-1/stage-2 cell code can use it directly.
 ##   Layers (5): IGO (shared full memberships, min-max scaled to [0,1] within year, continuous), ATOP defense, ATOP offense, DCA (2010 carried
-##   to 2011-14 as in the layer data), PTA (binary: any PTA). Years with no tie anywhere are structural zeros (score 0, via the year FE).
+##   to 2011-14 as in the layer data), PTA (binary: book layer layer_pta_desta from a[5], see below). Years with no tie anywhere are structural zeros (score 0, via the year FE).
 ##   Expected tie per layer on ALL directed dyads (i,j) and (j,i): logit (binary) / Poisson PML (IGO), y ~ contig12 | sender + receiver + year,
 ##   contig12 = COW conttype 1 or 2 (land, or water <= 12 miles). Rows dropped as perfectly predicted by the FE must have y = 0; expected 0.
 ##   Layer score = observed - expected (no per-layer rescaling). Directed composite = mean of the 5 scores. Symmetrize: (c_ij + c_ji) / 2.
@@ -10,14 +10,21 @@
 ##   prpos   : PageRank on tie_pos (unsigned: below-expected ties carry no weight)
 ##   prsigned: PageRank on tie_norm min-max rescaled to [0,1] within year (signed information kept: below-expected ties are weak but
 ##                   ordered, the year's most negative pair gets 0). PageRank cannot take negative weights, so this is the signed variant.
-## Spec ids: BOOKc12_ptaany|<layers>|prpos (unsigned) and |prsigned (signed; the main measure, PI 2026-11-23), for the 5-layer set and
+## Spec ids: BOOKc12_ptadesta|<layers>|prpos (unsigned; the main measure, PI 2026-11-23) and |prsigned (signed; appendix), for the 5-layer set and
 ## each drop-one set. Outputs: a positions file (R, key) and an edges file (list(edges = per-spec edge tables)) read by s2_spec_edges.
-## Usage: Rscript R/book_measure_c12.R LAYERS_RDS KEY_POSITIONS_RDS OUT_POSITIONS_RDS OUT_EDGES_RDS
+## Usage: Rscript R/book_measure_c12.R LAYERS_RDS KEY_POSITIONS_RDS OUT_POSITIONS_RDS OUT_EDGES_RDS BOOK_LAYERS_RDS
 suppressPackageStartupMessages({ library(data.table); library(fixest); library(igraph) })
-a <- commandArgs(trailingOnly = TRUE); stopifnot(length(a) == 4)
+a <- commandArgs(trailingOnly = TRUE); stopifnot(length(a) == 5)
 DY <- as.data.table(readRDS(a[1])); KEY <- as.data.table(readRDS(a[2])$key)[, .(ccode, year)]
+## PTA and DCA (PI 2026-11-24, book alignment): a[5] = book_layers.rds from R/book_layers.R. PTA = book layer_pta_desta (all members of an
+## in-force DESTA treaty linked, actual withdrawals, predecessor mapping), replacing the dyadic "any PTA" coding; DCA = Kinne dcaAnyV2
+## (2010 carried to 2011-14), replacing layers_dy dcaAnyV1.
+PT <- as.data.table(readRDS(a[5]))[, .(ccode1, ccode2, year, pta_desta, dca_v2)]
+DY[, dca := NULL]; setnames(PT, "dca_v2", "dca")
+DY <- merge(DY, PT, by = c("ccode1", "ccode2", "year"), all.x = TRUE); stopifnot(!anyNA(DY$pta_desta), !anyNA(DY$dca))
+cat(sprintf("PTA layer: %d linked dyad-years\n", sum(DY$pta_desta)))
 setorder(DY, year, ccode1, ccode2); stopifnot(!anyDuplicated(DY[, .(ccode1, ccode2, year)]), all(DY$ccode1 < DY$ccode2))
-DY[, `:=`(contig12 = as.integer(!is.na(conttype) & conttype %in% 1:2), pta_bin = as.integer(pta > 0), dca_bin = as.integer(dca > 0))]
+DY[, `:=`(contig12 = as.integer(!is.na(conttype) & conttype %in% 1:2), pta_bin = as.integer(pta_desta > 0), dca_bin = as.integer(dca > 0))]
 DY[, igo_mm := { r <- range(igo); if (r[2] > r[1]) (igo - r[1]) / (r[2] - r[1]) else 0 }, by = year]
 stopifnot(!anyNA(DY[, .(igo_mm, def, off, dca_bin, pta_bin, contig12)]), all(DY$def %in% 0:1), all(DY$off %in% 0:1))
 cat(sprintf("dyad-years %d; contig12 share %.4f; DCA years %d-%d; PTA years %d-%d\n", nrow(DY), mean(DY$contig12),
@@ -60,7 +67,7 @@ for (L in LAYSETS) {
     r <- range(tn[ix]); if (r[2] > r[1]) tm[ix] <- (tn[ix] - r[1]) / (r[2] - r[1]) }
   stopifnot(all(abs(tn) <= 1 + 1e-12), all(tp >= 0 & tp <= 1), all(tm >= 0 & tm <= 1))
   lab <- paste(L, collapse = "+")
-  for (v in c("pos", "signed")) { sp <- sprintf("BOOKc12_ptaany|%s|pr%s", lab, v); w <- if (v == "pos") tp else tm
+  for (v in c("pos", "signed")) { sp <- sprintf("BOOKc12_ptadesta|%s|pr%s", lab, v); w <- if (v == "pos") tp else tm
     RL[[sp]] <- pr_year(w); EL[[sp]] <- data.table(a = DY$ccode1, b = DY$ccode2, year = DY$year, w = w)[w > 0] }
   if (length(L) == 5) { TIES <- DY[, .(ccode1, ccode2, year)][, `:=`(s = s, tie_norm = tn, tie_pos = tp, tie_mm = tm)]
     cat(sprintf("main set: share of dyad-years with signed score > 0 %.3f\n", mean(s > 0))) }

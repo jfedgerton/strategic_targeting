@@ -27,3 +27,9 @@ Each with the 5 drop-one sets. Seed 123.
 ## Then
 - Stage 1, stage 2, bootstrap FE (500 draws) on both; compare to the prebuilt-PTA versions.
 - GPT audit of the three scripts before the main spec switches; stage-2 sweep and AME bundle rebuilt after.
+
+## Done 2026-11-24
+- R/book_layers.R: PTA = book layer_pta_desta (book's fixed 03_trade_agreements.R logic + Czechoslovakia/North Yemen mapping; 196,693) and DCA = dcaAnyV2 (book; 11,031 linked 1980-2010). Inputs in data_book/ (+ $NETDATA/dca_dyad.csv).
+- R/book_measure_c12.R and R/book_measure_raw.R take book_layers.rds. With the book's own PTA file they reproduce the book's c9_igo.def.off.dca.pta_sry_contig12 and _raw edges to 1e-14.
+- MAIN_SPEC = BOOKc12_ptadesta|igo+def+off+pta+dca|prpos. Main positions vs the old BOOKc12_ptaany: within-year rank correlation 1.00 before 1945, 0.98 1946-75, 0.82 1976-91, 0.85 after.
+- The layer-by-layer plan above (separate code/01-03 scripts) is superseded by these three scripts.

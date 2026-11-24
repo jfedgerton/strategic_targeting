@@ -23,7 +23,9 @@ WINDOW_MAIN=1             # originator window in months (definite bound); window
 WINDOWS="0 1 2 3 4 5 6"
 SAMPLE_MAIN=fmid          # fatal MIDs; "mid" = all MID onsets (failed-bargain step A)
 INTENSITY="jf fd2 fd3 fd4 fd5 fd6"   # intensity samples run through the full multiverse (jointly fatal; dispute fatality level >= 2..6)
-MAIN_SPEC='BOOKc12_ptaany|igo+def+off+pta+dca|prpos'   # the main relational measure (PI 2026-11-23): the book / JOP 2024 measure built exactly
+MAIN_SPEC='BOOKc12_ptadesta|igo+def+off+pta+dca|prpos'   # the main relational measure (PI 2026-11-23): the book / JOP 2024 measure built exactly
+# PI 2026-11-24: PTA = book layer_pta_desta (withdrawal fix + predecessor mapping, 196,693 linked) and DCA = dcaAnyV2, from R/book_layers.R;
+# edges reproduce the book build c9_igo.def.off.dca.pta_sry_contig12 to 1e-14 (with the book's PTA file). Was BOOKc12_ptaany (dyadic PTA, DCA v1).
 # (R/book_measure_c12.R: contig12 + sender/receiver/year FE, logit / PPML, observed - expected, mean of 5, symmetric), positive-part PageRank.
 # The signed version (|prsigned) goes in the appendix. Built by run_stage2.sh step 1 (not part of the stage-1 grid run).
 # Was 'W2contig_ptaall|igo+def+off+neu+nonagg+consul+dca+un|pr' (2026-11-18) for the stage-1 run in output_init; that run holds every measure, but its main-measure bootstrap is the old one
