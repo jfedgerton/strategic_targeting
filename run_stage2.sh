@@ -63,6 +63,12 @@ if has 1; then
   if ! { [ -s $BKP ] && [ -s $BKE ] && fresh $S2/edges/.book_c12 "$BKS"; }; then
     runR "BOOK_MEASURE_DONE|contig12|Error" R/book_measure_c12.R $O/layers_dy.rds $POSD/positions_core_W2contig_ptaall.rds $BKP $BKE $BL || die "book measure failed"
     stamp $S2/edges/.book_c12 "$BKS"; fi
+  ## the unweighted book measure (main, PI 2026-11-24; R/book_measure_raw.R)
+  BRP=$POSD/positions_core_BOOKraw_ptadesta.rds; BRE=$S2/edges/edges_book_raw.rds
+  BRS="$(h R/book_measure_raw.R) $(h $O/layers_dy.rds) $(h $POSD/positions_core_W2contig_ptaall.rds) $(h $BL)"
+  if ! { [ -s $BRP ] && [ -s $BRE ] && fresh $S2/edges/.book_raw "$BRS"; }; then
+    runR "BOOK_RAW_DONE|pooled|Error" R/book_measure_raw.R $O/layers_dy.rds $BL $POSD/positions_core_W2contig_ptaall.rds $BRP $BRE || die "unweighted book measure failed"
+    stamp $S2/edges/.book_raw "$BRS"; fi
   rm -f $POSD/positions_core_BOOKc12_ptaany.rds   # superseded (dyadic PTA / DCA v1); would otherwise enter the sweeps
   say "1 edges done: $(ls $S2/edges | wc -l | tr -d ' ') files"
 fi

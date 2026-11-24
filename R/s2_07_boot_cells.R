@@ -17,7 +17,7 @@ wtag <- function(W) if (W > 0) sprintf("_w%dd", W) else ""
 arm_of <- function(b) if (grepl("^positions_igo_arm", b)) "igo" else if (grepl("^positions_core_", b)) "core" else if (grepl("^positions_dipl_", b)) "dipl" else stop("arm of ", b)
 logf("two-stage bootstrap of %d cells %s | cores %d | block %d", nrow(CELLS), format(Sys.time()), CORES, BLOCK)
 ## provenance (GPT P1-2): code, cell list and every input the listed cells use
-edge_file_of <- function(f, spec) if (startsWith(f, "positions_core_BOOKc12_")) file.path(EDIR, "edges_book_c12.rds") else if (arm_of(f) == "igo") file.path(EDIR, "edges_igo_arm.rds") else file.path(EDIR, paste0(sub("^positions_", "edges_", sub("\\.rds$", "", f)), ".rds"))
+edge_file_of <- function(f, spec) if (startsWith(f, "positions_core_BOOKc12_")) file.path(EDIR, "edges_book_c12.rds") else if (startsWith(f, "positions_core_BOOKraw_")) file.path(EDIR, "edges_book_raw.rds") else if (arm_of(f) == "igo") file.path(EDIR, "edges_igo_arm.rds") else file.path(EDIR, paste0(sub("^positions_", "edges_", sub("\\.rds$", "", f)), ".rds"))
 bk <- unique(CELLS[, .(window, sample)])
 FPF <- c(s2_code_files(RD), script = normalizePath(this_file),   # cells.csv itself is not fingerprinted: cell_identity.txt protects each cell, so a regenerated list can add cells
          unlist(lapply(seq_len(nrow(bk)), function(i) s2_build_files(file.path(BR, sprintf("w%d_%s", bk$window[i], bk$sample[i])), sprintf("build_w%d_%s", bk$window[i], bk$sample[i])))),

@@ -27,7 +27,7 @@ smp <- c(stage1 = "fmid", gml = "fmid", mid = "mid")[[B$meta$fatal_def]]
 if (dump$types != "init" || cm != W_REF || dump$sample != smp) stop(sprintf("dump (%s, window %d, %s) does not match the build (init, window %d, %s)", dump$types, cm, dump$sample, W_REF, smp))
 logf("stage-2 sweep %s | build %s (window %d, fatal_def %s) | dump %s | set %s | cores %d", format(Sys.time()), BUILD, W_REF, B$meta$fatal_def, basename(DUMPF), SET, CORES)
 arm_of <- function(f) { b <- basename(f); if (grepl("^positions_igo_arm", b)) "igo" else if (grepl("^positions_core_", b)) "core" else if (grepl("^positions_dipl_", b)) "dipl" else stop("cannot tell arm of ", b) }
-edge_file_of <- function(f) { b <- sub("\\.rds$", "", basename(f)); if (startsWith(b, "positions_core_BOOKc12_")) file.path(EDIR, "edges_book_c12.rds") else if (arm_of(f) == "igo") file.path(EDIR, "edges_igo_arm.rds") else file.path(EDIR, paste0(sub("^positions_", "edges_", b), ".rds")) }
+edge_file_of <- function(f) { b <- sub("\\.rds$", "", basename(f)); if (startsWith(b, "positions_core_BOOKc12_")) file.path(EDIR, "edges_book_c12.rds") else if (startsWith(b, "positions_core_BOOKraw_")) file.path(EDIR, "edges_book_raw.rds") else if (arm_of(f) == "igo") file.path(EDIR, "edges_igo_arm.rds") else file.path(EDIR, paste0(sub("^positions_", "edges_", b), ".rds")) }
 FPF <- c(s2_code_files(RD), script = normalizePath(this_file), s2_build_files(BUILD, "build"), dump = DUMPF, setNames(POSF, paste0("pos:", basename(POSF))),
          setNames(vapply(POSF, edge_file_of, ""), paste0("edges:", basename(vapply(POSF, edge_file_of, "")))), if (!is.null(VAL)) c(validation = VAL))
 s2_fingerprint_check(OUT, FPF[!duplicated(names(FPF))])
