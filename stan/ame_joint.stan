@@ -48,6 +48,7 @@ data {
   vector<lower=0>[ND] ts_n; vector[ND] bbar_data;
   matrix[ND, J] W_oppA; matrix[ND, J] W_oppB; matrix[J, J] Pv; vector<lower=0, upper=1>[J] u_set;   // u_set: states appearing as initiators or stage-2 candidates (u centred over these)
   int<lower=1> grainsize; int<lower=1> grainsize2;
+  int<lower=1, upper=J> ref_v;   // K = 1 sign anchor for reporting only: u_out, v_out are flipped per draw so that v_out[ref_v] >= 0 (audit P2-1)
 }
 transformed data { array[E] int ev_idx; array[N2] int r_idx; for (e in 1:E) ev_idx[e] = e; for (n in 1:N2) r_idx[n] = n; }
 parameters {
@@ -56,7 +57,9 @@ parameters {
   vector[J] b_raw; vector[J] del_raw; matrix[J, NE_ERA] eta_raw;
   matrix[3, NE_ERA] alpha; vector[PA] betaA; vector[PB] betaB; vector[PO] betaO; vector[3] theta;
   vector<lower=0>[3] sigma_eps; matrix[ND, 3] eps_raw;
-  vector[K ? J : 0] u_free; vector[K ? J : 0] v_free; array[K] real<lower=0> lam1_raw; array[K] real lam2_raw;   // lambda1 > 0 fixes the sign; lambda2 free
+  vector[K ? J : 0] u_free; vector[K ? J : 0] v_free; array[K] real<lower=0> lam1_raw; array[K] real lam2_raw;
+  // lambda1 > 0 removes only the (lambda, u) flip; (u, v) -> (-u, -v) leaves the likelihood unchanged, so u and v are bimodal in the sampler.
+  // They are not gated; generated quantities report sign-aligned u_out / v_out and sign-free summaries (|lam1| ||u|| ||v||, latent variance share).
 }
 transformed parameters {
   // centred (audit P1-1): a constant added to b, to an era column of eta, or to del cancels inside every stage-1 event, so only the prior
@@ -85,6 +88,12 @@ model {
   }
 }
 generated quantities {
-  vector[K ? J : 0] u_out; vector[K ? J : 0] v_out;
-  if (K) { u_out = (u_free - dot_product(u_free, u_set) / sum(u_set)) .* u_set; v_out = Pv * v_free; }
+  vector[K ? J : 0] u_out; vector[K ? J : 0] v_out; real lat_norm1 = 0; real lat_share1 = 0;
+  if (K) { u_out = (u_free - dot_product(u_free, u_set) / sum(u_set)) .* u_set; v_out = Pv * v_free;
+    if (v_out[ref_v] < 0) { u_out = -u_out; v_out = -v_out; }   // reporting anchor only; the products below are sign-free
+    lat_norm1 = lam1_raw[1] * norm2(u_out) * norm2(v_out);       // Frobenius norm of lam1 * u v'
+    if (use_s1) {   // share of the stage-1 utility variance (over event rows) carried by the latent term (design section 4 / 9)
+      vector[N1] lin = X1 * beta1; vector[N1] lat;
+      for (r in 1:N1) { lin[r] += b[tgt1[r]] + eta[tgt1[r], era1[r]] + coal1[r] * del[tgt1[r]]; lat[r] = lam1_raw[1] * u_out[ini1[r]] * v_out[tgt1[r]]; }
+      lat_share1 = variance(lat) / (variance(lin) + variance(lat)); } }
 }

@@ -16,7 +16,7 @@ The model estimates **dependence** between target choice and joining through a s
 ## 2. Data (identical to the FE cells; no new build)
 - Stage 1: the init dump of the window/sample (fatal MIDs, window 1 main): events, initiator type g ∈ {bilateral, coalition}, choice set of all system members, chosen flag, event weight w, the stage-1 controls Z.
 - Stage 2: the one-shot reference cohort of the stage-2 build (≈ 63,000 rows on fatal MIDs; ≈ 270,000 on all MIDs), four categories {A, B, O, out} with the availability mask, the S2_REF_DESIGN terms.
-- Relational measure: the book measure, positive part (BOOKc12_ptaany|igo+def+off+pta+dca|prpos). Signed version as one cell.
+- Relational measure: the main measure, the unweighted book measure (BOOKraw_ptadesta|igo+def+off+pta+dca|pr; PI 2026-11-24). (Rev 2 named the weighted BOOKc12 positive part; superseded.)
 - **Positions standardized within year** before any gap or mean is formed (the book measure trends strongly over time; an era-mixed mean is not comparable across years). [P1-3a]
 
 ## 3. Model
@@ -92,3 +92,12 @@ Between type contrast and type-specific between contrasts; within contrasts; mat
 2. K = 0 main with K = 1 as a sensitivity (audit recommendation) versus K = 1 main.
 3. Era-specific b_j as main (audit recommendation) versus time-invariant.
 4. cmdstanr on the Mac (install needed) versus rstan.
+
+## Implementation notes (2026-11-24, after the code audit)
+- Software: rstan (>= 2.26, threading), not cmdstanr as section 6 says.
+- Stage-1 positions are centred within year and scaled by the FE gap scale (s2_gap_scale = sqrt(2) SD), so AME and FE contrasts share units.
+- K = 1: (u, v) -> (-u, -v) is unidentified; u_out / v_out are sign-aligned per draw on the United States (reporting only). Summaries are sign-free: |lam1| ||u|| ||v|| and the latent share of stage-1 utility variance.
+- The summary's convergence_gate_pass covers R-hat, ESS and zero divergences only; SBC and misspecification checks (section 7) are separate and not implemented yet.
+- Williams-Savitsky adjustment (section 6 main): not implemented; fits are raw weighted pseudo-posteriors. Open decision for the PI.
+- Stage-2 era-specific intercepts alpha[c, era] (a deviation from alpha_c in section 3; sparse era cells are prior-driven). AME stage 2 uses all stage-2 disputes; the FE joint model uses those with a repeat target.
+- Bundles carry state and dispute index maps (ST, DISP) and provenance (commit, input md5s, sub).
