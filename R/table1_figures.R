@@ -55,7 +55,7 @@ fwrite(CE, file.path(OUT, "table1_C_network.csv")); fwrite(C, file.path(OUT, "ta
 
 ## ---- figures ----
 D2 <- c("#1B9E77", "#D95F02", "#7570B3", "#E7298A", "#66A61E", "#E6AB02", "#A6761D", "#666666")   # RColorBrewer Dark2 (PI: Dark2 for all colour)
-th <- theme_bw(base_size = 11) + theme(legend.position = "bottom", strip.placement = "outside", panel.grid.minor = element_blank())
+th <- theme_bw(base_size = 11) + theme(legend.position = "bottom", strip.placement = "outside", strip.text = element_text(size = 13), panel.grid.minor = element_blank())
 sv <- function(p, nm, w = 7, h = 4.5) { ggsave(file.path(OUT, paste0(nm, ".pdf")), p, width = w, height = h); ggsave(file.path(OUT, paste0(nm, ".png")), p, width = w, height = h, dpi = 200) }
 mp <- data.table(ccode = c(2, 200, 220, 255, 365, 710, 740), state = c("United States", "United Kingdom", "France", "Germany", "Russia", "China", "Japan"))
 F1 <- merge(key, mp, by = "ccode")
@@ -108,17 +108,28 @@ S5[, lor_c := pmin(pmax(lor, -4), 4)]
 p5 <- ggplot(S5, aes(dM, dR)) + geom_raster(aes(fill = lor_c)) + geom_contour(data = S5[!is.na(lor)], aes(z = lor), breaks = seq(-4, 4, 1), colour = "grey30", linewidth = .25, na.rm = TRUE) +
   geom_hline(yintercept = 0, linetype = 3) + geom_vline(xintercept = 0, linetype = 3) + facet_wrap(~ role_lab, ncol = 2) +
   scale_fill_gradient2(low = D2[1], mid = "white", high = D2[2], midpoint = 0, limits = c(-4, 4), na.value = "white", name = "Log odds vs\na peer target") +
-  labs(x = xl, y = yl, caption = "Stage 1, between targets (no target FE), fatal MIDs. Log odds truncated at +/-4; contours every 1; blank where available targets are sparse.") + th + theme(legend.position = "right")
+  labs(x = xl, y = yl, caption = "Stage 1, between targets (no target FE), fatal MIDs. Log odds truncated at +/-4; contours every 1; blank where available targets are sparse.") + th + theme(legend.key.width = unit(1.6, "cm"))
 sv(p5, "F5_attack_plane_stage1_surface", w = 9.5, h = 4.8)
 ## F6: joiners on the plane of their gaps to the attacking side (candidate minus attacking side), over all candidates
 X6 <- copy(X1); X6 <- X6[is.finite(dM_kA) & is.finite(dR_kA)]; XR6 <- lim(X6$dM_kA); YR6 <- lim(X6$dR_kA)
 X6[, out_lab := factor(fifelse(y == "orig", "O", as.character(y)), levels = c("A", "B", "O", "out"), labels = c("Joins attacker (A)", "Joins target (B)", "Joins as originator (O)", "Does not join"))]
+J6 <- X6[y != "out" & dM_kA %between% XR6 & dR_kA %between% YR6]; J6[, out_lab := droplevels(out_lab)]
+CJ6 <- c("Joins attacker (A)" = D2[2], "Joins target (B)" = D2[1], "Joins as originator (O)" = D2[3]); SH6 <- c("Joins attacker (A)" = 16, "Joins target (B)" = 17, "Joins as originator (O)" = 15)
+xl6 <- "Material gap (candidate minus attacking side)"; yl6 <- "Relational gap (candidate minus attacking side)"
+## F6: joiners (larger, translucent, one shape per type) over the density of all candidates (grey)
 p6 <- ggplot(X6[dM_kA %between% XR6 & dR_kA %between% YR6], aes(dM_kA, dR_kA)) +
   stat_density_2d(geom = "polygon", aes(fill = after_stat(level)), contour_var = "ndensity", bins = 8, alpha = .8, show.legend = FALSE) +
   scale_fill_gradient(low = "grey95", high = "grey55") + geom_hline(yintercept = 0, linetype = 3) + geom_vline(xintercept = 0, linetype = 3) +
-  geom_point(data = X6[y != "out" & dM_kA %between% XR6 & dR_kA %between% YR6], aes(colour = out_lab), size = .9, alpha = .8) +
-  scale_colour_manual(values = c("Joins attacker (A)" = D2[2], "Joins target (B)" = D2[1], "Joins as originator (O)" = D2[3]), name = NULL) +
-  labs(x = "Material gap (candidate minus attacking side)", y = "Relational gap (candidate minus attacking side)", caption = "Shading: all candidates. Central 98% shown.") + th
+  geom_point(data = J6, aes(colour = out_lab, shape = out_lab), size = 2.6, alpha = .6) +
+  scale_colour_manual(values = CJ6, name = NULL) + scale_shape_manual(values = SH6, name = NULL) +
+  labs(x = xl6, y = yl6, caption = "Shading: all candidates. Central 98% shown.") + th
 sv(p6, "F6_attack_plane_joiners", w = 7, h = 5.5)
+## F6b: the same points, with each joiner type's own density shaded in its colour (no candidate shading)
+p6b <- ggplot(J6, aes(dM_kA, dR_kA)) + geom_hline(yintercept = 0, linetype = 3) + geom_vline(xintercept = 0, linetype = 3) +
+  stat_density_2d(geom = "polygon", aes(fill = out_lab, alpha = after_stat(level)), contour_var = "ndensity", bins = 6, show.legend = FALSE) +
+  scale_alpha(range = c(.05, .3)) + geom_point(aes(colour = out_lab, shape = out_lab), size = 2.6, alpha = .6) +
+  scale_colour_manual(values = CJ6, name = NULL) + scale_shape_manual(values = SH6, name = NULL) + scale_fill_manual(values = CJ6, guide = "none") +
+  coord_cartesian(xlim = XR6, ylim = YR6) + labs(x = xl6, y = yl6, caption = "Shading: density of each joiner type, in its colour. Central 98% shown.") + th
+sv(p6b, "F6b_attack_plane_joiners_by_type", w = 7, h = 5.5)
 
 cat("TABLE1_FIGURES_DONE", OUT, "\n")

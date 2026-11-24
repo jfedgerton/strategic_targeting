@@ -17,7 +17,7 @@ B <- s2_base(BUILD); W_REF <- B$window; dump <- readRDS(DUMPF)
 pz <- readRDS(POSF); key <- as.data.table(pz$key); stopifnot(SPEC %in% colnames(pz$R)); R <- pz$R[, SPEC]
 E <- s2_spec_edges("core", SPEC, EDIR); X <- s2_prepare(B, key, R, E)
 idv <- readLines(file.path(CELL, "cell_identity.txt")); stopifnot(grepl(SPEC, idv, fixed = TRUE))
-NB <- as.integer(trimws(strsplit(idv, "|", fixed = TRUE)[[1]][5]))
+idp <- trimws(strsplit(idv, " | ", fixed = TRUE)[[1]]); stopifnot(length(idp) == 6L, idp[2] == SPEC); NB <- as.integer(idp[5])   # file | spec | window | sample | n_boot | block (spec ids contain "|")
 P <- fread(file.path(CELL, "point.csv"))
 DRA <- unlist(lapply(sort(list.files(CELL, pattern = "^draws_.*\\.rds$", full.names = TRUE)), function(f) readRDS(f)$draws), recursive = FALSE)
 stopifnot(length(DRA) == NB); okd <- vapply(DRA, function(x) is.numeric(x) && identical(names(x), boot_names(dump)), TRUE); MJ <- do.call(rbind, DRA[okd])

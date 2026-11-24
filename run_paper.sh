@@ -6,7 +6,8 @@
 ##   1. networks: book PTA/DCA layers; MAIN measure (unweighted book measure, BOOKraw); weighted book measure (BOOKc12, appendix);
 ##      grid layers and grid positions (306 measures, R/lib/grid.R)
 ##   2. stage-2 builds, every window x {fmid, mid}, on the main measure, each accepted against its stage-1 init dump
-##   3. main table: two-stage bootstrap of the main cell (B_MAIN draws), fmid and mid at the main window; stage 1 / stage 2 / joint table
+##   3. main table: two-stage bootstrap of the main cell (B_MAIN draws), fmid and mid at the main window; stage 1 / stage 2 / joint table;
+##      marginal-effect plots with 95% bootstrap bands (B_CELL draws, fmid)
 ##   4. Table 1 and draft figures (main measure, main window)
 ##   5. grid sweep: 306 measures x main window x {fmid, mid} (joint two-stage FE point fits)
 ##   6. bootstrapped grid cells (R/grid_pick_boot_cells.R; main cell B_MAIN, others B_CELL)
@@ -15,7 +16,7 @@
 ## Usage: OUT=output_init ./run_paper.sh            (optional: P_STEPS="1 2 3 4 5 6 7 8", B_MAIN=2000, B_CELL=500)
 set -euo pipefail
 cd "$(dirname "$0")"; source config.sh
-O="${OUT:-output_init}"; S2=$O/stage2; PP=$O/paper; mkdir -p $S2/{edges,builds,logs} $PP/{main_table,table1,sweep,boot,summary,ame}
+O="${OUT:-output_init}"; S2=$O/stage2; PP=$O/paper; mkdir -p $S2/{edges,builds,logs} $PP/{main_table,marginal_effects,table1,sweep,boot,summary,ame}
 STEPS="${P_STEPS:-1 2 3 4 5 6 7 8}"; B_MAIN="${B_MAIN:-2000}"; B_CELL="${B_CELL:-500}"
 LOG=$PP/run_$(date +%Y%m%d_%H%M%S).log
 say() { echo "[$(date +%H:%M:%S)] $*" | tee -a "$LOG"; }
@@ -80,7 +81,9 @@ if has 3; then
     runR "MAIN_TABLE_DONE|Error" R/main_table.R --build=$S2/builds/w${WINDOW_MAIN}_${SM} --dump=$O/dumps/long_init_bon$(wtag $WINDOW_MAIN)_relyear_${SM}.rds --positions=$MAINF \
       --spec="$MAIN_SPEC" --edges_dir=$S2/edges --cell_dir=$PP/main_table/boot/m_$SM --out=$PP/main_table/$SM --cores=$CORES || die "main table $SM failed"
   done
-  say "3 main table done"
+  runR "MARGINAL_EFFECTS_DONE|bootstrap:|Error" R/marginal_effects.R --build=$S2/builds/w${WINDOW_MAIN}_fmid --dump=$O/dumps/long_init_bon$(wtag $WINDOW_MAIN)_relyear_fmid.rds \
+    --positions=$MAINF --spec="$MAIN_SPEC" --edges_dir=$S2/edges --n_boot=$B_CELL --out=$PP/marginal_effects --cores=$CORES || die "marginal effects failed"
+  say "3 main table and marginal effects done"
 fi
 
 ## ---- 4. Table 1 and figures ----
