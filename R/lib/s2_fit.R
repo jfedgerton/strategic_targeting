@@ -5,10 +5,12 @@
 ## environment. Returns coefficients on the original scale with the intercept at the covariate means, plus the centering constants, so
 ## mnl_predict() reproduces fitted probabilities from raw covariates (GPT P2-9).
 S2_CATS_FIT <- c(A = "A", B = "B", O = "orig")
-mnl_avail <- function(X, alts) cbind(A = X$H > W_REF, B = rep(TRUE, nrow(X)), O = rep(W_REF >= 1L, nrow(X)) & X$likely == 1)[, alts, drop = FALSE]
+## A: at W = 0 available in every month (s2_mask: no window), so every row; at W >= 1 only if the dispute runs past month W (audit 2026-11-24)
+mnl_avail <- function(X, alts) cbind(A = if (W_REF == 0L) rep(TRUE, nrow(X)) else X$H > W_REF, B = rep(TRUE, nrow(X)), O = rep(W_REF >= 1L, nrow(X)) & X$likely == 1)[, alts, drop = FALSE]
 
 fit_mnl <- function(X, design, label = "", vc = TRUE, w = NULL, start = NULL) {
   if (is.null(w)) w <- rep(1, nrow(X)); stopifnot(length(w) == nrow(X), all(w >= 0))
+  if (W_REF == 0L && "O" %in% names(design)) { stopifnot(!any(X$y == "orig")); design$O <- NULL }   # W = 0: no originator alternative (s2_mask); O quantities come out NA (audit 2026-11-24)
   drops <- list()
   for (al in names(design)) { ev <- X[y == S2_CATS_FIT[[al]] & w > 0]; keep <- vapply(design[[al]], function(v) length(unique(ev[[v]])) > 1L, TRUE)
     drops[[al]] <- design[[al]][!keep]; design[[al]] <- design[[al]][keep] }
