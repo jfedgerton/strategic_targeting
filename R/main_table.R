@@ -3,7 +3,7 @@
 ##   (2) Stage 2  : the joining model alone (categorical A / B / O vs out, S2_REF_DESIGN), no target trait
 ##   (3) Joint    : two-stage FE model: stage-1 target FE (within targets), bbar = mean target FE of the dispute's onset targets, stage 2 with bbar
 ## Inference: the two-stage dispute bootstrap with the common draws of R/s2_07_boot_cells.R (seed 123). Columns (1) and (3) are read from that
-## cell's draws; column (2) is fitted here on the same draws (same multiplicities, same seed), so all three use identical resamples.
+## cell's draws; column (2) is fitted here on the same draws (same Bayesian-bootstrap dispute weights, same seed; boot_weights), so all three use identical draws.
 ## 95% percentile intervals; a quantity is reported only with a finite point estimate and >= 80% finite draws (as s2_07).
 ## Usage: Rscript R/main_table.R --build=DIR --dump=FILE --positions=FILE --spec=ID --edges_dir=DIR --cell_dir=DIR --out=DIR [--cores=2]
 suppressPackageStartupMessages({ library(data.table); library(parallel) })
@@ -27,7 +27,7 @@ tie0 <- c("A:tie_sum_A", "B:tie_sum_B", "O:tie_sum_A"); stopifnot(all(tie0 %in% 
 nm0 <- c(paste("S2A", S0$alt, S0$axis, S0$gap, sep = "."), paste0("S2A.", tie0))
 pt0 <- setNames(c(S0$est, F0$b[tie0]), nm0)
 disp_all <- sort(unique(c(as.data.table(dump$D)$disp, B$X$dispnum)))
-set.seed(123); MM <- lapply(seq_len(NB), function(b) { m <- tabulate(sample.int(length(disp_all), length(disp_all), replace = TRUE), length(disp_all)); names(m) <- disp_all; m })
+MM <- boot_weights(disp_all, NB)   # Bayesian bootstrap, the same draws as s2_07 (lib/s2_cell.R)
 D0 <- mclapply(MM, function(m) tryCatch({ wt <- m[as.character(X$dispnum)]; Xb <- X[wt > 0]; w <- as.numeric(wt[wt > 0])
   f <- fit_mnl(Xb, S2_REF_DESIGN, "boot", vc = FALSE, w = w); s <- surf_contrasts(f); setNames(c(s$est, f$b[tie0]), c(paste("S2A", s$alt, s$axis, s$gap, sep = "."), paste0("S2A.", tie0)))[nm0] },
   error = function(e) NULL), mc.cores = CORES, mc.preschedule = FALSE)

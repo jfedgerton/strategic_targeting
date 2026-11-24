@@ -5,7 +5,7 @@
 ##       5th to 95th percentile (all other variables at their observed values; the surface terms rebuilt), per 1,000 candidates
 ##   ME3 joint model: average predicted probability of joining A / B / O as the dispute's target trait bbar moves across its 5th-95th percentiles
 ## Bands: percentile 95% over the two-stage dispute bootstrap with the common draws (seed 123), the same resamples as R/s2_07_boot_cells.R
-## and R/main_table.R. Each draw refits the model on the reweighted disputes (stage 1: event weights x multiplicity; stage 2: row weights);
+## and R/main_table.R. Each draw refits the model on the reweighted disputes (stage 1: event weights x dispute weight; stage 2: row weights; Bayesian bootstrap, boot_weights);
 ## a draw that fails is dropped and counted. Colours: Dark2.
 ## Usage: Rscript R/marginal_effects.R --build=DIR --dump=FILE --positions=FILE --spec=ID --edges_dir=DIR --n_boot=500 --out=DIR [--cores=2]
 suppressPackageStartupMessages({ library(data.table); library(parallel); library(ggplot2) })
@@ -46,7 +46,7 @@ bb0 <- bbar_of(D, ref_order, REP); XJ <- merge(X, bb0, by = "dispnum"); gB <- se
 FJ <- fit_mnl(XJ, DJ, "joint"); P3 <- th_curve(FJ, XJ, gB)
 ## ---- bootstrap (common draws) ----
 disp_all <- sort(unique(c(as.data.table(dump$D)$disp, B$X$dispnum)))
-set.seed(123); MM <- lapply(seq_len(NB), function(b) { m <- tabulate(sample.int(length(disp_all), length(disp_all), replace = TRUE), length(disp_all)); names(m) <- disp_all; m })
+MM <- boot_weights(disp_all, NB)   # Bayesian bootstrap, the same draws as s2_07 (lib/s2_cell.R)
 one <- function(m) tryCatch({
   Db <- copy(D); Db[, w := w * m[as.character(disp)]]; Db <- Db[w > 0]
   c1 <- s1_curve(coef(s1_fit_nofe(Db, dump)))

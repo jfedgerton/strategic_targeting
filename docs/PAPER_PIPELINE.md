@@ -12,7 +12,7 @@
 ## Models (unchanged code, R/lib/s2_cell.R)
 - Stage 1: conditional logit of target choice by initiator type (bilateral vs coalition originator); between targets (no target FE, three-way clustered) is the main stage-1 comparison; target FE (within) feeds the joint model; + initiator-target tie as robustness.
 - Stage 2: categorical joining (A attacker side / B target side / O originator vs out) on the reference cohort.
-- Joint: two-stage FE (stage-1 target FE -> bbar per dispute -> stage 2 with theta on bbar); two-stage dispute bootstrap, common draws, seed 123.
+- Joint: two-stage FE (stage-1 target FE -> bbar per dispute -> stage 2 with theta on bbar); two-stage dispute Bayesian bootstrap (Exp(1) dispute weights scaled to mean 1, Rubin 1981; R/lib/s2_cell.R boot_weights), common draws, seed 123.
 - AME: stan/ame_joint.stan + R/ame/ame_cell.R (cells main K=0, cut posterior, K=1), bundle built in step 8, fits on Roar.
 
 ## Main table (R/main_table.R)

@@ -1,6 +1,6 @@
 ## R/s2_07_boot_cells.R -- two-stage dispute bootstrap of the cells listed by R/s2_06_pick_boot_cells.R (stage-2 appendix, layer 2).
 ## Each draw resamples disputes and refits BOTH steps (R/lib/s2_cell.R joint_fe_draw; identical to R/s2_03_joint_fe.R). Draws are common
-## across cells that share a build (seed 123; draw b is the same multiplicity vector for every cell of a window x sample, and the first 500
+## across cells that share a build (seed 123; draw b is the same dispute-weight vector for every cell of a window x sample, and the first 500
 ## draws of a 2000-draw cell are the 500 draws of the others). Resumable in blocks of draws; percentile 95% intervals.
 ## Usage: Rscript R/s2_07_boot_cells.R --cells=cells.csv --posdir=DIR --builds_root=DIR --dumps_dir=DIR --edges_dir=DIR --out=DIR [--cores=4] [--block=50] [--only=b001,b002]
 suppressPackageStartupMessages({ library(data.table); library(parallel) })
@@ -42,9 +42,9 @@ run_cell <- function(cl) {
   ref_order <- names(sort(table(D[chosen == 1L, c2]), decreasing = TRUE))
   pf <- file.path(cd, "point.csv")
   if (!file.exists(pf)) { P <- joint_fe_cell(D, dump, X, B$TS); s2_write_atomic(P, pf) } else P <- fread(pf)   # an invalid point fit stops here (cell INVALID)
-  ## common draws: multiplicities over the build's disputes (measure-independent), generated sequentially from seed 123
+  ## common draws: Bayesian-bootstrap dispute weights over the build's disputes (measure-independent), generated sequentially from seed 123 (boot_weights)
   disp_all <- sort(unique(c(as.data.table(dump$D)$disp, B$X$dispnum)))
-  set.seed(123); MM <- lapply(seq_len(cl$n_boot), function(b) { m <- tabulate(sample.int(length(disp_all), length(disp_all), replace = TRUE), length(disp_all)); names(m) <- disp_all; m })
+  MM <- boot_weights(disp_all, cl$n_boot)   # Bayesian bootstrap (lib/s2_cell.R)
   nb <- ceiling(cl$n_boot / BLOCK); t0 <- Sys.time()
   for (k in seq_len(nb)) { bf <- file.path(cd, sprintf("draws_%03d.rds", k)); ix <- ((k - 1) * BLOCK + 1):min(k * BLOCK, cl$n_boot)
     one <- function(m) tryCatch(joint_fe_draw(D, dump, X, B$TS, m, ref_order), error = function(e) paste("numerical:", conditionMessage(e)))

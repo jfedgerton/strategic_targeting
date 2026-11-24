@@ -153,9 +153,18 @@ joint_fe_cell <- function(D, dump, X, TS, design = S2_REF_DESIGN) {
   out[]
 }
 
-## ---- one two-stage bootstrap draw of a cell (as R/s2_03_joint_fe.R): dispute multiplicities m (named by dispnum) reweight BOTH steps;
+## ---- one two-stage bootstrap draw of a cell (as R/s2_03_joint_fe.R): dispute weights m (named by dispnum; Bayesian bootstrap, boot_weights) reweight BOTH steps;
 ## step 1 refits the target-FE model (reference = most-chosen target present in the draw, b = 0), bbar is rebuilt, step 2 refits with row
 ## weights (equal to row replication, tests/test_s2_fit.R 4). Returns a named vector of the cell's quantities (names as boot_names()).
+## ---- dispute weights of the two-stage bootstrap (PI 2026-11-24: Bayesian bootstrap, Rubin 1981): each draw gives every dispute an
+## Exp(1) weight scaled to mean 1 (Dirichlet weights x n), seed 123. Every dispute stays in every draw (no zero weights), so no target, joiner
+## or sparse covariate cell drops out of a draw. Shared by R/s2_07_boot_cells.R, R/main_table.R and R/marginal_effects.R so all three use
+## identical draws. Replaces multinomial resampling (tabulate(sample.int(...))).
+boot_weights <- function(disp_all, NB) {
+  stopifnot(length(disp_all) > 1L, !anyDuplicated(disp_all), NB >= 1L)
+  set.seed(123)
+  lapply(seq_len(NB), function(b) { g <- rexp(length(disp_all)); m <- g / mean(g); names(m) <- disp_all; m })
+}
 boot_names <- function(dump) { r <- dump$roles; ax <- rep(c("M", "R"), each = 2); sg <- c(1, -1)
   c(paste("S1", rep(r, each = 4), ax, sg, sep = "."), paste("S1NF", rep(r, each = 4), ax, sg, sep = "."), paste("S1NFT", rep(r, each = 4), ax, sg, sep = "."),
     paste0("S1NFT.", r, ".tie"), paste("S2", rep(c("A", "B", "O"), each = 4), ax, sg, sep = "."),
