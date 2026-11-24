@@ -9,7 +9,7 @@
 ##   dca2, dca1    : Kinne DCAD dcaAnyV2 (book main; book_layers.rds) and dcaAnyV1 (layers_dy), 2010 carried to 2011-14
 ##   pta_book      : book layer_pta_desta (book_layers.rds; 196,196 linked)
 ##   pta_depth     : max DESTA 2.3 depth_index over in-force agreements / 7 (book 01_data/04_pta_desta_costly.R: dyadic DESTA 2.3,
-##                   in force from entryforceyear until the year before a recorded withdrawal; accessions take the base treaty's depth),
+##                   in force from entryforceyear until the year before a recorded withdrawal (withdrawal year = its entry-into-force year, else its signature year); accessions take the base treaty's depth),
 ##                   with the predecessor mapping used for pta_book (Germany 260 through 1990, Czechoslovakia 315 through 1992,
 ##                   North Yemen 678 through 1989)
 ## Weighted layer scores (appendix weighting schemes; book 04_multiverse/01_build_measure.R), for igo (count), def, off, dca2, pta_book:
@@ -57,7 +57,7 @@ DY[, `:=`(igo_count = mm(igo, year), igo_cos = mm(cs, year), igo_hyper = mm(hy, 
 
 ## ---- PTA depth (book 04_pta_desta_costly.R + predecessor mapping) ----
 dd <- fread(file.path(DB, "desta23_dyads.csv"), encoding = "Latin-1")[, .(iso1, iso2, number = as.character(number), base_treaty, eif = entryforceyear)]
-wd <- fread(file.path(DB, "desta23_dyadic_withdrawal.csv"), encoding = "Latin-1")[, .(a = pmin(iso1, iso2), b = pmax(iso1, iso2), base_treaty, wy = entryforceyear)][, .(wy = min(wy, na.rm = TRUE)), by = .(a, b, base_treaty)]
+wd <- fread(file.path(DB, "desta23_dyadic_withdrawal.csv"), encoding = "Latin-1")[, .(a = pmin(iso1, iso2), b = pmax(iso1, iso2), base_treaty, wy = fcoalesce(entryforceyear, year))][, .(wy = min(wy, na.rm = TRUE)), by = .(a, b, base_treaty)]   # audit 2026-11-24: 470 withdrawal rows lack an entry-into-force year; use the signature year, as pta_book does (book 04 script ignores them)
 ixd <- fread(file.path(DB, "desta23_indices.csv"), encoding = "Latin-1")[, .(number = as.character(number), base_treaty, depth = depth_index)]
 bd <- ixd[number == as.character(base_treaty), .(base_treaty, bdepth = depth)]
 dd <- merge(dd, ixd[, .(number, depth)], by = "number", all.x = TRUE); dd <- merge(dd, bd, by = "base_treaty", all.x = TRUE)
