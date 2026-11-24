@@ -19,6 +19,7 @@ Items the appendix should state. Numbers are from the sandbox build on the main 
 ## Inference
 - Two-stage dispute-level Bayesian bootstrap (Exp(1) dispute weights scaled to mean 1; Rubin 1981), common draws across stage 1, stage 2 and the joint model; 95% percentile intervals; a quantity is reported only with >= 80% finite draws.
 - Window 0 has no originator alternative; its O quantities are not estimated.
+- theta reporting (PI 2026-11-24): main text = point estimate, 95% percentile interval and bootstrap median; appendix = bias-corrected (BC) percentile interval. theta's draws are attenuated toward 0 relative to the point estimate (bbar re-estimated in every draw), so BC shifts the interval away from 0; at 500 draws its outer bound can sit at the most extreme draw. BCa (acceleration) not computed. Output: main_table_theta.csv.
 - Grid decision regressions: OLS of estimates / p-values on measurement choices, SEs clustered by measure; layer effects pool weighted and unweighted blocks.
 
 ## Figures

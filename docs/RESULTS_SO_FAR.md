@@ -25,7 +25,7 @@ Main measure BOOKraw_ptadesta, fatal MIDs, window 1. Two-stage dispute-level Bay
 - New-state build (point fit): theta A -0.88, theta B -0.43.
 
 ## Known issue to check (hypothesis)
-theta's percentile interval is off-centre relative to its point estimate (theta A: point -0.89, bootstrap median -0.60; theta B: -0.43 vs -0.31). Stage-1 contrasts are centred (medians equal points). Likely errors-in-variables attenuation from re-estimating bbar in each draw. Reporting decision (percentile vs BCa vs median) is open.
+theta's percentile interval is off-centre relative to its point estimate (theta A: point -0.89, bootstrap median -0.60; theta B: -0.43 vs -0.31). Stage-1 contrasts are centred (medians equal points). Likely errors-in-variables attenuation from re-estimating bbar in each draw. Decided: main text reports point, percentile interval and bootstrap median; BC interval in the appendix (theta A BC [-1.50, -0.79], theta B [-0.80, -0.30], theta O [-0.08, 1.21]).
 
 ## Not yet run end to end
 - run_paper.sh as a whole (each step tested separately in the sandbox).
