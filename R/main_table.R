@@ -41,10 +41,13 @@ lab_s1 <- c("M.1" = "weaker target (material gap +1)", "M.-1" = "stronger target
 for (r in dump$roles) for (k in names(lab_s1)) { ax <- sub("\\..*$", "", k); g <- as.numeric(sub("^[MR]\\.", "", k))
   T[[length(T) + 1]] <- row("(1) Stage 1, between targets", paste(r, lab_s1[[k]]), paste("S1NF", r, ax, g, sep = "."), getP("S1NF", r, ax, g), MJ)
   T[[length(T) + 1]] <- row("(3) Joint: stage 1 within targets", paste(r, lab_s1[[k]]), paste("S1", r, ax, g, sep = "."), getP("S1", r, ax, g), MJ) }
-lab_s2 <- c("M.1" = "attacker weaker (material gap +1)", "M.-1" = "attacker stronger (material gap -1)", "R.1" = "attacker less central (gap +1)", "R.-1" = "attacker more central (gap -1)")
+## stage-2 gaps are candidate minus the side the candidate would fight (A and O fight the target side B; B fights the attacking side A), so +1 = that side is weaker / less central (audit 2026-11-24)
+lab_s2 <- c("M.1" = "%s weaker (material gap +1)", "M.-1" = "%s stronger (material gap -1)", "R.1" = "%s less central (relational gap +1)", "R.-1" = "%s more central (relational gap -1)")
+opp <- c(A = "target side", B = "attacking side", O = "target side")
 for (al in c("A", "B", "O")) for (k in names(lab_s2)) { ax <- sub("\\..*$", "", k); g <- as.numeric(sub("^[MR]\\.", "", k)); q0 <- paste("S2A", al, ax, g, sep = ".")
-  T[[length(T) + 1]] <- row("(2) Stage 2 alone", paste("join", al, lab_s2[[k]]), q0, pt0[[q0]], M0)
-  T[[length(T) + 1]] <- row("(3) Joint: stage 2", paste("join", al, lab_s2[[k]]), paste("S2", al, ax, g, sep = "."), getP("S2", al, ax, g), MJ) }
+  lb <- paste("join", al, sprintf(lab_s2[[k]], opp[[al]]))
+  T[[length(T) + 1]] <- row("(2) Stage 2 alone", lb, q0, pt0[[q0]], M0)
+  T[[length(T) + 1]] <- row("(3) Joint: stage 2", lb, paste("S2", al, ax, g, sep = "."), getP("S2", al, ax, g), MJ) }
 for (i in 1:3) { al <- c("A", "B", "O")[i]
   T[[length(T) + 1]] <- row("(2) Stage 2 alone", paste("join", al, "recruitment ties"), paste0("S2A.", tie0[i]), pt0[[paste0("S2A.", tie0[i])]], M0)
   T[[length(T) + 1]] <- row("(3) Joint: stage 2", paste("join", al, "recruitment ties"), tie0[i], getP("S2", al, "tie_sum", NA), MJ)
@@ -52,9 +55,13 @@ for (i in 1:3) { al <- c("A", "B", "O")[i]
 TAB <- rbindlist(T)
 TAB[, cell := ifelse(is.na(lo), sprintf("%.2f", est), sprintf("%.2f [%.2f, %.2f]%s", est, lo, hi, ifelse(lo > 0 | hi < 0, "*", "")))]
 fwrite(TAB, file.path(OUT, "main_table_long.csv"))
-N <- data.table(quantity = c("stage-1 events", "stage-2 candidate rows", "joined A", "joined B", "joined O", "bootstrap draws (joint usable)", "bootstrap draws (stage 2 alone usable)"),
-                value = c(P$n_s1_events[1], P$n_s2_rows[1], P$n_s2_A[1], P$n_s2_B[1], P$n_s2_O[1], nrow(MJ), nrow(M0)))
+## column (2) uses all stage-2 rows; column (3) drops disputes without a finite bbar, so both Ns are reported (audit 2026-11-24)
+N <- data.table(quantity = c("stage-1 events", "stage-2 candidate rows, joint (3)", "joined A, joint", "joined B, joint", "joined O, joint",
+                             "stage-2 candidate rows, stage 2 alone (2)", "joined A, stage 2 alone", "joined B, stage 2 alone", "joined O, stage 2 alone",
+                             "bootstrap draws (joint usable)", "bootstrap draws (stage 2 alone usable)"),
+                value = c(P$n_s1_events[1], P$n_s2_rows[1], P$n_s2_A[1], P$n_s2_B[1], P$n_s2_O[1],
+                          nrow(X), sum(X$y == "A"), sum(X$y == "B"), sum(X$y == "orig"), nrow(MJ), nrow(M0)))
 fwrite(N, file.path(OUT, "main_table_n.csv"))
-W <- dcast(TAB, row ~ column, value.var = "cell", fill = "")
+W <- dcast(TAB, row ~ column, value.var = "cell", fill = ""); W <- W[match(unique(TAB$row), row)]   # keep the intended row order
 fwrite(W, file.path(OUT, "main_table_wide.csv"))
 cat(sprintf("MAIN_TABLE_DONE %s | joint draws %d, stage-2-alone draws %d of %d\n", OUT, nrow(MJ), nrow(M0), NB))
