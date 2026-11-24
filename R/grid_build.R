@@ -1,4 +1,4 @@
-## R/grid_build.R -- positions (log PageRank) for the 306 grid measures (R/lib/grid.R), one positions file per block, in the format the
+## R/grid_build.R -- positions (log PageRank) for the 236 grid measures (R/lib/grid.R), one positions file per block, in the format the
 ## stage-1/2 cell code reads (list(R = state-year x spec matrix, key, specs)). Edges are not stored: s2_spec_edges rebuilds them from
 ## grid_layers.rds with the same function (grid_edges), so positions and stage-2 ties always use identical edges.
 ## Check: the raw-block spec with the main layers, count IGO and book PTA must equal the main measure (BOOKraw_ptadesta) to 1e-10.

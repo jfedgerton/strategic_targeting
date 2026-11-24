@@ -1,7 +1,7 @@
 ## R/grid_pick_boot_cells.R -- the bootstrapped cells of the network-measure grid (PI 2026-11-24), a fixed rule-based list chosen before any
 ## result is seen; each is refitted by the two-stage dispute bootstrap (R/s2_07_boot_cells.R).
 ##   (1) the main measure (BOOKraw_ptadesta, unweighted book measure) at every window x sample (fmid, mid) except the main window (main table cells m_fmid / m_mid)
-##   (2) main window, fmid: main layers under the other IGO codings (cos, hyper; book PTA) and under PTA depth (count IGO)
+##   (2) main window, fmid: main layers under the other IGO codings (cos, hyper; book PTA)
 ##   (3) main window, fmid: the main layers minus one layer (raw, count IGO, book PTA where present), each layer in turn
 ##   (4) main window, fmid: the main layers under each weighting scheme (sry contig12, sry distance, sy contig12, sy distance)
 ##   (5) main window, fmid: main layers with DCA v1; main layers + the other-alliances layer
@@ -19,7 +19,6 @@ for (W in setdiff(WS, WM)) for (s in c("fmid", "mid")) add(MF, MAIN, W, s, "1 ma
 ML <- "igo+def+off+dca+pta"
 add("positions_core_Graw.rds", sprintf("Graw_cos_book|%s|pr", ML), WM, "fmid", "2 IGO cosine")
 add("positions_core_Graw.rds", sprintf("Graw_hyper_book|%s|pr", ML), WM, "fmid", "2 IGO hyperedge")
-add("positions_core_Graw.rds", sprintf("Graw_count_depth|%s|pr", ML), WM, "fmid", "2 PTA depth")
 for (l in c("igo", "def", "off", "dca", "pta")) { L <- setdiff(c("igo", "def", "off", "dca", "pta"), l)
   sp <- sprintf("Graw_%s_%s|%s|pr", if ("igo" %in% L) "count" else "na", if ("pta" %in% L) "book" else "na", paste(L, collapse = "+"))
   add("positions_core_Graw.rds", sp, WM, "fmid", paste0("3 drop layer ", l)) }

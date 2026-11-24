@@ -1,17 +1,17 @@
 #!/usr/bin/env bash
 ## run_paper.sh -- the paper pipeline on the main measure (PI 2026-11-24): networks, main table, Table 1 and figures, the network-measure grid
-## (306 measures x fatal MIDs and all MIDs), bootstrapped grid cells, grid summaries and the AME data bundle. Run after run_all.sh (TYPES=init)
+## (236 measures x fatal MIDs and all MIDs), bootstrapped grid cells, grid summaries and the AME data bundle. Run after run_all.sh (TYPES=init)
 ## has finished in the same output folder (it supplies layers_dy.rds, the stage-1 dumps and a positions key).
 ## Steps (each resumable; a finished step is skipped on rerun):
 ##   1. networks: book PTA/DCA layers; MAIN measure (unweighted book measure, BOOKraw); weighted book measure (BOOKc12, appendix);
-##      grid layers and grid positions (306 measures, R/lib/grid.R)
+##      grid layers and grid positions (236 measures, R/lib/grid.R)
 ##   2. stage-2 builds, every window x {fmid, mid}, on the main measure, each accepted against its stage-1 init dump (in $OUT/paper/builds,
 ##      separate from run_stage2.sh builds so the two runners never overwrite each other; audit 2026-11-24)
 ##   3. main table: two-stage bootstrap of the main cell (B_MAIN draws), fmid and mid at the main window; stage 1 / stage 2 / joint table;
 ##      marginal-effect plots with 95% bootstrap bands (B_CELL draws, fmid); missing-data robustness (main_table_robust_*, and a
 ##      --newstate_t=1 build + bootstrapped cell: year t where t - 1 does not exist)
 ##   4. Table 1 and draft figures (main measure, main window)
-##   5. grid sweep: 306 measures x main window x {fmid, mid} (joint two-stage FE point fits)
+##   5. grid sweep: 236 measures x main window x {fmid, mid} (joint two-stage FE point fits)
 ##   6. bootstrapped grid cells (R/grid_pick_boot_cells.R; B_CELL; the main-window main cells come from step 3)
 ##   7. grid summaries (distributions, decision regressions, specification curves)
 ##   8. AME data bundle for the joint AME (main measure, main window, fmid); the fits run on Roar (slurm/ame_cells.sbatch)
@@ -58,7 +58,7 @@ if has 1; then
 fi
 [ -s $MAINF ] || die "missing $MAINF (step 1)"
 GRIDPOS=""; if has 5 || has 6; then for B in raw dca1 ally sryc12 srydist syc12 sydist; do F=$POSD/positions_core_G$B.rds; [ -s $F ] || die "missing grid positions $F (step 1)"; GRIDPOS="$GRIDPOS${GRIDPOS:+,}$F"; done   # exactly the 7 blocks (audit 2026-11-24)
-  [ "$(($(wc -l < $POSD/grid_specs.csv) - 1))" -eq 306 ] || die "grid_specs.csv does not list 306 measures"; fi
+  [ "$(($(wc -l < $POSD/grid_specs.csv) - 1))" -eq 236 ] || die "grid_specs.csv does not list 236 measures"; fi
 
 ## ---- 2. builds ----
 if has 2; then

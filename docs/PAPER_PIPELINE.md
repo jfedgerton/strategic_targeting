@@ -18,17 +18,17 @@
 ## Main table (R/main_table.R)
 (1) stage 1 between targets; (2) stage 2 alone (no target trait); (3) joint (stage 1 within targets + stage 2 with theta). Same bootstrap draws for all three. 95% percentile intervals; >= 80% finite draws per quantity.
 
-## Network-measure grid (R/grid_layers.R, R/lib/grid.R, R/grid_build.R): 306 measures, all PageRank
+## Network-measure grid (R/grid_layers.R, R/lib/grid.R, R/grid_build.R): 236 measures, all PageRank (PTA depth dropped from the sweep, PI 2026-11-24)
 | Block | Content | Specs |
 |---|---|---|
-| raw | 24 layer combos of {igo, def, off, dca, pta} containing igo or def; IGO count / cosine / hyperedge (if igo); PTA book / depth (if pta) | 84 |
-| dca1 | as raw, DCA = dcaAnyV1, combos containing dca only | 42 |
-| ally | as raw + one "other alliances" layer (neutrality / non-aggression / consultation) | 84 |
+| raw | 24 layer combos of {igo, def, off, dca, pta} containing igo or def; IGO count / cosine / hyperedge (if igo); PTA book | 56 |
+| dca1 | as raw, DCA = dcaAnyV1, combos containing dca only | 28 |
+| ally | as raw + one "other alliances" layer (neutrality / non-aggression / consultation) | 56 |
 | sryc12, srydist, syc12, sydist | weighted: observed - expected per layer (logit / PPML), FE sender + receiver + year (sry) or sender x year + receiver x year (sy), geography contig12 or log capital distance; positive part / yearly max; IGO count, PTA book | 4 x 24 |
-Swept at the main window on fatal MIDs and on all MIDs (612 cells). IGO cos / hyper follow book 01_data/06_igo_variants.R (state-year file); PTA depth follows book 01_data/04_pta_desta_costly.R (DESTA 2.3 dyadic, max depth / 7) plus the predecessor mapping.
+Swept at the main window on fatal MIDs and on all MIDs (472 cells). IGO cos / hyper follow book 01_data/06_igo_variants.R (state-year file); The PTA depth layer (book 01_data/04_pta_desta_costly.R) is still built in grid_layers.rds but is no longer swept.
 
 ## Bootstrapped cells (R/grid_pick_boot_cells.R, fixed before results)
-Main x windows 0-6 x {fmid, mid} (the main-window pair is the main table's B_MAIN bootstrap, step 3; the other 12 here); main layers under IGO cos, hyper, PTA depth; drop-one layer; the 4 weighting schemes; DCA v1; + other alliances. 26 cells here + 2 in the main table. Window 0 has no originator alternative, so its O quantities are NA.
+Main x windows 0-6 x {fmid, mid} (the main-window pair is the main table's B_MAIN bootstrap, step 3; the other 12 here); main layers under IGO cos, hyper; drop-one layer; the 4 weighting schemes; DCA v1; + other alliances. 25 cells here + 2 in the main table. Window 0 has no originator alternative, so its O quantities are NA.
 
 ## Checks that must stop the run
 PTA 196,196 and 93 withdrawers; DCA v2 11,031 (1980-2010); raw pooled tie share 0.952; grid raw main = BOOKraw to 1e-10; grid sry c12 main = BOOKc12 (tested); fixest warnings/convergence; sry dropped rows must have y = 0.
@@ -41,6 +41,6 @@ PTA 196,196 and 93 withdrawers; DCA v2 11,031 (1980-2010); raw pooled tie share 
 
 ## Reporting fixes (audit part B, 2026-11-24)
 - Table 1 panel A: weighted moments (stage-1 event weights) next to unweighted; events_weighted. F1: West Germany (260) in 1990. Axis labels state scaled units. F3: denominators are candidates for whom the option is available. Figure captions report the share of points outside the 1st/99th-percentile axis cut.
-- Grid summary: decision-regression SEs clustered by measure; main measure drawn on top of the specification curves. The 16 sy specs without IGO are SKIPPED (constant positions), so 290 measures per sample are fitted.
+- Grid summary: decision-regression SEs clustered by measure; main measure drawn on top of the specification curves. The 16 sy specs without IGO are SKIPPED (constant positions), so 220 measures per sample are fitted.
 - Run-stopping: fixest warnings in grid_layers.R; grid sry contig12 main = BOOKc12 (grid_build.R --c12).
 - Marginal effects: stage 2 alone on the joint sample; columns trimmed to the design; draws saved in blocks of 50 (resumable); dump/build pairing check; a draw whose fitted term set differs from the point fit is dropped.
