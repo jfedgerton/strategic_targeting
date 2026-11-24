@@ -8,6 +8,11 @@ suppressPackageStartupMessages(library(survival))
 .edge_cache <- new.env()
 s2_spec_edges <- function(arm, spec_id, edges_dir) {
   p <- strsplit(spec_id, "|", fixed = TRUE)[[1]]
+  if (startsWith(p[1], "G")) {   # grid measures (R/lib/grid.R, PI 2026-11-24): edges rebuilt from grid_layers.rds by the same function as the positions
+    f <- file.path(edges_dir, "grid_layers.rds"); if (is.null(.edge_cache[[f]])) { if (!file.exists(f)) stop("missing edge file ", basename(f)); g <- readRDS(f); setDT(g); setorder(g, year, ccode1, ccode2); .edge_cache[[f]] <- g }
+    if (!exists("grid_edges", mode = "function")) source("R/lib/grid.R")
+    return(grid_edges(.edge_cache[[f]], spec_id))
+  }
   if (startsWith(p[1], "BOOKc12_") || startsWith(p[1], "BOOKraw_")) {   # book measures (R/book_measure_c12.R weighted; R/book_measure_raw.R unweighted = main, PI 2026-11-24): edges stored per spec
     f <- file.path(edges_dir, if (startsWith(p[1], "BOOKraw_")) "edges_book_raw.rds" else "edges_book_c12.rds"); if (is.null(.edge_cache[[f]])) { if (!file.exists(f)) stop("missing edge file ", basename(f)); .edge_cache[[f]] <- readRDS(f) }
     E <- .edge_cache[[f]]$edges[[spec_id]]; if (is.null(E)) stop("no book-measure edges for ", spec_id)

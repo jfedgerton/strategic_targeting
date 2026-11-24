@@ -1,0 +1,693 @@
+"number","base_treaty","name","year","entry_type","full_fta","standards","investments","services","procurement","competition","iprs","depth_index","depth_rasch","flexrigid","flexescape","enforce","enforce01"
+"1",1,"Afghanistan India",2003,"base_treaty",0,1,0,0,0,0,0,1,-0.802056364419869,3,0,2,2
+"10",10,"Albania Kosovo",2003,"base_treaty",1,1,1,0,0,0,1,4,0.817093567530365,2,4,1,1
+"100",100,"Bangkok Agreement",1975,"base_treaty",0,1,0,0,0,0,0,1,-1.50138719903385,0,4,0,0
+"1016a",810,"Andean Countries UK (consolidated)",2019,"consolidated",1,1,1,1,1,1,1,7,1.86727967188918,5,4,8,4.25
+"1017a",815,"Korea UK (consolidated)",2019,"consolidated",1,1,1,1,1,1,1,7,2.01206541825322,6,4,8,4.25
+"1019a",799,"Central America UK (consolidated)",2019,"consolidated",1,1,1,0,1,1,1,6,1.73673574389149,6,4,8,4.25
+"1020a",202,"Chile UK (consolidated)",2019,"consolidated",1,1,1,1,1,1,1,7,1.50307591678018,4,4,8,4.25
+"1021a",307,"Faroe Islands UK (consolidated)",2019,"consolidated",1,1,0,0,0,0,0,2,-0.422894455343379,1,4,0,0
+"1024a",316,"Israel UK (consolidated)",2019,"consolidated",1,1,0,1,1,1,0,5,0.644249863074381,2,4,7,4.5
+"1025a",318,"Jordan UK (consolidated)",2019,"consolidated",1,1,1,0,0,1,0,4,0.925717038076248,1,3,7,4.5
+"1027a",323,"Lebanon UK (consolidated)",2019,"consolidated",1,1,0,1,0,1,0,4,0.582967107707455,3,4,7,4.5
+"1028a",350,"Liechtenstein UK (consolidated)",2019,"consolidated",1,1,0,0,0,0,0,2,-0.422894455343379,1,4,0,0
+"1029a",334,"Morocco UK (consolidated)",2019,"consolidated",1,1,1,0,0,1,0,4,0.817093567530592,3,4,5,4
+"1032a",350,"Switzerland UK (consolidated)",2019,"consolidated",1,1,0,0,0,0,0,2,-0.422894455343379,1,4,0,0
+"1033a",354,"Tunisia UK (consolidated)",2019,"consolidated",1,1,0,1,0,1,0,4,0.703520501239283,3,4,5,3
+"1038a",562,"Brazil Paraguay (consolidated)",2020,"consolidated",1,1,0,0,0,0,0,2,-0.802056364419843,0,1,0,0
+"1045a",908,"Colombia Mexico (consolidated)",2011,"consolidated",1,1,1,1,1,0,1,6,1.67546433988389,7,4,8,4.25
+"1050a",304,"Egypt UK (consolidated)",2019,"consolidated",1,1,1,1,0,1,0,5,0.871911264423073,3,4,7,4.5
+"1054a",328,"Macedonia UK (consolidated)",2020,"consolidated",1,1,1,1,1,0,1,6,1.13467000045887,4,4,0,0
+"1055a",874,"Singapore UK (consolidated)",2020,"consolidated",1,1,1,1,1,1,1,7,2.09161922279047,6,4,7,4
+"1057a",877,"UK Vietnam (consolidated)",2020,"consolidated",1,1,1,1,1,1,1,7,2.01206541825322,6,4,7,4
+"1059a",848,"Canada UK (consolidated)",2020,"consolidated",1,1,1,1,1,1,1,7,1.80052069310476,3,4,7,4
+"1060a",330,"Mexico UK (consolidated)",2020,"consolidated",1,1,0,0,1,1,0,4,0.817093567530457,2,4,9,4.75
+"1068a",419,"El Salvador Panama (consolidated)",1976,"consolidated",0,0,0,0,0,1,0,1,-0.592425270600578,0,0,3,2.5
+"1069a",419,"El Salvador Panama Protocol (consolidated)",1986,"consolidated",0,0,0,0,0,1,0,1,-0.592425270600578,0,0,3,2.5
+"1071a",630,"Namibia Zimbabwe (consolidated)",2009,"consolidated",0,0,0,0,0,0,0,0,-1.50138719903385,0,3,0,0
+"109",109,"Belarus Russia (Union State)",1999,"base_treaty",1,0,0,0,0,0,0,1,-0.592425270171497,0,0,3,2
+"11",11,"Albania Macedonia",2002,"base_treaty",1,1,1,0,0,0,1,4,0.817093567530489,2,4,0,0
+"112",112,"Belarus Serbia",2009,"base_treaty",1,1,0,0,0,0,0,2,-0.0449417794522096,3,4,0,0
+"114",114,"Belarus Ukraine",1992,"base_treaty",1,0,0,0,0,0,0,1,-0.802056364419869,0,4,0,0
+"115",115,"Belize Guatemala",2006,"base_treaty",0,1,1,0,0,0,0,2,0.519188620155443,4,4,8,4.75
+"116",116,"Bhutan India",2006,"base_treaty",1,0,0,0,0,0,0,1,-1.50138719903385,0,0,0,0
+"117",117,"Bhutan India",1972,"base_treaty",1,0,0,0,0,0,0,1,-1.50138719903385,0,1,0,0
+"119",119,"Bolivia Chile",1993,"base_treaty",0,1,1,0,0,1,0,3,0.871911264423164,2,4,5,4
+"12",12,"Albania Moldova",2003,"base_treaty",1,1,1,0,0,0,1,4,0.817093567530348,2,4,1,1
+"121",121,"Bolivia Cuba",2000,"base_treaty",0,1,1,0,0,0,0,2,0.452592044785702,4,3,5,4
+"123",123,"Bolivia MERCOSUR",1996,"base_treaty",1,1,1,0,0,1,0,4,0.382661686392358,5,2,5,4
+"124",124,"Bolivia Mexico",1994,"base_treaty",1,1,1,1,1,0,1,6,1.55894889089537,5,4,8,4.25
+"125",125,"Bolivia Paraguay",1994,"base_treaty",0,1,1,0,0,1,0,3,-0.0449417794522201,2,2,0,0
+"126",126,"Bolivia Uruguay",1991,"base_treaty",0,0,0,0,0,0,0,0,-1.07997146489977,0,1,0,0
+"128",128,"Bosnia and Herzegovina Bulgaria",2003,"base_treaty",1,1,1,0,0,0,1,4,0.703520501239305,2,4,0,0
+"129",129,"Bosnia and Herzegovina Croatia",2000,"base_treaty",1,1,0,0,0,0,1,3,0.70352050123931,2,4,0,0
+"13",13,"Albania Romania",2003,"base_treaty",1,1,1,0,0,0,0,3,0.582921595669913,2,4,0,0
+"130",130,"Bosnia and Herzegovina EC SAA",2008,"base_treaty",1,1,0,0,1,0,1,4,1.03108522691554,5,4,8,4.5
+"131",131,"Bosnia and Herzegovina Macedonia",2002,"base_treaty",1,1,0,0,0,0,1,3,0.582967107707498,2,4,0,0
+"132",132,"Bosnia and Herzegovina Moldova",2002,"base_treaty",1,1,0,0,0,0,0,2,0.308776851924378,2,4,0,0
+"133",133,"Bosnia and Herzegovina Romania",2003,"base_treaty",1,1,1,0,0,0,0,3,0.519188620155436,3,4,0,0
+"134",134,"Bosnia and Herzegovina Serbia and Montenegro",2002,"base_treaty",1,1,0,0,0,0,1,3,0.871911264423163,3,4,0,0
+"135",135,"Bosnia and Herzegovina Slovenia",2001,"base_treaty",1,1,0,0,0,0,1,3,0.761044193146697,2,4,0,0
+"136",136,"Bosnia and Herzegovina Turkey",2002,"base_treaty",1,1,0,0,0,0,0,2,0.582921595669913,3,4,0,0
+"138",138,"Brazil Cuba",1989,"base_treaty",0,0,0,0,0,0,0,0,-1.50138719903385,1,1,0,0
+"139",139,"Brazil Cuba",1999,"base_treaty",0,0,0,0,0,0,0,0,-1.50138719903385,1,2,0,0
+"14",14,"Albania Serbia",2003,"base_treaty",1,1,1,0,0,0,1,4,0.871911264423106,2,4,1,1
+"140",140,"Brazil Guyana",2001,"base_treaty",0,0,0,0,0,0,0,0,-1.50138719903385,1,1,0,0
+"141",141,"Brazil Mexico",2002,"base_treaty",0,1,0,0,0,0,0,1,-0.0449417794521965,4,4,0,0
+"142",142,"Brazil Peru",1993,"base_treaty",0,1,1,0,0,1,0,3,0.0547489422164535,2,2,0,0
+"143",143,"Brazil Suriname",2005,"base_treaty",0,0,0,0,0,0,0,0,-1.50138719903385,0,0,0,0
+"144",144,"Brazil Uruguay",1986,"base_treaty",0,0,0,0,0,0,0,0,-1.50138719903385,0,2,0,0
+"146",146,"Brunei Japan",2007,"base_treaty",1,1,1,1,0,0,0,4,0.925717038076253,4,4,8,4.25
+"148",148,"Bulgaria EC",1993,"base_treaty",1,1,1,1,1,1,0,6,1.39479614697676,3,4,5,3.5
+"149",149,"Bulgaria EFTA",1993,"base_treaty",1,1,0,0,0,0,1,3,0.644249863074403,2,4,7,4.5
+"15",15,"Albania Turkey",2006,"base_treaty",1,1,1,0,0,0,1,4,0.761044193146566,3,4,0,0
+"150",150,"Bulgaria Estonia",2001,"base_treaty",1,1,1,0,0,0,1,4,0.644249863074403,2,4,0,0
+"151",151,"Bulgaria Finland",1974,"base_treaty",1,0,0,0,0,0,0,1,-1.07997146489979,0,2,0,0
+"152",152,"Bulgaria Israel",2001,"base_treaty",1,1,0,0,0,0,0,2,0.230177781370832,2,4,7,4.5
+"153",153,"Bulgaria Latvia",2002,"base_treaty",1,1,0,0,0,0,1,3,0.382661686392358,2,4,0,0
+"154",154,"Bulgaria Lithuania",2001,"base_treaty",1,1,0,0,0,0,0,2,0.308776851924346,2,4,0,0
+"155",155,"Bulgaria Macedonia",1999,"base_treaty",1,1,0,0,0,0,1,3,0.45259204478572,2,4,0,0
+"156",156,"Bulgaria Moldova",2004,"base_treaty",1,1,0,0,0,0,0,2,0.519188620155544,2,4,0,0
+"157",157,"Bulgaria Serbia",2003,"base_treaty",1,1,1,0,0,0,0,3,0.703520501239413,2,4,0,0
+"158",158,"Bulgaria Slovakia",1995,"base_treaty",1,1,0,0,0,0,0,2,0.230177781370804,3,3,0,0
+"159",159,"Bulgaria Slovenia",1996,"base_treaty",1,1,0,0,0,0,0,2,0.308776851924378,1,3,0,0
+"16",16,"Algeria EC",1976,"base_treaty",0,0,0,0,0,0,0,0,-0.422894454554469,2,4,0,0
+"160",160,"Bulgaria Turkey",1998,"base_treaty",1,1,1,0,0,0,1,4,0.38266168639241,2,4,0,0
+"161",161,"Canada Chile",1996,"base_treaty",1,1,1,1,0,1,1,6,1.28968679510924,2,3,8,4.25
+"162",162,"Canada Colombia",2008,"base_treaty",1,1,1,1,1,1,0,6,1.55894889089536,6,4,8,4.25
+"163",163,"Canada Costa Rica",2001,"base_treaty",1,1,1,0,0,1,0,4,0.644249863074403,7,4,7,4
+"164",164,"Canada EFTA",2008,"base_treaty",1,1,1,0,0,1,0,4,0.582967107707412,6,3,7,4
+"165",165,"Canada Israel",1996,"base_treaty",1,1,0,0,0,1,0,3,0.3826616863925,3,4,6,3.25
+"166",166,"Canada Jordan",2009,"base_treaty",1,0,1,0,0,0,0,2,-0.42289445468597,6,3,7,4
+"167",167,"Canada New Zealand",1981,"base_treaty",0,0,0,0,0,0,0,0,-0.42289445468593,3,2,0,0
+"168",168,"Canada Peru",2008,"base_treaty",1,1,1,1,1,1,0,6,1.61631403452152,7,3,8,4.25
+"169",169,"Canada US",1988,"base_treaty",1,0,1,1,0,0,0,3,0.582967107707427,5,2,7,4
+"17",17,"Algeria EC Euro-Med Association Agreement",2002,"base_treaty",1,1,1,1,0,1,0,5,1.13467000045887,3,4,4,2.5
+"171",171,"Caribbean Community (CARICOM)",1973,"base_treaty",1,0,1,0,0,0,0,2,-0.155378408994142,0,2,5,3.75
+"172",172,"Caribbean Community (CARICOM) Colombia",1994,"base_treaty",0,1,0,0,0,0,0,1,-0.802056364419932,3,4,0,0
+"173",173,"Caribbean Community (CARICOM) Costa Rica",2004,"base_treaty",0,1,1,0,0,1,0,3,0.817093567530444,3,4,9,5.25
+"174",174,"Caribbean Community (CARICOM) Cuba",2000,"base_treaty",0,1,0,1,0,0,0,2,0.054748942216443,4,3,0,0
+"175",175,"Caribbean Community (CARICOM) Dominican Republic",1998,"base_treaty",0,1,1,1,0,0,1,4,1.03108522691523,0,0,0,0
+"176a",171,"Caribbean Community (CARICOM) (consolidated)",1997,"consolidated",1,0,1,1,0,0,0,3,-0.0449417794522047,0,2,5,3.75
+"177",177,"Caribbean Community (CARICOM) revised",2001,"base_treaty",1,1,1,1,0,1,0,5,0.644249863383642,1,4,7,4.25
+"178",178,"Caribbean Community (CARICOM) Venezuela",1992,"base_treaty",0,1,0,0,0,0,0,1,-0.592425270153517,3,4,0,0
+"179",179,"Caribbean Free Trade Association (CARIFTA)",1965,"base_treaty",1,0,0,0,0,0,0,1,-0.279783415258753,2,4,0,0
+"18",18,"Algeria Jordan",1997,"base_treaty",1,0,0,0,0,0,0,1,-1.07997146489979,0,1,0,0
+"180",180,"Caribbean Free Trade Association (CARIFTA)",1968,"base_treaty",1,0,0,0,0,0,0,1,-0.155378408994142,2,4,0,0
+"181",181,"CARIFORUM EC EPA",2008,"base_treaty",1,1,1,1,1,1,1,7,1.55894889089528,6,4,8,4.5
+"182",182,"Central African Customs and Economic Union (UDEAC)",1964,"base_treaty",1,0,0,0,0,0,0,1,-1.07997146489977,0,1,0,0
+"183",183,"Central America Chile",1999,"base_treaty",0,1,1,1,1,1,1,6,1.44842221080411,3,4,8,4.25
+"184",184,"Central America Dominican Republic",1998,"base_treaty",1,1,1,1,1,1,1,7,1.50307591678017,4,4,9,5.25
+"185",185,"Central America Panama",2002,"base_treaty",1,1,1,1,1,1,1,7,1.34194508042843,4,4,8,4.25
+"186",186,"Central American Common Market (CACM)",1960,"base_treaty",1,0,0,0,0,0,0,1,-1.50138719903385,0,2,4,3
+"187",187,"Central American Free Trade Agreement (CAFTA)",2004,"base_treaty",1,1,1,1,1,0,1,6,1.67546433905001,4,4,9,4.5
+"188",188,"Central American Free Trade Agreement (CAFTA) Dominican Republic",2004,"base_treaty",1,1,1,1,1,0,1,6,1.73673574382436,4,4,9,4.5
+"189",189,"Central American Free Trade Area (CAFTA)",1958,"base_treaty",1,0,1,0,0,0,0,2,-0.422894454521624,1,3,5,4
+"19",19,"Algeria Morocco",1989,"base_treaty",1,0,0,0,0,0,0,1,-1.50138719903385,0,0,0,0
+"190",190,"Central American Integration System",1991,"base_treaty",0,0,0,0,0,0,0,0,-1.50138719903385,0,0,3,2
+"192",192,"Central European Free Trade Agreement (CEFTA)",1992,"base_treaty",1,1,0,0,0,0,0,2,-0.155378408994089,2,4,4,2.5
+"193a",192,"Central European Free Trade Agreement (CEFTA) (consolidated)",2006,"consolidated",1,1,1,0,0,1,0,4,0.761044193146797,2,4,4,2.5
+"199",199,"Chile China",2005,"base_treaty",1,1,1,1,0,0,1,5,1.08304544643614,3,4,8,4.25
+"2",2,"African Common Market",1962,"base_treaty",1,0,0,0,0,0,0,1,-1.50138719903385,0,0,0,0
+"20",20,"Algeria Tunisia",2008,"base_treaty",0,1,0,0,0,1,0,2,-0.279783415188362,3,4,0,0
+"200",200,"Chile Colombia",1993,"base_treaty",0,1,1,0,0,0,0,2,0.582967107707468,3,4,6,3.5
+"201",201,"Chile Colombia",2006,"base_treaty",1,1,1,1,1,0,0,5,1.23783754700797,6,4,8,4.25
+"202",202,"Chile EC",2002,"base_treaty",1,1,1,1,1,1,1,7,1.50307591678018,4,4,8,4.25
+"203",203,"Chile Ecuador",1994,"base_treaty",0,1,1,0,0,0,0,2,0.382661686392447,2,3,7,4.5
+"204",204,"Chile Ecuador",2008,"base_treaty",0,1,1,0,0,0,0,2,0.230177781370862,4,4,9,5.25
+"205",205,"Chile EFTA",2003,"base_treaty",1,1,1,1,1,1,1,7,1.39479614697661,3,3,6,3.25
+"206",206,"Chile India",2006,"base_treaty",0,1,0,0,0,0,0,1,-0.0449417794521965,4,3,9,5.25
+"207",207,"Chile Japan",2007,"base_treaty",1,1,1,1,1,1,1,7,1.44842221080423,4,4,8,4.25
+"208",208,"Chile Korea",2003,"base_treaty",1,1,1,1,1,1,1,7,1.67546433988393,4,3,8,4.25
+"209",209,"Chile MERCOSUR",1996,"base_treaty",1,1,1,1,0,1,0,5,0.519188620155498,1,2,4,3
+"210a",209,"Chile MERCOSUR (consolidated)",2009,"consolidated",1,1,1,1,0,1,0,5,0.644249863457883,1,3,4,3
+"211",211,"Chile Mexico",1991,"base_treaty",0,1,1,1,0,0,0,3,0.0547489422164197,1,1,0,0
+"212",212,"Chile Mexico",1998,"base_treaty",1,1,1,1,0,1,1,6,1.67546433905016,1,3,8,4.25
+"213",213,"Chile Panama",2006,"base_treaty",1,1,1,1,0,0,1,5,0.519188620155443,3,4,8,4.25
+"215",215,"Chile Peru",1998,"base_treaty",1,1,1,0,0,0,0,3,0.382661686392463,3,2,7,4
+"216",216,"Chile Turkey",2009,"base_treaty",1,1,0,0,0,0,1,3,0.145911621483895,3,4,9,5.25
+"217",217,"Chile Uruguay",1985,"base_treaty",0,0,0,0,0,0,0,0,-1.07997146489979,1,1,0,0
+"218",218,"Chile US",2003,"base_treaty",1,1,1,1,1,1,1,7,1.67546433905011,4,3,9,4.5
+"219",219,"Chile Venezuela",1993,"base_treaty",0,1,1,0,0,0,0,2,0.0547489422163677,3,4,7,4.5
+"22",22,"Andean Countries Brazil",1999,"base_treaty",0,1,0,0,0,0,0,1,-0.422894455343427,3,3,6,4.25
+"220",220,"China Hong Kong",2003,"base_treaty",1,0,1,1,0,0,0,3,0.761044193146532,1,2,0,0
+"221",221,"China Macao",2003,"base_treaty",1,0,1,1,0,0,0,3,0.644249863383642,1,2,0,0
+"222",222,"China New Zealand",2008,"base_treaty",1,1,1,1,0,0,0,4,1.18622197082444,4,4,8,4.25
+"224",224,"China Pakistan",2006,"base_treaty",1,1,1,0,0,0,1,4,0.519188620155569,4,3,8,4.25
+"225a",224,"China Pakistan (consolidated)",2009,"consolidated",1,1,1,1,0,0,1,5,0.925717038076171,4,4,8,4.25
+"227",227,"China Peru",2009,"base_treaty",1,1,1,1,0,0,1,5,1.34194508042845,4,4,8,4.25
+"228",228,"China Singapore",2008,"base_treaty",1,1,1,1,0,0,0,4,1.03108522691534,5,4,8,4.25
+"230",230,"Colombia Costa Rica",1984,"base_treaty",0,0,0,0,0,0,0,0,-1.50138719903385,0,1,0,0
+"233",233,"Colombia Cuba",2000,"base_treaty",0,1,1,0,0,0,0,2,-0.155378408994141,4,3,0,0
+"234",234,"Colombia EFTA",2008,"base_treaty",1,1,1,1,1,1,1,7,1.80052069310486,5,4,8,4.25
+"235",235,"Colombia El Salvador",1984,"base_treaty",0,0,0,0,0,0,0,0,-1.50138719903385,0,1,0,0
+"236",236,"Colombia Guatemala",1984,"base_treaty",0,0,0,0,0,0,0,0,-1.50138719903385,0,1,0,0
+"237",237,"Colombia Honduras",1984,"base_treaty",0,0,0,0,0,0,0,0,-1.50138719903385,0,1,0,0
+"238",238,"Colombia Nicaragua",1984,"base_treaty",0,0,0,0,0,0,0,0,-1.50138719903385,0,1,0,0
+"239",239,"Colombia Northern Triangle",2007,"base_treaty",0,1,1,1,1,0,0,4,1.39479614697657,4,4,8,4.25
+"23a",27,"Andean Community (consolidated)",1996,"consolidated",1,1,0,0,0,0,0,2,-1.07997146489983,0,1,6,3
+"24",24,"Andean Countries Argentina",2000,"base_treaty",0,1,0,0,0,0,0,1,-0.044941779452149,3,3,3,2.25
+"240",240,"Colombia Panama",1993,"base_treaty",0,1,0,0,0,0,0,1,-0.592425270600548,4,3,0,0
+"241",241,"Colombia US",2006,"base_treaty",1,1,1,1,1,1,1,7,1.93756827683203,4,3,9,4.5
+"242",242,"Common Economic Zone",2003,"base_treaty",1,1,0,1,0,0,0,3,-0.279783415441008,1,0,0,0
+"243",243,"Common Market for Eastern and Southern Africa (COMESA)",1993,"base_treaty",1,1,1,0,0,0,0,3,0.45259204478572,1,4,3,2
+"244",244,"Commonwealth of Independent States (CIS)",1994,"base_treaty",1,1,0,0,0,0,0,2,-0.592425270171445,0,3,3,2
+"247",247,"Costa Rica Mexico",1982,"base_treaty",0,0,0,0,0,0,0,0,-1.50138719903385,0,1,0,0
+"248",248,"Costa Rica Mexico",1994,"base_treaty",1,1,1,1,1,0,1,6,1.44842221080097,3,4,9,5.25
+"249",249,"Costa Rica Nicaragua Panama",1961,"base_treaty",0,0,0,0,0,0,0,0,-1.07997146489989,0,0,0,0
+"25",25,"Andean Countries MERCOSUR",2004,"base_treaty",0,0,1,0,0,1,0,2,0.0547489422164785,3,3,5,4
+"250a",249,"Costa Rica Panama (consolidated)",1973,"consolidated",0,0,0,0,0,0,0,0,-0.592425270600566,0,2,3,3
+"251",251,"Costa Rica Venezuela",1986,"base_treaty",0,0,0,0,0,0,0,0,-1.50138719903385,0,2,0,0
+"252",252,"Cote d'Ivoire EC EPA",2008,"base_treaty",1,1,1,0,0,0,0,3,0.230177781370818,3,3,7,4
+"253",253,"Cotonou Agreement",2000,"base_treaty",0,1,1,0,0,0,0,2,0.978712347450844,0,1,5,4
+"254",254,"Croatia EC",2001,"base_treaty",0,1,1,1,1,1,1,6,1.34194508042857,4,4,0,0
+"255",255,"Croatia EFTA",2001,"base_treaty",1,1,1,1,0,0,1,5,0.70352050123923,3,3,7,4.5
+"257",257,"Croatia Lithuania",2002,"base_treaty",1,1,1,0,0,0,0,3,0.382661686392446,2,4,0,0
+"258",258,"Croatia Macedonia",1997,"base_treaty",1,1,0,0,0,0,1,3,0.382661686392339,2,4,0,0
+"259",259,"Croatia Macedonia",2002,"base_treaty",1,1,0,0,0,0,1,3,0.308776851924378,2,4,0,0
+"26",26,"Andean Group Cartagena Agreement",1969,"base_treaty",1,0,1,0,0,1,0,3,-0.279783415258722,0,3,3,2.25
+"260",260,"Croatia Moldova",2004,"base_treaty",1,1,0,0,0,0,0,2,0.452592044785724,2,4,0,0
+"261",261,"Croatia Serbia and Montenegro",2004,"base_treaty",1,1,1,0,0,0,0,3,0.14591162148388,2,4,0,0
+"262",262,"Croatia Slovenia",1997,"base_treaty",1,1,0,0,0,0,0,2,0.582967107707356,2,4,5,3.5
+"263",263,"Croatia Turkey",2002,"base_treaty",1,1,1,0,1,0,0,4,0.582967107707427,2,4,0,0
+"265",265,"Cuba Ecuador",2000,"base_treaty",0,1,1,0,0,0,0,2,-0.0449417794521655,4,3,0,0
+"266",266,"Cuba Guatemala",1999,"base_treaty",0,1,1,0,0,0,0,2,-0.279783415013857,3,3,5,3.5
+"267",267,"Cuba MERCOSUR",2006,"base_treaty",0,1,0,0,0,0,0,1,-0.155378408994165,4,3,6,4.5
+"268",268,"Cuba Mexico",1985,"base_treaty",0,0,0,0,0,0,0,0,-1.50138719903385,0,1,0,0
+"269a",268,"Cuba Mexico (consolidated)",2000,"consolidated",0,0,0,0,0,0,0,0,-1.50138719903385,0,1,0,0
+"270",270,"Cuba Paraguay",2000,"base_treaty",0,1,0,0,0,0,0,1,0.0547489422164785,4,3,0,0
+"273",273,"Cuba Peru",2000,"base_treaty",0,1,1,0,0,0,0,2,-0.155378408994112,4,3,0,0
+"275",275,"Cuba Uruguay",1999,"base_treaty",0,0,0,0,0,0,0,0,-1.50138719903385,0,1,0,0
+"277",277,"Cuba Venezuela",1999,"base_treaty",0,1,1,0,0,0,1,3,-0.155378408994112,4,3,2,2
+"278",278,"Cyprus EC",1972,"base_treaty",1,1,0,0,0,0,0,2,-0.592425270242962,2,2,0,0
+"279",279,"Czech and Slovak Republic EFTA",1992,"base_treaty",1,1,1,0,0,0,1,4,0.3826616863925,2,4,0,0
+"27a",26,"Andean Group (consolidated)",1987,"consolidated",1,1,1,0,0,1,0,4,-0.15537840899408,0,3,3,2.25
+"28",28,"Andorra EC",1990,"base_treaty",1,0,0,0,0,0,0,1,-1.50138719903385,0,0,5,4
+"280",280,"Czech Republic EC",1991,"base_treaty",1,1,1,1,0,1,0,5,0.978712347450818,3,4,5,4
+"282",282,"Czech Republic Estonia",1996,"base_treaty",1,1,0,0,0,0,0,2,0.452592044785697,2,4,1,1
+"283",283,"Czech Republic Israel",1996,"base_treaty",1,1,0,0,0,0,0,2,0.230177781370895,2,4,7,4.5
+"284",284,"Czech Republic Latvia",1996,"base_treaty",1,1,0,0,0,0,0,2,0.382661686392463,2,4,1,1
+"285",285,"Czech Republic Lithuania",1995,"base_treaty",1,1,0,0,0,0,0,2,0.0547489422163762,2,4,1,1
+"287",287,"Czech Republic Slovakia",1992,"base_treaty",1,1,0,1,1,1,1,6,0.308776851924358,1,3,7,4.5
+"288",288,"Czech Republic Slovenia",1993,"base_treaty",1,1,0,0,0,0,0,2,0.145911621483915,2,4,0,0
+"289",289,"Czech Republic Turkey",1997,"base_treaty",1,1,0,0,0,0,0,2,0.14591162148389,2,4,0,0
+"29",29,"Arab Common Market",1962,"base_treaty",1,0,0,0,0,0,0,1,-1.50138719903385,0,0,0,0
+"290",290,"Czechoslovakia Finland",1974,"base_treaty",1,0,0,0,0,0,0,1,-1.07997146489979,0,2,0,0
+"291",291,"D8 PTA",2006,"base_treaty",0,1,0,0,0,0,0,1,-0.422894455343304,0,4,3,3
+"292",292,"Dominican Republic Panama",1985,"base_treaty",0,0,0,0,0,0,0,0,-1.50138719903385,1,3,4,2.5
+"293",293,"EC",1957,"base_treaty",1,1,0,1,0,1,0,4,0.38266168639241,1,3,3,2
+"3",3,"African Economic Community",1991,"base_treaty",1,1,0,0,0,0,0,2,-1.07997146489977,0,2,3,2
+"30",30,"Arab Maghreb Union",1989,"base_treaty",0,0,0,1,0,0,0,1,-1.07997146489977,0,0,3,2
+"300",300,"EC Amsterdam",1997,"base_treaty",1,1,1,1,0,1,0,5,0.817093567530479,1,1,3,2
+"302",302,"EC Egypt",1977,"base_treaty",0,1,0,0,0,0,0,1,-0.802056364419869,2,4,0,0
+"303",303,"EC Egypt Agreement",1972,"base_treaty",0,0,0,0,0,0,0,0,-0.592425270242962,2,4,0,0
+"304",304,"EC Egypt Euro-Med Association Agreement",2001,"base_treaty",1,1,1,1,0,1,0,5,0.871911264423073,3,4,7,4.5
+"305",305,"EC Estonia",1993,"base_treaty",1,1,0,0,0,1,0,3,0.145911621483916,3,4,5,4
+"306",306,"EC Estonia Europe Agreement",1995,"base_treaty",1,1,1,1,0,1,1,6,1.34194508042848,3,4,5,4
+"307",307,"EC Faroe Islands",1996,"base_treaty",1,1,0,0,0,0,0,2,-0.422894455343379,1,4,0,0
+"308",308,"EC Faroe Islands",1991,"base_treaty",1,1,0,0,0,0,0,2,-0.422894455343379,1,4,0,0
+"309",309,"EC Finland",1972,"base_treaty",1,0,0,0,0,0,0,1,-0.422894455343379,1,4,0,0
+"310a",311,"EC Greece Association Agreement (consolidated)",1975,"consolidated",1,1,0,0,0,1,0,3,-0.0449417794522047,2,4,4,3
+"311",311,"EC Greece Association Agreement",1961,"base_treaty",1,0,0,0,0,1,0,2,-0.279783415309353,1,4,4,3
+"312",312,"EC Hungary",1991,"base_treaty",1,1,1,1,1,1,0,6,1.08304544643578,3,4,7,4.5
+"313",313,"EC Iceland",1972,"base_treaty",1,1,0,0,0,0,0,2,-0.422894455343379,1,4,0,0
+"314",314,"EC Israel",1970,"base_treaty",0,0,0,0,0,0,0,0,-0.592425270242962,2,4,0,0
+"315",315,"EC Israel",1975,"base_treaty",1,0,0,0,0,0,0,1,-0.422894455343379,1,2,0,0
+"316",316,"EC Israel Euro-Med Association Agreement",1995,"base_treaty",1,1,0,1,1,1,0,5,0.644249863074381,2,4,7,4.5
+"317",317,"EC Jordan",1977,"base_treaty",0,0,0,0,0,0,0,0,-0.802056364419869,4,4,0,0
+"318",318,"EC Jordan Euro-Med Association Agreement",1997,"base_treaty",1,1,1,0,0,1,0,4,0.925717038076248,1,3,7,4.5
+"319",319,"EC Latvia",1994,"base_treaty",1,1,0,0,0,1,0,3,0.0547489422164994,3,4,7,4.5
+"32",32,"Argentina Brazil",1986,"base_treaty",0,0,0,0,1,0,0,1,-0.80205636441997,0,0,0,0
+"320",320,"EC Latvia Europe Agreement",1995,"base_treaty",1,1,1,1,1,1,0,6,1.1346699932136,3,4,5,4
+"321",321,"EC Lebanon",1972,"base_treaty",0,0,0,0,0,0,0,0,-1.50138719903385,1,2,0,0
+"322",322,"EC Lebanon",1977,"base_treaty",0,0,0,0,0,0,0,0,-0.802056364419869,2,4,0,0
+"323",323,"EC Lebanon Euro-Med Association Agreement",2002,"base_treaty",1,1,0,1,0,1,0,4,0.582967107707455,3,4,7,4.5
+"324",324,"EC Lisbon",2007,"base_treaty",1,1,1,1,0,1,0,5,0.871911264423134,1,0,3,2
+"325",325,"EC Lithuania",1994,"base_treaty",1,1,0,0,0,1,0,3,-0.0449417794521147,3,4,7,4.5
+"326",326,"EC Lithuania Europe Agreement",1995,"base_treaty",1,1,1,1,1,1,1,7,1.44842221080347,1,1,5,4
+"327",327,"EC Maastricht",1992,"base_treaty",1,1,1,1,0,1,0,5,0.817093567530479,1,0,3,2
+"328",328,"EC Macedonia SAA",2001,"base_treaty",1,1,1,1,1,0,1,6,1.13467000045887,4,4,0,0
+"329",329,"EC Malta",1970,"base_treaty",1,0,0,0,0,0,0,1,-0.802056364419869,2,3,0,0
+"33",33,"Argentina Brazil",1988,"base_treaty",0,0,0,0,0,0,0,0,-0.802056364419843,0,0,0,0
+"330",330,"EC Mexico",2000,"base_treaty",1,1,0,0,1,1,0,4,0.817093567530457,2,4,9,4.75
+"331",331,"EC Montenegro SAA",2007,"base_treaty",1,1,1,1,1,0,1,6,1.34194508042844,5,4,8,5
+"332",332,"EC Morocco",1976,"base_treaty",0,0,0,0,0,0,0,0,-1.07997146489979,0,1,0,0
+"333",333,"EC Morocco Association Agreement",1969,"base_treaty",0,0,0,0,0,0,0,0,-1.07997146489979,0,2,0,0
+"334",334,"EC Morocco Euro-Med Association Agreement",1996,"base_treaty",1,1,1,0,0,1,0,4,0.817093567530592,3,4,5,4
+"335",335,"EC Nice",2001,"base_treaty",1,1,1,1,0,1,0,5,0.817093567530479,1,0,3,2
+"336",336,"EC Norway",1973,"base_treaty",1,1,0,0,0,1,0,3,-0.279783415258631,1,4,0,0
+"337",337,"EC Poland",1991,"base_treaty",1,1,1,1,1,1,0,6,1.08304544643586,3,4,5,4
+"338",338,"EC Portugal",1972,"base_treaty",1,0,0,0,0,0,0,1,-0.422894455343379,1,4,0,0
+"339a",338,"EC Portugal (consolidated)",1976,"consolidated",1,0,0,0,0,0,0,1,-0.422894455343379,1,4,0,0
+"34",34,"Argentina Brazil",1990,"base_treaty",0,0,0,0,0,0,0,0,-1.50138719903385,1,2,0,0
+"340",340,"EC Romania",1993,"base_treaty",1,1,1,1,1,1,1,7,1.1862219744103,3,4,5,4
+"341",341,"EC San Marino",1991,"base_treaty",1,0,0,0,0,0,0,1,-1.07997146489977,0,1,5,4
+"342",342,"EC Serbia SAA",2008,"base_treaty",1,1,1,1,1,1,1,7,1.39479614697662,4,4,8,5
+"343a",293,"EC (consolidated)",1986,"consolidated",1,1,0,1,0,1,0,4,0.38266168639241,1,3,3,2
+"344",344,"EC Slovakia",1993,"base_treaty",1,1,1,1,1,1,0,6,1.18622197082454,3,4,5,4
+"345",345,"EC Slovenia",1993,"base_treaty",0,0,0,0,0,0,0,0,-1.07997146489974,3,4,5,3.5
+"346",346,"EC Slovenia Europe Agreement",1996,"base_treaty",1,1,1,1,0,1,1,6,1.03108522691512,2,4,5,4
+"347",347,"EC South Africa",1999,"base_treaty",1,1,0,0,0,1,0,3,1.03108522691534,5,4,5,4
+"348",348,"EC Spain",1970,"base_treaty",0,0,0,0,0,0,0,0,-0.802056364419929,2,4,0,0
+"349",349,"EC Sweden",1972,"base_treaty",1,0,0,0,0,0,0,1,-0.422894455343379,1,4,0,0
+"35",35,"Argentina Chile",1991,"base_treaty",0,1,0,0,0,1,0,2,-0.422894454528168,2,3,0,0
+"350",350,"EC Switzerland Liechtenstein",1972,"base_treaty",1,1,0,0,0,0,0,2,-0.422894455343379,1,4,0,0
+"351",351,"EC Syria",1977,"base_treaty",0,0,0,0,0,0,0,0,-0.802056364419869,2,4,0,0
+"352",352,"EC Tunisia",1976,"base_treaty",0,0,0,0,0,0,0,0,-0.802056364419929,1,2,0,0
+"353",353,"EC Tunisia Association Agreement",1969,"base_treaty",0,0,0,0,0,0,0,0,-1.50138719903385,0,2,0,0
+"354",354,"EC Tunisia Euro-Med Association Agreement",1995,"base_treaty",1,1,0,1,0,1,0,4,0.703520501239283,3,4,5,3
+"355",355,"EC Turkey",1995,"base_treaty",1,1,0,0,0,1,1,4,0.45259204478572,2,3,6,4
+"356a",357,"EC Turkey Association Agreement (Ankara Agreement) (consolidated)",1970,"consolidated",1,0,0,0,0,1,0,2,-0.592425270242916,1,4,3,3
+"357",357,"EC Turkey Association Agreement (Ankara Agreement)",1963,"base_treaty",0,0,0,0,0,0,0,0,-1.07997146489977,0,0,3,3
+"358a",356,"EC Turkey Additional Protocol (consolidated)",1973,"consolidated",1,0,0,0,0,1,0,2,-0.592425270242916,1,4,3,3
+"359",359,"EC Yugoslavia",1980,"base_treaty",1,0,0,0,0,0,0,1,-1.07997146489979,0,2,0,0
+"36",36,"Argentina Colombia",1988,"base_treaty",0,0,0,0,0,0,0,0,-1.50138719903385,0,1,0,0
+"360",360,"Economic and Monetary Community of Central Africa (CEMAC)",1994,"base_treaty",1,1,0,1,0,0,0,3,0.230177781370933,0,2,3,2
+"361",361,"Economic and Monetary Community of Central Africa (CEMAC) revised",2008,"base_treaty",1,0,0,0,0,0,0,1,-1.50138719903385,0,0,0,0
+"363",363,"Economic Community of Central African States (ECCAS-CEEAC)",1983,"base_treaty",1,0,1,1,0,0,0,3,-0.155378408994124,0,2,3,2
+"366",366,"Economic Community Of West African States (ECOWAS)",1975,"base_treaty",1,0,0,0,0,0,0,1,-0.802056364419857,0,1,0,0
+"367",367,"Economic Community Of West African States (ECOWAS)",1993,"base_treaty",1,1,0,0,0,0,0,2,-0.422894454685885,1,2,3,2
+"370",370,"Economic Cooperation Organization (ECO) Preferences",1991,"base_treaty",0,0,0,0,0,0,0,0,-1.50138719903385,0,2,0,0
+"371",371,"Economic Cooperation Organization Trade Agreement (ECOTA)",2003,"base_treaty",0,0,0,0,0,0,0,0,-0.155378408994132,0,4,0,0
+"372",372,"Ecuador Mexico",1987,"base_treaty",0,0,0,0,0,0,0,0,-1.50138719903385,1,2,0,0
+"373",373,"Ecuador Paraguay",1994,"base_treaty",0,0,0,0,0,0,0,0,-1.07997146489977,1,1,0,0
+"374",374,"Ecuador Uruguay",1994,"base_treaty",0,1,0,0,0,0,0,1,-0.592425270243007,1,3,0,0
+"375",375,"EFTA",1960,"base_treaty",1,1,0,0,0,0,0,2,-0.155378408994112,1,3,0,0
+"376",376,"EFTA Egypt",2007,"base_treaty",1,1,1,1,0,1,1,6,0.817093567530489,3,4,7,4.5
+"377",377,"EFTA Estonia",1995,"base_treaty",1,1,1,0,0,0,1,4,0.871911264423169,1,4,7,4.5
+"379",379,"EFTA Gulf Cooperation Council (GCC)",2009,"base_treaty",1,1,0,1,1,1,1,6,0.978712347450732,3,4,9,5.25
+"380",380,"EFTA Hungary",1993,"base_treaty",1,1,0,0,0,0,0,2,-0.0449417794521792,3,4,4,2.5
+"382",382,"EFTA Israel",1992,"base_treaty",1,1,1,0,0,0,1,4,0.582967107707427,1,4,6,3.5
+"383",383,"EFTA Jordan",2001,"base_treaty",1,1,1,0,0,0,1,4,0.519188620155498,2,4,7,4.5
+"384",384,"EFTA Korea",2005,"base_treaty",1,1,1,1,0,1,1,6,1.39479614697667,5,4,9,5.25
+"385",385,"EFTA Latvia",1995,"base_treaty",1,1,1,0,0,0,1,4,0.761044193146778,1,4,5,4
+"386",386,"EFTA Lebanon",2004,"base_treaty",1,1,0,0,0,0,1,3,0.644249863457869,3,4,7,4.5
+"388",388,"EFTA Lithuania",1995,"base_treaty",1,1,0,0,0,0,1,3,0.582967107707427,1,4,5,4
+"389",389,"EFTA Macedonia",2000,"base_treaty",1,1,0,0,0,0,1,3,0.644249863074381,2,4,5,4
+"39",39,"Argentina Cuba",1999,"base_treaty",0,0,0,0,0,0,0,0,-1.50138719903385,0,1,0,0
+"390",390,"EFTA Mexico",2000,"base_treaty",1,1,1,1,1,1,1,7,1.67546433905011,4,4,8,4.25
+"391",391,"EFTA Morocco",1997,"base_treaty",1,1,0,0,0,0,1,3,0.871911264423134,1,4,5,4
+"392",392,"EFTA Poland",1992,"base_treaty",1,1,0,0,0,0,1,3,0.45259204478572,2,4,0,0
+"393",393,"EFTA Romania",1992,"base_treaty",1,1,0,0,0,0,1,3,0.382661686392463,2,4,0,0
+"394",394,"EFTA Serbia",2009,"base_treaty",1,1,1,0,1,0,1,5,0.871911264423136,6,3,6,4
+"395a",375,"EFTA (consolidated)",2001,"consolidated",1,1,1,1,0,1,1,6,1.44842221080087,3,3,7,4.5
+"396",396,"EFTA Singapore",2002,"base_treaty",1,1,1,1,0,1,1,6,1.39479614697658,5,3,8,4.25
+"398",398,"EFTA Slovenia",1995,"base_treaty",1,1,1,0,0,0,1,4,0.582967107707455,1,4,5,4
+"399",399,"EFTA Southern African Customs Union (SACU)",2006,"base_treaty",1,1,1,0,0,0,1,4,0.644249863074392,3,4,7,4
+"4",4,"Agadir Agreement",2004,"base_treaty",1,1,0,0,0,0,0,2,-0.279783415098752,1,2,3,3
+"40",40,"Argentina Ecuador",1984,"base_treaty",0,0,0,0,0,0,0,0,-1.50138719903385,1,1,0,0
+"400",400,"EFTA Spain",1979,"base_treaty",1,1,0,0,0,0,0,2,-0.59242527015718,1,2,0,0
+"401",401,"EFTA Tunisia",2004,"base_treaty",1,1,1,0,0,0,1,4,0.644249863074366,3,4,5,4
+"402",402,"EFTA Turkey",1991,"base_treaty",1,1,0,0,0,0,1,3,0.30877685192441,2,4,0,0
+"404",404,"Egypt Jordan",1998,"base_treaty",1,0,0,0,0,0,0,1,-1.07997146489974,3,4,0,0
+"405",405,"Egypt Jordan",1996,"base_treaty",1,0,0,0,0,0,0,1,-1.07997146489974,2,4,0,0
+"406",406,"Egypt Jordan",1967,"base_treaty",0,0,0,0,0,0,0,0,-1.07997146489974,0,0,0,0
+"41",41,"Argentina Ecuador",1993,"base_treaty",0,1,0,0,0,0,0,1,-0.80205636441983,0,2,0,0
+"410",410,"Egypt Morocco",1998,"base_treaty",0,1,0,0,0,0,0,1,-0.592425270600498,3,4,0,0
+"412",412,"Egypt PLO",1998,"base_treaty",0,0,0,0,0,0,0,0,-1.50138719903385,0,0,0,0
+"413",413,"Egypt Syria",1991,"base_treaty",0,0,0,0,0,0,0,0,-1.50138719903385,0,0,0,0
+"415",415,"Egypt Turkey",2005,"base_treaty",1,1,0,0,0,1,1,4,0.644249863074366,3,4,5,4
+"416",416,"El Salvador Honduras Taiwan",2007,"base_treaty",1,1,1,1,0,0,0,4,1.13466999595698,5,4,8,4.25
+"417",417,"El Salvador Mexico",1986,"base_treaty",0,0,0,0,0,0,0,0,-1.50138719903385,1,1,0,0
+"418",418,"El Salvador Nicaragua Free Trade Area",1951,"base_treaty",1,0,1,0,0,0,0,2,-1.07997146489978,0,2,2,2
+"419",419,"El Salvador Panama",1970,"base_treaty",0,0,0,0,0,1,0,1,-0.592425270600578,0,0,3,2.5
+"421",421,"El Salvador Venezuela",1986,"base_treaty",0,0,0,0,0,0,0,0,-1.50138719903385,0,2,0,0
+"422",422,"Equatorial Customs Union",1959,"base_treaty",1,0,0,0,0,0,0,1,-1.50138719903385,0,0,0,0
+"424",424,"Estonia Faroe Islands",1997,"base_treaty",1,1,0,0,0,0,0,2,0.308776851924404,2,4,0,0
+"425",425,"Estonia Finland",1992,"base_treaty",1,0,0,0,0,0,0,1,-0.802056364419799,0,1,0,0
+"426",426,"Estonia Hungary",1998,"base_treaty",1,1,0,0,0,0,0,2,0.230177781370824,2,4,0,0
+"427",427,"Estonia Norway",1992,"base_treaty",1,1,0,0,0,0,0,2,-0.422894454554462,1,1,0,0
+"428",428,"Estonia Slovakia",1996,"base_treaty",1,1,0,0,0,0,0,2,0.145911621483915,2,4,0,0
+"429",429,"Estonia Slovenia",1996,"base_treaty",1,1,0,0,0,0,0,2,0.519188620155443,2,4,0,0
+"43",43,"Argentina Mexico",1986,"base_treaty",0,0,0,0,0,0,0,0,-1.07997146489973,0,2,0,0
+"430",430,"Estonia Sweden",1991,"base_treaty",1,0,0,0,0,0,0,1,-1.07997146489977,0,1,0,0
+"431",431,"Estonia Switzerland",1992,"base_treaty",1,1,0,0,0,0,1,3,0.145911621483915,2,4,0,0
+"432",432,"Estonia Turkey",1997,"base_treaty",1,1,1,0,0,0,1,4,0.38266168639241,2,4,0,0
+"433",433,"Estonia Ukraine",1995,"base_treaty",1,0,0,0,0,0,1,2,-0.279783415062445,1,4,0,0
+"434",434,"Eurasian Economic Community (EAEC)",1999,"base_treaty",1,0,0,1,0,0,0,2,-0.279783415309286,0,0,3,2
+"436",436,"European Coal and Steel Community",1951,"base_treaty",0,0,0,0,0,0,0,0,-0.422894455343379,0,0,3,2
+"437",437,"European Economic Area (EEA)",1992,"base_treaty",1,1,1,0,0,1,1,5,0.644249863074403,1,3,0,0
+"438",438,"Faroe Islands Iceland",1992,"base_treaty",1,1,0,0,1,0,0,3,-0.155378408994106,1,4,0,0
+"439",439,"Faroe Islands Iceland",2005,"base_treaty",1,1,0,0,0,0,0,2,0.38266168639241,1,1,0,0
+"440",440,"Faroe Islands Norway",1992,"base_treaty",1,1,0,0,0,0,0,2,-0.0449417794522201,1,4,0,0
+"441",441,"Faroe Islands Poland",1998,"base_treaty",1,1,0,0,0,0,0,2,0.308776851924404,2,4,0,0
+"443",443,"Faroe Islands Switzerland",1994,"base_treaty",1,0,0,0,0,0,0,1,-1.50138719903385,1,1,0,0
+"445",445,"EFTA Finland",1961,"base_treaty",1,0,0,0,0,0,0,1,-1.50138719903385,0,0,0,0
+"446",446,"Finland German Democratic Republic",1975,"base_treaty",1,0,0,0,0,0,0,1,-1.07997146489979,0,0,0,0
+"447",447,"Finland Hungary",1974,"base_treaty",1,0,0,0,0,0,0,1,-1.07997146489979,0,1,0,0
+"448",448,"Finland Latvia",1992,"base_treaty",1,0,0,0,0,0,0,1,-1.07997146489979,0,1,0,0
+"449",449,"Finland Lithuania",1992,"base_treaty",1,0,0,0,0,0,0,1,-0.802056364419799,0,1,0,0
+"45",45,"Argentina Paraguay",1989,"base_treaty",0,0,0,0,0,0,0,0,-1.50138719903385,0,2,0,0
+"450",450,"Finland Poland",1976,"base_treaty",1,0,0,0,0,0,0,1,-1.07997146489979,0,1,0,0
+"452",452,"France Monaco",1963,"base_treaty",1,0,0,0,0,0,0,1,-1.50138719903385,0,0,0,0
+"453",453,"France Tunisia Customs Union Convention",1955,"base_treaty",1,0,0,0,0,0,0,1,-0.802056364419869,0,1,0,0
+"454",454,"Georgia Kazakhstan",1997,"base_treaty",1,0,0,0,0,0,0,1,-0.592425270171445,0,0,0,0
+"455",455,"Georgia Russia",1994,"base_treaty",1,0,0,0,0,0,0,1,-0.279783416328923,0,2,0,0
+"456",456,"Georgia Turkey",2007,"base_treaty",1,1,0,0,0,1,1,4,0.644249863074366,3,4,5,4
+"457",457,"Georgia Turkmenistan",1996,"base_treaty",1,0,0,0,0,0,0,1,-0.592425270171445,0,2,2,2
+"458",458,"Georgia Ukraine",1995,"base_treaty",1,0,0,0,0,0,0,1,-0.802056364419869,0,1,0,0
+"46",46,"Argentina Peru",1988,"base_treaty",0,0,0,0,0,0,0,0,-1.50138719903385,0,2,0,0
+"460",460,"Ghana Upper Volta Trade Agreement",1961,"base_treaty",1,0,0,0,0,0,0,1,-1.50138719903385,0,0,0,0
+"461",461,"Global System of Trade Preferences (GSTP)",1988,"base_treaty",0,0,0,0,0,0,0,0,-1.50138719903385,0,4,0,0
+"462",462,"Greater Arab Free Trade Agreement",1997,"base_treaty",1,0,1,0,0,0,0,2,-1.07997146489978,3,4,0,0
+"466",466,"GUAM/GUUAM Organization for Democracy and Economic Development",2002,"base_treaty",1,1,0,0,0,0,0,2,0.0547489422164387,2,2,0,0
+"467",467,"Guatemala Mexico",1985,"base_treaty",0,0,0,0,0,0,0,0,-1.50138719903385,0,1,0,0
+"468",468,"Guatemala Mexico",2000,"base_treaty",0,0,0,0,0,0,0,0,-1.07997146489979,0,0,0,0
+"469",469,"Guatemala Panama",1974,"base_treaty",0,0,0,0,0,0,0,0,-0.802056364419929,0,2,2,2
+"47",47,"Argentina Uruguay",2003,"base_treaty",0,0,0,0,0,0,0,0,-1.50138719903385,0,0,0,0
+"470",470,"Guatemala Taiwan",2005,"base_treaty",1,1,1,1,0,0,1,5,1.23783754700796,6,3,8,4.25
+"471",471,"Guatemala Venezuela",1985,"base_treaty",0,0,0,0,0,0,0,0,-1.50138719903385,0,2,0,0
+"473",473,"Gulf Cooperation Council (GCC)",1981,"base_treaty",1,0,0,0,0,0,0,1,-1.50138719903385,0,0,0,0
+"474",474,"Gulf Cooperation Council (GCC)",2001,"base_treaty",1,0,0,0,0,0,0,1,-0.802056364420011,0,0,3,2
+"475",475,"Gulf Cooperation Council (GCC) Singapore",2008,"base_treaty",1,1,0,1,1,0,0,4,0.64424986338368,3,4,8,4.25
+"476",476,"Guyana Venezuela",1990,"base_treaty",0,0,0,0,0,0,0,0,-1.50138719903385,1,1,0,0
+"477",477,"Honduras Mexico",1985,"base_treaty",0,0,0,0,0,0,0,0,-1.50138719903385,3,3,0,0
+"478",478,"Honduras Panama",1973,"base_treaty",0,0,0,0,0,0,0,0,-1.50138719903385,0,1,2,2
+"48",48,"Argentina Venezuela",1986,"base_treaty",0,0,0,0,0,0,0,0,-0.802056364419843,1,1,0,0
+"480",480,"Honduras Venezuela",1986,"base_treaty",0,0,0,0,0,0,0,0,-1.50138719903385,0,2,0,0
+"481",481,"Hungary Israel",1997,"base_treaty",1,1,0,0,1,0,0,3,0.308776851924358,2,4,0,0
+"482",482,"Hungary Latvia",1999,"base_treaty",1,1,0,0,0,0,0,2,0.145911621483896,2,4,0,0
+"483",483,"Hungary Lithuania",1998,"base_treaty",1,1,0,0,0,0,0,2,0.145911621483896,2,4,0,0
+"487",487,"Hungary Slovenia",1994,"base_treaty",1,1,0,0,0,0,0,2,-0.155378408994089,2,4,0,0
+"488",488,"Hungary Turkey",1997,"base_treaty",1,1,0,0,0,0,1,3,0.145911621483916,2,4,0,0
+"489",489,"India Korea",2009,"base_treaty",1,1,1,1,0,1,1,6,1.18622197082453,6,4,8,4.25
+"49",49,"Argentina Venezuela",1992,"base_treaty",0,1,0,0,0,0,0,1,-1.50138719903385,3,4,0,0
+"490",490,"India MERCOSUR",2004,"base_treaty",0,1,0,0,0,0,0,1,-0.0449417794521965,5,3,8,4.25
+"491",491,"India Nepal",1991,"base_treaty",0,0,0,0,0,0,0,0,-1.07997146489979,0,0,0,0
+"492",492,"India Nepal",2009,"base_treaty",0,1,0,0,0,0,0,1,-1.07997146489979,1,1,0,0
+"493",493,"India Singapore",2005,"base_treaty",1,1,1,1,0,0,0,4,1.08304544643593,5,4,7,3.75
+"494",494,"India Sri Lanka",1998,"base_treaty",1,0,0,0,0,0,0,1,-0.592425270600472,2,4,2,2
+"495",495,"Indonesia Japan",2007,"base_treaty",1,0,1,1,0,1,1,5,1.13467000045911,5,4,8,4.25
+"496",496,"Inter-Arab Trade Agreement",1981,"base_treaty",0,0,1,0,0,0,0,1,-1.07997146489978,0,0,0,0
+"497",497,"Iran Pakistan",2004,"base_treaty",0,1,0,0,0,0,0,1,-0.802056364419893,0,3,4,3.5
+"498",498,"Iran Syria",2006,"base_treaty",0,1,0,0,0,0,0,1,-0.592425270600512,0,3,0,0
+"5",5,"Albania Bosnia and Herzegovina",2003,"base_treaty",1,1,1,0,0,0,1,4,0.761044193146797,2,4,1,1
+"500",500,"Iraq Jordan",1953,"base_treaty",0,0,0,0,0,0,0,0,-1.50138719903385,0,0,0,0
+"504",504,"Iraq UAE",1977,"base_treaty",1,0,0,0,0,0,0,1,-1.50138719903385,0,0,0,0
+"505",505,"Ireland UK Free Trade Area",1965,"base_treaty",1,0,0,0,0,0,0,1,-0.42289445468597,2,4,0,0
+"506",506,"Israel Jordan",1995,"base_treaty",0,0,0,0,0,0,0,0,-1.07997146489977,1,2,0,0
+"508",508,"Israel MERCOSUR",2007,"base_treaty",1,1,0,0,0,0,0,2,0.308776851924404,5,4,7,4
+"509",509,"Israel Mexico",2000,"base_treaty",1,1,0,0,1,1,1,5,0.644249863074403,6,4,8,4.25
+"51",51,"Armenia Estonia",2002,"base_treaty",0,1,0,0,0,0,0,1,-0.592425270600599,2,2,0,0
+"510",510,"Israel PLO",1994,"base_treaty",1,1,0,1,0,0,0,3,-0.279783415013402,0,0,2,2
+"511",511,"Israel Poland",1997,"base_treaty",1,1,0,0,0,0,0,2,0.230177781370895,2,4,5,3.5
+"512",512,"Israel Romania",2001,"base_treaty",1,1,0,0,0,0,0,2,0.308776851924346,2,4,0,0
+"513",513,"Israel Slovakia",1996,"base_treaty",1,1,0,0,0,0,0,2,0.308776851924346,2,4,3,3
+"514",514,"Israel Slovenia",1998,"base_treaty",1,1,0,0,0,0,0,2,0.145911621483855,2,4,3,3
+"515",515,"Israel Turkey",1996,"base_treaty",1,1,0,1,0,0,0,3,0.45259204478572,2,4,4,3.5
+"516",516,"Israel US",1985,"base_treaty",1,1,0,1,1,0,1,5,0.145911621483895,1,2,6,3.5
+"517",517,"Japan Malaysia",2005,"base_treaty",1,1,1,1,0,1,1,6,1.50307591678015,5,4,8,4.25
+"518",518,"Japan Mexico",2004,"base_treaty",1,1,1,1,1,1,1,7,1.39479614697673,5,4,8,4.25
+"519",519,"Japan Philippines",2006,"base_treaty",1,1,1,1,0,1,1,6,1.23783754700793,5,4,8,4.25
+"52",52,"Armenia Georgia",1995,"base_treaty",1,1,0,0,0,0,0,2,-0.802056364419869,0,0,0,0
+"520",520,"Japan Singapore",2002,"base_treaty",1,1,1,1,1,1,1,7,1.13466999670725,6,4,8,4.25
+"521",521,"Japan Switzerland",2009,"base_treaty",1,1,1,1,0,1,1,6,2.01206541825315,4,3,8,4.25
+"522",522,"Japan Thailand",2007,"base_treaty",1,1,1,1,0,1,1,6,1.55894889089525,5,4,8,4.25
+"523",523,"Japan Vietnam",2008,"base_treaty",1,1,1,1,0,1,1,6,1.34194508042846,5,4,8,4.25
+"524",524,"Jordan Kuwait",2001,"base_treaty",1,1,0,0,0,0,0,2,-0.279783416240086,3,3,0,0
+"525",525,"Jordan Kuwait",1986,"base_treaty",1,0,0,0,0,0,0,1,-1.07997146489989,0,0,0,0
+"526",526,"Jordan Lebanon",1992,"base_treaty",1,0,0,0,0,0,0,1,-1.50138719903385,0,0,0,0
+"527",527,"Jordan Lebanon",2002,"base_treaty",1,0,0,0,0,0,0,1,-1.07997146489977,1,1,0,0
+"528",528,"Jordan Libya",1992,"base_treaty",1,0,0,0,0,0,0,1,-1.50138719903385,0,0,0,0
+"529",529,"Jordan Morocco",1994,"base_treaty",0,0,0,0,0,0,0,0,-1.07997146489979,0,2,0,0
+"53",53,"Armenia Iran",1995,"base_treaty",0,0,0,0,0,0,0,0,-1.50138719903385,0,0,2,2
+"530",530,"Jordan Morocco",1998,"base_treaty",1,1,0,0,0,0,0,2,-0.802056364419679,3,4,0,0
+"531",531,"Jordan PLO",1995,"base_treaty",1,0,0,0,0,0,0,1,-1.07997146489977,0,0,0,0
+"532",532,"Jordan Qatar",1980,"base_treaty",0,0,0,0,0,0,0,0,-1.50138719903385,0,0,0,0
+"533",533,"Jordan Saudi Arabia",1962,"base_treaty",0,0,0,0,0,0,0,0,-1.50138719903385,0,0,0,0
+"534",534,"Jordan Singapore",2004,"base_treaty",1,1,1,1,0,0,0,4,0.382661686392463,7,4,9,5.25
+"535",535,"Jordan Sudan",2003,"base_treaty",1,1,0,0,0,0,0,2,-0.59242527024286,0,3,0,0
+"536",536,"Jordan Sudan",1966,"base_treaty",0,0,0,0,0,0,0,0,-1.50138719903385,0,0,0,0
+"537",537,"Jordan Syria",2001,"base_treaty",1,1,0,0,0,0,0,2,0.0547489422163888,1,3,0,0
+"538",538,"Jordan Syria",1965,"base_treaty",0,0,0,0,0,0,0,0,-1.50138719903385,0,0,0,0
+"539",539,"Jordan Syria",1975,"base_treaty",0,0,0,0,0,0,0,0,-1.50138719903385,0,0,0,0
+"54",54,"Armenia Kazakhstan",1999,"base_treaty",1,1,0,0,0,0,0,2,-0.802056364419869,0,2,0,0
+"540",540,"Jordan Tunisia",1998,"base_treaty",1,0,0,0,0,0,0,1,-0.802056364419872,3,4,0,0
+"541",541,"Jordan Turkey",2009,"base_treaty",1,1,0,0,0,1,0,3,0.452592044785697,3,4,5,3.75
+"542",542,"Jordan UAE",2000,"base_treaty",1,0,0,0,0,0,0,1,-0.802056364419863,3,3,0,0
+"543",543,"Jordan US",2000,"base_treaty",1,0,0,1,0,0,1,3,0.817093567530467,4,3,7,4.5
+"544",544,"Kazakhstan Kyrgyzstan",1995,"base_treaty",1,0,0,0,0,0,0,1,-0.802056364419869,0,2,0,0
+"545",545,"Kazakhstan Moldova",1995,"base_treaty",1,0,0,0,0,0,0,1,-0.736250082906842,0,1,2,2
+"546",546,"Kazakhstan Russia",1992,"base_treaty",1,0,0,0,0,0,0,1,-0.192351228298542,0,2,0,0
+"548",548,"Kazakhstan Ukraine",1994,"base_treaty",1,0,0,0,0,0,0,1,-0.802056364419869,0,2,0,0
+"549",549,"Kazakhstan Uzbekistan",1997,"base_treaty",1,0,0,0,0,0,0,1,-0.736250082906842,1,2,0,0
+"55",55,"Armenia Kyrgyzstan",1994,"base_treaty",1,1,0,0,0,0,0,2,-0.422894454685883,0,1,0,0
+"550",550,"Korea Singapore",2005,"base_treaty",1,1,1,1,1,1,1,7,1.44842221080097,5,4,8,4.25
+"551",551,"Korea US",2007,"base_treaty",1,1,1,1,1,1,1,7,1.93756827683213,6,3,8,4.25
+"554",554,"Kuwait UAE",1972,"base_treaty",0,0,0,0,0,0,0,0,-1.07997146489984,0,0,0,0
+"555",555,"Kyrgyzstan Moldova",1995,"base_treaty",1,0,0,0,0,0,0,1,-0.422894454528197,0,1,0,0
+"556",556,"Kyrgyzstan Russia",1992,"base_treaty",1,0,0,0,0,0,0,1,-0.279783415835888,0,0,0,0
+"558",558,"Kyrgyzstan Ukraine",1995,"base_treaty",1,0,0,1,0,0,0,2,-0.422894454528197,0,2,0,0
+"559",559,"Kyrgyzstan Uzbekistan",1996,"base_treaty",1,0,0,0,0,0,0,1,-0.422894454528197,1,2,0,0
+"56",56,"Armenia Moldova",1993,"base_treaty",1,0,0,0,0,0,0,1,-0.592425270171445,0,1,0,0
+"560",560,"Laos Thailand",1991,"base_treaty",0,0,0,0,0,0,0,0,-1.50138719903385,0,0,0,0
+"561",561,"Latin American Free Trade Area (LAFTA)",1960,"base_treaty",0,0,0,0,0,0,0,0,-0.802056364419843,0,2,0,0
+"562",562,"Latin American Integration Association (ALADI LAIA)",1980,"base_treaty",0,0,0,0,0,0,0,0,-0.802056364419843,0,1,0,0
+"564",564,"Latvia Norway",1992,"base_treaty",1,1,1,0,0,0,0,3,-0.279783415441011,1,4,0,0
+"565",565,"Latvia Poland",1997,"base_treaty",1,1,1,0,0,0,1,4,0.644249863383642,3,4,0,0
+"566",566,"Latvia Slovakia",1996,"base_treaty",1,1,0,0,0,0,0,2,0.145911621483915,2,4,0,0
+"567",567,"Latvia Slovenia",1996,"base_treaty",1,1,1,0,0,0,1,4,0.382661686392463,2,4,0,0
+"568",568,"Latvia Sweden",1992,"base_treaty",1,1,0,0,0,0,0,2,-0.279783415230447,1,4,0,0
+"569",569,"Latvia Switzerland",1992,"base_treaty",1,1,1,0,0,0,1,4,0.382661686392463,1,4,0,0
+"57",57,"Armenia Russia",1992,"base_treaty",1,0,0,0,0,0,0,1,-0.422894455343379,0,1,0,0
+"570",570,"Latvia Turkey",1998,"base_treaty",1,1,0,0,0,0,0,2,-0.155378408994077,3,4,0,0
+"574",574,"Libya Morocco",1990,"base_treaty",1,0,0,0,0,0,0,1,-1.50138719903385,0,0,0,0
+"576",576,"Lithuania Norway",1992,"base_treaty",1,1,1,0,0,0,0,3,-0.279783415441011,1,4,0,0
+"577",577,"Lithuania Poland",1996,"base_treaty",1,1,1,0,0,0,0,3,0.382661686392481,2,4,2,2
+"578",578,"Lithuania Slovakia",1996,"base_treaty",1,1,0,0,0,0,0,2,0.230177781370895,2,4,0,0
+"579",579,"Lithuania Slovenia",1996,"base_treaty",1,1,1,0,0,0,0,3,0.582967107707356,2,4,2,2
+"580",580,"Lithuania Sweden",1991,"base_treaty",1,0,0,0,0,0,0,1,-1.07997146489977,0,1,0,0
+"581",581,"Lithuania Switzerland",1992,"base_treaty",1,1,0,0,0,0,1,3,0.230177781370875,1,4,0,0
+"582",582,"Lithuania Turkey",1997,"base_treaty",1,1,1,0,0,0,0,3,0.308776851924333,2,4,0,0
+"584",584,"Lome I",1975,"base_treaty",0,0,0,0,0,0,0,0,-0.802056364419904,0,2,5,4
+"585",585,"Lome II",1979,"base_treaty",0,0,0,0,0,0,0,0,-1.50138719903385,0,1,3,3
+"586",586,"Lome III",1984,"base_treaty",0,0,1,1,0,1,0,3,-0.0449417794521656,0,2,3,3
+"587",587,"Lome IV",1989,"base_treaty",0,0,1,1,0,1,0,3,-0.0449417794521894,0,2,3,3
+"589",589,"Macedonia Moldova",2004,"base_treaty",1,1,0,0,0,0,0,2,0.230177781370804,2,4,0,0
+"59",59,"Armenia Turkmenistan",1995,"base_treaty",1,0,0,0,0,0,0,1,-0.592425270171445,0,1,0,0
+"590",590,"Macedonia Romania",2003,"base_treaty",1,1,1,0,0,0,0,3,0.582921596443887,2,4,0,0
+"592",592,"Macedonia Slovenia",1996,"base_treaty",1,1,0,0,0,0,0,2,0.308776851924358,2,4,0,0
+"593",593,"Macedonia Turkey",1999,"base_treaty",1,1,1,0,0,0,0,3,0.308776851924374,2,4,0,0
+"594",594,"Macedonia Ukraine",2001,"base_treaty",1,1,0,0,0,0,1,3,0.519188620155553,2,4,0,0
+"595",595,"Malawi Mozambique",2005,"base_treaty",0,1,0,0,0,0,0,1,-0.155378408994112,3,3,0,0
+"598",598,"Malaysia New Zealand",2009,"base_treaty",1,1,1,1,0,1,1,6,1.39479614697656,6,3,8,4.25
+"599",599,"Malaysia Pakistan",2007,"base_treaty",1,1,1,1,0,0,0,4,1.23783754700797,6,4,6,3.25
+"6",6,"Albania Bulgaria",2003,"base_treaty",1,1,1,0,0,0,1,4,0.644249863383631,2,4,0,0
+"60",60,"Armenia Ukraine",1994,"base_treaty",1,0,0,0,0,0,0,1,-0.802056364419869,0,0,0,0
+"600",600,"Mano River Union",1973,"base_treaty",1,0,0,0,0,0,0,1,-1.50138719903385,0,0,0,0
+"601",601,"Mauritania Morocco",1986,"base_treaty",0,0,0,0,0,0,0,0,-1.50138719903385,0,0,0,0
+"602",602,"Mauritius Pakistan",2007,"base_treaty",0,1,0,0,0,0,0,1,-0.279783415441008,1,3,0,0
+"603",603,"Melanesian Spearhead Group (MSG)",1993,"base_treaty",0,0,0,0,0,0,0,0,-0.592425270171445,2,4,0,0
+"604",604,"MERCOSUR",1991,"base_treaty",1,1,0,0,0,0,0,2,-0.592425270600543,3,1,3,2
+"606",606,"MERCOSUR Peru",2005,"base_treaty",0,1,1,0,0,1,0,3,0.519188620155443,5,3,9,5.25
+"607a",604,"MERCOSUR (consolidated)",1997,"consolidated",1,1,0,1,0,0,0,3,0.519188620155409,5,2,3,2
+"608",608,"MERCOSUR Southern African Customs Union (SACU)",2004,"base_treaty",0,1,0,0,0,0,0,1,-0.0449417794521692,5,3,9,5.25
+"61",61,"Arusha Agreement II",1969,"base_treaty",0,1,1,1,0,0,0,3,-0.0449417794521894,0,2,3,3
+"610",610,"Mexico Nicaragua",1985,"base_treaty",0,0,0,0,0,0,0,0,-1.50138719903385,0,2,0,0
+"611",611,"Mexico Nicaragua",1997,"base_treaty",1,1,1,1,1,0,1,6,1.39479614697659,5,4,9,5.25
+"612",612,"Mexico Northern Triangle",2000,"base_treaty",1,1,1,1,0,0,1,5,1.55894889089538,6,4,8,4.25
+"613",613,"Mexico Panama",1985,"base_treaty",0,0,0,0,0,0,0,0,-1.50138719903385,0,1,0,0
+"615",615,"Mexico Uruguay",1986,"base_treaty",0,0,0,0,0,0,0,0,-1.07997146489974,0,1,0,0
+"616",616,"Mexico Uruguay",2004,"base_treaty",1,1,1,1,0,1,1,6,1.67546434009206,6,4,8,4.25
+"617",617,"Moldova Romania",1994,"base_treaty",1,1,0,0,0,0,0,2,-0.0449417794521692,0,4,0,0
+"619",619,"Moldova Serbia",2003,"base_treaty",1,1,0,0,0,0,0,2,0.14591162148388,0,4,0,0
+"62",62,"Asia Pacific Trade Agreement (Bangkok Agreement) amended",2005,"base_treaty",0,1,0,0,0,0,0,1,-0.155378408994112,2,4,0,0
+"621",621,"Moldova Ukraine",2003,"base_treaty",1,1,0,0,0,0,1,3,0.0547489422164908,3,3,0,0
+"624",624,"Montenegro Turkey",2008,"base_treaty",1,1,1,0,1,0,1,5,0.817093567530355,3,4,0,0
+"625",625,"Morocco Tunisia",1999,"base_treaty",1,1,0,0,0,0,0,2,-0.592425270600536,2,4,0,0
+"626",626,"Morocco Turkey",2004,"base_treaty",1,1,0,0,0,0,1,3,0.644249863074366,3,3,5,3.5
+"627",627,"Morocco UAE",2001,"base_treaty",1,1,0,0,0,0,0,2,-0.279783415023089,2,2,0,0
+"628",628,"Morocco US",2004,"base_treaty",1,1,1,1,1,0,1,6,1.8005206931048,5,3,9,4.5
+"63",63,"Association of Caribbean States",1994,"base_treaty",0,0,0,0,0,0,0,0,-1.50138719903385,0,0,0,0
+"630",630,"Namibia Zimbabwe",1992,"base_treaty",0,0,0,0,0,0,0,0,-1.50138719903385,0,3,0,0
+"631",631,"New Zealand Singapore",2000,"base_treaty",1,1,1,1,1,1,0,6,1.39479614697659,4,4,8,4.75
+"632",632,"New Zealand Thailand",2005,"base_treaty",1,1,1,0,0,1,1,5,1.03108522691531,6,3,8,4.25
+"633",633,"Nicaragua Panama",1973,"base_treaty",0,0,0,0,0,0,0,0,-0.802056364419929,0,2,2,2
+"634",634,"Nicaragua Taiwan",2006,"base_treaty",1,1,1,1,0,1,1,6,1.61631403452147,6,3,8,4.75
+"635",635,"Nicaragua Venezuela",1986,"base_treaty",0,0,0,0,0,0,0,0,-1.50138719903385,0,2,0,0
+"636",636,"North American Free Trade Agreement (NAFTA)",1992,"base_treaty",1,1,1,1,1,1,1,7,1.80052069310471,6,4,8,4.25
+"637",637,"Oman US",2006,"base_treaty",1,1,1,1,1,0,1,6,1.8005206931048,4,2,9,4.5
+"638",638,"Organisation of Eastern Caribbean States (OECS)",1981,"base_treaty",1,0,0,0,0,0,0,1,-0.592425270171497,1,1,5,4
+"639",639,"Pacific Island Countries Trade Agreement (PICTA)",2001,"base_treaty",1,0,0,0,0,0,0,1,-0.592425270171445,3,4,7,4.5
+"64",64,"Association of Southeast Asian Nations (ASEAN) FTA",1992,"base_treaty",1,1,0,0,0,0,0,2,-1.07997146489979,1,1,0,0
+"640",640,"Pakistan Sri Lanka",2002,"base_treaty",1,1,0,1,0,0,0,3,-0.279783415046747,3,4,3,3
+"641",641,"Panama Singapore",2006,"base_treaty",1,1,1,1,1,1,0,6,1.34194508042845,6,4,7,4
+"642",642,"Panama Taiwan",2003,"base_treaty",1,1,1,1,0,1,1,6,1.80052069310476,7,4,9,5.25
+"643",643,"Panama US",2007,"base_treaty",1,1,1,1,1,0,1,6,1.8005206931048,5,3,9,4.5
+"644",644,"Peru Singapore",2008,"base_treaty",1,1,1,1,1,1,1,7,1.55894889089528,6,4,8,4.25
+"645",645,"Peru US",2006,"base_treaty",1,1,1,1,1,1,1,7,1.86727967188919,6,3,9,4.5
+"646",646,"Poland Turkey",1999,"base_treaty",1,1,1,0,0,0,0,3,0.382661686392446,2,4,4,2.5
+"647",647,"Protocol on Trade Negotiations (PTN)",1971,"base_treaty",0,0,0,0,0,0,0,0,-1.50138719903385,0,2,0,0
+"648",648,"Romania Serbia",2003,"base_treaty",1,1,1,0,0,0,0,3,0.582921596443887,1,3,0,0
+"649",649,"Romania Slovakia",1994,"base_treaty",1,1,0,0,1,0,0,3,0.308776851924333,2,4,0,0
+"65",65,"Association of Southeast Asian Nations (ASEAN) Preferential Trading Arrangements (PTA)",1977,"base_treaty",0,0,0,0,1,0,0,1,-1.07997146489989,0,1,0,0
+"650",650,"Romania Turkey",1997,"base_treaty",1,0,1,0,0,0,1,3,0.230177781370903,2,4,0,0
+"651",651,"Russia Serbia and Montenegro",2000,"base_treaty",1,1,0,0,0,0,0,2,-0.736250082906858,0,4,0,0
+"652",652,"Russia Tajikistan",1992,"base_treaty",1,0,0,0,0,0,0,1,-0.341101245357256,0,2,0,0
+"654",654,"Russia Ukraine",1993,"base_treaty",1,0,0,0,0,0,0,1,-0.592425270171445,0,2,0,0
+"656",656,"Saudi Arabia UAE",1978,"base_treaty",1,0,0,0,0,0,0,1,-1.50138719903385,0,0,0,0
+"657",657,"Serbia Turkey",2009,"base_treaty",1,1,1,0,1,0,0,4,0.703520501239224,3,4,0,0
+"658",658,"Singapore US",2003,"base_treaty",1,1,1,1,1,1,1,7,1.67546433988389,4,3,8,4.25
+"659",659,"Slovakia Slovenia",1993,"base_treaty",1,1,0,0,0,0,0,2,0.230177781370824,1,1,0,0
+"66",66,"Association of Southeast Asian Nations (ASEAN) Australia New Zealand FTA (AANZFTA)",2009,"base_treaty",1,1,1,1,0,1,1,6,1.50307591678017,4,4,8,4.25
+"660",660,"Slovakia Turkey",1997,"base_treaty",1,1,0,0,0,0,0,2,0.230177781370818,2,4,0,0
+"661",661,"Slovenia Turkey",1998,"base_treaty",1,1,0,0,0,0,1,3,0.230177781370895,2,4,5,3.5
+"663",663,"South Africa Southern Rhodesia Customs Union",1948,"base_treaty",1,0,0,0,0,0,0,1,-1.50138719903385,0,1,0,0
+"664",664,"South Africa Zimbabwe",1964,"base_treaty",0,0,0,0,0,0,0,0,-1.50138719903385,0,0,0,0
+"666",666,"South Asian Association for Regional Cooperation, Preferential Trading Arrangement (SAPTA)",1993,"base_treaty",0,0,0,0,0,0,0,0,-1.50138719903385,0,3,0,0
+"667",667,"South Asian Free Trade Area (SAFTA)",2004,"base_treaty",1,0,0,0,0,0,0,1,-1.07997146489979,2,4,0,0
+"668",668,"South Pacific Trade and Economic Co Operation Agreement (SPARTECA)",1980,"base_treaty",0,1,0,0,0,0,0,1,-1.50138719903385,0,2,0,0
+"669",669,"Southern Africa Customs Union (SACU)",1969,"base_treaty",1,1,0,0,0,0,0,2,-1.07997146489983,0,0,0,0
+"67",67,"Association of Southeast Asian Nations (ASEAN) China",2004,"base_treaty",1,1,0,0,0,0,0,2,-0.279783415440958,4,3,8,4.75
+"670",670,"Southern Africa Customs Union (SACU)",2002,"base_treaty",1,1,0,0,0,0,0,2,-0.592425270600578,0,0,3,3
+"671",671,"Southern African Development Community (SADC)",1992,"base_treaty",0,0,0,0,0,0,0,0,-1.07997146489977,0,0,3,2
+"672a",671,"Southern African Development Community (SADC) (consolidated)",1996,"consolidated",1,1,0,0,0,0,0,2,0.230177781370875,4,3,3,2
+"675",675,"Syria Turkey",2004,"base_treaty",1,1,0,0,0,0,0,2,0.703520501239315,3,4,4,2.5
+"677",677,"Tajikistan Ukraine",2001,"base_treaty",1,1,0,0,0,0,0,2,-0.592425270171445,0,2,0,0
+"679",679,"Trans Pacific Strategic EPA",2005,"base_treaty",1,1,0,1,1,1,1,6,1.28968679510927,3,3,8,4.25
+"680",680,"Treaty of Economic Association",1960,"base_treaty",1,0,0,0,0,0,0,1,-1.07997146489989,0,2,5,4
+"681",681,"Trinidad and Tobago Venezuela",1989,"base_treaty",0,0,0,0,0,0,0,0,-1.50138719903385,0,1,0,0
+"682",682,"Tripartite Agreement",1967,"base_treaty",0,0,0,0,0,0,0,0,-1.50138719903385,0,1,0,0
+"683",683,"Tunisia Turkey",2004,"base_treaty",1,1,0,0,0,1,0,3,0.45259204478572,3,4,3,3
+"684",684,"Turkmenistan Ukraine",1994,"base_treaty",1,0,0,0,0,0,0,1,-0.592425270171445,1,1,0,0
+"686",686,"Ukraine Uzbekistan",1994,"base_treaty",1,1,0,0,0,0,0,2,-0.592425270171445,1,3,0,0
+"687",687,"US Vietnam",2000,"base_treaty",0,1,1,1,0,0,1,4,1.2896867951093,0,3,1,1
+"688",688,"West African Economic and Monetary Union",1994,"base_treaty",1,1,0,0,0,1,0,3,0.38266168639241,2,2,0,0
+"689",689,"Yaounde I",1963,"base_treaty",0,0,1,0,0,0,0,1,-0.279783416240222,0,2,6,4
+"68a",67,"Association of Southeast Asian Nations (ASEAN) China (consolidated)",2007,"consolidated",1,1,0,1,0,0,0,3,0.452592044785702,4,4,8,4.75
+"69",69,"Association of Southeast Asian Nations (ASEAN) Goods",2009,"base_treaty",1,1,0,0,0,0,0,2,0.145911621483916,3,4,9,4.75
+"690",690,"Yaounde II",1969,"base_treaty",1,0,0,0,0,0,0,1,-0.422894454528172,0,2,3,2
+"694a",23,"Andean Community (consolidated)",1997,"consolidated",1,1,0,1,0,0,0,3,-0.592425270153591,0,1,6,3
+"698",698,"Argentina Uruguay",1974,"base_treaty",1,0,0,0,0,0,0,1,-1.50138719903385,0,1,0,0
+"699",699,"Argentina Uruguay",1982,"base_treaty",1,0,0,0,0,0,0,1,-1.50138719903385,2,2,0,0
+"7",7,"Albania Croatia",2002,"base_treaty",1,1,1,0,0,0,1,4,0.81709356753039,2,3,1,1
+"70",70,"Association of Southeast Asian Nations (ASEAN) India",2009,"base_treaty",1,1,0,0,0,0,0,2,-0.80205636441989,5,2,6,4
+"700",700,"Arusha Agreement I",1968,"base_treaty",1,0,0,1,0,0,0,2,-0.592425270243049,0,2,5,4
+"706",706,"Benelux Economic Union",1958,"base_treaty",1,1,0,1,1,0,0,4,-0.422894454528176,0,0,2,2
+"71",71,"Association of Southeast Asian Nations (ASEAN) Japan",2008,"base_treaty",1,1,1,0,0,0,0,3,-0.15537840899415,5,4,8,4.25
+"714a",186,"Central American Common Market (CACM) (consolidated)",1993,"consolidated",1,0,0,0,0,0,0,1,-0.592425270171445,1,3,4,3
+"715",715,"Chile Cuba",1999,"base_treaty",0,1,1,0,0,0,0,2,0.0547489422164387,2,2,0,0
+"716",716,"Chile Peru",2006,"base_treaty",1,1,1,1,0,1,0,5,1.28968679510932,4,3,7,4
+"72",72,"Association of Southeast Asian Nations (ASEAN) Korea",2006,"base_treaty",1,1,0,0,0,0,0,2,0.054748942216443,4,4,7,3.75
+"732",732,"Faroe Islands Finland",1992,"base_treaty",1,1,0,0,1,0,0,3,-0.155378408994132,1,3,0,0
+"73a",72,"Association of Southeast Asian Nations (ASEAN) Korea (consolidated)",2007,"consolidated",1,1,0,1,0,0,0,3,0.644249863457869,4,4,7,3.75
+"74",74,"Australia Canada",1960,"base_treaty",0,0,0,0,0,0,0,0,-1.50138719903385,0,1,0,0
+"742",742,"Guinea Morocco",1997,"base_treaty",0,0,0,0,0,0,0,0,-1.07997146489977,0,3,0,0
+"75",75,"Australia Chile",2008,"base_treaty",1,1,1,1,1,1,1,7,1.80052069310469,2,4,8,4.25
+"756a",536,"Jordan Sudan (consolidated)",1989,"consolidated",0,0,0,0,0,0,0,0,-1.50138719903385,0,0,0,0
+"764",764,"Malawi Zimbabwe",2006,"base_treaty",1,1,0,0,0,0,0,2,-0.155378408994077,3,4,3,3
+"767",767,"Mexico Peru",1987,"base_treaty",0,0,0,0,0,0,0,0,-1.50138719903385,0,2,0,0
+"768",768,"Morocco Saudi Arabia",1966,"base_treaty",0,0,0,0,0,0,0,0,-1.44390489863214,0,1,0,0
+"769",769,"Morocco Senegal",1963,"base_treaty",0,0,0,0,0,0,0,0,-1.50138719903385,0,0,0,0
+"76a",65,"Association of Southeast Asian Nations (ASEAN) Preferential Trading Arrangements (PTA) (consolidated)",1995,"consolidated",1,0,0,1,1,0,0,3,-0.422894454685929,0,1,0,0
+"77",77,"Australia New Zealand (ANZCERTA)",1983,"base_treaty",1,1,0,0,1,0,0,3,-0.592425270600611,0,3,0,0
+"771",771,"Peru Thailand",2005,"base_treaty",0,1,0,0,0,0,0,1,-0.422894454521566,3,3,7,4.25
+"772",772,"PTA for Eastern and Southern African States",1982,"base_treaty",0,1,0,0,0,0,0,1,-0.592425270243032,0,1,3,2
+"780",780,"West African Economic Community (CEAO)",1973,"base_treaty",1,0,0,0,0,0,0,1,-1.07997146489977,1,1,3,2
+"781",781,"Paraguay Venezuela",2008,"base_treaty",0,0,0,0,0,0,0,0,-1.50138719903385,0,0,0,0
+"782",782,"Uruguay Venezuela",2008,"base_treaty",0,0,0,0,0,0,0,0,-1.50138719903385,0,0,0,0
+"783",783,"Canada Portugal",1954,"base_treaty",0,0,0,0,0,0,0,0,-1.50138719903385,0,1,0,0
+"784",784,"Canada Spain",1954,"base_treaty",0,0,0,0,0,0,0,0,-1.50138719903385,0,1,0,0
+"787",787,"East African Community (EAC)",1999,"base_treaty",1,1,1,1,0,0,0,4,-0.422894454685932,0,2,3,2
+"788",788,"East Caribbean Common Market",1968,"base_treaty",1,1,0,0,0,0,0,2,-0.422894455343348,1,3,0,0
+"789",789,"MERCOSUR Southern African Customs Union (SACU)",2008,"base_treaty",1,1,0,0,0,0,0,2,-0.279783415258811,5,3,8,4.25
+"78a",77,"Australia New Zealand (ANZCERTA) (consolidated)",1988,"consolidated",1,1,0,1,1,0,0,4,0.145911621483915,0,3,0,0
+"79",79,"Australia New Zealand Free Trade Agreement",1965,"base_treaty",1,0,0,0,0,0,0,1,-0.802056364419869,1,3,0,0
+"790",790,"El Salvador Guatemala",1991,"base_treaty",1,0,0,0,0,0,0,1,-1.50138719903385,0,0,0,0
+"792",792,"Brazil Uruguay",1982,"base_treaty",0,0,0,0,0,0,0,0,-1.50138719903385,0,1,0,0
+"793",793,"EC Switzerland Bilaterals I",1999,"base_treaty",1,1,0,0,1,0,1,4,0.978712347450797,0,1,0,0
+"795",795,"Australia Malaysia",2012,"base_treaty",1,1,1,1,0,1,1,6,1.61631403452144,6,4,8,4.25
+"797",797,"Canada Honduras",2013,"base_treaty",1,1,1,1,1,1,0,6,1.44842221080097,3,3,8,4.25
+"798",798,"Canada Panama",2010,"base_treaty",1,1,1,1,1,1,0,6,1.55894889089534,3,3,8,4.25
+"799",799,"Central America EC",2012,"base_treaty",1,1,1,0,1,1,1,6,1.73673574389149,6,4,8,4.25
+"8",8,"Albania EC SAA",2006,"base_treaty",1,1,1,1,1,1,1,7,1.237837547008,5,4,0,0
+"80",80,"Australia Papua New Guinea",1991,"base_treaty",1,0,0,0,0,0,0,1,-0.592425270153634,0,4,0,0
+"800",800,"Chile Malaysia",2010,"base_treaty",1,1,0,0,0,0,1,3,0.145911621483915,6,4,8,4.25
+"801",801,"Chile Thailand",2013,"base_treaty",1,1,0,1,0,0,1,4,0.644249863383657,6,4,8,4.25
+"803",803,"Chile Vietnam",2011,"base_treaty",1,1,0,0,0,0,1,3,0.145911621483915,6,4,8,4.25
+"804",804,"China Costa Rica",2010,"base_treaty",1,1,1,1,0,0,1,5,0.978712347450739,6,4,7,3.75
+"805",805,"Colombia Costa Rica",2013,"base_treaty",1,1,1,1,1,1,1,7,1.86727967188915,6,4,8,4.25
+"806",806,"Colombia Israel",2013,"base_treaty",1,1,1,1,1,0,0,5,1.13467000045893,6,4,9,5.25
+"808",808,"Colombia Korea",2013,"base_treaty",1,1,1,1,1,1,1,7,1.86727967188912,6,3,8,4.25
+"809",809,"Colombia Panama",2013,"base_treaty",1,1,1,1,1,1,1,7,1.73673574382446,6,4,8,4.25
+"81",81,"Australia Papua New Guinea",1976,"base_treaty",1,0,0,0,0,0,0,1,-0.592425270600574,0,4,0,0
+"810",810,"Colombia EC Peru",2012,"base_treaty",1,1,1,1,1,1,1,7,1.86727967188918,5,4,8,4.25
+"811",811,"Commonwealth of Independent States (CIS)",2011,"base_treaty",1,1,0,0,0,0,0,2,-0.422894454554396,3,4,10,5.75
+"813",813,"Costa Rica Peru",2011,"base_treaty",1,1,1,1,1,1,1,7,1.80052069310457,6,4,8,4.25
+"814",814,"Costa Rica Singapore",2010,"base_treaty",1,1,1,1,1,1,1,7,1.39479614697673,6,4,8,4.25
+"815",815,"EC Korea",2010,"base_treaty",1,1,1,1,1,1,1,7,2.01206541825322,6,4,8,4.25
+"817",817,"EFTA Hong Kong",2011,"base_treaty",1,1,1,1,0,1,1,6,1.44842221080095,5,3,8,4.25
+"818",818,"EFTA Montenegro",2011,"base_treaty",1,1,1,0,0,0,1,4,1.13467000045878,5,2,7,4.5
+"819",819,"EFTA Peru",2010,"base_treaty",1,1,1,0,1,1,1,6,1.61631403452144,6,3,8,4.25
+"82",82,"Australia Singapore",2003,"base_treaty",1,1,1,1,1,1,1,7,1.55894889089528,3,4,5,2.75
+"820",820,"EFTA Ukraine",2010,"base_treaty",1,1,1,1,1,1,1,7,1.8672796718893,5,3,8,4.25
+"821",821,"Egypt MERCOSUR",2010,"base_treaty",1,1,1,0,0,0,0,3,0.0547489422164847,6,4,7,4
+"823",823,"Guatemala Peru",2011,"base_treaty",1,1,1,1,1,1,1,7,1.86727967188915,6,3,8,4.25
+"825",825,"Hong Kong New Zealand",2010,"base_treaty",1,1,1,1,1,1,1,7,1.28968679510928,3,3,8,4.25
+"826",826,"India Japan",2011,"base_treaty",1,1,1,1,0,1,1,6,1.34194508042843,5,4,8,4.25
+"827",827,"India Malaysia",2011,"base_treaty",1,1,1,1,0,0,1,5,1.08304544643593,5,3,7,3.75
+"829",829,"Japan Peru",2011,"base_treaty",1,1,1,1,1,1,1,7,2.0120654182532,5,3,8,4.25
+"83",83,"Australia Thailand",2004,"base_treaty",1,1,1,1,0,1,0,5,1.23783754700797,3,4,6,3.25
+"830",830,"Korea Peru",2011,"base_treaty",1,1,1,1,1,1,1,7,2.01206541825306,6,4,8,4.25
+"831",831,"Korea Turkey",2012,"base_treaty",1,1,0,0,0,1,1,4,0.925717038076171,6,4,8,4.25
+"832",832,"Mauritius Turkey",2011,"base_treaty",1,1,0,0,0,0,0,2,-0.0449417794521965,4,4,3,2.5
+"833",833,"Montenegro Ukraine",2011,"base_treaty",1,1,0,1,0,0,0,3,0.519188620155443,6,4,9,5.25
+"834",834,"New Zealand Taiwan",2013,"base_treaty",1,1,1,1,1,1,1,7,1.55894889089529,3,4,7,3.75
+"836",836,"Pacific Alliance",2012,"base_treaty",1,1,1,1,1,0,1,6,1.23783751798987,2,3,8,4.25
+"837",837,"Panama Peru",2011,"base_treaty",1,1,1,1,1,1,1,7,1.80052069310457,6,3,8,4.25
+"838",838,"Peru Venezuela",2012,"base_treaty",0,1,0,0,0,0,0,1,-0.592425270242969,3,1,6,4.25
+"84",84,"Australia US",2004,"base_treaty",1,1,1,1,1,1,1,7,1.80052069310471,3,3,8,4.25
+"840",840,"Australia China",2015,"base_treaty",1,1,1,1,0,0,1,5,1.34194508042843,5,3,8,4.25
+"842",842,"Australia Japan",2014,"base_treaty",1,1,1,1,1,1,1,7,1.67546433988389,6,3,8,4.25
+"844",844,"Bosnia and Herzegovina EFTA",2013,"base_treaty",1,1,1,0,0,0,1,4,1.13467000045878,5,2,9,5.25
+"848",848,"Canada EC (CETA)",2016,"base_treaty",1,1,1,1,1,1,1,7,1.80052069310476,3,4,7,4
+"85",85,"Austria EC",1972,"base_treaty",1,1,0,0,0,0,0,2,-0.422894455343379,1,4,0,0
+"852",852,"Canada Korea",2014,"base_treaty",1,1,1,1,0,1,1,6,1.93756827683207,6,3,8,4.25
+"855",855,"Canada Ukraine",2016,"base_treaty",1,1,1,0,1,1,1,6,0.722425772601115,3,4,9,4.5
+"858",858,"Chile Hong Kong",2012,"base_treaty",1,1,1,1,1,1,1,7,1.2378375470079,3,3,8,4.25
+"86",86,"Azerbaijan Georgia",1996,"base_treaty",1,0,1,0,0,0,0,2,-0.422894455343371,0,2,0,0
+"862",862,"China Switzerland",2013,"base_treaty",1,1,1,1,0,1,1,6,1.50307591678013,6,3,8,4.25
+"864",864,"Central America EFTA",2013,"base_treaty",1,1,1,1,1,1,1,7,1.80052069310486,6,4,8,4.25
+"866",866,"EC Georgia",2014,"base_treaty",1,1,1,1,1,1,1,7,2.01206541825302,3,3,8,4.25
+"867",867,"Armenia EC",2017,"base_treaty",1,1,1,1,1,1,1,7,1.29001309251491,4,4,8,4.25
+"869",869,"EC Japan",2018,"base_treaty",1,1,1,1,1,1,1,7,1.63316411374754,5,4,8,4.25
+"872",872,"EC Moldova",2014,"base_treaty",1,1,1,1,1,1,1,7,2.09161922279046,6,4,8,4.25
+"874",874,"EC Singapore",2018,"base_treaty",1,1,1,1,1,1,1,7,2.09161922279047,6,4,7,4
+"876",876,"EC Ukraine",2014,"base_treaty",1,1,1,1,1,1,1,7,1.73673574382449,4,4,7,4.5
+"877",877,"EC Vietnam",2019,"base_treaty",1,1,1,1,1,1,1,7,2.01206541825322,6,4,7,4
+"885",885,"Guatemala Trinidad and Tobago",2015,"base_treaty",0,1,0,1,0,0,0,2,0.154710659355292,5,4,2,1.5
+"891",891,"Mexico Panama",2014,"base_treaty",1,1,1,1,0,0,1,5,1.50307591678015,6,4,8,4.25
+"895",895,"Pacific Agreement on Closer Economic Relations (PACER) Plus",2017,"base_treaty",1,1,1,1,0,0,0,4,1.10162730261038,3,4,8,4.25
+"896",896,"Panama Trinidad and Tobago",2013,"base_treaty",0,1,0,1,0,0,0,2,0.249500761834356,4,4,8,4.25
+"899",899,"Transpacific Partnership (TPP)",2016,"base_treaty",1,1,1,1,1,1,1,7,1.93756827683211,6,3,9,4.5
+"9",9,"Albania EFTA",2009,"base_treaty",1,1,1,1,1,0,1,6,0.925717038076188,4,3,7,4.5
+"90",90,"Azerbaijan Russia",1992,"base_treaty",1,0,0,0,0,0,0,1,-0.192351228204144,0,2,0,0
+"908",908,"Colombia Mexico Venezuela",1994,"base_treaty",1,1,1,1,1,0,1,6,1.67546433988389,7,4,8,4.25
+"909",909,"China Korea",2015,"base_treaty",1,1,1,1,0,1,1,6,1.8005206931048,7,4,8,4.25
+"911",911,"Australia Korea",2014,"base_treaty",1,1,1,1,1,1,1,7,1.67546433988392,6,3,9,4.75
+"912",912,"Korea New Zealand",2015,"base_treaty",1,1,1,1,1,1,1,7,1.63316411374753,5,4,8,4.25
+"913",913,"Korea Vietnam",2015,"base_treaty",1,1,1,1,0,1,1,6,1.35465499819726,5,4,8,4.25
+"916",916,"Cuba El Salvador",2011,"base_treaty",0,1,0,0,0,0,0,1,-0.736247790995653,5,3,9,5.25
+"919",919,"Honduras Peru",2015,"base_treaty",1,1,1,1,1,1,1,7,1.63316411374738,6,4,8,4.25
+"92",92,"Azerbaijan Ukraine",1995,"base_treaty",1,1,0,0,0,0,0,2,-0.802056364419869,0,2,0,0
+"930",930,"Japan Mongolia",2015,"base_treaty",1,1,1,1,0,1,1,6,1.50307591678012,6,4,8,4.25
+"94",94,"Bahrain Jordan",2001,"base_treaty",1,0,0,0,0,0,0,1,-1.07997146489974,3,3,0,0
+"943",943,"Malaysia Turkey",2014,"base_treaty",1,1,1,0,0,0,0,3,0.382661686392481,6,4,8,4.25
+"949",949,"Central America Mexico",2011,"base_treaty",1,1,1,1,1,0,1,6,1.42082391964387,6,4,8,4.25
+"955",955,"China Iceland",2013,"base_treaty",1,1,1,1,0,1,1,6,0.761044193146677,6,4,8,4.25
+"96",96,"Bahrain US",2004,"base_treaty",1,1,1,1,1,0,1,6,1.18622195289464,4,3,9,4.5
+"962",962,"Singapore Turkey",2015,"base_treaty",1,1,1,1,1,1,1,7,1.63316411374745,4,4,8,4.25
+"965",965,"EFTA Philippines",2016,"base_treaty",1,1,1,1,0,1,1,6,0.78788314295669,4,4,9,4.5
+"97",97,"Baltic Free Trade Area (BAFTA) agriculture",1996,"base_treaty",0,1,0,0,0,0,0,1,-1.07997146489979,1,4,0,0
+"974",974,"Chile Uruguay",2016,"base_treaty",1,1,1,1,0,1,1,6,0.787883142956594,1,2,8,4.25
+"975",975,"EC Kosovo SAA",2015,"base_treaty",1,1,1,0,1,0,1,5,1.16385371764095,5,4,6,3.5
+"976",976,"Laos US",2003,"base_treaty",1,1,0,1,0,0,1,4,0.51436019512724,0,2,1,1
+"978",978,"EC South African Development Community (SADC) EPA",2016,"base_treaty",1,1,1,0,0,0,1,4,0.514360195127178,4,4,8,4.25
+"98",98,"Baltic Free Trade Area (BAFTA) industrial",1993,"base_treaty",1,1,0,0,0,0,1,3,0.0547489422164387,1,4,0,0
+"981",981,"EFTA Georgia",2016,"base_treaty",1,1,1,1,1,1,1,7,1.4889674447025,6,4,8,4.75
+"983",983,"Moldova Turkey",2014,"base_treaty",1,1,0,0,0,0,1,3,-0.00944465525781259,2,4,2,2
+"984",984,"Hong Kong Macao",2017,"base_treaty",1,1,1,1,0,0,0,4,0.439545367934806,1,2,0,0
+"987",987,"Singapore Sri Lanka",2018,"base_treaty",1,1,1,1,1,1,1,7,1.42082391964382,5,4,7,3.75
+"99",99,"Baltic Free Trade Area (BAFTA) Non Tariff Barriers",1997,"base_treaty",0,1,0,0,0,0,0,1,-0.155378408994132,0,0,0,0
+"990",990,"China Georgia",2017,"base_treaty",1,1,1,1,0,1,1,6,0.9151768565972,5,4,8,4.25
+"992",992,"Australia Peru",2018,"base_treaty",1,1,1,1,1,1,1,7,1.48896756267671,5,4,8,4
