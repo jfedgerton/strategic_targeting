@@ -130,6 +130,8 @@ s2_prepare <- function(B, key, R, EDGE) {
   add_surface(X); attr(X, "dropped") <- n0 - nrow(X); X
 }
 
+## tie term of each option in a stage-2 design: "A:tie_sum_A", "B:tie_sum_B", "O:tie_sum_A" by default (exactly one tie_* term per option)
+tie_terms <- function(design) vapply(c("A", "B", "O"), function(al) { t <- grep("^tie_", design[[al]], value = TRUE); stopifnot(length(t) == 1L); paste0(al, ":", t) }, "")
 ## ---- the joint two-stage FE model on one cell ------------------------------------------------------------------------------------------
 ## returns a long table: stage-1 FE contrasts (two-way SE), stage-2 surface contrasts and theta (two-way SE conditional on bbar), counts
 joint_fe_cell <- function(D, dump, X, TS, design = S2_REF_DESIGN, fill_b = FALSE) {   # fill_b: robustness, targets without a repeat-target FE get b = 0 (the mean)
@@ -143,8 +145,8 @@ joint_fe_cell <- function(D, dump, X, TS, design = S2_REF_DESIGN, fill_b = FALSE
   F_t <- fit_mnl(X1, lapply(design, function(v) c(v, "bbar")), "cell")
   sc <- surf_contrasts(F_t)[, .(stage = "S2", alt, axis, gap, est, se)]
   th <- data.table(stage = "S2", alt = c("A", "B", "O"), axis = "theta", gap = NA_real_, est = F_t$b[c("A:bbar", "B:bbar", "O:bbar")], se = sqrt(diag(F_t$V))[c("A:bbar", "B:bbar", "O:bbar")])
-  tie <- data.table(stage = "S2", alt = c("A", "B", "O"), axis = "tie_sum", gap = NA_real_, est = F_t$b[c("A:tie_sum_A", "B:tie_sum_B", "O:tie_sum_A")],
-                    se = sqrt(diag(F_t$V))[c("A:tie_sum_A", "B:tie_sum_B", "O:tie_sum_A")])
+  tq <- tie_terms(design)   # the design's tie term per option (own-side ties by default; net ties in the ties robustness)
+  tie <- data.table(stage = "S2", alt = c("A", "B", "O"), axis = "tie_sum", gap = NA_real_, est = unname(F_t$b[tq]), se = unname(sqrt(diag(F_t$V))[tq]))
   mN <- s1_fit_nofe(D, dump); kN <- names(coef(mN)) %in% s1_terms(dump)
   nf <- s1_contrasts(coef(mN)[kN], s1_vc3w(mN, D)[kN, kN], dump$roles)[, stage := "S1NF"]   # between targets (main stage-1 comparison)
   TT <- paste0("tie_", dump$roles); nft <- NULL
@@ -192,7 +194,7 @@ joint_fe_draw <- function(D, dump, X, TS, m, ref_order, design = S2_REF_DESIGN, 
   if (!"A:bbar" %in% names(ft$b)) stop("bbar dropped by the separation rule in this draw")
   sc <- surf_contrasts(ft)
   v <- c(setNames(c1$est, paste("S1", c1$alt, c1$axis, c1$gap, sep = ".")), setNames(cN$est, paste("S1NF", cN$alt, cN$axis, cN$gap, sep = ".")), vT, setNames(sc$est, paste("S2", sc$alt, sc$axis, sc$gap, sep = ".")),
-         ft$b[c("A:bbar", "B:bbar", "O:bbar", "A:tie_sum_A", "B:tie_sum_B", "O:tie_sum_A")])
+         ft$b[c("A:bbar", "B:bbar", "O:bbar")], setNames(ft$b[tie_terms(design)], c("A:tie_sum_A", "B:tie_sum_B", "O:tie_sum_A")))   # tie labels kept; value = the design's tie term
   bn <- boot_names(dump); setNames(v[bn], bn)   # a dropped term gives NA for that quantity only, never a misnamed draw (recheck P2)
 }
 
