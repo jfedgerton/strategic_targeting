@@ -129,11 +129,12 @@ s2_prepare <- function(B, key, R, EDGE) {
 
 ## ---- the joint two-stage FE model on one cell ------------------------------------------------------------------------------------------
 ## returns a long table: stage-1 FE contrasts (two-way SE), stage-2 surface contrasts and theta (two-way SE conditional on bbar), counts
-joint_fe_cell <- function(D, dump, X, TS, design = S2_REF_DESIGN) {
+joint_fe_cell <- function(D, dump, X, TS, design = S2_REF_DESIGN, fill_b = FALSE) {   # fill_b: robustness, targets without a repeat-target FE get b = 0 (the mean)
   ch <- D[chosen == 1L]; NCH0 <- sort(table(ch$c2), decreasing = TRUE); REP <- names(NCH0)[NCH0 >= 2]
   s1 <- s1_fit_fe(D, dump, names(NCH0)); b1 <- coef(s1$m); keep <- !grepl("^tfe", names(b1)); V1 <- s1_vc2w(s1$m, s1$dd)
   bfe <- b1[!keep]; names(bfe) <- sub("^tfe", "", names(bfe)); bfe <- c(setNames(0, levels(s1$dd$tfe)[1]), bfe)   # the reference level actually used by the fit
   b <- bfe[names(bfe) %in% REP & is.finite(bfe)]; b <- pmin(pmax(b - mean(b), -5), 5)
+  if (fill_b) { nt <- setdiff(as.character(unique(TS$ccode)), names(b)); b <- c(b, setNames(rep(0, length(nt)), nt)) }   # robustness (PI 2026-11-24): one-time / unchosen targets at the mean
   bb <- TS[, .(dispnum, b = b[as.character(ccode)])][, .(bbar = mean(b, na.rm = TRUE)), by = dispnum][is.finite(bbar)]
   X1 <- merge(X, bb, by = "dispnum")
   F_t <- fit_mnl(X1, lapply(design, function(v) c(v, "bbar")), "cell")
@@ -150,7 +151,8 @@ joint_fe_cell <- function(D, dump, X, TS, design = S2_REF_DESIGN) {
                  data.table(stage = "S1NFT", alt = dump$roles, axis = "tie", gap = NA_real_, est = coef(mT)[TT], se = sqrt(diag(VT))[TT])) }
   out <- rbind(s1_contrasts(b1[keep], V1[keep, keep], dump$roles), nf, nft, sc, th, tie)
   out[, `:=`(n_s1_events = nrow(ch), n_s2_rows = F_t$n, n_s2_A = sum(X1$y == "A"), n_s2_B = sum(X1$y == "B"), n_s2_O = sum(X1$y == "orig"))]
-  out[]
+  setattr(out, "disp_joint", sort(unique(X1$dispnum)))   # the joint model's disputes (finite bbar); main_table fits stage 2 alone on these
+  out
 }
 
 ## ---- one two-stage bootstrap draw of a cell (as R/s2_03_joint_fe.R): dispute weights m (named by dispnum; Bayesian bootstrap, boot_weights) reweight BOTH steps;
@@ -169,7 +171,7 @@ boot_names <- function(dump) { r <- dump$roles; ax <- rep(c("M", "R"), each = 2)
   c(paste("S1", rep(r, each = 4), ax, sg, sep = "."), paste("S1NF", rep(r, each = 4), ax, sg, sep = "."), paste("S1NFT", rep(r, each = 4), ax, sg, sep = "."),
     paste0("S1NFT.", r, ".tie"), paste("S2", rep(c("A", "B", "O"), each = 4), ax, sg, sep = "."),
     "A:bbar", "B:bbar", "O:bbar", "A:tie_sum_A", "B:tie_sum_B", "O:tie_sum_A") }
-joint_fe_draw <- function(D, dump, X, TS, m, ref_order, design = S2_REF_DESIGN) {
+joint_fe_draw <- function(D, dump, X, TS, m, ref_order, design = S2_REF_DESIGN, fill_b = FALSE) {
   ch <- D[chosen == 1L]; NCH <- table(ch$c2); REP <- names(NCH)[NCH >= 2]   # repeat targets of the full sample (as R/s2_03)
   Db <- copy(D); Db[, w := w * m[as.character(disp)]]; Db <- Db[w > 0]
   s1 <- s1_fit_fe(Db, dump, ref_order); bb <- coef(s1$m); be <- bb[grepl("^tfe", names(bb))]; names(be) <- sub("^tfe", "", names(be))
@@ -180,6 +182,7 @@ joint_fe_draw <- function(D, dump, X, TS, m, ref_order, design = S2_REF_DESIGN) 
   if (all(TT %in% names(Db))) { mT <- s1_fit_nofe(Db, dump, TT); kT <- names(coef(mT)) %in% s1_terms(dump); cT <- s1_contrasts(coef(mT)[kT], NULL, dump$roles)
     vT <- c(setNames(cT$est, paste("S1NFT", cT$alt, cT$axis, cT$gap, sep = ".")), setNames(coef(mT)[TT], paste0("S1NFT.", dump$roles, ".tie"))) }
   b <- be[names(be) %in% REP & is.finite(be)]; b <- pmin(pmax(b - mean(b), -5), 5)
+  if (fill_b) { nt <- setdiff(as.character(unique(TS$ccode)), names(b)); b <- c(b, setNames(rep(0, length(nt)), nt)) }
   bbt <- TS[, .(dispnum, b = b[as.character(ccode)])][, .(bbar = mean(b, na.rm = TRUE)), by = dispnum][is.finite(bbar)]
   Xb <- merge(X, bbt, by = "dispnum"); wt <- m[as.character(Xb$dispnum)]; Xb <- Xb[wt > 0]; wt <- wt[wt > 0]
   ft <- fit_mnl(Xb, lapply(design, function(v) c(v, "bbar")), "boot", vc = FALSE, w = as.numeric(wt))
