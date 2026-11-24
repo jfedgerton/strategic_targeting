@@ -4,7 +4,7 @@
 - **BOOKraw_ptadesta|igo+def+off+pta+dca|pr**: the book's unweighted measure (book tag `c9_igo.def.off.dca.pta_raw`). Five layers, each in [0,1] with true zeros:
   IGO = shared full COW IGO memberships (peacesciencer dyadic count), min-max within year; ATOP defense; ATOP offense; Kinne DCAD dcaAnyV2 (2010 carried to 2011-14);
   PTA = book `layer_pta_desta` (every member pair of an in-force DESTA treaty linked, only actual withdrawers leave, ISO->COW with Germany 260 for 1955-90,
-  Czechoslovakia 315 through 1992, North Yemen 678 through 1989; 196,693 linked undirected dyad-years). Tie = mean of the 5 layers / its yearly maximum.
+  Czechoslovakia 315 through 1992, North Yemen 678 through 1989; 196,196 linked undirected dyad-years). Tie = mean of the 5 layers / its yearly maximum.
   Position = log PageRank (igraph, damping 0.85, undirected, weighted; every state in the year's key is a vertex).
 - With the book's own PTA file the builders reproduce the book's `_raw` and `_sry_contig12` edges to 1e-14 (checked 2026-11-24).
 - The weighted book measure (BOOKc12_ptadesta, sry contig12) is an appendix robustness measure.
@@ -31,4 +31,4 @@ Swept at the main window on fatal MIDs and on all MIDs (612 cells). IGO cos / hy
 Main x windows 0-6 x {fmid, mid}; main layers under IGO cos, hyper, PTA depth; drop-one layer; the 4 weighting schemes; DCA v1; + other alliances. 28 cells.
 
 ## Checks that must stop the run
-PTA 196,693 and 93 withdrawers; DCA v2 11,031 (1980-2010); raw pooled tie share 0.952; grid raw main = BOOKraw to 1e-10; grid sry c12 main = BOOKc12 (tested); fixest warnings/convergence; sry dropped rows must have y = 0.
+PTA 196,196 and 93 withdrawers; DCA v2 11,031 (1980-2010); raw pooled tie share 0.952; grid raw main = BOOKraw to 1e-10; grid sry c12 main = BOOKc12 (tested); fixest warnings/convergence; sry dropped rows must have y = 0.

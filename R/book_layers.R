@@ -6,7 +6,7 @@
 ##     in the most withdrawal pairs; a one-pair event withdraws both), from the withdrawal year on
 ##   - every member pair of a base treaty in force in year t is linked (binary); 1816-2014
 ##   - ISO numeric -> COW (countrycode); Germany 276 -> 260 for 1955-1990; Serbia 688 -> 345; Kosovo 900 -> 347
-## Check: 196,693 linked undirected dyad-years on the layer frame (book file without the predecessor mapping: 196,669); stops otherwise.
+## Check: 196,196 linked undirected dyad-years on the layer frame (196,693 before the 2026-11-24 post-2014-entry fix; book file without the predecessor mapping: 196,669 before that fix); stops otherwise.
 ## DCA (PI 2026-11-24, book alignment): Kinne DCAD dcaAnyV2 (the book / JOP main; layers_dy holds dcaAnyV1), binary, true zeros before 1980,
 ##   each dyad's 2010 value carried to 2011-14. Check: equals the book layer_dca for 1980-2010.
 ## Usage: Rscript R/book_layers.R LAYERS_RDS DESTA_02_02_TXT DESTA23_WITHDRAWAL_CSV DCA_DYAD_CSV OUT_RDS   (out: ccode1, ccode2, year, pta_desta, dca_v2)
@@ -32,7 +32,9 @@ stopifnot(nrow(wd) == 93L)
 mem <- join[, .(start = min(start)), by = .(base_treaty, iso)]
 mem <- merge(mem, wd[, .(stop = min(stop)), by = .(base_treaty, iso)], by = c("base_treaty", "iso"), all.x = TRUE)
 mem[is.na(stop), stop := 9999L]; mem <- mem[start < stop]
-my <- mem[, .(year = seq(max(start, 1816L), min(stop - 1L, 2014L))), by = .(base_treaty, iso)][!is.na(year)]
+mem[, `:=`(y0 = pmax(start, 1816L), y1 = pmin(stop - 1L, 2014L))]
+mem <- mem[y0 <= y1]   # audit 2026-11-24: treaties entering force after 2014 have y0 > y1; seq() would count DOWN to 2014 and add 497 false 2014 links (book line 66 has the same bug)
+my <- mem[, .(year = seq(y0, y1)), by = .(base_treaty, iso)]
 map <- data.table(iso = unique(my$iso)); map[, ccode := suppressWarnings(countrycode(iso, "iso3n", "cown"))]
 map[iso == 688, ccode := 345L]; map[iso == 900, ccode := 347L]
 cat("ISO codes without a COW code (non-COW territories):", paste(sort(map[is.na(ccode), iso]), collapse = ", "), "\n")
@@ -47,7 +49,7 @@ OUT <- merge(FR, P, by = c("ccode1", "ccode2", "year"), all.x = TRUE)[is.na(pta_
 stopifnot(nrow(OUT) == nrow(FR))
 n <- sum(OUT$pta_desta); cat(sprintf("linked undirected dyad-years %d (years %d-%d); Czechoslovakia (315) %d\n", n,
   min(OUT[pta_desta == 1, year]), max(OUT[pta_desta == 1, year]), OUT[pta_desta == 1 & (ccode1 == 315 | ccode2 == 315), .N]))
-stopifnot(n == 196693L)
+stopifnot(n == 196196L)
 ## DCA v2
 dc <- fread(a[4])[, .(ccode1 = pmin(ccode1, ccode2), ccode2 = pmax(ccode1, ccode2), year, v = as.integer(dcaAnyV2 > 0))][, .(v = max(v)), by = .(ccode1, ccode2, year)]
 stopifnot(min(dc$year) == 1980L, max(dc$year) == 2010L)

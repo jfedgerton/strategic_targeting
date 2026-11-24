@@ -7,7 +7,7 @@
 ##   def, off      : ATOP defense / offense pledge, either direction (layers_dy; equals the book atop_un_layers)
 ##   othally       : 1 if a neutrality, non-aggression or consultation pledge links the pair (max of the three ATOP types; layers_dy)
 ##   dca2, dca1    : Kinne DCAD dcaAnyV2 (book main; book_layers.rds) and dcaAnyV1 (layers_dy), 2010 carried to 2011-14
-##   pta_book      : book layer_pta_desta (book_layers.rds; 196,693 linked)
+##   pta_book      : book layer_pta_desta (book_layers.rds; 196,196 linked)
 ##   pta_depth     : max DESTA 2.3 depth_index over in-force agreements / 7 (book 01_data/04_pta_desta_costly.R: dyadic DESTA 2.3,
 ##                   in force from entryforceyear until the year before a recorded withdrawal; accessions take the base treaty's depth),
 ##                   with the predecessor mapping used for pta_book (Germany 260 through 1990, Czechoslovakia 315 through 1992,
