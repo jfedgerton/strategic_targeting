@@ -1,8 +1,8 @@
 ## R/ame/ame_cell.R -- joint two-stage AME cells 1-3 (docs/ame_design.md rev 2; PI 2026-11-23 "start with just 1-3"):
 ##   main = joint, K = 0 | cut = stage 1 alone, then stage 2 with bbar from M stage-1 posterior draws (cut posterior) | k1 = joint, K = 1.
 ## Stage-1 relational gap split into between (initiator vs the target's pre-event mean) and within (target's deviation from that mean) parts,
-## both with the full quadratic surface; positions centred within year and scaled by the FE gap scale (s2_gap_scale) first. Event weights enter as a pseudo-likelihood (the
-## Williams-Savitsky adjustment of rev 2 section 6 is NOT applied yet; reported as raw weighted posteriors).
+## both with the full quadratic surface; positions centred within year and scaled by the FE gap scale (s2_gap_scale) first. Event weights enter as a pseudo-likelihood;
+## summaries report both the raw weighted posterior and the Williams-Savitsky adjusted fixed parameters (R/ame/ame_ws.R; design section 6 main).
 ## Usage: Rscript R/ame/ame_cell.R --cell=main|cut|k1 --build=DIR --dump=FILE --positions=FILE --spec=SPEC --edges_dir=DIR --out=DIR
 ##          [--chains=4] [--warmup=1000] [--iter=1000] [--threads=2] [--sub=1] [--M=10] [--seed=123]
 ## Two-machine mode: --prep_only --bundle=FILE (where the builds live; no Stan) then --bundle=FILE (fit only, e.g. on Roar; no build inputs needed).
@@ -26,7 +26,7 @@ if (!is.null(BUNDLE) && file.exists(BUNDLE) && !PREP_ONLY) {
   stopifnot(identical(BN$spec, SPEC) || is.null(SPEC)); SPEC <- BN$spec
   logf("AME cell %s | bundle %s (%s, built %s) | chains %d x (%d + %d) | threads %d | seed %d", CELL, BUNDLE, SPEC, BN$built, CH, WU, IT, TH, SEED)
   if (!is.null(BN$prov)) { logf("bundle provenance: commit %s | sub %.2f | %s", BN$prov$commit, BN$prov$sub, paste(sprintf("%s %s", names(BN$prov$md5), BN$prov$md5), collapse = " | ")); if (BN$prov$sub < 1) logf("WARNING: subsampled bundle (sub %.2f)", BN$prov$sub) }
-  ST <- BN$ST; DISP <- BN$DISP
+  ST <- BN$ST; DISP <- BN$DISP; EV_DISP <- BN$EV_DISP; stopifnot(!is.null(EV_DISP))
   mk <- function(use_s1, use_s2, fix_bbar, K, bbar = rep(0, BASE$ND)) modifyList(BASE, list(use_s1 = use_s1, use_s2 = use_s2, fix_bbar = fix_bbar, K = K, bbar_data = bbar))
 } else {
   for (f in c("s2.R", "s2_fit.R", "sry.R", "s2_cell.R")) source(file.path(RD, "lib", f))   # build-side only; fit-only mode needs rstan and data.table
@@ -49,7 +49,8 @@ for (g in 0:1) for (v in SURF) D[, paste0(v, "_", ROLES[g + 1]) := get(v) * (typ
 X1N <- c(as.vector(outer(SURF, ROLES, paste, sep = "_")), dump$Z_cols)
 setorder(D, ev_id, row)
 X1 <- as.matrix(D[, ..X1N]); sc1 <- apply(X1, 2, sd); stopifnot(all(sc1 > 0)); X1 <- sweep(X1, 2, sc1, "/")
-ev <- D[, .(s = .I[1], e = .I[.N], ch = .I[chosen == 1L], w = w[1]), by = ev_id]; stopifnot(nrow(ev) == uniqueN(D$ev_id))
+ev <- D[, .(s = .I[1], e = .I[.N], ch = .I[chosen == 1L], w = w[1], disp = disp[1]), by = ev_id]; stopifnot(nrow(ev) == uniqueN(D$ev_id), D[, uniqueN(disp), by = ev_id]$V1 == 1L)
+EV_DISP <- ev$disp   # dispute of each stage-1 event: the Williams-Savitsky clusters (same ids as stage-2 dispnum)
 ## ---- stage 2: the FE cell's design (s2_prepare + S2_REF_DESIGN), standardized; availability; disputes; target sets ----------------
 X <- s2_prepare(B, key, R, E)
 alts <- c("A", "B", "O"); AV <- mnl_avail(X, alts)
@@ -84,7 +85,7 @@ logf("stage 1: %d events, %d rows, %d terms | stage 2: %d rows, %d disputes, ter
   md5 <- tools::md5sum(c(build_meta = file.path(opt("build"), "s2_meta.rds"), dump = opt("dump"), positions = opt("positions")))
   cm <- tryCatch(system2("git", c("-C", dirname(RD), "rev-parse", "--short", "HEAD"), stdout = TRUE), error = function(e) NA_character_)
   if (PREP_ONLY) { stopifnot(!is.null(BUNDLE)); saveRDS(list(base = BASE, sc1 = sc1, X1N = X1N, ROLES = ROLES, alts = alts, spec = SPEC, built = format(Sys.time()),
-                                                    window = W_REF, fatal_def = B$meta$fatal_def, ST = ST, DISP = DISP,   # index maps for b, eta, del, bbar, u, v (audit P2-7)
+                                                    window = W_REF, fatal_def = B$meta$fatal_def, ST = ST, DISP = DISP, EV_DISP = EV_DISP,   # index maps for b, eta, del, bbar, u, v (audit P2-7)
                                                     prov = list(commit = cm[1], sub = SUB, md5 = setNames(unname(md5), c("build_meta", "dump", "positions")), dump_commit = dump$git_commit)), BUNDLE)
     logf("AME_BUNDLE_WRITTEN %s (%.1f MB)", BUNDLE, file.size(BUNDLE) / 1e6); quit(status = 0) }
 }
@@ -99,7 +100,7 @@ fit1 <- function(dat, tag, ch = CH, wu = WU, it = IT) { t0 <- Sys.time()
   if (file.exists(ff)) logf("%s: existing %s does not match this run's signature; refitting", tag, ff)
   f <- sampling(mod, data = dat, chains = ch, cores = ch, warmup = wu, iter = wu + it, seed = SEED, refresh = max(1, (wu + it) %/% 10),
                 control = list(adapt_delta = 0.9, max_treedepth = 11),
-                pars = c("beta1", "sigma_b", "sigma_del", "sigma_eta", "alpha", "betaA", "betaB", "betaO", "theta", "sigma_eps", "b", "del", "eta", "bbar",
+                pars = c("beta1", "sigma_b", "sigma_del", "sigma_eta", "alpha", "betaA", "betaB", "betaO", "theta", "sigma_eps", "b", "del", "eta", "bbar", "eps_raw",
                          if (dat$K) c("lam1_raw", "lam2_raw", "u_out", "v_out", "lat_norm1", "lat_share1")))
   saveRDS(f, ff); saveRDS(sig, sf); logf("%s: %.1f min; divergences %d; max treedepth hits %d", tag, as.numeric(difftime(Sys.time(), t0, units = "mins")),
     sum(get_divergent_iterations(f)), sum(get_max_treedepth_iterations(f))); f }
@@ -127,6 +128,34 @@ for (p in c("sigma_b", "sigma_del", "sigma_eta")) OUTT[[length(OUTT) + 1]] <- su
 S2f <- if (CELL == "cut") FITS$stage2 else list(FITS$joint)
 se <- do.call(rbind, lapply(S2f, function(f) rstan::extract(f, "sigma_eps")$sigma_eps)); for (c in 1:3) OUTT[[length(OUTT) + 1]] <- summ(se[, c], sprintf("sigma_eps_%s", alts[c]))
 if (CELL == "k1") for (p in c("lat_norm1", "lat_share1")) OUTT[[length(OUTT) + 1]] <- summ(rstan::extract(FITS$joint, p)[[1]], c(lat_norm1 = "K1 |lam1| ||u|| ||v|| (Frobenius norm of lam1 u v')", lat_share1 = "K1 latent share of stage-1 utility variance")[[p]])
+## ---- Williams-Savitsky adjustment (PI 2026-11-24; design section 6 main): fixed-parameter draws rescaled to the dispute-clustered sandwich ----
+source(file.path(RD, "ame", "ame_ws.R"))
+ws_fit <- function(f, dat) {
+  ex <- rstan::extract(f); pm <- function(x) if (length(dim(x)) == 1) mean(x) else apply(x, seq_along(dim(x))[-1], mean)
+  blk <- c(if (dat$use_s1) "beta1", if (dat$use_s2) c("alpha", "betaA", "betaB", "betaO", "theta"))
+  DR <- do.call(cbind, lapply(blk, function(k) { x <- ex[[k]]; m <- matrix(x, nrow = dim(x)[1]); colnames(m) <- paste0(k, "[", seq_len(ncol(m)), "]"); m }))
+  lat <- list(b = pm(ex$b), eta = pm(ex$eta), del = pm(ex$del), bbar = pm(ex$bbar),
+              eps = apply(sweep(ex$eps_raw, c(1, 3), ex$sigma_eps, "*"), c(2, 3), mean))
+  if (dat$K) lat <- c(lat, list(u = pm(ex$u_out), v = pm(ex$v_out), lam1 = mean(ex$lam1_raw), lam2 = mean(ex$lam2_raw)))
+  n1 <- sum(grepl("^beta1", colnames(DR)))
+  full <- function(pp) {   # rebuild the ame_unpack order (beta1, alpha, betaA, betaB, betaO, theta); blocks a fit did not use are zero and unused
+    b1 <- if (dat$use_s1) pp[seq_len(n1)] else rep(0, dat$P1)
+    s2 <- if (dat$use_s2) pp[(n1 + 1L):length(pp)] else rep(0, 3 * dat$NE_ERA + dat$PA + dat$PB + dat$PO + 3)
+    c(b1, s2) }
+  llc <- function(pp) ame_ll_by_cluster(full(pp), dat, lat, EV_DISP, DISP)
+  r <- ws_rescale(DR, ws_jacobian(llc, colMeans(DR)))
+  logf("WS adjustment (%s): %d fixed parameters, %d dispute clusters; sd ratio sandwich / posterior median %.2f (range %.2f-%.2f)",
+       paste(blk, collapse = ","), ncol(DR), length(llc(colMeans(DR))), median(r$ratio_sd), min(r$ratio_sd), max(r$ratio_sd))
+  r }
+datS1 <- if (CELL == "cut") mk(1, 0, 0, 0) else if (CELL == "k1") mk(1, 1, 0, 1) else mk(1, 1, 0, 0)
+W1 <- tryCatch(ws_fit(S1f, datS1), error = function(e) { logf("WS adjustment failed (stage 1 fit): %s", conditionMessage(e)); NULL })
+if (!is.null(W1)) { bw <- W1$draws[, grepl("^beta1", colnames(W1$draws)), drop = FALSE]; colnames(bw) <- X1N; bw <- sweep(bw, 2, sc1, "/")
+  for (r in ROLES) for (ax in c("B", "W", "M")) for (g in c(1, -1)) OUTT[[length(OUTT) + 1]] <- summ(con(bw, r, ax, g), sprintf("S1 %s %s gap %+d [WS-adjusted]", r, c(B = "between R", W = "within R", M = "material")[ax], g))
+  for (ax in c("B", "W")) for (g in c(1, -1)) OUTT[[length(OUTT) + 1]] <- summ(con(bw, ROLES[2], ax, g) - con(bw, ROLES[1], ax, g), sprintf("S1 coal-bil %s gap %+d [WS-adjusted]", c(B = "between R", W = "within R")[ax], g)) }
+thw <- if (CELL == "cut") { L <- lapply(FITS$stage2, function(f) tryCatch(ws_fit(f, mk(0, 1, 1, 0, rstan::extract(f, "bbar")$bbar[1, ])), error = function(e) NULL))
+  if (all(!vapply(L, is.null, TRUE))) do.call(rbind, lapply(L, function(r) r$draws[, paste0("theta[", 1:3, "]")])) else NULL
+} else if (!is.null(W1)) W1$draws[, paste0("theta[", 1:3, "]")] else NULL
+if (!is.null(thw)) for (c in 1:3) OUTT[[length(OUTT) + 1]] <- summ(thw[, c], sprintf("S2 theta_%s [WS-adjusted]", alts[c]))
 S <- rbindlist(OUTT); S[, cell := CELL]
 fs <- if (CELL == "cut") c(list(FITS$stage1), FITS$stage2) else list(FITS$joint)
 ## convergence over everything the gate names (audit P1-2): bulk / tail ESS and rank-normalized Rhat (rstan::monitor)
