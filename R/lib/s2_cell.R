@@ -207,6 +207,6 @@ s2_fingerprint_check <- function(out, files) {   # files: named character vector
   fwrite(cur, paste0(f, ".tmp"), sep = "\t"); if (!file.rename(paste0(f, ".tmp"), f)) stop("could not write ", f)
   invisible(cur)
 }
-s2_code_files <- function(rd) c(lib_s2 = file.path(rd, "lib", "s2.R"), lib_s2_fit = file.path(rd, "lib", "s2_fit.R"), lib_sry = file.path(rd, "lib", "sry.R"), lib_s2_cell = file.path(rd, "lib", "s2_cell.R"))
+s2_code_files <- function(rd) c(lib_s2 = file.path(rd, "lib", "s2.R"), lib_s2_fit = file.path(rd, "lib", "s2_fit.R"), lib_sry = file.path(rd, "lib", "sry.R"), lib_s2_cell = file.path(rd, "lib", "s2_cell.R"), lib_grid = file.path(rd, "lib", "grid.R"))   # grid.R rebuilds grid ties at run time (audit 2026-11-24)
 s2_build_files <- function(bd, tag) { f <- sort(list.files(bd, pattern = "\\.rds$", full.names = TRUE)); setNames(f, paste0(tag, ":", basename(f))) }
 s2_write_atomic <- function(x, f) { fwrite(x, paste0(f, ".tmp")); if (!file.rename(paste0(f, ".tmp"), f)) stop("could not write ", f) }

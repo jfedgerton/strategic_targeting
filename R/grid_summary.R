@@ -16,6 +16,10 @@ SW <- strsplit(opt("sweeps"), ",")[[1]]; MAIN <- opt("main_spec"); OUT <- opt("o
 fs <- unlist(lapply(SW, function(d) list.files(d, pattern = "\\.csv$", full.names = TRUE))); fs <- fs[!grepl("census|log", basename(fs))]
 A <- rbindlist(lapply(fs, fread), fill = TRUE); stopifnot(all(c("spec_id", "status", "sample", "stage", "alt", "axis", "gap", "est", "se") %in% names(A)))
 cen <- unique(A[, .(spec_id, sample, status)]); fwrite(cen[, .N, by = .(sample, status)], file.path(OUT, "grid_census.csv"))
+## completeness (audit 2026-11-24): every sweep has all 306 measures, and the main measure fitted (OK) in each sample
+for (sm in unique(cen$sample)) { cs <- cen[sample == sm]; if (uniqueN(cs$spec_id) != 306L) stop(sprintf("sweep %s has %d measures, expected 306", sm, uniqueN(cs$spec_id)))
+  if (!identical(cs[spec_id == MAIN, status], "OK")) stop(sprintf("main measure %s is not OK in sample %s", MAIN, sm)) }
+stopifnot(uniqueN(cen$sample) == length(SW))
 A <- A[status == "OK"]
 Q <- data.table(stage = c("S1NF", "S1NF", "S1NF", "S1NF", "S2", "S2", "S2", "S2"), alt = c("coal", "bil", "coal", "coal", "A", "B", "B", "B"),
                 axis = c("R", "R", "M", "M", "theta", "theta", "M", "R"), gap = c(1, 1, 1, -1, NA, NA, -1, 1),

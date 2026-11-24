@@ -28,7 +28,7 @@
 Swept at the main window on fatal MIDs and on all MIDs (612 cells). IGO cos / hyper follow book 01_data/06_igo_variants.R (state-year file); PTA depth follows book 01_data/04_pta_desta_costly.R (DESTA 2.3 dyadic, max depth / 7) plus the predecessor mapping.
 
 ## Bootstrapped cells (R/grid_pick_boot_cells.R, fixed before results)
-Main x windows 0-6 x {fmid, mid}; main layers under IGO cos, hyper, PTA depth; drop-one layer; the 4 weighting schemes; DCA v1; + other alliances. 28 cells.
+Main x windows 0-6 x {fmid, mid} (the main-window pair is the main table's B_MAIN bootstrap, step 3; the other 12 here); main layers under IGO cos, hyper, PTA depth; drop-one layer; the 4 weighting schemes; DCA v1; + other alliances. 26 cells here + 2 in the main table. Window 0 has no originator alternative, so its O quantities are NA.
 
 ## Checks that must stop the run
 PTA 196,196 and 93 withdrawers; DCA v2 11,031 (1980-2010); raw pooled tie share 0.952; grid raw main = BOOKraw to 1e-10; grid sry c12 main = BOOKc12 (tested); fixest warnings/convergence; sry dropped rows must have y = 0.
