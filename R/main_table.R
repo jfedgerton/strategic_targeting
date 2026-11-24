@@ -10,6 +10,8 @@
 ##   (2b) stage 2 alone on all stage-2 disputes (incl. those without bbar: every onset target chosen < 2 times in stage 1)
 ##   (3b) joint model with b = 0 (the mean target) for targets without a repeat-target FE, so every stage-2 dispute has a bbar
 ##   plus a census of the rows the t-1 timing rule and the bbar rule remove (main_table_missingness.csv).
+## Ties robustness (PI 2026-11-24), same file: (3c) joint model with NET ties per option (ties to the side joined minus ties to the opposing side;
+##   A and O: tie_sum_A - tie_sum_B, B: tie_sum_B - tie_sum_A) in place of own-side ties.
 ## Usage: Rscript R/main_table.R --build=DIR --dump=FILE --positions=FILE --spec=ID --edges_dir=DIR --cell_dir=DIR --out=DIR [--cores=2] [--n_robust=500]
 suppressPackageStartupMessages({ library(data.table); library(parallel) })
 for (f in c("s2.R", "s2_fit.R", "sry.R", "s2_cell.R")) source(file.path("R/lib", f))
@@ -47,6 +49,14 @@ MB <- do.call(rbind, Db[!vapply(Db, is.null, TRUE)])
 PF <- joint_fe_cell(D, dump, X, B$TS, fill_b = TRUE); stopifnot(length(attr(PF, "disp_joint")) == uniqueN(X$dispnum))
 DF <- mclapply(MR, function(m) tryCatch(joint_fe_draw(D, dump, X, B$TS, m, ref_order, fill_b = TRUE), error = function(e) NULL), mc.cores = CORES, mc.preschedule = FALSE)
 MF <- do.call(rbind, DF[vapply(DF, function(x) is.numeric(x) && identical(names(x), boot_names(dump)), TRUE)])
+## (3c) net ties: the joint model with tie_net_* in place of own-side ties (boot_names keeps the own-side labels; see the mapping below)
+XN <- copy(X)[, `:=`(tie_net_A = tie_sum_A - tie_sum_B, tie_net_B = tie_sum_B - tie_sum_A)]
+DN <- list(A = sub("^tie_sum_A$", "tie_net_A", S2_REF_DESIGN$A), B = sub("^tie_sum_B$", "tie_net_B", S2_REF_DESIGN$B), O = sub("^tie_sum_A$", "tie_net_A", S2_REF_DESIGN$O))
+stopifnot(sum(DN$A == "tie_net_A") == 1L, sum(DN$B == "tie_net_B") == 1L, sum(DN$O == "tie_net_A") == 1L)
+PNT <- joint_fe_cell(D, dump, XN, B$TS, design = DN)
+nt_draw <- function(m) { f <- joint_fe_draw(D, dump, XN, B$TS, m, ref_order, design = DN) ; f }
+DNT <- mclapply(MR, function(m) tryCatch(nt_draw(m), error = function(e) NULL), mc.cores = CORES, mc.preschedule = FALSE)
+MNT <- do.call(rbind, DNT[vapply(DNT, function(x) is.numeric(x) && identical(names(x), boot_names(dump)), TRUE)])
 ## assemble
 ci <- function(M, k, est, nb) { x <- if (is.null(M)) numeric(0) else M[is.finite(M[, k]), k]; if (!is.finite(est) || length(x) < 0.8 * nb) c(NA, NA) else unname(quantile(x, c(.025, .975))) }
 row <- function(col, label, q, est, M, nb = NB) { b <- ci(M, q, est, nb); data.table(column = col, row = label, est = est, lo = b[1], hi = b[2], n_draws = if (is.null(M)) 0L else sum(is.finite(M[, q]))) }
@@ -72,24 +82,30 @@ fmt <- function(TB) TB[, cell := ifelse(is.na(lo), sprintf("%.2f", est), sprintf
 fmt(TAB); fwrite(TAB, file.path(OUT, "main_table_long.csv"))
 N <- data.table(quantity = c("stage-1 events", "stage-2 disputes, (2) and (3)", "stage-2 candidate rows, (2) and (3)", "joined A", "joined B", "joined O",
                              "stage-2 disputes, all (2b, 3b)", "stage-2 candidate rows, all", "joined A, all", "joined B, all", "joined O, all",
-                             "bootstrap draws, joint usable", "bootstrap draws, stage 2 alone usable", "robustness draws attempted", "robustness draws usable (2b / 3b)"),
+                             "bootstrap draws, joint usable", "bootstrap draws, stage 2 alone usable", "robustness draws attempted", "robustness draws usable (2b / 3b / 3c)"),
                 value = c(P$n_s1_events[1], length(JS), nrow(XJ), sum(XJ$y == "A"), sum(XJ$y == "B"), sum(XJ$y == "orig"),
                           uniqueN(X$dispnum), nrow(X), sum(X$y == "A"), sum(X$y == "B"), sum(X$y == "orig"), nrow(MJ), nrow(M0), NR,
-                          paste(if (is.null(MB)) 0L else nrow(MB), if (is.null(MF)) 0L else nrow(MF), sep = " / ")))
+                          paste(if (is.null(MB)) 0L else nrow(MB), if (is.null(MF)) 0L else nrow(MF), if (is.null(MNT)) 0L else nrow(MNT), sep = " / ")))
 fwrite(N, file.path(OUT, "main_table_n.csv"))
 W <- dcast(TAB, row ~ column, value.var = "cell", fill = ""); W <- W[match(unique(TAB$row), row)]   # keep the intended row order
 fwrite(W, file.path(OUT, "main_table_wide.csv"))
 ## ---- missing-data robustness: (2) vs (2b) and (3) vs (3b) side by side ----
 gF <- function(st, al, ax, g) PF[stage == st & alt == al & axis == ax & (is.na(g) & is.na(gap) | gap == g), est]
+gN <- function(st, al, ax, g) PNT[stage == st & alt == al & axis == ax & (is.na(g) & is.na(gap) | gap == g), est]
 RB <- list()
 for (al in c("A", "B", "O")) for (k in names(lab_s2)) { ax <- sub("\\..*$", "", k); g <- as.numeric(sub("^[MR]\\.", "", k)); lb <- paste("join", al, sprintf(lab_s2[[k]], opp[[al]]))
   RB[[length(RB) + 1]] <- row("(2) Stage 2 alone, joint sample", lb, paste("S2A", al, ax, g, sep = "."), pt0[[paste("S2A", al, ax, g, sep = ".")]], M0)
   RB[[length(RB) + 1]] <- row("(2b) Stage 2 alone, all disputes", lb, paste("S2Ab", al, ax, g, sep = "."), ptb[[paste("S2Ab", al, ax, g, sep = ".")]], MB, NR)
   RB[[length(RB) + 1]] <- row("(3) Joint", lb, paste("S2", al, ax, g, sep = "."), getP("S2", al, ax, g), MJ)
-  RB[[length(RB) + 1]] <- row("(3b) Joint, b = 0 for one-time targets", lb, paste("S2", al, ax, g, sep = "."), gF("S2", al, ax, g), MF, NR) }
+  RB[[length(RB) + 1]] <- row("(3b) Joint, b = 0 for one-time targets", lb, paste("S2", al, ax, g, sep = "."), gF("S2", al, ax, g), MF, NR)
+  RB[[length(RB) + 1]] <- row("(3c) Joint, net ties", lb, paste("S2", al, ax, g, sep = "."), gN("S2", al, ax, g), MNT, NR) }
 for (al in c("A", "B", "O")) {
   RB[[length(RB) + 1]] <- row("(3) Joint", paste("join", al, "theta (target trait)"), paste0(al, ":bbar"), getP("S2", al, "theta", NA), MJ)
-  RB[[length(RB) + 1]] <- row("(3b) Joint, b = 0 for one-time targets", paste("join", al, "theta (target trait)"), paste0(al, ":bbar"), gF("S2", al, "theta", NA), MF, NR) }
+  RB[[length(RB) + 1]] <- row("(3b) Joint, b = 0 for one-time targets", paste("join", al, "theta (target trait)"), paste0(al, ":bbar"), gF("S2", al, "theta", NA), MF, NR)
+  RB[[length(RB) + 1]] <- row("(3c) Joint, net ties", paste("join", al, "theta (target trait)"), paste0(al, ":bbar"), gN("S2", al, "theta", NA), MNT, NR)
+  tq <- c(A = "A:tie_sum_A", B = "B:tie_sum_B", O = "O:tie_sum_A")[[al]]
+  RB[[length(RB) + 1]] <- row("(3) Joint", paste("join", al, "ties (own side; net = own minus opposing in 3c)"), tq, getP("S2", al, "tie_sum", NA), MJ)
+  RB[[length(RB) + 1]] <- row("(3c) Joint, net ties", paste("join", al, "ties (own side; net = own minus opposing in 3c)"), tq, gN("S2", al, "tie_sum", NA), MNT, NR) }
 RT <- rbindlist(RB); fmt(RT); fwrite(RT, file.path(OUT, "main_table_robust_long.csv"))
 RW <- dcast(RT, row ~ column, value.var = "cell", fill = ""); RW <- RW[match(unique(RT$row), row)]; fwrite(RW, file.path(OUT, "main_table_robust_wide.csv"))
 ## census of what the t-1 timing rule (build reference cohort) and the bbar rule remove
