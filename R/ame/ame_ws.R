@@ -15,6 +15,7 @@ ws_jacobian <- function(f, p, h = 1e-5) {
 ## the rescaling itself; draws: S x P matrix of fixed-parameter draws; scores: G x P cluster scores at the posterior mean
 ws_rescale <- function(draws, scores) {
   stopifnot(is.matrix(draws), is.matrix(scores), ncol(draws) == ncol(scores), nrow(scores) > ncol(scores))
+  if (nrow(draws) < 2 * ncol(draws)) stop(sprintf("WS adjustment needs at least 2 x %d posterior draws (has %d); run more iterations", ncol(draws), nrow(draws)))
   G <- nrow(scores); mu <- colMeans(draws); Sp <- cov(draws)
   Jc <- crossprod(scores) * G / (G - 1)
   Ss <- Sp %*% Jc %*% Sp; Ss <- (Ss + t(Ss)) / 2
