@@ -94,8 +94,10 @@ RT <- rbindlist(RB); fmt(RT); fwrite(RT, file.path(OUT, "main_table_robust_long.
 RW <- dcast(RT, row ~ column, value.var = "cell", fill = ""); RW <- RW[match(unique(RT$row), row)]; fwrite(RW, file.path(OUT, "main_table_robust_wide.csv"))
 ## census of what the t-1 timing rule (build reference cohort) and the bbar rule remove
 O1 <- as.data.table(readRDS(file.path(BUILD, sprintf("s2_oneshot_w%d.rds", W_REF))))
-MC <- rbind(O1[excl_reason != "", .(rows = .N, disputes_lost_entirely = NA_integer_, joins = sum(y != "out")), by = .(rule = paste0("build: ", excl_reason))],
+## each excluded row is counted once, under its FIRST failing check (s2_ref_cohort order); "incomplete horizon" is the 2014 data end, not the t-1 rule
+MC <- rbind(O1[excl_reason != "", .(rows = .N, disputes_lost_entirely = NA_integer_, joins = sum(y != "out")), by = .(rule = paste0("build (first failing check): ", excl_reason))],
             data.table(rule = "build: disputes with no reference-cohort row", rows = 0L, disputes_lost_entirely = uniqueN(O1$dispnum) - uniqueN(O1[in_ref == TRUE]$dispnum), joins = NA_integer_),
+            data.table(rule = "measure step (s2_prepare): rows without the measure's gaps / ties", rows = as.integer(attr(X, "dropped")), disputes_lost_entirely = NA_integer_, joins = NA_integer_),
             data.table(rule = "joint: no repeat target (bbar undefined)", rows = nrow(X) - nrow(XJ), disputes_lost_entirely = uniqueN(X$dispnum) - length(JS), joins = sum(X[!dispnum %in% JS]$y != "out")))
 fwrite(MC, file.path(OUT, "main_table_missingness.csv"))
 cat(sprintf("MAIN_TABLE_DONE %s | joint draws %d, stage-2-alone draws %d of %d | robustness %d draws (2b %d, 3b %d usable)\n", OUT, nrow(MJ), nrow(M0), NB, NR,

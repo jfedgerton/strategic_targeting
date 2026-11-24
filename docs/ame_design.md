@@ -96,7 +96,7 @@ Between type contrast and type-specific between contrasts; within contrasts; mat
 ## Implementation notes (2026-11-24, after the code audit)
 - Software: rstan (>= 2.26, threading), not cmdstanr as section 6 says.
 - Stage-1 positions are centred within year and scaled by the FE gap scale (s2_gap_scale = sqrt(2) SD), so AME and FE contrasts share units.
-- K = 1: (u, v) -> (-u, -v) is unidentified; u_out / v_out are sign-aligned per draw on the United States (reporting only). Summaries are sign-free: |lam1| ||u|| ||v|| and the latent share of stage-1 utility variance.
+- K = 1: (u, v) -> (-u, -v) is unidentified; u_out / v_out are sign-aligned per draw on the United States (reporting only; the US latent position can sit near 0, so individual signs may still flip). Summaries are sign-free: |lam1| ||u|| ||v|| and the latent share of stage-1 utility variance.
 - The summary's convergence_gate_pass covers R-hat, ESS and zero divergences only; SBC and misspecification checks (section 7) are separate and not implemented yet.
 - Williams-Savitsky adjustment (section 6 main): not implemented; fits are raw weighted pseudo-posteriors. Open decision for the PI.
 - Stage-2 era-specific intercepts alpha[c, era] (a deviation from alpha_c in section 3; sparse era cells are prior-driven). AME stage 2 uses all stage-2 disputes; the FE joint model uses those with a repeat target.

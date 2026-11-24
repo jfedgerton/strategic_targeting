@@ -13,7 +13,9 @@
 ## AME cells 1-3 (docs/ame_design.md rev 2; PI 2026-11-23): 0 = main (joint, K = 0), 1 = cut posterior, 2 = k1 (joint, K = 1).
 ## Fit-only: reads the data bundle written on the Mac by `Rscript R/ame/ame_cell.R --prep_only=1 --bundle=...`. Submit from the repo root:
 ##   BUNDLE=ame/ame_bundle_w1_fmid_main.rds sbatch slurm/ame_cells.sbatch   (name written by run_paper.sh step 8)
-## Before the 7-day array: a smoke test, e.g. BUNDLE=... WARMUP=10 ITER=10 sbatch --array=0 --time=02:00:00 slurm/ame_cells.sbatch
+## Before the 7-day array: a smoke test in its OWN output folder, e.g.
+##   BUNDLE=... OUT=ame/smoke WARMUP=10 ITER=10 sbatch --array=0 --time=02:00:00 slurm/ame_cells.sbatch
+## (fits are reused only on an exact signature match, so a smoke fit is never taken as the final fit)
 module purge; module load gcc/12.2.0; module load r/4.2.1-gcc-8.5.0
 export LD_LIBRARY_PATH="$(dirname "$(gcc -print-file-name=libstdc++.so)"):${LD_LIBRARY_PATH}"
 export R_LIBS_USER="${R_LIBS_USER:-$HOME/R/x86_64-pc-linux-gnu-library/4.2}"

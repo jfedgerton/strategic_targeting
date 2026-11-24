@@ -88,15 +88,20 @@ logf("stage 1: %d events, %d rows, %d terms | stage 2: %d rows, %d disputes, ter
                                                     prov = list(commit = cm[1], sub = SUB, md5 = setNames(unname(md5), c("build_meta", "dump", "positions")), dump_commit = dump$git_commit)), BUNDLE)
     logf("AME_BUNDLE_WRITTEN %s (%.1f MB)", BUNDLE, file.size(BUNDLE) / 1e6); quit(status = 0) }
 }
-STANF <- opt("stan", file.path(dirname(RD), "stan", "ame_joint.stan")); mod <- stan_model(STANF)   # per-task copy on Roar (no shared compile cache)
+STANF <- opt("stan", file.path(dirname(RD), "stan", "ame_joint.stan")); mod <- stan_model(STANF)
+digest_of <- function(x) { tf <- tempfile(fileext = ".rds"); saveRDS(x, tf, compress = FALSE); on.exit(unlink(tf)); unname(tools::md5sum(tf)) }   # per-task copy on Roar (no shared compile cache)
 fit1 <- function(dat, tag, ch = CH, wu = WU, it = IT) { t0 <- Sys.time()
-  ff <- file.path(OUT, sprintf("fit_%s.rds", tag))   # resume after a requeue: reuse a saved fit newer than the bundle (audit P2-6)
-  if (file.exists(ff) && (is.null(BUNDLE) || file.mtime(ff) > file.mtime(BUNDLE))) { logf("%s: reusing %s", tag, ff); return(readRDS(ff)) }
+  ff <- file.path(OUT, sprintf("fit_%s.rds", tag)); sf <- sub("\\.rds$", "_sig.rds", ff)
+  ## resume after a requeue only on an EXACT match of data, Stan file and sampler settings (re-audit P1: a 10-iteration smoke test must never
+  ## be reused as the final fit)
+  sig <- list(data = digest_of(dat), stan = unname(tools::md5sum(STANF)), chains = ch, warmup = wu, iter = it, seed = SEED, threads = TH)
+  if (file.exists(ff) && file.exists(sf) && identical(readRDS(sf), sig)) { logf("%s: reusing %s (signature match)", tag, ff); return(readRDS(ff)) }
+  if (file.exists(ff)) logf("%s: existing %s does not match this run's signature; refitting", tag, ff)
   f <- sampling(mod, data = dat, chains = ch, cores = ch, warmup = wu, iter = wu + it, seed = SEED, refresh = max(1, (wu + it) %/% 10),
                 control = list(adapt_delta = 0.9, max_treedepth = 11),
                 pars = c("beta1", "sigma_b", "sigma_del", "sigma_eta", "alpha", "betaA", "betaB", "betaO", "theta", "sigma_eps", "b", "del", "eta", "bbar",
                          if (dat$K) c("lam1_raw", "lam2_raw", "u_out", "v_out", "lat_norm1", "lat_share1")))
-  saveRDS(f, file.path(OUT, sprintf("fit_%s.rds", tag))); logf("%s: %.1f min; divergences %d; max treedepth hits %d", tag, as.numeric(difftime(Sys.time(), t0, units = "mins")),
+  saveRDS(f, ff); saveRDS(sig, sf); logf("%s: %.1f min; divergences %d; max treedepth hits %d", tag, as.numeric(difftime(Sys.time(), t0, units = "mins")),
     sum(get_divergent_iterations(f)), sum(get_max_treedepth_iterations(f))); f }
 
 ## ---- fits ----------------------------------------------------------------------------------------------------------------------------

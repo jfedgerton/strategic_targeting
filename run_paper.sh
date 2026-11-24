@@ -18,7 +18,7 @@
 ## Usage: OUT=output_init ./run_paper.sh            (optional: P_STEPS="1 2 3 4 5 6 7 8", B_MAIN=2000, B_CELL=500)
 set -euo pipefail
 cd "$(dirname "$0")"; source config.sh
-O="${OUT:-output_init}"; S2=$O/stage2; PP=$O/paper; mkdir -p $S2/{edges,logs} $PP/{builds,main_table,marginal_effects,table1,sweep,boot,summary,ame}
+O="${OUT:-output_init}"; [[ "$O" != *" "* ]] || { echo "STOP: OUT must not contain spaces (paths are unquoted in this runner)"; exit 1; }; S2=$O/stage2; PP=$O/paper; mkdir -p $S2/{edges,logs} $PP/{builds,main_table,marginal_effects,table1,sweep,boot,summary,ame}
 STEPS="${P_STEPS:-1 2 3 4 5 6 7 8}"; B_MAIN="${B_MAIN:-2000}"; B_CELL="${B_CELL:-500}"
 LOG=$PP/run_$(date +%Y%m%d_%H%M%S).log
 say() { echo "[$(date +%H:%M:%S)] $*" | tee -a "$LOG"; }
@@ -30,7 +30,6 @@ fresh() { [ -s "$1.stamp" ] && [ "$(cat "$1.stamp")" = "$2" ]; }
 stamp() { echo "$2" > "$1.stamp.tmp" && mv "$1.stamp.tmp" "$1.stamp"; }
 wtag() { [ "$1" -gt 0 ] && echo "_w${1}d" || echo ""; }
 GAPS=""; gap() { local rc=$1 NM=$2; [ $rc -eq 0 ] && return 0; [ $rc -eq 3 ] && { say "WARNING: $NM finished with ERROR cells (rerun to retry)"; GAPS="$GAPS $NM"; return 0; }; die "$NM failed (exit $rc)"; }
-[[ "$O" != *" "* ]] || die "OUT must not contain spaces (paths are unquoted in this runner); use a relative folder such as output_init"
 [ -e $O/.created_by_run_all ] || die "$O is not a run_all.sh output folder"
 [ "${S2_FORCE:-0}" = "1" ] || ! pgrep -f "run_all.sh|R/07_fit_sweep.R" > /dev/null || die "run_all.sh looks still running (S2_FORCE=1 overrides)"
 [ -s $O/layers_dy.rds ] || die "missing $O/layers_dy.rds"
@@ -88,9 +87,10 @@ if has 3; then
   runR "MARGINAL_EFFECTS_DONE|bootstrap:|Error" R/marginal_effects.R --build=$PP/builds/w${WINDOW_MAIN}_fmid --dump=$O/dumps/long_init_bon$(wtag $WINDOW_MAIN)_relyear_fmid.rds \
     --positions=$MAINF --spec="$MAIN_SPEC" --edges_dir=$S2/edges --n_boot=$B_CELL --out=$PP/marginal_effects --cores=$CORES || die "marginal effects failed"
   ## missing-data robustness (PI 2026-11-24): year t when t - 1 does not exist (new states), stage 2 only (stage 1 comes from the run_all dumps);
-  ## a --newstate_t=1 build at the main window (fmid) and one bootstrapped cell (B_CELL) on the same Bayesian-bootstrap draws
+  ## a --newstate_t=1 build at the main window (fmid) and one bootstrapped cell (B_CELL), Bayesian bootstrap with seed 123. Its dispute list adds
+  ## the recovered disputes, so its draws are NOT draw-for-draw identical to the main cell's (re-audit P2)
   NSB=$PP/robust_newstate/builds/w${WINDOW_MAIN}_fmid; DPN=$O/dumps/long_init_bon$(wtag $WINDOW_MAIN)_relyear_fmid.rds
-  NST="$(h R/s2_01_build_riskset.R) $(h R/lib/s2.R) $(h R/lib/s2_cell.R) $(h $DPN) $(h $MAINF) $(h $O/layers_dy.rds) $(h data_entry/manifest.csv) $MAIN_SPEC $WINDOW_MAIN newstate_t"
+  NST="$(h R/s2_01_build_riskset.R) $(h R/lib/s2.R) $(h R/lib/s2_cell.R) $(h R/lib/sry.R) $(h $S2/edges/edges_book_raw.rds) $(h $DPN) $(h $MAINF) $(h $O/layers_dy.rds) $(h data_entry/manifest.csv) $MAIN_SPEC $WINDOW_MAIN newstate_t"
   if ! { [ -s $NSB/s2_meta.rds ] && fresh $NSB/.build "$NST"; }; then rm -rf $NSB
     runR "acceptance|FAILED|written|newstate_t|Error" R/s2_01_build_riskset.R --data_entry=data_entry --layers=$O/layers_dy.rds --positions=$MAINF --poscol="$MAIN_SPEC" \
       --out=$NSB --window=$WINDOW_MAIN --fatal_def=stage1 --dump_bcjs=$DPN --edges_dir=$S2/edges --newstate_t=1 || die "newstate build failed"; stamp $NSB/.build "$NST"; fi

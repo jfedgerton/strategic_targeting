@@ -66,10 +66,11 @@ one <- function(m) tryCatch({
   c3 <- th_curve(fj, XJ, gB)
   list(c1 = c1$y, c2 = c2$y, c3 = c3$y) }, error = function(e) paste("failed:", conditionMessage(e)))
 ## blocks of 50 saved as they finish; a rerun reuses blocks whose draw indices and grids match (audit 2026-11-24)
-BD <- file.path(OUT, "boot"); dir.create(BD, showWarnings = FALSE); BLK <- 50L; sig <- list(NB = NB, spec = SPEC, build = BUILD, gR = gR, gM = gM, gg = gg, gB = gB)
+BD <- file.path(OUT, "boot"); dir.create(BD, showWarnings = FALSE); BLK <- 50L; sig <- list(NB = NB, spec = SPEC, gR = gR, gM = gM, gg = gg, gB = gB, md5 = unname(tools::md5sum(c("R/marginal_effects.R", file.path("R/lib", c("s2.R", "s2_fit.R", "s2_cell.R")),
+             file.path(BUILD, "s2_meta.rds"), DUMPF, POSF))))   # contents, not paths (re-audit P2)
 DR <- list()
 for (k in seq_len(ceiling(NB / BLK))) { ix <- ((k - 1L) * BLK + 1L):min(k * BLK, NB); bf <- file.path(BD, sprintf("draws_%03d.rds", k))
-  if (file.exists(bf)) { o <- readRDS(bf); if (identical(o$ix, ix) && identical(o$sig, sig)) { DR[ix] <- o$draws; next } else stop("stale block ", bf, ": use a new --out") }
+  if (file.exists(bf)) { o <- readRDS(bf); if (identical(o$ix, ix) && identical(o$sig, sig)) { DR[ix] <- o$draws; next } else stop("stale block ", bf, " (code, inputs or grids changed): delete ", BD, " or use a new --out") }
   dk <- mclapply(MM[ix], one, mc.cores = CORES, mc.preschedule = FALSE)
   saveRDS(list(ix = ix, sig = sig, draws = dk), paste0(bf, ".tmp")); file.rename(paste0(bf, ".tmp"), bf); DR[ix] <- dk
   cat(sprintf("block %d done (%d draws)\n", k, max(ix))) }
