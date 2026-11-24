@@ -1,0 +1,10 @@
+file,md5,bytes,dropbox_source
+cow_igo/SOURCES.md,06a94db9c516477f486d9532a9bab711,378,/book_project_conflict_cycles/replication/data/raw/cow_igo/SOURCES.md
+cow_igo/state_year_formatv3.csv,63cfe7c7704cc79b87e258ac68ed563d,22512711,/book_project_conflict_cycles/replication/data/raw/cow_igo/state_year_formatv3.csv
+desta/dyads.csv,456818a6a0c336e935b23268c9dd387b,3112582,/book_project_conflict_cycles/replication/data/raw/desta/dyads.csv
+desta/indices.csv,134fd4bdfdfea905970738a5ba92b514,66795,/book_project_conflict_cycles/replication/data/raw/desta/indices.csv
+desta/treaties.csv,73ad19c186193d8174d8c90914848fe5,443831,/book_project_conflict_cycles/replication/data/raw/desta/treaties.csv
+desta/withdrawal.csv,78824e8c0103e62fa1882e58a65fa917,713302,/book_project_conflict_cycles/replication/data/raw/desta/withdrawal.csv
+mia/MIA_v4_authority.dta,f1b50e34375a43456630f1ca3dc110c7,1063816,/book_project_conflict_cycles/replication/data/raw/mia/MIA_v4_authority.dta
+prebuilt/atop_un_layers.rds,92f763400f3eb16f39dffaf4291964f8,5020670,/book_project_conflict_cycles/replication/data/raw/prebuilt/atop_un_layers.rds
+prebuilt/pta_layers.rds,06faa41ae7df23d362b75d96a8500671,206124,/book_project_conflict_cycles/replication/data/raw/prebuilt/pta_layers.rds
