@@ -34,17 +34,18 @@ PJ <- joint_fe_cell(D, dump, X, B$TS); JS <- attr(PJ, "disp_joint"); stopifnot(l
 stopifnot(isTRUE(all.equal(PJ[stage == "S2" & axis == "theta" & alt == "A", est], P[stage == "S2" & axis == "theta" & alt == "A", est], tolerance = 1e-6)))   # same point fit as the cell
 XJ <- X[dispnum %in% JS]; stopifnot(nrow(XJ) == P$n_s2_rows[1])
 tie0 <- c("A:tie_sum_A", "B:tie_sum_B", "O:tie_sum_A")
-s2a <- function(Xs, w = NULL, tag = "S2A", vc = TRUE) { f <- fit_mnl(Xs, S2_REF_DESIGN, tag, vc = vc, w = w); s <- surf_contrasts(f)
+s2a <- function(Xs, w = NULL, tag = "S2A", vc = TRUE, start_b = NULL) { f <- fit_mnl(Xs, S2_REF_DESIGN, tag, vc = vc, w = w, start_b = start_b); s <- surf_contrasts(f)
   setNames(c(s$est, f$b[tie0]), c(paste(tag, s$alt, s$axis, s$gap, sep = "."), paste0(tag, ".", tie0))) }
-nm0 <- names(s2a(XJ)); pt0 <- s2a(XJ)                       # (2) on the joint sample
-nmb <- names(s2a(X, tag = "S2Ab")); ptb <- s2a(X, tag = "S2Ab")   # (2b) on all stage-2 disputes
+pt0 <- s2a(XJ); nm0 <- names(pt0)                            # (2) on the joint sample
+ptb <- s2a(X, tag = "S2Ab"); nmb <- names(ptb)                # (2b) on all stage-2 disputes
+bJ0 <- fit_mnl(XJ, S2_REF_DESIGN, "S2A start", vc = FALSE)$b; bB0 <- fit_mnl(X, S2_REF_DESIGN, "S2Ab start", vc = FALSE)$b   # warm starts for the draws (same optimum)
 disp_all <- sort(unique(c(as.data.table(dump$D)$disp, B$X$dispnum)))
 MM <- boot_weights(disp_all, NB)   # Bayesian bootstrap, the same draws as s2_07 (lib/s2_cell.R)
-D0 <- mclapply(MM, function(m) tryCatch(s2a(XJ, as.numeric(m[as.character(XJ$dispnum)]), vc = FALSE)[nm0], error = function(e) NULL), mc.cores = CORES, mc.preschedule = FALSE)
+D0 <- mclapply(MM, function(m) tryCatch(s2a(XJ, as.numeric(m[as.character(XJ$dispnum)]), vc = FALSE, start_b = bJ0)[nm0], error = function(e) NULL), mc.cores = CORES, mc.preschedule = FALSE)
 M0 <- do.call(rbind, D0[!vapply(D0, is.null, TRUE)])
 ## robustness draws: the first N_ROBUST draws (boot_weights is prefix-stable, so these are draws 1..N_ROBUST of the main run)
 NR <- min(N_ROBUST, NB); MR <- MM[seq_len(NR)]
-Db <- mclapply(MR, function(m) tryCatch(s2a(X, as.numeric(m[as.character(X$dispnum)]), tag = "S2Ab", vc = FALSE)[nmb], error = function(e) NULL), mc.cores = CORES, mc.preschedule = FALSE)
+Db <- mclapply(MR, function(m) tryCatch(s2a(X, as.numeric(m[as.character(X$dispnum)]), tag = "S2Ab", vc = FALSE, start_b = bB0)[nmb], error = function(e) NULL), mc.cores = CORES, mc.preschedule = FALSE)
 MB <- do.call(rbind, Db[!vapply(Db, is.null, TRUE)])
 PF <- joint_fe_cell(D, dump, X, B$TS, fill_b = TRUE); stopifnot(length(attr(PF, "disp_joint")) == uniqueN(X$dispnum))
 DF <- mclapply(MR, function(m) tryCatch(joint_fe_draw(D, dump, X, B$TS, m, ref_order, fill_b = TRUE), error = function(e) NULL), mc.cores = CORES, mc.preschedule = FALSE)
