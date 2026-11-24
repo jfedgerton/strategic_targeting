@@ -3,7 +3,7 @@
 ##   (a) distribution across measures (share with a 95% interval excluding 0, by sign), with the main measure marked
 ##   (b) decision regressions: the estimate and the two-sided p-value regressed on the measurement choices (layer included: igo, def, off,
 ##       dca, pta, ally; IGO coding: cos, hyper vs count; PTA coding: depth vs book; DCA v1; weighting scheme vs raw; sample mid vs fmid),
-##       OLS with HC1 standard errors; coefficient plots (one panel per quantity)
+##       OLS with HC1 standard errors clustered by measure (spec_id); coefficient plots (one panel per quantity)
 ##   (c) specification curve of the estimate (sorted), with the choices below
 ## Headline quantities: S1NF coal R +1 (coalition, less central target, between targets), S1NF bil R +1, S1NF coal M +1 / -1, theta A, theta B,
 ##   S2 B M -1 (joining the target vs a stronger attacker), S2 B R +1.
@@ -40,22 +40,25 @@ fwrite(S, file.path(OUT, "grid_distribution.csv"))
 X <- c("inc_igo", "inc_def", "inc_off", "inc_dca", "inc_pta", "inc_ally", "igo_cos", "igo_hyper", "pta_depth", "dca_v1", "w_sryc12", "w_srydist", "w_syc12", "w_sydist", "mid")
 R <- list()
 for (lb in unique(K$label)) for (y in c("est", "p")) { d <- K[label == lb]; xs <- X[vapply(X, function(v) uniqueN(d[[v]]) > 1, TRUE)]
-  m <- lm(as.formula(paste(y, "~", paste(xs, collapse = " + "))), data = d); V <- vcovHC(m, type = "HC1"); b <- coef(m)[-1]; s <- sqrt(diag(V))[-1]
+  m <- lm(as.formula(paste(y, "~", paste(xs, collapse = " + "))), data = d); V <- vcovCL(m, cluster = d$spec_id, type = "HC1"); b <- coef(m)[-1]; s <- sqrt(diag(V))[-1]   # SEs clustered by measure: each measure enters once per sample (audit 2026-11-24)
   R[[length(R) + 1]] <- data.table(label = lb, outcome = y, term = sub("TRUE$", "", names(b)), b = b, se = s, n = nobs(m)) }
 R <- rbindlist(R); fwrite(R, file.path(OUT, "grid_decision_regressions.csv"))
 nice <- c(inc_igo = "IGO layer", inc_def = "Defense alliances", inc_off = "Offense alliances", inc_dca = "DCA", inc_pta = "PTA", inc_ally = "Other alliances",
           igo_cos = "IGO cosine", igo_hyper = "IGO hyperedge", pta_depth = "PTA depth", dca_v1 = "DCA v1", w_sryc12 = "Weighted sry contig", w_srydist = "Weighted sry distance",
           w_syc12 = "Weighted sy contig", w_sydist = "Weighted sy distance", mid = "All MIDs (vs fatal)")
 R[, term_lab := factor(nice[term], levels = rev(nice))]
-th <- theme_bw(base_size = 10) + theme(panel.grid.minor = element_blank(), strip.placement = "outside")
+th <- theme_bw(base_size = 10) + theme(panel.grid.minor = element_blank(), strip.placement = "outside", strip.text = element_text(size = 12))
 for (y in c("est", "p")) { p <- ggplot(R[outcome == y], aes(b, term_lab)) + geom_vline(xintercept = 0, linetype = 2) +
     geom_errorbarh(aes(xmin = b - 1.96 * se, xmax = b + 1.96 * se), height = 0) + geom_point(size = 1.3) + facet_wrap(~ label, ncol = 4, scales = "free_x") +
     labs(x = if (y == "est") "Change in the estimate" else "Change in the p-value", y = NULL) + th
   ggsave(file.path(OUT, sprintf("grid_decisions_%s.pdf", y)), p, width = 11, height = 6.5); ggsave(file.path(OUT, sprintf("grid_decisions_%s.png", y)), p, width = 11, height = 6.5, dpi = 200) }
 ## (c) specification curves
 K[, rk := frank(est, ties.method = "first"), by = .(label, sample)]
+K[, main_f := factor(is_main, levels = c(FALSE, TRUE))]
 p <- ggplot(K[sample == "fmid"], aes(rk, est)) + geom_hline(yintercept = 0, linetype = 2) + geom_linerange(aes(ymin = lo, ymax = hi), colour = "grey70") +
-  geom_point(aes(colour = is_main), size = .7) + scale_colour_manual(values = c(`FALSE` = "grey20", `TRUE` = "firebrick"), labels = c("Grid measure", "Main measure"), name = NULL) +
+  geom_point(data = K[sample == "fmid" & !is_main], aes(colour = main_f), size = .7) +
+  geom_point(data = K[sample == "fmid" & is_main], aes(colour = main_f), size = 2.4, shape = 18) +   # main measure drawn last, larger (audit 2026-11-24)
+  scale_colour_manual(values = c(`FALSE` = "grey20", `TRUE` = "#D95F02"), labels = c("Grid measure", "Main measure"), name = NULL, drop = FALSE) +
   facet_wrap(~ label, ncol = 4, scales = "free") + labs(x = "Measures, ranked by estimate (fatal MIDs)", y = "Estimate with 95% interval") + th + theme(legend.position = "bottom")
 ggsave(file.path(OUT, "grid_spec_curves.pdf"), p, width = 11, height = 6.5); ggsave(file.path(OUT, "grid_spec_curves.png"), p, width = 11, height = 6.5, dpi = 200)
 cat("GRID_SUMMARY_DONE", OUT, nrow(K), "rows\n")

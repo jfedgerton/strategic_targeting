@@ -18,6 +18,9 @@ dir.create(OUT, showWarnings = FALSE, recursive = TRUE); set.seed(123)
 pz <- readRDS(POSF); key <- as.data.table(pz$key); stopifnot(SPEC %in% colnames(pz$R)); key[, R := pz$R[, SPEC]]
 E <- s2_spec_edges("core", SPEC, EDIR)
 qs <- function(x) { x <- x[is.finite(x)]; c(n = length(x), mean = mean(x), sd = sd(x), p10 = unname(quantile(x, .1)), p50 = median(x), p90 = unname(quantile(x, .9))) }
+## stage-1 rows carry event weights (w < 1 when an event is shared); the models use them, so panel A reports weighted moments next to unweighted ones (audit 2026-11-24)
+qsw <- function(x, w) { k <- is.finite(x) & is.finite(w); x <- x[k]; w <- w[k]; m <- sum(w * x) / sum(w); c(qs(x), sum_w = sum(w), mean_w = m, sd_w = sqrt(sum(w * (x - m)^2) / sum(w))) }
+summw <- function(DT, vars, by = NULL) rbindlist(lapply(vars, function(v) DT[, as.list(qsw(get(v), w)), by = by][, variable := v]), use.names = TRUE)
 summ <- function(DT, vars, by = NULL) rbindlist(lapply(vars, function(v) DT[, as.list(qs(get(v))), by = by][, variable := v]), use.names = TRUE)
 
 ## ---- panel A: stage 1 ----
@@ -26,11 +29,11 @@ if (!is.null(opt("build_mid"))) SM$mid <- list(b = opt("build_mid"), d = opt("du
 A <- list(); A2 <- list(); BB <- list()
 for (s in names(SM)) {
   dump <- readRDS(SM[[s]]$d); D <- s1_prepare(dump, key[, .(ccode, year)], key$R); D[, role := dump$roles[type + 1L]]
-  ev <- D[, .(n_alt = .N, chosen = sum(chosen)), by = .(ev_id, role, disp, init)]; stopifnot(all(ev$chosen == 1L))
-  A[[s]] <- ev[, .(sample = s, events = .N, disputes = uniqueN(disp), initiators = uniqueN(init), choice_set_mean = mean(n_alt), choice_set_min = min(n_alt), choice_set_max = max(n_alt)), by = role]
+  ev <- D[, .(n_alt = .N, chosen = sum(chosen), w_ev = w[chosen == 1L][1]), by = .(ev_id, role, disp, init)]; stopifnot(all(ev$chosen == 1L), all(is.finite(ev$w_ev)))
+  A[[s]] <- ev[, .(sample = s, events = .N, events_weighted = sum(w_ev), disputes = uniqueN(disp), initiators = uniqueN(init), choice_set_mean = mean(n_alt), choice_set_min = min(n_alt), choice_set_max = max(n_alt)), by = role]
   A[[paste0(s, "_tg")]] <- D[chosen == 1L, .(sample = s, role = "all", events = NA_integer_, disputes = NA_integer_, initiators = NA_integer_, choice_set_mean = NA_real_, choice_set_min = NA_integer_, choice_set_max = NA_integer_, distinct_targets = uniqueN(c2))]
-  A2[[s]] <- rbind(summ(D[chosen == 1L], c("dM", "dR", dump$Z_cols), "role")[, rows := "chosen targets"],
-                   summ(D, c("dM", "dR", dump$Z_cols), "role")[, rows := "all available targets"])[, sample := s]
+  A2[[s]] <- rbind(summw(D[chosen == 1L], c("dM", "dR", dump$Z_cols), "role")[, rows := "chosen targets"],
+                   summw(D, c("dM", "dR", dump$Z_cols), "role")[, rows := "all available targets"])[, sample := s]
   BB[[s]] <- list(B = s2_base(SM[[s]]$b), D = D, dump = dump)
 }
 fwrite(rbindlist(A, fill = TRUE), file.path(OUT, "table1_A_stage1_counts.csv")); fwrite(rbindlist(A2), file.path(OUT, "table1_A_stage1_variables.csv"))
@@ -59,7 +62,9 @@ th <- theme_bw(base_size = 11) + theme(legend.position = "bottom", strip.placeme
 sv <- function(p, nm, w = 7, h = 4.5) { ggsave(file.path(OUT, paste0(nm, ".pdf")), p, width = w, height = h); ggsave(file.path(OUT, paste0(nm, ".png")), p, width = w, height = h, dpi = 200) }
 mp <- data.table(ccode = c(2, 200, 220, 255, 365, 710, 740), state = c("United States", "United Kingdom", "France", "Germany", "Russia", "China", "Japan"))
 F1 <- merge(key, mp, by = "ccode")
-F1[ccode == 255, state := "Germany"]; F1 <- rbind(F1, merge(key[ccode == 260], data.table(ccode = 260, state = "Germany"), by = "ccode"))
+F1 <- F1[!(ccode == 255 & year %in% key[ccode == 260]$year)]   # 1990 has both 255 (unified, from October) and 260: use West Germany that year (audit 2026-11-24)
+F1 <- rbind(F1, merge(key[ccode == 260], data.table(ccode = 260, state = "Germany"), by = "ccode"))
+stopifnot(!anyDuplicated(F1[, .(state, year)]))
 F1 <- merge(F1, key[, .(N = .N), by = year], by = "year")[, Rn := R + log(N)]   # log(N x PageRank): 0 = the uniform share, comparable across system sizes
 F1 <- merge(CJ(state = unique(F1$state), year = min(key$year):max(key$year)), F1[, .(state, year, Rn)], by = c("state", "year"), all.x = TRUE)   # gaps (e.g. Germany 1946-54) break the line
 p1 <- ggplot(F1, aes(year, Rn, colour = state)) + geom_hline(yintercept = 0, linetype = 3) + geom_line(linewidth = .5, na.rm = TRUE) +
@@ -67,29 +72,32 @@ p1 <- ggplot(F1, aes(year, Rn, colour = state)) + geom_hline(yintercept = 0, lin
 sv(p1, "F1_major_power_positions")
 D1 <- BB[["fmid"]]$D[chosen == 1L]; D1[, role_lab := factor(role, levels = c("bil", "coal"), labels = c("Bilateral initiators", "Coalition originators"))]
 p2 <- ggplot(D1, aes(dR)) + geom_histogram(bins = 30, fill = D2[1], colour = "white") + geom_vline(xintercept = 0, linetype = 2) +
-  facet_wrap(~ role_lab, ncol = 2, scales = "free_y") + labs(x = "Relational gap to the chosen target\n(initiator minus target, log PageRank)", y = "Events") + th
+  facet_wrap(~ role_lab, ncol = 2, scales = "free_y") + labs(x = "Relational gap to the chosen target\n(initiator minus target; log PageRank in units of the year's typical pairwise gap)", y = "Events") + th
 sv(p2, "F2_chosen_target_relational_gap")
 B1 <- BB[["fmid"]]$B; W_REF <- B1$window; X1 <- s2_prepare(B1, key[, .(ccode, year)], key$R, E)
 X1 <- X1[is.finite(dR_kA)]; X1[, bin := cut(dR_kA, unique(quantile(dR_kA, seq(0, 1, .2))), include.lowest = TRUE)]
-F3 <- X1[, .(n = .N, A = mean(y == "A"), B = mean(y == "B"), O = mean(y == "orig")), by = bin]
+## denominators: only candidates for whom that outcome is available (one-shot mask), so availability is not mixed into the gap pattern (audit 2026-11-24)
+AV1 <- mnl_avail(X1, c("A", "B", "O")); X1[, `:=`(avA = AV1[, "A"], avB = AV1[, "B"], avO = AV1[, "O"])]
+F3 <- X1[, .(n = .N, A = sum(y == "A" & avA) / sum(avA), B = sum(y == "B" & avB) / sum(avB), O = if (any(avO)) sum(y == "orig" & avO) / sum(avO) else NA_real_), by = bin]
 F3 <- melt(F3, id.vars = c("bin", "n"), variable.name = "outcome", value.name = "share")
 F3[, outcome := factor(outcome, levels = c("A", "B", "O"), labels = c("Joins attacker (A)", "Joins target (B)", "Joins as originator (O)"))]
 p3 <- ggplot(F3, aes(bin, 1000 * share)) + geom_col(fill = D2[1]) + facet_wrap(~ outcome, ncol = 3, scales = "free_y") +
-  scale_x_discrete(labels = function(x) gsub(",", ",\n", x)) + labs(x = "Candidate's relational gap to the attacking side (quintiles)", y = "Joins per 1,000 candidates") + th
+  scale_x_discrete(labels = function(x) gsub(",", ",\n", x)) + labs(x = "Candidate's relational gap to the attacking side (quintiles)", y = "Joins per 1,000 candidates\nwho could take that option") + th
 sv(p3, "F3_joining_by_relational_gap", w = 9)
 
 ## ---- attack-plane figures (PI 2026-11-24): material gap x relational gap, initiator minus target ----
-xl <- "Material gap (initiator minus target)\n<- target stronger      initiator stronger ->"
-yl <- "Relational gap (initiator minus target)\n<- target more central      initiator more central ->"
+xl <- "Material gap (initiator minus target, scaled log CINC share)\n<- target stronger      initiator stronger ->"
+yl <- "Relational gap (initiator minus target, scaled log PageRank)\n<- target more central      initiator more central ->"
 Df <- BB[["fmid"]]$D; Df[, role_lab := factor(role, levels = c("bil", "coal"), labels = c("Bilateral initiators", "Coalition originators"))]
 lim <- function(x) unname(quantile(x[is.finite(x)], c(.01, .99)))
 XR <- lim(Df$dM); YR <- lim(Df$dR)   # (D has a column yr: do not use xr / yr names inside [ ])
+cap_cut <- function(x, y, xr, yr) sprintf("Axes cut at the 1st and 99th percentile of each gap; %.1f%% of points lie outside.", 100 * mean(!(x %between% xr & y %between% yr)))
 ## F4: chosen targets on the plane, over the density of all available targets
 p4 <- ggplot(Df[dM %between% XR & dR %between% YR], aes(dM, dR)) +
   stat_density_2d(geom = "polygon", aes(fill = after_stat(level)), contour_var = "ndensity", bins = 8, alpha = .8, show.legend = FALSE) +
   scale_fill_gradient(low = "grey95", high = "grey55") + geom_hline(yintercept = 0, linetype = 3) + geom_vline(xintercept = 0, linetype = 3) +
   geom_point(data = Df[chosen == 1L & dM %between% XR & dR %between% YR], colour = D2[2], size = .9, alpha = .8) +
-  facet_wrap(~ role_lab, ncol = 2) + labs(x = xl, y = yl, caption = "Shading: all available targets. Points: chosen targets. Central 98% of gaps shown.") + th
+  facet_wrap(~ role_lab, ncol = 2) + labs(x = xl, y = yl, caption = paste("Shading: all available targets. Points: chosen targets.", cap_cut(Df[chosen == 1L]$dM, Df[chosen == 1L]$dR, XR, YR))) + th
 sv(p4, "F4_attack_plane_chosen_targets", w = 9, h = 4.8)
 ## F5: fitted stage-1 surface (between-target conditional logit, no target FE): odds of choosing a target relative to a peer (gap 0, 0)
 dump_f <- BB[["fmid"]]$dump; mN <- s1_fit_nofe(Df, dump_f); bN <- coef(mN)
@@ -116,21 +124,21 @@ X6[, out_lab := factor(fifelse(y == "orig", "O", as.character(y)), levels = c("A
 J6 <- X6[y != "out" & dM_kA %between% XR6 & dR_kA %between% YR6]; J6[, out_lab := droplevels(out_lab)]
 ## colours: orange (A) vs purple (B) is the main contrast and stays distinct under deutan/protan/tritan simulation; shapes add a second cue
 CJ6 <- c("Joins attacker (A)" = D2[2], "Joins target (B)" = D2[3], "Joins as originator (O)" = D2[1]); SH6 <- c("Joins attacker (A)" = 16, "Joins target (B)" = 17, "Joins as originator (O)" = 15)
-xl6 <- "Material gap (candidate minus attacking side)"; yl6 <- "Relational gap (candidate minus attacking side)"
+xl6 <- "Material gap (candidate minus attacking side, scaled)"; yl6 <- "Relational gap (candidate minus attacking side, scaled)"
 ## F6: joiners (larger, translucent, one shape per type) over the density of all candidates (grey)
 p6 <- ggplot(X6[dM_kA %between% XR6 & dR_kA %between% YR6], aes(dM_kA, dR_kA)) +
   stat_density_2d(geom = "polygon", aes(fill = after_stat(level)), contour_var = "ndensity", bins = 8, alpha = .8, show.legend = FALSE) +
   scale_fill_gradient(low = "grey95", high = "grey55") + geom_hline(yintercept = 0, linetype = 3) + geom_vline(xintercept = 0, linetype = 3) +
   geom_point(data = J6, aes(colour = out_lab, shape = out_lab), size = 2.6, alpha = .6) +
   scale_colour_manual(values = CJ6, name = NULL) + scale_shape_manual(values = SH6, name = NULL) +
-  labs(x = xl6, y = yl6, caption = "Shading: all candidates. Central 98% shown.") + th
+  labs(x = xl6, y = yl6, caption = paste("Shading: all candidates.", cap_cut(X6[y != "out"]$dM_kA, X6[y != "out"]$dR_kA, XR6, YR6))) + th
 sv(p6, "F6_attack_plane_joiners", w = 7, h = 5.5)
 ## F6b: the same points, with each joiner type's own density shaded in its colour (no candidate shading)
 p6b <- ggplot(J6, aes(dM_kA, dR_kA)) + geom_hline(yintercept = 0, linetype = 3) + geom_vline(xintercept = 0, linetype = 3) +
   stat_density_2d(geom = "polygon", aes(fill = out_lab, alpha = after_stat(level)), contour_var = "ndensity", bins = 6, show.legend = FALSE) +
   scale_alpha(range = c(.05, .3)) + geom_point(aes(colour = out_lab, shape = out_lab), size = 2.6, alpha = .6) +
   scale_colour_manual(values = CJ6, name = NULL) + scale_shape_manual(values = SH6, name = NULL) + scale_fill_manual(values = CJ6, guide = "none") +
-  coord_cartesian(xlim = XR6, ylim = YR6) + labs(x = xl6, y = yl6, caption = "Shading: density of each joiner type, in its colour. Central 98% shown.") + th
+  coord_cartesian(xlim = XR6, ylim = YR6) + labs(x = xl6, y = yl6, caption = paste("Shading: density of each joiner type, in its colour.", cap_cut(X6[y != "out"]$dM_kA, X6[y != "out"]$dR_kA, XR6, YR6))) + th
 sv(p6b, "F6b_attack_plane_joiners_by_type", w = 7, h = 5.5)
 
 cat("TABLE1_FIGURES_DONE", OUT, "\n")

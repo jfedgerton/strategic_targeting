@@ -51,8 +51,8 @@ if has 1; then
   { [ -s $BKP ] && [ -s $BKE ] && fresh $BKP "$S"; } || { runR "BOOK_MEASURE_DONE|PTA layer|Error" R/book_measure_c12.R $O/layers_dy.rds $KEYF $BKP $BKE $BL || die "weighted book measure failed"; stamp $BKP "$S"; }
   GL=$S2/edges/grid_layers.rds; S="$(h R/grid_layers.R) $(h $O/layers_dy.rds) $(h $BL) $(cat data_book/MD5SUMS | shasum -a 256 | cut -c1-16)"
   { [ -s $GL ] && fresh $GL "$S"; } || { runR "GRID_LAYERS_DONE|IGO count|PTA depth|Error" R/grid_layers.R $O/layers_dy.rds $BL data_book $GL --cores=$CORES || die "grid layers failed"; stamp $GL "$S"; }
-  GS=$POSD/grid_specs.csv; S="$(h R/grid_build.R) $(h R/lib/grid.R) $(h $GL) $(h $KEYF) $(h $BRP)"
-  { [ -s $GS ] && fresh $GS "$S"; } || { runR "GRID_BUILD_DONE|specs in|vs BOOKraw|constant|Error" R/grid_build.R $GL $KEYF $BRP $POSD --cores=$CORES || die "grid positions failed"; stamp $GS "$S"; }
+  GS=$POSD/grid_specs.csv; S="$(h R/grid_build.R) $(h R/lib/grid.R) $(h $GL) $(h $KEYF) $(h $BRP) $(h $BKP)"
+  { [ -s $GS ] && fresh $GS "$S"; } || { runR "GRID_BUILD_DONE|specs in|vs BOOKraw|vs BOOKc12|constant|Error" R/grid_build.R $GL $KEYF $BRP $POSD --cores=$CORES --c12=$BKP || die "grid positions failed"; stamp $GS "$S"; }
   rm -f $POSD/positions_core_BOOKc12_ptaany.rds
   say "1 networks done"
 fi

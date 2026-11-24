@@ -38,3 +38,9 @@ PTA 196,196 and 93 withdrawers; DCA v2 11,031 (1980-2010); raw pooled tie share 
 - Main table column (2) is fitted on the joint model's disputes, so (2) vs (3) differs only by the target trait.
 - `main_table_robust_*.csv`: (2b) stage 2 alone on all disputes; (3b) joint with b = 0 for one-time / unchosen targets (first N_ROBUST draws).
 - New-state cell: `s2_01_build_riskset.R --newstate_t=1` back-fills year-t values to t-1 only for state-years absent at t-1 (positions, CINC, democracy, dyads, edges; scales from original data), stage 2 only; one bootstrapped cell (B_CELL). Sandbox: 220 back-filled state-years, 560 disputes / 65,274 rows (vs 544 / 63,143).
+
+## Reporting fixes (audit part B, 2026-11-24)
+- Table 1 panel A: weighted moments (stage-1 event weights) next to unweighted; events_weighted. F1: West Germany (260) in 1990. Axis labels state scaled units. F3: denominators are candidates for whom the option is available. Figure captions report the share of points outside the 1st/99th-percentile axis cut.
+- Grid summary: decision-regression SEs clustered by measure; main measure drawn on top of the specification curves. The 16 sy specs without IGO are SKIPPED (constant positions), so 290 measures per sample are fitted.
+- Run-stopping: fixest warnings in grid_layers.R; grid sry contig12 main = BOOKc12 (grid_build.R --c12).
+- Marginal effects: stage 2 alone on the joint sample; columns trimmed to the design; draws saved in blocks of 50 (resumable); dump/build pairing check; a draw whose fitted term set differs from the point fit is dropped.

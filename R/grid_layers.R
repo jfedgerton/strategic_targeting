@@ -87,7 +87,7 @@ for (sch in c("sry_c12", "sry_dist", "sy_c12", "sy_dist")) {
     fit <- withCallingHandlers(if (v == "igo") fepois(fml, data = d, notes = FALSE, glm.iter = 50) else feglm(fml, data = d, family = binomial("logit"), notes = FALSE, glm.iter = 50),
                                warning = function(e) { wrn <<- c(wrn, conditionMessage(e)); invokeRestart("muffleWarning") })
     if (!isTRUE(fit$convStatus)) stop(sch, " ", v, ": GLM did not converge")
-    if (length(wrn)) cat(sprintf("  %s %s warnings: %s\n", sch, v, paste(unique(wrn), collapse = " | ")))
+    if (length(wrn)) stop(sprintf("%s %s: fixest warnings (run-stopping per docs/PAPER_PIPELINE.md): %s", sch, v, paste(unique(wrn), collapse = " | ")))
     pred <- rep(NA_real_, length(idx)); pred[obs(fit)] <- fitted(fit); dr <- is.na(pred)
     if (startsWith(sch, "sry")) { if (any(d[[v]][dr] != 0)) stop(sch, " ", v, ": dropped rows with y != 0"); pred[dr] <- 0 } else pred[dr] <- d[[v]][dr]
     s <- numeric(2 * n); s[idx] <- d[[v]] - pred

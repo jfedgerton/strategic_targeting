@@ -2,7 +2,8 @@
 ## stage-1/2 cell code reads (list(R = state-year x spec matrix, key, specs)). Edges are not stored: s2_spec_edges rebuilds them from
 ## grid_layers.rds with the same function (grid_edges), so positions and stage-2 ties always use identical edges.
 ## Check: the raw-block spec with the main layers, count IGO and book PTA must equal the main measure (BOOKraw_ptadesta) to 1e-10.
-## Usage: Rscript R/grid_build.R GRID_LAYERS_RDS KEY_POSITIONS_RDS MAIN_POSITIONS_RDS OUT_DIR [--cores=N]
+##        With --c12=FILE (the weighted book measure positions) the sry contig12 main-layer spec must equal BOOKc12_ptadesta (prpos) to 1e-8.
+## Usage: Rscript R/grid_build.R GRID_LAYERS_RDS KEY_POSITIONS_RDS MAIN_POSITIONS_RDS OUT_DIR [--cores=N] [--c12=FILE]
 suppressPackageStartupMessages({ library(data.table); library(igraph); library(parallel) })
 set.seed(123)
 source("R/lib/grid.R")
@@ -27,6 +28,10 @@ cat(sprintf("%d specs in %.1f min\n", ncol(R), as.numeric(difftime(Sys.time(), t
 M <- readRDS(a[3]); stopifnot(identical(as.integer(M$key$ccode), as.integer(KEY$ccode)), identical(as.integer(M$key$year), as.integer(KEY$year)))
 dmax <- max(abs(R[, "Graw_count_book|igo+def+off+dca+pta|pr"] - M$R[, "BOOKraw_ptadesta|igo+def+off+pta+dca|pr"]))
 cat(sprintf("grid raw count/book main layers vs BOOKraw_ptadesta: max |diff| %.2e\n", dmax)); stopifnot(dmax < 1e-10)
+if (length(grep("^--c12=", a))) {   # run-stopping check listed in docs/PAPER_PIPELINE.md (audit 2026-11-24)
+  M2 <- readRDS(sub("^--c12=", "", grep("^--c12=", a, value = TRUE)[1])); stopifnot(identical(as.integer(M2$key$ccode), as.integer(KEY$ccode)), identical(as.integer(M2$key$year), as.integer(KEY$year)))
+  d2 <- max(abs(R[, "Gsryc12_count_book|igo+def+off+dca+pta|pr"] - M2$R[, "BOOKc12_ptadesta|igo+def+off+pta+dca|prpos"]))
+  cat(sprintf("grid sry contig12 main layers vs BOOKc12_ptadesta prpos: max |diff| %.2e\n", d2)); stopifnot(d2 < 1e-8) }
 ## constant positions in a year (would be refused by the cells) are reported here
 cst <- vapply(seq_len(ncol(R)), function(j) sum(tapply(R[, j], KEY$year, function(z) sd(z) < 1e-8), na.rm = TRUE), 0)
 if (any(cst > 0)) cat("specs with constant-position years:", paste(sprintf("%s (%d)", SP$spec_id[cst > 0], cst[cst > 0]), collapse = "; "), "\n")
