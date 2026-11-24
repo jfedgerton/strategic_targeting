@@ -8,7 +8,8 @@
 ##   2. stage-2 builds, every window x {fmid, mid}, on the main measure, each accepted against its stage-1 init dump (in $OUT/paper/builds,
 ##      separate from run_stage2.sh builds so the two runners never overwrite each other; audit 2026-11-24)
 ##   3. main table: two-stage bootstrap of the main cell (B_MAIN draws), fmid and mid at the main window; stage 1 / stage 2 / joint table;
-##      marginal-effect plots with 95% bootstrap bands (B_CELL draws, fmid)
+##      marginal-effect plots with 95% bootstrap bands (B_CELL draws, fmid); missing-data robustness (main_table_robust_*, and a
+##      --newstate_t=1 build + bootstrapped cell: year t where t - 1 does not exist)
 ##   4. Table 1 and draft figures (main measure, main window)
 ##   5. grid sweep: 306 measures x main window x {fmid, mid} (joint two-stage FE point fits)
 ##   6. bootstrapped grid cells (R/grid_pick_boot_cells.R; B_CELL; the main-window main cells come from step 3)
@@ -85,7 +86,18 @@ if has 3; then
   done
   runR "MARGINAL_EFFECTS_DONE|bootstrap:|Error" R/marginal_effects.R --build=$PP/builds/w${WINDOW_MAIN}_fmid --dump=$O/dumps/long_init_bon$(wtag $WINDOW_MAIN)_relyear_fmid.rds \
     --positions=$MAINF --spec="$MAIN_SPEC" --edges_dir=$S2/edges --n_boot=$B_CELL --out=$PP/marginal_effects --cores=$CORES || die "marginal effects failed"
-  say "3 main table and marginal effects done"
+  ## missing-data robustness (PI 2026-11-24): year t when t - 1 does not exist (new states), stage 2 only (stage 1 comes from the run_all dumps);
+  ## a --newstate_t=1 build at the main window (fmid) and one bootstrapped cell (B_CELL) on the same Bayesian-bootstrap draws
+  NSB=$PP/robust_newstate/builds/w${WINDOW_MAIN}_fmid; DPN=$O/dumps/long_init_bon$(wtag $WINDOW_MAIN)_relyear_fmid.rds
+  NST="$(h R/s2_01_build_riskset.R) $(h R/lib/s2.R) $(h R/lib/s2_cell.R) $(h $DPN) $(h $MAINF) $(h $O/layers_dy.rds) $(h data_entry/manifest.csv) $MAIN_SPEC $WINDOW_MAIN newstate_t"
+  if ! { [ -s $NSB/s2_meta.rds ] && fresh $NSB/.build "$NST"; }; then rm -rf $NSB
+    runR "acceptance|FAILED|written|newstate_t|Error" R/s2_01_build_riskset.R --data_entry=data_entry --layers=$O/layers_dy.rds --positions=$MAINF --poscol="$MAIN_SPEC" \
+      --out=$NSB --window=$WINDOW_MAIN --fatal_def=stage1 --dump_bcjs=$DPN --edges_dir=$S2/edges --newstate_t=1 || die "newstate build failed"; stamp $NSB/.build "$NST"; fi
+  NC=$PP/robust_newstate/cells.csv
+  printf 'file,spec_id,window,sample,rule,n_boot,cell_id\n%s,%s,%s,fmid,newstate_t,%s,ns_fmid\n' "$(basename $MAINF)" "$MAIN_SPEC" $WINDOW_MAIN $B_CELL > $NC
+  runR "draws ok|census|INVALID|SKIPPED|S2_BOOT_DONE|S2_BOOT_GAPS|Error" R/s2_07_boot_cells.R --cells=$NC --posdir=$POSD --builds_root=$PP/robust_newstate/builds --dumps_dir=$O/dumps \
+    --edges_dir=$S2/edges --out=$PP/robust_newstate/boot --cores=$CORES && rc=0 || rc=$?; gap $rc newstate_boot
+  say "3 main table, marginal effects and missing-data robustness done"
 fi
 
 ## ---- 4. Table 1 and figures ----

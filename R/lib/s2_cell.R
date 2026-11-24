@@ -101,10 +101,13 @@ s1_contrasts <- function(b, V, roles) { out <- list()
 
 ## ---- stage 2 inputs for a measure: gaps from its positions, ties from its edges (one-shot, month-0 rosters, onset year - 1) ----------
 s2_prepare <- function(B, key, R, EDGE) {
-  PV <- merge(as.data.table(B$SI$PV)[, .(ccode, year, M)], data.table(ccode = key$ccode, year = key$year, R = R), by = c("ccode", "year"), all = TRUE)
+  ## new-state robustness build (meta newstate_t): the measure's t - 1 lookups (positions, ties) fall back to year t exactly as in the build
+  NS <- isTRUE(B$meta$newstate_t); NEWY <- if (NS) as.data.table(B$meta$newstate_years) else NULL
+  KL <- data.table(ccode = key$ccode, year = key$year, R = R); if (NS) { KL <- s2_backfill_sy(KL, NEWY); EDGE <- s2_backfill_dy(EDGE, NEWY, "a", "b") }
+  PV <- merge(as.data.table(B$SI$PV)[, .(ccode, year, M)], KL, by = c("ccode", "year"), all = TRUE)
   ## common cohort (GPT P2-7): B$X is the main build's eligible cohort. Position-dependent eligibility is identical for this measure only if it
   ## has a finite position on exactly the same state-years as the main measure; stop otherwise (never a silently different cohort)
-  pk <- as.data.table(B$SI$PV)[is.finite(R), paste(ccode, year)]; mk <- paste(key$ccode, key$year)[is.finite(R)]
+  pk <- as.data.table(B$SI$PV)[is.finite(R), paste(ccode, year)]; mk <- KL[is.finite(R), paste(ccode, year)]
   if (!setequal(pk, mk)) stop(sprintf("measure covers different state-years than the main measure (%d vs %d); the main-defined cohort would not apply", length(mk), length(pk)))
   ## constant positions (GPT P2-5): sd < 1e-8 in a year that eligible rows use (positions at ty, scale of year t); unused years are dropped
   ER <- merge(as.data.table(B$SI$rows), unique(B$X[, .(dispnum, ccode)]), by = c("dispnum", "ccode"))
@@ -114,7 +117,7 @@ s2_prepare <- function(B, key, R, EDGE) {
   sv <- s2_surface(ER, B$SI$mem_roster, PV, B$SI$sM, sR, "mean")   # eligible rows only
   ## the measure's OWN centrality controls (audit P1, 2026-11-22): own_cent = R of the candidate at onset - 1; tgt_cent_mean / _min over the
   ## baseline target set at onset - 1 (NA if any target lacks a position), exactly as R/s2_01_build_riskset.R builds them from the main measure
-  RK <- data.table(ccode = key$ccode, ty = key$year, Rv = R)
+  RK <- KL[, .(ccode, ty = year, Rv = R)]
   own <- merge(unique(B$row0[, .(dispnum, ccode, ty = onset_year - 1L)]), RK, by = c("ccode", "ty"), all.x = TRUE)[, .(dispnum, ccode, own_cent = Rv)]
   tg <- merge(merge(B$TS, unique(B$row0[, .(dispnum, ty = onset_year - 1L)]), by = "dispnum"), RK, by = c("ccode", "ty"), all.x = TRUE)
   tc <- tg[, .(tgt_cent_mean = if (anyNA(Rv)) NA_real_ else mean(Rv), tgt_cent_min = if (anyNA(Rv)) NA_real_ else min(Rv)), by = dispnum]

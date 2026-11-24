@@ -32,3 +32,9 @@ Main x windows 0-6 x {fmid, mid} (the main-window pair is the main table's B_MAI
 
 ## Checks that must stop the run
 PTA 196,196 and 93 withdrawers; DCA v2 11,031 (1980-2010); raw pooled tie share 0.952; grid raw main = BOOKraw to 1e-10; grid sry c12 main = BOOKc12 (tested); fixest warnings/convergence; sry dropped rows must have y = 0.
+
+## Missing-data robustness (PI 2026-11-24)
+- Main design keeps the t-1 timing rule. Rows lost to it (states not in the system at t-1) and to the bbar rule (no repeat target) are counted in `main_table_missingness.csv`.
+- Main table column (2) is fitted on the joint model's disputes, so (2) vs (3) differs only by the target trait.
+- `main_table_robust_*.csv`: (2b) stage 2 alone on all disputes; (3b) joint with b = 0 for one-time / unchosen targets (first N_ROBUST draws).
+- New-state cell: `s2_01_build_riskset.R --newstate_t=1` back-fills year-t values to t-1 only for state-years absent at t-1 (positions, CINC, democracy, dyads, edges; scales from original data), stage 2 only; one bootstrapped cell (B_CELL). Sandbox: 220 back-filled state-years, 560 disputes / 65,274 rows (vs 544 / 63,143).

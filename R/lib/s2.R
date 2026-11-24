@@ -416,3 +416,32 @@ S2_AVAIL <- unique(c(S2_AVAIL, "dM_kA", "dR_kA", "dM_kB", "dR_kB", "land_side_A"
 S2_DIMS$target <- NULL
 S2_DIMS$opp_side <- c("mean", "min"); S2_DIMS$design <- c("surface", "linear")
 S2_REF <- vapply(S2_DIMS, `[`, "", 1)
+
+## ---- new-state robustness (PI 2026-11-24): "use year t when t - 1 does not exist" -----------------------------------------------------
+## The design measures everything at onset_year - 1. A state that is not in the system at t - 1 (new states, states back from occupation)
+## has no t - 1 value, so its rows drop. The robustness build (--newstate_t=1) back-fills ONLY those state-years: for each state-year (c, y)
+## in the system whose (c, y - 1) is absent, the year-y values are copied to y - 1. Nothing that exists at t - 1 changes, and gap scales are
+## computed from the original (un-back-filled) data.
+## sys: data.table(ccode, year) of system state-years (the positions key). Returns the back-filled state-years (ccode, year = y - 1).
+s2_newstate_years <- function(sys) {
+  S <- unique(as.data.table(sys)[, .(ccode, year)]); y0 <- min(S$year)
+  N <- S[!S[, .(ccode, year = year + 1L)], on = .(ccode, year)][year > y0, .(ccode, year = year - 1L)]   # (c, y) present, (c, y - 1) absent
+  N[order(ccode, year)]
+}
+## copy a state-year table's year-y rows to y - 1 for the back-filled state-years (only where TAB has no row at y - 1)
+s2_backfill_sy <- function(TAB, NEW, ccol = "ccode", ycol = "year") {
+  TAB <- as.data.table(TAB); if (!nrow(NEW)) return(TAB)
+  src <- merge(TAB, NEW[, .(c_ = ccode, y_ = year + 1L)], by.x = c(ccol, ycol), by.y = c("c_", "y_"))
+  src[, (ycol) := get(ycol) - 1L]
+  have <- paste(TAB[[ccol]], TAB[[ycol]]); src <- src[!paste(get(ccol), get(ycol)) %in% have]
+  out <- rbind(TAB, src, use.names = TRUE); stopifnot(!anyDuplicated(out[, c(ccol, ycol), with = FALSE])); out
+}
+## dyadic analogue: copy dyad-year rows (a, b, y) to y - 1 when a or b is back-filled at y - 1 and the dyad has no row at y - 1
+s2_backfill_dy <- function(TAB, NEW, c1, c2, ycol = "year") {
+  TAB <- as.data.table(TAB); if (!nrow(NEW)) return(TAB)
+  nk <- paste(NEW$ccode, NEW$year)
+  src <- TAB[paste(get(c1), get(ycol) - 1L) %in% nk | paste(get(c2), get(ycol) - 1L) %in% nk]
+  src[, (ycol) := get(ycol) - 1L]
+  have <- paste(TAB[[c1]], TAB[[c2]], TAB[[ycol]]); src <- src[!paste(get(c1), get(c2), get(ycol)) %in% have]
+  out <- rbind(TAB, src, use.names = TRUE); stopifnot(!anyDuplicated(out[, c(c1, c2, ycol), with = FALSE])); out
+}

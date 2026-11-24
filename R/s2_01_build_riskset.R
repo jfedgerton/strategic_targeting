@@ -15,7 +15,7 @@ this_file <- sub("^--file=", "", grep("^--file=", commandArgs(FALSE), value = TR
 source(file.path(dirname(normalizePath(this_file)), "lib", "s2.R"))
 args <- commandArgs(trailingOnly = TRUE)
 opt <- function(name, default = NULL) { a <- grep(paste0("^--", name, "="), args, value = TRUE); if (length(a)) sub(paste0("^--", name, "="), "", a) else default }
-known <- c("data_entry", "layers", "positions", "poscol", "out", "dump_bcjs", "mode", "window", "fatal_def", "edges_dir")
+known <- c("data_entry", "layers", "positions", "poscol", "out", "dump_bcjs", "mode", "window", "fatal_def", "edges_dir", "newstate_t")
 fl <- sub("^--([a-z_]+)=.*$", "\\1", args); if (any(!fl %in% known) || anyDuplicated(fl)) stop("unknown or duplicated option: ", paste(fl, collapse = " "))
 DE <- opt("data_entry"); LAYERS_RDS <- opt("layers"); POSF <- opt("positions"); POSCOL <- opt("poscol"); OUT <- opt("out")
 EDIR <- opt("edges_dir"); W_REF <- as.integer(opt("window", "1")); FATAL_DEF <- opt("fatal_def", "stage1"); MODE <- opt("mode", "release"); DUMP <- opt("dump_bcjs")
@@ -36,6 +36,10 @@ P <- as.data.table(readRDS(file.path(DE, "participants_timing.rds")))
 EV <- as.data.table(readRDS(file.path(DE, "events.rds")))
 DY <- as.data.table(readRDS(LAYERS_RDS))
 pz <- readRDS(POSF); stopifnot(POSCOL %in% colnames(pz$R)); POS <- data.table(pz$key, R = pz$R[, POSCOL]); stopifnot(!anyDuplicated(POS[, .(ccode, year)]))
+## new-state robustness (PI 2026-11-24, R/lib/s2.R s2_backfill_*): with --newstate_t=1 every t - 1 lookup falls back to year t for state-years
+## not in the system at t - 1; scales and the edge/position check use the original data. Default 0 = the main design.
+NS <- opt("newstate_t", "0") == "1"; NEWY <- if (NS) s2_newstate_years(POS) else data.table(ccode = integer(0), year = integer(0))
+POSL <- if (NS) s2_backfill_sy(POS[, .(ccode, year, R)], NEWY) else POS   # t - 1 lookups only
 GP <- as.data.table(gml_part); GD <- as.data.table(gml_mid_disps); GDY <- as.data.table(gml_mid_ddydisps)
 logf("participants_timing %d spells / %d disputes; gml_part %d rows; gml_mid_disps %d disputes; positions %d state-years", nrow(P), uniqueN(P$dispnum), nrow(GP), nrow(GD), nrow(POS))
 GP[, end_mk := s2_mk(endyear, endmon)]                           # s2_mk stops on invalid month codes (P2-5)
@@ -193,6 +197,7 @@ dev <- vapply(COVER, function(y) { k <- POS$year == y; vs <- POS$ccode[k]; e <- 
 logf("main-measure edges: %d positive dyad-years; covered years %d-%d (%d); log PageRank vs %s: max abs deviation over all years %.1e (worst year %d)",
      nrow(EDGE), min(COVER), max(COVER), length(COVER), POSCOL, max(dev), COVER[which.max(dev)])
 if (max(dev) > 1e-6) stop("stage-2 edges do not reproduce the stage-1 main-measure positions")
+EDGE0 <- EDGE; if (NS) { EDGE <- s2_backfill_dy(EDGE, NEWY, "a", "b"); logf("newstate_t: %d back-filled state-years; edges %d -> %d", nrow(NEWY), nrow(EDGE0), nrow(EDGE)) }
 R0 <- ROS[m == 0L]
 row0 <- merge(OS[, .(dispnum, ccode)], DT[, .(dispnum, onset_year)], by = "dispnum")[, m := 0L]
 T1 <- s2_ties(row0[, .(dispnum, ccode, m, year_tie = onset_year - 1L)], R0, EDGE, COVER)
@@ -209,6 +214,7 @@ logf("ties: one-shot rows with a positive tie to A %d / to B %d of %d; monthly r
 ## tiers use contiguity in the onset year ("frozen at onset", memo section 4) and alliances at t - 1; side covariates below use t - 1 throughout
 BASE <- CL[baseline == TRUE, .(dispnum, ccode)]
 DYk <- rbind(DY[, .(k = ccode1, j = ccode2, year, conttype, capdist, ally, defoff = as.integer(def > 0 | off > 0))], DY[, .(k = ccode2, j = ccode1, year, conttype, capdist, ally, defoff = as.integer(def > 0 | off > 0))])
+if (NS) DYk <- s2_backfill_dy(DYk, NEWY, "k", "j")
 pr <- merge(merge(COH[, .(dispnum, ccode)], BASE[, .(dispnum, j = ccode)], by = "dispnum", allow.cartesian = TRUE), DT[, .(dispnum, onset_year)], by = "dispnum")
 pr <- merge(pr, DYk[, .(k, j, year, conttype)], by.x = c("ccode", "j", "onset_year"), by.y = c("k", "j", "year"), all.x = TRUE)
 pr[, ty := onset_year - 1L]
@@ -222,13 +228,13 @@ logf("relevance tiers: likely %d of %d (contiguous %d, same region %d, major %d,
 
 ## ---- 9. one-shot reference covariates (memo section 7; t - 1; P1-2, P2-4) ----------------------------------------------------------
 ## Strict aggregation: a side aggregate is NA when any member's input is missing (reason flags kept); never a partial sum or a false "no".
-NMC <- as.data.table(cow_nmc)[, .(ccode, year, cinc)]
+NMC <- as.data.table(cow_nmc)[, .(ccode, year, cinc)]; if (NS) NMC <- s2_backfill_sy(NMC, NEWY)
 sx <- merge(row0[, .(dispnum, ccode, ty = onset_year - 1L)], R0[, .(dispnum, j = ccode, side_rel)], by = "dispnum", allow.cartesian = TRUE)[ccode != j]
 sx <- merge(sx, NMC[, .(j = ccode, ty = year, cinc_j = cinc)], by = c("j", "ty"), all.x = TRUE)
 sx <- merge(sx, DYk[, .(ccode = k, j, ty = year, capdist, conttype, ally, defoff)], by = c("ccode", "j", "ty"), all.x = TRUE)
 ## stage-1 directed controls mirrored toward each side (assemble_cell.R Z_DIRECTED, t - 1): democracy = polity2 >= 6 with missing -> 0 (the
 ## build's POLITY_DEM_CUT is assumed to be 6: verify against v2/R/01_build_data.R section 6); MID ongoing between k and a member in t - 1
-DEMY <- as.data.table(ccode_democracy)[, .(ccode, year, dem = as.integer(!is.na(polity2) & polity2 >= 6))]
+DEMY <- as.data.table(ccode_democracy)[, .(ccode, year, dem = as.integer(!is.na(polity2) & polity2 >= 6))]; if (NS) DEMY <- s2_backfill_sy(unique(DEMY, by = c("ccode", "year")), NEWY)
 sx <- merge(sx, DEMY[, .(j = ccode, ty = year, dem_j = dem)], by = c("j", "ty"), all.x = TRUE); sx[is.na(dem_j), dem_j := 0L]
 ## conflict histories (GPT surface review P2-4): COW-MID histories mirror stage 1 (the main build keeps COW-based histories) and are the
 ## reference; GML histories are kept as a labelled alternative (*_gml)
@@ -258,7 +264,7 @@ SC <- merge(SC, PRI[, .(dispnum, ccode, side_rel, prior_side = log1p(prior_n))],
 SC <- merge(SC, PRIg[, .(dispnum, ccode, side_rel, prior_side_gml = log1p(prior_n))], by = c("dispnum", "ccode", "side_rel"))
 SC <- dcast(SC, dispnum + ccode ~ side_rel, value.var = c("n_side", "side_cinc", "cinc_miss", "min_capdist", "contig_side", "ally_side", "dyad_miss", "prior_side", "major_side", "land_side", "defoff_side", "dem_side", "mid_tm1_side", "mid_tm1_side_gml", "prior_side_gml"))
 own <- merge(row0[, .(dispnum, ccode, ty = onset_year - 1L)], NMC[, .(ccode, ty = year, cinc_k = cinc)], by = c("ccode", "ty"), all.x = TRUE)
-own <- merge(own, POS[, .(ccode, ty = year, own_cent = R)], by = c("ccode", "ty"), all.x = TRUE)
+own <- merge(own, POSL[, .(ccode, ty = year, own_cent = R)], by = c("ccode", "ty"), all.x = TRUE)
 own <- merge(own, DEMY[, .(ccode, ty = year, dem_k = dem)], by = c("ccode", "ty"), all.x = TRUE); own[is.na(dem_k), dem_k := 0L]
 majk <- maj_at(merge(row0[, .(dispnum, ccode)], DT[, .(dispnum, onset_lo = s2_mk(onset_year - 1L, 12L))], by = "dispnum"))[, major_k := 1L]
 own <- merge(own, majk, by = c("dispnum", "ccode"), all.x = TRUE); own[is.na(major_k), major_k := 0L]
@@ -269,7 +275,7 @@ SC[, `:=`(log_cinc_k = ifelse(cinc_k > 0, log(cinc_k), NA_real_),
           share_A = ifelse(side_cinc_A + side_cinc_B > 0, side_cinc_A / (side_cinc_A + side_cinc_B), NA_real_))]
 SC[, share_B := 1 - share_A]
 tgt <- merge(CL[baseline == TRUE & side_rel == "B", .(dispnum, ccode)], DT[, .(dispnum, ty = onset_year - 1L)], by = "dispnum")
-tgt <- merge(tgt, POS[, .(ccode, ty = year, R)], by = c("ccode", "ty"), all.x = TRUE)
+tgt <- merge(tgt, POSL[, .(ccode, ty = year, R)], by = c("ccode", "ty"), all.x = TRUE)
 TC <- tgt[, .(tgt_cent_mean = if (anyNA(R)) NA_real_ else mean(R), tgt_cent_min = if (anyNA(R)) NA_real_ else min(R), tgt_pos_miss = anyNA(R)), by = dispnum]
 logf("covariate missingness (rows): own CINC %d, own centrality %d; side CINC incomplete A %d / B %d; side dyad rows incomplete A %d / B %d; target set without t-1 position %d disputes",
      sum(is.na(SC$log_cinc_k)), sum(is.na(SC$own_cent)), sum(SC$cinc_miss_A), sum(SC$cinc_miss_B), sum(SC$dyad_miss_A), sum(SC$dyad_miss_B), sum(TC$tgt_pos_miss))
@@ -290,8 +296,8 @@ ONE[, `:=`(lcap_A = log1p(min_capdist_A), lcap_B = log1p(min_capdist_B))]       
 ## state-years of sy_positions; dR scale of the main-measure positions in the onset year); side value = mean of the month-0 roster ("min" kept
 ## as sweep columns)
 SYP <- as.data.table(readRDS(file.path(DE, "sy_positions.rds")))[, .(ccode, year, M)]
-PV <- merge(SYP, POS[, .(ccode, year, R)], by = c("ccode", "year"), all = TRUE)
-sM <- s2_gap_scale_pooled(SYP$M, SYP$year); sR <- vapply(split(POS$R, POS$year), s2_gap_scale, 0)
+PV <- merge(if (NS) s2_backfill_sy(SYP, NEWY) else SYP, POSL[, .(ccode, year, R)], by = c("ccode", "year"), all = TRUE)
+sM <- s2_gap_scale_pooled(SYP$M, SYP$year); sR <- vapply(split(POS$R, POS$year), s2_gap_scale, 0)   # scales from the original data
 rows_s <- row0[, .(dispnum, ccode, ty = onset_year - 1L, t = onset_year)]
 mem_s <- R0[, .(dispnum, side_rel, j = ccode)]
 SURF <- s2_surface(rows_s, mem_s, PV, sM, sR, "mean")
@@ -376,10 +382,10 @@ MON <- merge(MON, DT[, .(dispnum, fold, end_source, end_imputed, onset_year)], b
 stopifnot(all(MON$fold == s2_fold(MON$onset_year)))                  # every monthly row carries its dispute's onset fold (recheck finding 6)
 MON[, onset_year := NULL]
 META <- list(cover = COVER, built = format(Sys.time()), git = GIT, mode = MODE, fatal_def = FATAL_DEF, fatal_label = switch(FATAL_DEF, stage1 = "primary disputes represented by stage-1 fatal-event flags", gml = "GML dispute fatality > 0", mid = "primary disputes of stage-1 all-MID events (in_mid)"),
-             window = W_REF, positions = POSF, poscol = POSCOL, avail_cols = S2_AVAIL, ref_design = S2_REF_DESIGN, ref_design_linear = S2_REF_DESIGN_LINEAR, monthly_covariates = "ties and frozen tier only (monthly non-tie covariates not built)")
+             window = W_REF, positions = POSF, poscol = POSCOL, avail_cols = S2_AVAIL, ref_design = S2_REF_DESIGN, ref_design_linear = S2_REF_DESIGN_LINEAR, monthly_covariates = "ties and frozen tier only (monthly non-tie covariates not built)", newstate_t = NS, newstate_years = NEWY)
 for (o in c("DT", "ONE", "MON")) { x <- get(o); setattr(x, "s2_meta", META); assign(o, x) }
 saveRDS(META, file.path(OUT, "s2_meta.rds")); saveRDS(DT, file.path(OUT, "s2_disputes.rds")); saveRDS(PT, file.path(OUT, "s2_participant_spells.rds"))
 saveRDS(CLW, file.path(OUT, "s2_classification_w0_6.rds")); saveRDS(ONE, file.path(OUT, sprintf("s2_oneshot_w%d.rds", W_REF))); saveRDS(MON, file.path(OUT, sprintf("s2_monthly_w%d.rds", W_REF)))
-saveRDS(ROS, file.path(OUT, "s2_rosters_carry.rds")); saveRDS(EDGE, file.path(OUT, "s2_main_edges.rds"))
+saveRDS(ROS, file.path(OUT, "s2_rosters_carry.rds")); saveRDS(EDGE0, file.path(OUT, "s2_main_edges.rds"))
 logf("written (%s build): s2_disputes %d, s2_oneshot_w%d %d (reference cohort %d), s2_monthly_w%d %d, rosters %d, edges %d", MODE, nrow(DT), W_REF, nrow(ONE), sum(ONE$in_ref), W_REF, nrow(MON), nrow(ROS), nrow(EDGE))
 logf("S2_BUILD_DONE")
