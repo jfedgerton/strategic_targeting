@@ -6,6 +6,10 @@
 ## Inference: the two-stage dispute bootstrap with the common draws of R/s2_07_boot_cells.R (seed 123). Columns (1) and (3) are read from that
 ## cell's draws; column (2) is fitted here on the same draws (same Bayesian-bootstrap dispute weights, same seed; boot_weights), so all three use identical draws.
 ## 95% percentile intervals; a quantity is reported only with a finite point estimate and >= 80% finite draws (as s2_07).
+## theta (PI 2026-11-24): also a bias-corrected (BC) percentile interval and the bootstrap median, because theta's draws are attenuated
+##   relative to its point estimate (bbar re-estimated in every draw). BC: z0 = qnorm(share of draws below the point estimate); the interval
+##   is the draws' quantiles at pnorm(2 z0 + qnorm(.025)) and pnorm(2 z0 + qnorm(.975)). No acceleration term (BCa would need ~500
+##   leave-one-dispute-out joint refits per cell). Written to main_table_theta.csv.
 ## Missing-data robustness (PI 2026-11-24), written to main_table_robust_*.csv on the first N_ROBUST draws of the same weights:
 ##   (2b) stage 2 alone on all stage-2 disputes (incl. those without bbar: every onset target chosen < 2 times in stage 1)
 ##   (3b) joint model with b = 0 (the mean target) for targets without a repeat-target FE, so every stage-2 dispute has a bbar
@@ -88,6 +92,11 @@ N <- data.table(quantity = c("stage-1 events", "stage-2 disputes, (2) and (3)", 
                           uniqueN(X$dispnum), nrow(X), sum(X$y == "A"), sum(X$y == "B"), sum(X$y == "orig"), nrow(MJ), nrow(M0), NR,
                           paste(if (is.null(MB)) 0L else nrow(MB), if (is.null(MF)) 0L else nrow(MF), if (is.null(MNT)) 0L else nrow(MNT), sep = " / ")))
 fwrite(N, file.path(OUT, "main_table_n.csv"))
+bc_ci <- function(x, est) { x <- x[is.finite(x)]; if (!is.finite(est) || length(x) < 0.8 * NB) return(c(NA, NA)); z0 <- qnorm(mean(x < est))
+  if (!is.finite(z0)) return(c(NA, NA)); unname(quantile(x, pnorm(2 * z0 + qnorm(c(.025, .975))))) }
+TH <- rbindlist(lapply(c("A", "B", "O"), function(al) { q <- paste0(al, ":bbar"); est <- getP("S2", al, "theta", NA); x <- MJ[, q]; pc <- ci(MJ, q, est, NB); bc <- bc_ci(x, est)
+  data.table(theta = al, est = est, boot_median = median(x[is.finite(x)]), pct_lo = pc[1], pct_hi = pc[2], bc_lo = bc[1], bc_hi = bc[2], share_below_est = mean(x[is.finite(x)] < est), n_draws = sum(is.finite(x))) }))
+fwrite(TH, file.path(OUT, "main_table_theta.csv"))
 W <- dcast(TAB, row ~ column, value.var = "cell", fill = ""); W <- W[match(unique(TAB$row), row)]   # keep the intended row order
 fwrite(W, file.path(OUT, "main_table_wide.csv"))
 ## ---- missing-data robustness: (2) vs (2b) and (3) vs (3b) side by side ----

@@ -23,6 +23,7 @@ Main measure BOOKraw_ptadesta, fatal MIDs, window 1. Two-stage dispute-level Bay
 ## Robustness (100 draws)
 - (2b) stage 2 on all 544 disputes and (3b) b = 0 for one-time targets: all signs and significance unchanged (theta A -0.92*, theta B -0.42*).
 - New-state build (point fit): theta A -0.88, theta B -0.43.
+- (3c) net ties (own-side minus opposing-side ties per option): stage-2 gaps and theta unchanged (theta A -0.89*, theta B -0.40*); net ties for joining the target side become clearly positive (1.77 [0.69, 3.28]*, own-side only 0.39 n.s.); originator entry 2.39*; joining the attacker n.s.
 
 ## Known issue to check (hypothesis)
 theta's percentile interval is off-centre relative to its point estimate (theta A: point -0.89, bootstrap median -0.60; theta B: -0.43 vs -0.31). Stage-1 contrasts are centred (medians equal points). Likely errors-in-variables attenuation from re-estimating bbar in each draw. Decided: main text reports point, percentile interval and bootstrap median; BC interval in the appendix (theta A BC [-1.50, -0.79], theta B [-0.80, -0.30], theta O [-0.08, 1.21]).
