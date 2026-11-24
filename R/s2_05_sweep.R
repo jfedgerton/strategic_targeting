@@ -1,7 +1,7 @@
 ## R/s2_05_sweep.R -- the stage-2 parallel multiverse (PI 2026-11-22): the joint two-stage FE model (R/lib/s2_cell.R) for every relational
 ## measure in the given positions files, on one window x sample (one stage-2 build + its stage-1 init dump). Each measure uses its OWN
 ## positions (stage-1 dR, stage-2 surface gaps) and its OWN edges (stage-2 ties; option A, measure-specific ties).
-## Point fits only (two-way clustered SEs); the bootstrapped sub-multiverse is R/s2_07_boot_cells.R (cells picked by R/s2_06_pick_boot_cells.R).
+## Point fits only (two-way clustered SEs); the bootstrapped sub-multiverse is R/s2_07_boot_cells.R (cells picked by R/s2_06_pick_boot_cells.R or R/grid_pick_boot_cells.R).
 ## Resumable: one CSV per (positions file x chunk); a chunk whose CSV exists is skipped. A failing cell is written as status ERROR, never dropped.
 ## Usage:
 ##   Rscript R/s2_05_sweep.R --build=DIR --dump=long_init_...rds --edges_dir=DIR --out=DIR --positions=f1.rds,f2.rds,...

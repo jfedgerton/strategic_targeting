@@ -1,4 +1,4 @@
-## R/s2_07_boot_cells.R -- two-stage dispute bootstrap of the cells listed by R/s2_06_pick_boot_cells.R (stage-2 appendix, layer 2).
+## R/s2_07_boot_cells.R -- two-stage dispute bootstrap of the cells listed by R/s2_06_pick_boot_cells.R or R/grid_pick_boot_cells.R (stage-2 appendix, layer 2).
 ## Each draw resamples disputes and refits BOTH steps (R/lib/s2_cell.R joint_fe_draw; identical to R/s2_03_joint_fe.R). Draws are common
 ## across cells that share a build (seed 123; draw b is the same dispute-weight vector for every cell of a window x sample, and the first 500
 ## draws of a 2000-draw cell are the 500 draws of the others). Resumable in blocks of draws; percentile 95% intervals.

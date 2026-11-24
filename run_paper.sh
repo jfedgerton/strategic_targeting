@@ -30,6 +30,7 @@ fresh() { [ -s "$1.stamp" ] && [ "$(cat "$1.stamp")" = "$2" ]; }
 stamp() { echo "$2" > "$1.stamp.tmp" && mv "$1.stamp.tmp" "$1.stamp"; }
 wtag() { [ "$1" -gt 0 ] && echo "_w${1}d" || echo ""; }
 GAPS=""; gap() { local rc=$1 NM=$2; [ $rc -eq 0 ] && return 0; [ $rc -eq 3 ] && { say "WARNING: $NM finished with ERROR cells (rerun to retry)"; GAPS="$GAPS $NM"; return 0; }; die "$NM failed (exit $rc)"; }
+[[ "$O" != *" "* ]] || die "OUT must not contain spaces (paths are unquoted in this runner); use a relative folder such as output_init"
 [ -e $O/.created_by_run_all ] || die "$O is not a run_all.sh output folder"
 [ "${S2_FORCE:-0}" = "1" ] || ! pgrep -f "run_all.sh|R/07_fit_sweep.R" > /dev/null || die "run_all.sh looks still running (S2_FORCE=1 overrides)"
 [ -s $O/layers_dy.rds ] || die "missing $O/layers_dy.rds"
@@ -102,6 +103,7 @@ fi
 
 ## ---- 4. Table 1 and figures ----
 if has 4; then
+  rm -f "$PP"/table1/*.png "$PP"/table1/*.pdf "$PP"/table1/*.csv   # no stale figures from an earlier design (audit 2026-11-24)
   runR "TABLE1_FIGURES_DONE|Error" R/table1_figures.R --positions=$MAINF --spec="$MAIN_SPEC" --edges_dir=$S2/edges \
     --build_fmid=$PP/builds/w${WINDOW_MAIN}_fmid --dump_fmid=$O/dumps/long_init_bon$(wtag $WINDOW_MAIN)_relyear_fmid.rds \
     --build_mid=$PP/builds/w${WINDOW_MAIN}_mid --dump_mid=$O/dumps/long_init_bon$(wtag $WINDOW_MAIN)_relyear_mid.rds --out=$PP/table1 || die "Table 1 failed"
