@@ -8,7 +8,7 @@
 ##             S2MON  monthly competing-risk multinomial (GPT 5; clustered SEs, bootstrap only with --monthly_boot=1)
 ##   Joint     JMAIN  stage-1 target FE -> bbar -> stage 2 (main) | JSEP joint with own + opposing ties (GPT 4: theta as dependence)
 ## Added (PI 2026-11-24, robustness for this paper):
-##             S1RIV  initiator x target (rivalry) FE          | S1ERA_<era> stage 1 between targets fitted within each era
+##             S1RIV  initiator x target (rivalry) FE   (within-era fits dropped, PI 2026-11-24; era enters only as target x era FE)
 ##             S2TWFE per-option binary logit with candidate + dispute FE together (fixest)
 ##             JTE    joint with bbar from target x era FE (bbar of a dispute = its targets' FE in the dispute's onset era)
 ##             S1ME_* / S2ME_* measurement error in the relational gap, lambda 0.5 and 1: noise (classical) and conf (relational gap
@@ -132,7 +132,6 @@ one_draw <- function(m, monthly = FALSE) {
   J <- blk(s1_bbar(Db)); v$s1fe <- J$c
   v$s1riv <- blk({ Dr <- fe_prune(copy(Db)[, c2 := paste(c1, c2, sep = "_")]); ro <- names(sort(table(Dr[chosen == 1L, c2]), decreasing = TRUE))
                    bb <- s1_fit_fe_tol(Dr, DUMP_RIV, ro)$b; s1c(bb[!grepl("^tfe", names(bb))], "S1RIV") })
-  for (e in ERA_LB) v[[paste0("era", e)]] <- blk({ mm <- s1_fit_nofe(Db[era == e], dump); s1c(coef(mm), paste0("S1ERA_", e)) })
   for (k in c("noise", "conf")) for (l in ME_L) {
     v[[paste0("me1", k, l)]] <- blk({ mm <- s1_fit_nofe(me_D(Db, k, l), dump); s1c(coef(mm), paste0("S1ME_", k, lamtag(l))) })
     v[[paste0("me2", k, l)]] <- blk(s2c(fit_mnl(XME[[paste(k, l)]], S2_REF_DESIGN, "me", vc = FALSE, w = wX)$b, paste0("S2ME_", k, lamtag(l)))) }
@@ -217,7 +216,6 @@ fwrite(L, file.path(OUT, "explore_long.csv"))
 ## ---- 9. summary: each variant vs its reference on the shared quantities ----
 REF <- c(S1FE = "S1NF", S1MUND = "S1NF", S1TE = "S1NF", S1RIV = "S1NF", S2JS = "S2FULL", S2SEP = "S2FULL", S2MON = "S2FULL",
          S2CFE = "S2BIN", S2DFE = "S2BIN", S2TWFE = "S2BIN", JSEP = "JMAIN", JTE = "JMAIN",
-         setNames(rep("S1NF", length(ERA_LB)), paste0("S1ERA_", ERA_LB)),
          setNames(rep("S1NF", 4), paste0("S1ME_", rep(c("noise", "conf"), each = 2), lamtag(ME_L))),
          setNames(rep("S2FULL", 4), paste0("S2ME_", rep(c("noise", "conf"), each = 2), lamtag(ME_L))))
 S <- rbindlist(lapply(names(REF), function(s) { a <- L[spec == s]; r <- L[spec == REF[[s]], .(q, est_ref = est, sig_ref = sig)]
