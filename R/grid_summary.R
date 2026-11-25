@@ -26,10 +26,11 @@ bad <- cen[status != "OK" & !(status == "SKIPPED" & exp_skip(spec_id))]
 if (nrow(bad)) stop(sprintf("unexpected non-OK grid cells: %s", paste(sprintf("%s %s %s", bad$sample, bad$spec_id, bad$status), collapse = "; ")))
 fit_n <- cen[status == "OK", .N, by = sample]; cat(sprintf("fitted measures per sample: %s (expected 236 minus the allowed constant-position skips)\n", paste(sprintf("%s %d", fit_n$sample, fit_n$N), collapse = ", ")))
 A <- A[status == "OK"]
-Q <- data.table(stage = c("S1NF", "S1NF", "S1NF", "S1NF", "S2", "S2", "S2", "S2"), alt = c("coal", "bil", "coal", "coal", "A", "B", "B", "B"),
-                axis = c("R", "R", "M", "M", "theta", "theta", "M", "R"), gap = c(1, 1, 1, -1, NA, NA, -1, 1),
+Q <- data.table(stage = c("S1NF", "S1NF", "S1NF", "S1NF", "S2", "S2", "S2", "S2", "S2", "S2"), alt = c("coal", "bil", "coal", "coal", "A", "B", "B", "B", "B", "O"),
+                axis = c("R", "R", "M", "M", "theta", "theta", "M", "R", "tie_opp", "tie_sum"), gap = c(1, 1, 1, -1, NA, NA, -1, 1, NA, NA),
                 label = c("Coalition: less central target", "Bilateral: less central target", "Coalition: weaker target", "Coalition: stronger target",
-                          "theta A (join attacker)", "theta B (join target)", "Join target vs stronger attacker", "Join target vs less central attacker"))
+                          "theta A (join attacker)", "theta B (join target)", "Join target vs stronger attacker", "Join target vs less central attacker",
+                          "Join target: ties to the attacker", "Originator entry: ties to the attacker"))   # tie rows added with the both-ties design (PI 2026-11-24)
 K <- merge(A, Q, by = c("stage", "alt", "axis", "gap"))
 K[, `:=`(lo = est - 1.96 * se, hi = est + 1.96 * se, p = 2 * pnorm(-abs(est / se)))]
 ## decision indicators

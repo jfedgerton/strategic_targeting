@@ -16,6 +16,9 @@ Items the appendix should state. Numbers are from the sandbox build on the main 
 - Joint model: 33 disputes have no repeat target (every onset target chosen fewer than 2 times in stage 1), so no target trait; main-table columns (2) and (3) both use the remaining 511 disputes.
 - Robustness: (2b) stage 2 alone on all 544 disputes; (3b) joint model with b = 0 for one-time targets; new-state cell using year t where t - 1 does not exist (stage 2 only; 560 disputes, 65,274 rows).
 
+## Stage-2 ties
+- Main design: ties to both sides per option (own side joined, opposing side fought); own-side-only ties reported as (3c). Net ties dropped (collinear with both ties).
+
 ## Inference
 - Two-stage dispute-level Bayesian bootstrap (Exp(1) dispute weights scaled to mean 1; Rubin 1981), common draws across stage 1, stage 2 and the joint model; 95% percentile intervals; a quantity is reported only with >= 80% finite draws.
 - Window 0 has no originator alternative; its O quantities are not estimated.
@@ -27,7 +30,5 @@ Items the appendix should state. Numbers are from the sandbox build on the main 
 - Attack-plane axes are cut at the 1st / 99th percentile of each gap; captions report the share of points outside.
 - F3 rates use only candidates for whom the option is available.
 
-## AME (appendix)
-- rstan; stage-1 gaps in FE units; K = 1 latent term reported only through sign-free summaries.
-- Fits are weighted pseudo-posteriors. A Williams-Savitsky rescaling is computed, but a GPT audit (2026-11-24) showed it mixes the marginal posterior covariance with scores taken at fixed random effects, so it is not a valid sandwich for this model; its "[WS-adjusted]" rows must not be reported until a corrected adjustment is validated (decision pending). Report the raw pseudo-posterior, and use the FE dispute bootstrap as the clustered inference.
-- Stage 2 uses era-specific intercepts; AME stage 2 keeps all 544 disputes (random effects pool one-time targets).
+## AME
+- Dropped (PI 2026-11-24). The paper uses the FE models with the two-stage dispute bootstrap; AME code stays in the repo but is not run.
