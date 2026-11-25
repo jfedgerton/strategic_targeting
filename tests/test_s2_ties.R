@@ -24,7 +24,7 @@ check("1f boot_names(): 47 unique names, including A/B/O:tie_opp", length(bn) ==
 
 ## ---- part 2: point vs bootstrap extraction on real data ----
 if (length(a) >= 4) {
-  B <- s2_base(a[1]); dump <- readRDS(a[2]); pz <- readRDS(a[3]); key <- as.data.table(pz$key)
+  B <- s2_base(a[1]); W_REF <- B$window; dump <- readRDS(a[2]); pz <- readRDS(a[3]); key <- as.data.table(pz$key)
   SPEC <- "BOOKraw_ptadesta|igo+def+off+pta+dca|pr"; stopifnot(SPEC %in% colnames(pz$R)); R <- pz$R[, SPEC]
   E <- s2_spec_edges("core", SPEC, a[4]); X <- s2_prepare(B, key, R, E); D <- s1_prepare(dump, key, R)
   ref_order <- names(sort(table(D[chosen == 1L, c2]), decreasing = TRUE))
