@@ -14,8 +14,8 @@
 ##   (2b) stage 2 alone on all stage-2 disputes (incl. those without bbar: every onset target chosen < 2 times in stage 1)
 ##   (3b) joint model with b = 0 (the mean target) for targets without a repeat-target FE, so every stage-2 dispute has a bbar
 ##   plus a census of the rows the t-1 timing rule and the bbar rule remove (main_table_missingness.csv).
-## Ties robustness (PI 2026-11-24), same file: (3c) joint model with NET ties per option (ties to the side joined minus ties to the opposing side;
-##   A and O: tie_sum_A - tie_sum_B, B: tie_sum_B - tie_sum_A) in place of own-side ties.
+## Ties (PI 2026-11-24): the main design has ties to BOTH sides (own side joined and opposing side fought; S2_REF_DESIGN). Robustness, same
+##   file: (3c) joint model with own-side ties only (S2_REF_DESIGN_OWN, the earlier main design).
 ## Usage: Rscript R/main_table.R --build=DIR --dump=FILE --positions=FILE --spec=ID --edges_dir=DIR --cell_dir=DIR --out=DIR [--cores=2] [--n_robust=500]
 suppressPackageStartupMessages({ library(data.table); library(parallel) })
 for (f in c("s2.R", "s2_fit.R", "sry.R", "s2_cell.R")) source(file.path("R/lib", f))
@@ -37,9 +37,10 @@ D <- s1_add_tie(s1_prepare(dump, key, R), E, dump$roles); ref_order <- names(sor
 PJ <- joint_fe_cell(D, dump, X, B$TS); JS <- attr(PJ, "disp_joint"); stopifnot(length(JS) > 0, all(JS %in% X$dispnum))
 stopifnot(isTRUE(all.equal(PJ[stage == "S2" & axis == "theta" & alt == "A", est], P[stage == "S2" & axis == "theta" & alt == "A", est], tolerance = 1e-6)))   # same point fit as the cell
 XJ <- X[dispnum %in% JS]; stopifnot(nrow(XJ) == P$n_s2_rows[1])
-tie0 <- c("A:tie_sum_A", "B:tie_sum_B", "O:tie_sum_A")
+tie0 <- c("A:tie_sum_A", "B:tie_sum_B", "O:tie_sum_A"); tieO <- c("A:tie_sum_B", "B:tie_sum_A", "O:tie_sum_B")   # own-side / opposing-side ties
+stopifnot(identical(unname(tie_terms(S2_REF_DESIGN)), tie0), identical(unname(tie_opp_terms(S2_REF_DESIGN)), tieO))
 s2a <- function(Xs, w = NULL, tag = "S2A", vc = TRUE, start_b = NULL) { f <- fit_mnl(Xs, S2_REF_DESIGN, tag, vc = vc, w = w, start_b = start_b); s <- surf_contrasts(f)
-  setNames(c(s$est, f$b[tie0]), c(paste(tag, s$alt, s$axis, s$gap, sep = "."), paste0(tag, ".", tie0))) }
+  setNames(c(s$est, unname(f$b[tie0]), unname(f$b[tieO])), c(paste(tag, s$alt, s$axis, s$gap, sep = "."), paste0(tag, ".", tie0), paste0(tag, ".", tieO))) }
 pt0 <- s2a(XJ); nm0 <- names(pt0)                            # (2) on the joint sample
 ptb <- s2a(X, tag = "S2Ab"); nmb <- names(ptb)                # (2b) on all stage-2 disputes
 bJ0 <- fit_mnl(XJ, S2_REF_DESIGN, "S2A start", vc = FALSE)$b; bB0 <- fit_mnl(X, S2_REF_DESIGN, "S2Ab start", vc = FALSE)$b   # warm starts for the draws (same optimum)
@@ -63,10 +64,8 @@ NR <- min(N_ROBUST, NB); MR <- MM[seq_len(NR)]
 MB <- run_draws(MR, function(m) s2a(X, as.numeric(m[as.character(X$dispnum)]), tag = "S2Ab", vc = FALSE, start_b = bB0)[nmb], nmb)
 PF <- joint_fe_cell(D, dump, X, B$TS, fill_b = TRUE); stopifnot(length(attr(PF, "disp_joint")) == uniqueN(X$dispnum))
 MF <- run_draws(MR, function(m) joint_fe_draw(D, dump, X, B$TS, m, ref_order, fill_b = TRUE), boot_names(dump))
-## (3c) net ties: the joint model with tie_net_* in place of own-side ties (boot_names keeps the own-side labels; see the mapping below)
-XN <- copy(X)[, `:=`(tie_net_A = tie_sum_A - tie_sum_B, tie_net_B = tie_sum_B - tie_sum_A)]
-DN <- list(A = sub("^tie_sum_A$", "tie_net_A", S2_REF_DESIGN$A), B = sub("^tie_sum_B$", "tie_net_B", S2_REF_DESIGN$B), O = sub("^tie_sum_A$", "tie_net_A", S2_REF_DESIGN$O))
-stopifnot(sum(DN$A == "tie_net_A") == 1L, sum(DN$B == "tie_net_B") == 1L, sum(DN$O == "tie_net_A") == 1L)
+## (3c) own-side ties only: the joint model without the opposing-side ties (S2_REF_DESIGN_OWN; its tie_opp quantities are NA)
+XN <- X; DN <- S2_REF_DESIGN_OWN; stopifnot(all(is.na(tie_opp_terms(DN))))
 PNT <- joint_fe_cell(D, dump, XN, B$TS, design = DN)
 MNT <- run_draws(MR, function(m) joint_fe_draw(D, dump, XN, B$TS, m, ref_order, design = DN), boot_names(dump))
 ## assemble
@@ -88,6 +87,8 @@ for (al in c("A", "B", "O")) for (k in names(lab_s2)) { ax <- sub("\\..*$", "", 
 for (i in 1:3) { al <- c("A", "B", "O")[i]
   T[[length(T) + 1]] <- row("(2) Stage 2 alone", paste("join", al, "recruitment ties"), paste0("S2A.", tie0[i]), pt0[[paste0("S2A.", tie0[i])]], M0)
   T[[length(T) + 1]] <- row("(3) Joint: stage 2", paste("join", al, "recruitment ties"), tie0[i], getP("S2", al, "tie_sum", NA), MJ)
+  T[[length(T) + 1]] <- row("(2) Stage 2 alone", paste("join", al, "ties to the opposing side"), paste0("S2A.", tieO[i]), pt0[[paste0("S2A.", tieO[i])]], M0)
+  T[[length(T) + 1]] <- row("(3) Joint: stage 2", paste("join", al, "ties to the opposing side"), paste0(al, ":tie_opp"), getP("S2", al, "tie_opp", NA), MJ)
   T[[length(T) + 1]] <- row("(3) Joint: stage 2", paste("join", al, "theta (target trait)"), paste0(al, ":bbar"), getP("S2", al, "theta", NA), MJ) }
 TAB <- rbindlist(T)
 fmt <- function(TB) TB[, cell := ifelse(is.na(lo), sprintf("%.2f", est), sprintf("%.2f [%.2f, %.2f]%s", est, lo, hi, ifelse(lo > 0 | hi < 0, "*", "")))]
@@ -115,14 +116,15 @@ for (al in c("A", "B", "O")) for (k in names(lab_s2)) { ax <- sub("\\..*$", "", 
   RB[[length(RB) + 1]] <- row("(2b) Stage 2 alone, all disputes", lb, paste("S2Ab", al, ax, g, sep = "."), ptb[[paste("S2Ab", al, ax, g, sep = ".")]], MB, NR)
   RB[[length(RB) + 1]] <- row("(3) Joint", lb, paste("S2", al, ax, g, sep = "."), getP("S2", al, ax, g), MJ)
   RB[[length(RB) + 1]] <- row("(3b) Joint, b = 0 for one-time targets", lb, paste("S2", al, ax, g, sep = "."), gF("S2", al, ax, g), MF, NR)
-  RB[[length(RB) + 1]] <- row("(3c) Joint, net ties", lb, paste("S2", al, ax, g, sep = "."), gN("S2", al, ax, g), MNT, NR) }
+  RB[[length(RB) + 1]] <- row("(3c) Joint, own-side ties only", lb, paste("S2", al, ax, g, sep = "."), gN("S2", al, ax, g), MNT, NR) }
 for (al in c("A", "B", "O")) {
   RB[[length(RB) + 1]] <- row("(3) Joint", paste("join", al, "theta (target trait)"), paste0(al, ":bbar"), getP("S2", al, "theta", NA), MJ)
   RB[[length(RB) + 1]] <- row("(3b) Joint, b = 0 for one-time targets", paste("join", al, "theta (target trait)"), paste0(al, ":bbar"), gF("S2", al, "theta", NA), MF, NR)
-  RB[[length(RB) + 1]] <- row("(3c) Joint, net ties", paste("join", al, "theta (target trait)"), paste0(al, ":bbar"), gN("S2", al, "theta", NA), MNT, NR)
+  RB[[length(RB) + 1]] <- row("(3c) Joint, own-side ties only", paste("join", al, "theta (target trait)"), paste0(al, ":bbar"), gN("S2", al, "theta", NA), MNT, NR)
   tq <- c(A = "A:tie_sum_A", B = "B:tie_sum_B", O = "O:tie_sum_A")[[al]]
-  RB[[length(RB) + 1]] <- row("(3) Joint", paste("join", al, "ties (own side; net = own minus opposing in 3c)"), tq, getP("S2", al, "tie_sum", NA), MJ)
-  RB[[length(RB) + 1]] <- row("(3c) Joint, net ties", paste("join", al, "ties (own side; net = own minus opposing in 3c)"), tq, gN("S2", al, "tie_sum", NA), MNT, NR) }
+  RB[[length(RB) + 1]] <- row("(3) Joint", paste("join", al, "ties to the side joined"), tq, getP("S2", al, "tie_sum", NA), MJ)
+  RB[[length(RB) + 1]] <- row("(3c) Joint, own-side ties only", paste("join", al, "ties to the side joined"), tq, gN("S2", al, "tie_sum", NA), MNT, NR)
+  RB[[length(RB) + 1]] <- row("(3) Joint", paste("join", al, "ties to the opposing side"), paste0(al, ":tie_opp"), getP("S2", al, "tie_opp", NA), MJ) }
 RT <- rbindlist(RB); fmt(RT); fwrite(RT, file.path(OUT, "main_table_robust_long.csv"))
 RW <- dcast(RT, row ~ column, value.var = "cell", fill = ""); RW <- RW[match(unique(RT$row), row)]; fwrite(RW, file.path(OUT, "main_table_robust_wide.csv"))
 ## census of what the t-1 timing rule (build reference cohort) and the bbar rule remove

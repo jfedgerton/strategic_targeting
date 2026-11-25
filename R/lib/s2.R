@@ -403,10 +403,13 @@ S2_SURF_A <- c("sA_dM", "sA_dM2", "sA_dR", "sA_dR2", "sA_dMR"); S2_SURF_B <- c("
 S2_REF_DESIGN_LINEAR <- S2_REF_DESIGN
 S2_Z_TOWARD <- function(o) c(paste0("land_side_", o), paste0("lcap_", o), paste0("dem_side_", o), paste0("dem_x_", o), paste0("defoff_side_", o),
                               paste0("major_side_", o), paste0("major_x_", o), paste0("mid_tm1_side_", o), paste0("prior_side_", o))
-S2_REF_DESIGN <- list(
+S2_REF_DESIGN_OWN <- list(   # own-side ties only (main design until 2026-11-24; now the ties robustness)
   A = c("likely", S2_SURF_A, S2_Z_TOWARD("B"), "tie_sum_A", "ally_side_A", "share_A", "n_side_A", "n_side_B"),
   B = c("likely", S2_SURF_B, S2_Z_TOWARD("A"), "tie_sum_B", "ally_side_B", "share_B", "n_side_A", "n_side_B"),
   O = c(S2_SURF_A, setdiff(S2_Z_TOWARD("B"), "dem_x_B"), "tie_sum_A", "ally_side_A", "share_A", "n_side_A", "n_side_B"))
+## main design (PI 2026-11-24): ties to BOTH sides, as in the stage-2 design memo (Nov 21). Each option gets its own-side tie (the side it
+## joins) and its opposing-side tie (the side it would fight): A and O tie_sum_A + tie_sum_B; B tie_sum_B + tie_sum_A.
+S2_REF_DESIGN <- list(A = c(S2_REF_DESIGN_OWN$A, "tie_sum_B"), B = c(S2_REF_DESIGN_OWN$B, "tie_sum_A"), O = c(S2_REF_DESIGN_OWN$O, "tie_sum_B"))
 ## O restrictions (GPT surface review P2-3, declared): originator entry is structurally unavailable to unlikely candidates (fit_mnl mask), so
 ## "likely" is not an O term; dem_x_B is excluded from O because no originator entrant is a democracy facing a democratic target side (its MLE
 ## does not exist) -- a declared restricted specification, reported as such

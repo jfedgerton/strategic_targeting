@@ -70,7 +70,8 @@ run_cell <- function(cl) {
           setNames(P[stage == "S1NFT" & axis == "tie", est], paste0("S1NFT.", P[stage == "S1NFT" & axis == "tie", alt], ".tie")),
           setNames(P[stage == "S2" & axis %in% c("M", "R"), est], paste("S2", P[stage == "S2" & axis %in% c("M", "R"), alt], P[stage == "S2" & axis %in% c("M", "R"), axis], P[stage == "S2" & axis %in% c("M", "R"), gap], sep = ".")),
           setNames(P[axis == "theta", est], paste0(P[axis == "theta", alt], ":bbar")),
-          setNames(P[axis == "tie_sum", est], c("A:tie_sum_A", "B:tie_sum_B", "O:tie_sum_A")))
+          setNames(P[axis == "tie_sum", est], c("A:tie_sum_A", "B:tie_sum_B", "O:tie_sum_A")),
+          setNames(P[axis == "tie_opp", est], c("A:tie_opp", "B:tie_opp", "O:tie_opp")))
   q <- boot_names(dump); stopifnot(all(q %in% names(pt)))
   ## GPT P1-3: usable draws counted PER QUANTITY; an interval is reported only with a finite point estimate and >= QMIN x n_boot finite draws
   nf <- colSums(is.finite(M[, q, drop = FALSE]))

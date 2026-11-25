@@ -134,8 +134,14 @@ s2_prepare <- function(B, key, R, EDGE) {
 s2_edge_file <- function(spec, edges_dir) {
   f <- if (startsWith(spec, "G")) "grid_layers.rds" else if (startsWith(spec, "BOOKraw_")) "edges_book_raw.rds" else if (startsWith(spec, "BOOKc12_")) "edges_book_c12.rds" else stop("no edge-file rule for ", spec)
   f <- file.path(edges_dir, f); if (!file.exists(f)) stop("missing edge file ", f); f }
-## tie term of each option in a stage-2 design: "A:tie_sum_A", "B:tie_sum_B", "O:tie_sum_A" by default (exactly one tie_* term per option)
-tie_terms <- function(design) vapply(c("A", "B", "O"), function(al) { t <- grep("^tie_", design[[al]], value = TRUE); stopifnot(length(t) == 1L); paste0(al, ":", t) }, "")
+## tie terms of each option in a stage-2 design. Own side = the side the option joins (A, O: suffix _A; B: suffix _B); opposing = the other.
+## tie_terms(): the own-side term ("A:tie_sum_A", "B:tie_sum_B", "O:tie_sum_A" by default; the earlier own-only design S2_REF_DESIGN_OWN), exactly one per option.
+## tie_opp_terms(): the opposing-side term ("A:tie_sum_B", "B:tie_sum_A", "O:tie_sum_B" in the main design), NA when the design has none.
+tie_side <- function(al, own) if ((al == "B") == own) "B" else "A"
+tie_terms <- function(design) vapply(c("A", "B", "O"), function(al) { t <- grep("^tie_", design[[al]], value = TRUE)
+  if (length(t) > 1L) t <- grep(paste0("_", tie_side(al, TRUE), "$"), t, value = TRUE); stopifnot(length(t) == 1L); paste0(al, ":", t) }, "")
+tie_opp_terms <- function(design) vapply(c("A", "B", "O"), function(al) { t <- grep("^tie_", design[[al]], value = TRUE)
+  t <- setdiff(t, sub("^.:", "", tie_terms(design)[[al]])); stopifnot(length(t) <= 1L); if (length(t)) paste0(al, ":", t) else NA_character_ }, "")
 ## ---- the joint two-stage FE model on one cell ------------------------------------------------------------------------------------------
 ## returns a long table: stage-1 FE contrasts (two-way SE), stage-2 surface contrasts and theta (two-way SE conditional on bbar), counts
 joint_fe_cell <- function(D, dump, X, TS, design = S2_REF_DESIGN, fill_b = FALSE) {   # fill_b: robustness, targets without a repeat-target FE get b = 0 (the mean)
@@ -149,8 +155,10 @@ joint_fe_cell <- function(D, dump, X, TS, design = S2_REF_DESIGN, fill_b = FALSE
   F_t <- fit_mnl(X1, lapply(design, function(v) c(v, "bbar")), "cell")
   sc <- surf_contrasts(F_t)[, .(stage = "S2", alt, axis, gap, est, se)]
   th <- data.table(stage = "S2", alt = c("A", "B", "O"), axis = "theta", gap = NA_real_, est = F_t$b[c("A:bbar", "B:bbar", "O:bbar")], se = sqrt(diag(F_t$V))[c("A:bbar", "B:bbar", "O:bbar")])
-  tq <- tie_terms(design)   # the design's tie term per option (own-side ties by default; net ties in the ties robustness)
+  tq <- tie_terms(design)   # the design's tie term per option (own-side tie; opposing-side ties come from tie_opp_terms)
   tie <- data.table(stage = "S2", alt = c("A", "B", "O"), axis = "tie_sum", gap = NA_real_, est = unname(F_t$b[tq]), se = unname(sqrt(diag(F_t$V))[tq]))
+  to <- tie_opp_terms(design); seo <- sqrt(diag(F_t$V))   # opposing-side ties (main design); NA when the design has none or the term was dropped
+  tie <- rbind(tie, data.table(stage = "S2", alt = c("A", "B", "O"), axis = "tie_opp", gap = NA_real_, est = unname(ifelse(is.na(to), NA_real_, F_t$b[to])), se = unname(ifelse(is.na(to), NA_real_, seo[to]))))
   mN <- s1_fit_nofe(D, dump); kN <- names(coef(mN)) %in% s1_terms(dump)
   nf <- s1_contrasts(coef(mN)[kN], s1_vc3w(mN, D)[kN, kN], dump$roles)[, stage := "S1NF"]   # between targets (main stage-1 comparison)
   TT <- paste0("tie_", dump$roles); nft <- NULL
@@ -179,7 +187,7 @@ boot_weights <- function(disp_all, NB) {
 boot_names <- function(dump) { r <- dump$roles; ax <- rep(c("M", "R"), each = 2); sg <- c(1, -1)
   c(paste("S1", rep(r, each = 4), ax, sg, sep = "."), paste("S1NF", rep(r, each = 4), ax, sg, sep = "."), paste("S1NFT", rep(r, each = 4), ax, sg, sep = "."),
     paste0("S1NFT.", r, ".tie"), paste("S2", rep(c("A", "B", "O"), each = 4), ax, sg, sep = "."),
-    "A:bbar", "B:bbar", "O:bbar", "A:tie_sum_A", "B:tie_sum_B", "O:tie_sum_A") }
+    "A:bbar", "B:bbar", "O:bbar", "A:tie_sum_A", "B:tie_sum_B", "O:tie_sum_A", "A:tie_opp", "B:tie_opp", "O:tie_opp") }
 joint_fe_draw <- function(D, dump, X, TS, m, ref_order, design = S2_REF_DESIGN, fill_b = FALSE) {
   ch <- D[chosen == 1L]; NCH <- table(ch$c2); REP <- names(NCH)[NCH >= 2]   # repeat targets of the full sample (as R/s2_03)
   Db <- copy(D); Db[, w := w * m[as.character(disp)]]; Db <- Db[w > 0]
@@ -198,7 +206,8 @@ joint_fe_draw <- function(D, dump, X, TS, m, ref_order, design = S2_REF_DESIGN, 
   if (!"A:bbar" %in% names(ft$b)) stop("bbar dropped by the separation rule in this draw")
   sc <- surf_contrasts(ft)
   v <- c(setNames(c1$est, paste("S1", c1$alt, c1$axis, c1$gap, sep = ".")), setNames(cN$est, paste("S1NF", cN$alt, cN$axis, cN$gap, sep = ".")), vT, setNames(sc$est, paste("S2", sc$alt, sc$axis, sc$gap, sep = ".")),
-         ft$b[c("A:bbar", "B:bbar", "O:bbar")], setNames(ft$b[tie_terms(design)], c("A:tie_sum_A", "B:tie_sum_B", "O:tie_sum_A")))   # tie labels kept; value = the design's tie term
+         ft$b[c("A:bbar", "B:bbar", "O:bbar")], setNames(ft$b[tie_terms(design)], c("A:tie_sum_A", "B:tie_sum_B", "O:tie_sum_A")),   # tie labels kept; value = the design's own-side tie term
+         setNames(unname(ft$b[tie_opp_terms(design)]), c("A:tie_opp", "B:tie_opp", "O:tie_opp")))   # opposing-side ties (NA without them)
   bn <- boot_names(dump); setNames(v[bn], bn)   # a dropped term gives NA for that quantity only, never a misnamed draw (recheck P2)
 }
 
