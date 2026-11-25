@@ -189,6 +189,7 @@ cat(sprintf("draws done (%.1f min): %d of %d returned\n", as.numeric(difftime(Sy
 
 ## ---- 7b. permutation (point fits): relational gaps shuffled across candidates within each stage-1 event and within each stage-2
 ## dispute (both gaps of a candidate move together). Seed 123 + i per permutation, so results do not depend on --cores.
+## p_perm is two-sided against the permutation distribution itself (not against 0): stage-2 permuted contrasts are not centred on 0.
 perm_one <- function(i) { set.seed(123 + i)
   Dp <- copy(D); Dp[, dR := dR[sample.int(.N)], by = ev_id]; Dp <- s1_redo(Dp)
   Xp <- copy(X); Xp[, c("dR_kA", "dR_kB") := { o <- sample.int(.N); list(dR_kA[o], dR_kB[o]) }, by = dispnum]; Xp <- add_surface(Xp)
@@ -198,7 +199,7 @@ if (NPERM > 0) {
   qp <- grep("^(S1NF|S2FULL)\\.", names(PT), value = TRUE)
   PMX <- do.call(rbind, lapply(PR, function(x) if (is.numeric(x)) x[qp] else rep(NA_real_, length(qp)))); colnames(PMX) <- qp
   PRM <- rbindlist(lapply(qp, function(q) { x <- PMX[, q]; x <- x[is.finite(x)]; p <- strsplit(q, ".", fixed = TRUE)[[1]]
-    data.table(spec = p[1], q = paste(p[-1], collapse = "."), est = PT[[q]], perm_mean = mean(x), perm_sd = sd(x), p_perm = (1 + sum(abs(x) >= abs(PT[[q]]))) / (1 + length(x)), n_perm = length(x)) }))
+    data.table(spec = p[1], q = paste(p[-1], collapse = "."), est = PT[[q]], perm_mean = mean(x), perm_sd = sd(x), p_perm = min(1, 2 * min((1 + sum(x >= PT[[q]])) / (1 + length(x)), (1 + sum(x <= PT[[q]])) / (1 + length(x)))), n_perm = length(x)) }))
   fwrite(PRM, file.path(OUT, "explore_permutation.csv"))
   cat(sprintf("permutations done (%.1f min): %d of %d returned\n", as.numeric(difftime(Sys.time(), t0, units = "mins")), sum(vapply(PR, is.numeric, TRUE)), NPERM)) }
 
