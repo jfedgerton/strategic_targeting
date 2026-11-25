@@ -14,12 +14,12 @@
 ##   5. grid sweep: 236 measures x main window x {fmid, mid} (joint two-stage FE point fits)
 ##   6. bootstrapped grid cells (R/grid_pick_boot_cells.R; B_CELL; the main-window main cells come from step 3)
 ##   7. grid summaries (distributions, decision regressions, specification curves)
-##   8. AME data bundle for the joint AME (main measure, main window, fmid); the fits run on Roar (slurm/ame_cells.sbatch)
-## Usage: OUT=output_init ./run_paper.sh            (optional: P_STEPS="1 2 3 4 5 6 7 8", B_MAIN=2000, B_CELL=500)
+##   8. (off by default; AME dropped 2026-11-24) AME data bundle; P_STEPS="... 8" to build it
+## Usage: OUT=output_init ./run_paper.sh            (optional: P_STEPS="1 2 3 4 5 6 7", B_MAIN=2000, B_CELL=500)
 set -euo pipefail
 cd "$(dirname "$0")"; source config.sh
 O="${OUT:-output_init}"; [[ "$O" != *" "* ]] || { echo "STOP: OUT must not contain spaces (paths are unquoted in this runner)"; exit 1; }; S2=$O/stage2; PP=$O/paper; mkdir -p $S2/{edges,logs} $PP/{builds,main_table,marginal_effects,table1,sweep,boot,summary,ame}
-STEPS="${P_STEPS:-1 2 3 4 5 6 7 8}"; B_MAIN="${B_MAIN:-2000}"; B_CELL="${B_CELL:-500}"
+STEPS="${P_STEPS:-1 2 3 4 5 6 7}"; B_MAIN="${B_MAIN:-2000}"; B_CELL="${B_CELL:-500}"   # step 8 (AME bundle) off by default: AME dropped (PI 2026-11-24)
 LOG=$PP/run_$(date +%Y%m%d_%H%M%S).log
 say() { echo "[$(date +%H:%M:%S)] $*" | tee -a "$LOG"; }
 die() { say "STOP: $*"; exit 1; }
