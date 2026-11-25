@@ -3,10 +3,10 @@
 ##   Stage 1   S1NF  between targets (main)        | S1FE  target FE (within)       | S1MUND Mundlak (gaps + target-mean gaps)
 ##             S1TE  target x era FE               | every S1 spec also reports coalition - bilateral differences (GPT 1)
 ##   Stage 2   S2FULL multinomial, all disputes (main for GPT 3) | S2JS same on the joint-model disputes (matched cohort)
-##             S2SEP  own-side and opposing-side ties together (GPT 2)
+##             S2SEP  own-side ties only (the main design has ties to both sides since 2026-11-24)
 ##             S2BIN  per-option binary logit, no FE (reference for the FE versions) | S2CFE candidate FE | S2DFE dispute FE
 ##             S2MON  monthly competing-risk multinomial (GPT 5; clustered SEs, bootstrap only with --monthly_boot=1)
-##   Joint     JMAIN  stage-1 target FE -> bbar -> stage 2 (main) | JSEP joint with own + opposing ties (GPT 4: theta as dependence)
+##   Joint     JMAIN  stage-1 target FE -> bbar -> stage 2 (main) | JSEP joint with own-side ties only
 ## Added (PI 2026-11-24, robustness for this paper):
 ##             S1RIV  initiator x target (rivalry) FE   (within-era fits dropped, PI 2026-11-24; era enters only as target x era FE)
 ##             S2TWFE per-option binary logit with candidate + dispute FE together (fixest)
@@ -50,7 +50,7 @@ set.seed(123); NZ1 <- rnorm(nrow(D)); NZ2 <- rnorm(nrow(X)); NZ3 <- rnorm(nrow(X
 stopifnot(all(c("dR_kA", "dR_kB", "dM_kA", "dM_kB") %in% names(X)))
 SD1 <- c(R = sd(D$dR), M = sd(D$dM)); SD2 <- c(RA = sd(X$dR_kA), RB = sd(X$dR_kB), MA = sd(X$dM_kA), MB = sd(X$dM_kB))
 ## stage-2 designs: separate own-side and opposing-side ties
-DSEP <- list(A = c(S2_REF_DESIGN$A, "tie_sum_B"), B = c(S2_REF_DESIGN$B, "tie_sum_A"), O = c(S2_REF_DESIGN$O, "tie_sum_B"))
+DSEP <- S2_REF_DESIGN_OWN   # main design now has ties to both sides (PI 2026-11-24); S2SEP / JSEP are now the own-side-only versions
 TIE_OWN <- c(A = "tie_sum_A", B = "tie_sum_B", O = "tie_sum_A"); TIE_OPP <- c(A = "tie_sum_B", B = "tie_sum_A", O = "tie_sum_B")
 ## joint-model disputes from the point fit (fixed across draws, as main_table column 2)
 REP0 <- { n <- table(D[chosen == 1L, c2]); names(n)[n >= 2] }
