@@ -7,14 +7,21 @@
 ##             S2BIN  per-option binary logit, no FE (reference for the FE versions) | S2CFE candidate FE | S2DFE dispute FE
 ##             S2MON  monthly competing-risk multinomial (GPT 5; clustered SEs, bootstrap only with --monthly_boot=1)
 ##   Joint     JMAIN  stage-1 target FE -> bbar -> stage 2 (main) | JSEP joint with own + opposing ties (GPT 4: theta as dependence)
+## Added (PI 2026-11-24, robustness for this paper):
+##             S1RIV  initiator x target (rivalry) FE          | S1ERA_<era> stage 1 between targets fitted within each era
+##             S2TWFE per-option binary logit with candidate + dispute FE together (fixest)
+##             JTE    joint with bbar from target x era FE (bbar of a dispute = its targets' FE in the dispute's onset era)
+##             S1ME_* / S2ME_* measurement error in the relational gap, lambda 0.5 and 1: noise (classical) and conf (relational gap
+##                    contaminated by the material gap, mimicking power-driven ties); compared with S1NF / S2FULL
+##             explore_permutation.csv: relational gaps permuted within each stage-1 event / stage-2 dispute (point fits, --n_perm)
 ## Output (--out): explore_long.csv (every quantity), explore_summary.csv (each variant vs its reference: robust / attenuated / flips / new)
-## Usage: Rscript R/explore_specs.R --build=DIR --dump=FILE --positions=FILE --spec=ID --edges_dir=DIR --out=DIR [--n_boot=200] [--cores=8] [--monthly_boot=0]
-suppressPackageStartupMessages({ library(data.table); library(parallel); library(survival) })
+## Usage: Rscript R/explore_specs.R --build=DIR --dump=FILE --positions=FILE --spec=ID --edges_dir=DIR --out=DIR [--n_boot=200] [--cores=8] [--monthly_boot=0] [--n_perm=200]
+suppressPackageStartupMessages({ library(data.table); library(parallel); library(survival); library(fixest) })
 for (f in c("s2.R", "s2_fit.R", "sry.R", "s2_cell.R")) source(file.path("R/lib", f))
 args <- commandArgs(trailingOnly = TRUE)
 opt <- function(name, default = NULL) { a <- grep(paste0("^--", name, "="), args, value = TRUE); if (length(a)) sub(paste0("^--", name, "="), "", a) else default }
 BUILD <- opt("build"); DUMPF <- opt("dump"); POSF <- opt("positions"); SPEC <- opt("spec"); EDIR <- opt("edges_dir"); OUT <- opt("out")
-NB <- as.integer(opt("n_boot", "200")); CORES <- as.integer(opt("cores", "8")); MONB <- opt("monthly_boot", "0") == "1"
+NB <- as.integer(opt("n_boot", "200")); CORES <- as.integer(opt("cores", "8")); MONB <- opt("monthly_boot", "0") == "1"; NPERM <- as.integer(opt("n_perm", "200"))
 stopifnot(!is.null(BUILD), !is.null(DUMPF), !is.null(POSF), !is.null(SPEC), !is.null(EDIR), !is.null(OUT))
 dir.create(OUT, showWarnings = FALSE, recursive = TRUE); set.seed(123); t0 <- Sys.time()
 
@@ -30,7 +37,18 @@ D[, `:=`(mdM = mean(dM), mdR = mean(dR)), by = c2]
 for (g in 0:1) { D[, paste0("mdM_", ROLES[g + 1]) := mdM * (type == g)]; D[, paste0("mdR_", ROLES[g + 1]) := mdR * (type == g)] }
 MUND <- as.vector(outer(c("mdM", "mdR"), ROLES, paste, sep = "_"))
 ## eras for the target x era FE
-D[, era := cut(yr, c(-Inf, 1913, 1945, 1989, Inf), labels = c("e1816", "e1914", "e1946", "e1990"))]
+ERA_BR <- c(-Inf, 1913, 1945, 1989, Inf); ERA_LB <- c("e1816", "e1914", "e1946", "e1990")
+D[, era := as.character(cut(yr, ERA_BR, labels = ERA_LB))]
+stopifnot("onset_year" %in% names(X))
+DERA <- unique(X[, .(dispnum, era = as.character(cut(onset_year, ERA_BR, labels = ERA_LB)))]); stopifnot(!anyDuplicated(DERA$dispnum), !anyNA(DERA$era))
+TSE <- merge(B$TS, DERA, by = "dispnum")[, key := paste(ccode, era)]   # onset targets keyed by target x onset era
+REP_TE <- { n <- table(D[chosen == 1L, paste(c2, era)]); names(n)[n >= 2] }
+## rivalry FE: dyadic controls that never change within an initiator-target pair are absorbed by the pair FE
+DUMP_RIV <- dump; DUMP_RIV$Z_cols <- setdiff(dump$Z_cols, c("contig_land", "log_capdist"))
+## measurement error: fixed noise vectors (seed 123, identical in every draw); conf = relational gap contaminated by the material gap
+set.seed(123); NZ1 <- rnorm(nrow(D)); NZ2 <- rnorm(nrow(X)); NZ3 <- rnorm(nrow(X)); ME_L <- c(0.5, 1)
+stopifnot(all(c("dR_kA", "dR_kB", "dM_kA", "dM_kB") %in% names(X)))
+SD1 <- c(R = sd(D$dR), M = sd(D$dM)); SD2 <- c(RA = sd(X$dR_kA), RB = sd(X$dR_kB), MA = sd(X$dM_kA), MB = sd(X$dM_kB))
 ## stage-2 designs: separate own-side and opposing-side ties
 DSEP <- list(A = c(S2_REF_DESIGN$A, "tie_sum_B"), B = c(S2_REF_DESIGN$B, "tie_sum_A"), O = c(S2_REF_DESIGN$O, "tie_sum_B"))
 TIE_OWN <- c(A = "tie_sum_A", B = "tie_sum_B", O = "tie_sum_A"); TIE_OPP <- c(A = "tie_sum_B", B = "tie_sum_A", O = "tie_sum_B")
@@ -54,6 +72,9 @@ blk <- function(expr) tryCatch(expr, error = function(e) NULL)   # a failing spe
 bin_fit <- function(Xs, w, al, strat = NULL) {
   av <- mnl_avail(Xs, al)[, 1]; d <- Xs[av]; d[, `:=`(yy = as.integer(y == S2_CATS_FIT[[al]]), ww = w[av])]
   tm <- S2_REF_DESIGN[[al]]
+  if (identical(strat, "twfe")) {   # candidate + dispute FE together; fixest drops collinear terms and all-0 / all-1 FE groups
+    m <- suppressMessages(suppressWarnings(feglm(as.formula(paste("yy ~", paste(tm, collapse = " + "), "| ccode + dispnum")), data = d, weights = ~ww, family = binomial(), notes = FALSE)))
+    b <- coef(m); b <- b[is.finite(b)]; return(setNames(b, paste0(al, ":", names(b)))) }
   if (!is.null(strat)) { d[, st := get(strat)]; tm <- tm[vapply(tm, function(v) d[, sd(get(v)), by = st][, any(V1 > 1e-10, na.rm = TRUE)], TRUE)]
     f <- as.formula(paste("Surv(rep(1, nrow(d)), yy) ~", paste(tm, collapse = " + "), "+ strata(st)"))
     m <- coxph(f, data = d, weights = ww, method = "efron") } else {
@@ -62,12 +83,26 @@ bin_fit <- function(Xs, w, al, strat = NULL) {
   b <- coef(m); b <- b[is.finite(b)]; setNames(b, paste0(al, ":", names(b))) }
 bin_all <- function(Xs, w, strat, tag) { b <- unlist(lapply(c("A", "B", "O"), function(al) blk(bin_fit(Xs, w, al, strat)))); if (is.null(b)) return(NULL); s2c(b, tag) }
 ## stage-1 target FE -> bbar per dispute (as joint_fe_draw); returns list(contrasts, bbar table)
-s1_bbar <- function(Db) {
-  s1 <- s1_fit_fe(Db, dump, ref_order); bb <- coef(s1$m); be <- bb[grepl("^tfe", names(bb))]; names(be) <- sub("^tfe", "", names(be))
-  refb <- setdiff(intersect(ref_order, as.character(unique(Db[chosen == 1L, c2]))), names(be))[1]; be <- c(setNames(0, refb), be)
-  b <- be[names(be) %in% REP0 & is.finite(be)]; b <- pmin(pmax(b - mean(b), -5), 5)
-  bbt <- B$TS[, .(dispnum, b = b[as.character(ccode)])][, .(bbar = mean(b, na.rm = TRUE)), by = dispnum][is.finite(bbar)]
-  list(c = s1c(bb[!grepl("^tfe", names(bb))], "S1FE"), bbt = bbt) }
+## te = TRUE: target x era FE; a dispute's bbar averages its onset targets' FE in the dispute's onset era (repeat target-eras only)
+s1_bbar <- function(Db, te = FALSE) {
+  if (te) Db <- copy(Db)[, c2 := paste(c2, era)]
+  ro <- if (te) names(sort(table(Db[chosen == 1L, c2]), decreasing = TRUE)) else ref_order
+  s1 <- s1_fit_fe(Db, dump, ro); bb <- coef(s1$m); be <- bb[grepl("^tfe", names(bb))]; names(be) <- sub("^tfe", "", names(be))
+  refb <- setdiff(intersect(ro, as.character(unique(Db[chosen == 1L, c2]))), names(be))[1]; be <- c(setNames(0, refb), be)
+  b <- be[names(be) %in% (if (te) REP_TE else REP0) & is.finite(be)]; b <- pmin(pmax(b - mean(b), -5), 5)
+  bbt <- if (te) TSE[, .(dispnum, b = b[key])][, .(bbar = mean(b, na.rm = TRUE)), by = dispnum][is.finite(bbar)]
+         else B$TS[, .(dispnum, b = b[as.character(ccode)])][, .(bbar = mean(b, na.rm = TRUE)), by = dispnum][is.finite(bbar)]
+  list(c = s1c(bb[!grepl("^tfe", names(bb))], if (te) "S1TE" else "S1FE"), bbt = bbt) }
+## stage-1 relational terms rebuilt after dR changes (measurement error, permutation)
+s1_redo <- function(Dx) { Dx[, `:=`(dR2 = dR^2, dMR = dM * dR)]
+  for (g in 0:1) for (v in c("dR", "dR2", "dMR")) Dx[, paste0(v, "_", ROLES[g + 1]) := get(v) * (type == g)]; Dx }
+me_D <- function(Db, kind, lam) { Dx <- copy(Db)
+  if (kind == "noise") Dx[, dR := dR + lam * SD1[["R"]] * NZ1] else Dx[, dR := dR + lam * SD1[["R"]] / SD1[["M"]] * dM]; s1_redo(Dx) }
+me_X <- function(kind, lam) { Xx <- copy(X)
+  if (kind == "noise") Xx[, `:=`(dR_kA = dR_kA + lam * SD2[["RA"]] * NZ2, dR_kB = dR_kB + lam * SD2[["RB"]] * NZ3)]
+  else Xx[, `:=`(dR_kA = dR_kA + lam * SD2[["RA"]] / SD2[["MA"]] * dM_kA, dR_kB = dR_kB + lam * SD2[["RB"]] / SD2[["MB"]] * dM_kB)]
+  add_surface(Xx) }
+lamtag <- function(l) sprintf("%02d", round(10 * l))   # 0.5 -> "05", 1 -> "10" (spec names carry no dots)
 
 ## ---- 4. one draw: every spec on dispute weights m (m = 1 gives the point estimates) ----
 one_draw <- function(m, monthly = FALSE) {
@@ -76,21 +111,31 @@ one_draw <- function(m, monthly = FALSE) {
   ## stage 1
   v$s1nf <- blk({ mm <- s1_fit_nofe(Db, dump); s1c(coef(mm), "S1NF") })
   v$s1mu <- blk({ mm <- s1_fit_nofe(Db, dump, MUND); b <- coef(mm); c(s1c(b, "S1MUND"), setNames(b[MUND], paste0("S1MUND.between.", MUND))) })
-  v$s1te <- blk({ De <- copy(Db)[, c2 := paste(c2, era)]; ro <- names(sort(table(De[chosen == 1L, c2]), decreasing = TRUE))
-                  s1 <- s1_fit_fe(De, dump, ro); bb <- coef(s1$m); s1c(bb[!grepl("^tfe", names(bb))], "S1TE") })
+  JT <- blk(s1_bbar(Db, te = TRUE)); v$s1te <- JT$c
   J <- blk(s1_bbar(Db)); v$s1fe <- J$c
+  v$s1riv <- blk({ Dr <- copy(Db)[, c2 := paste(c1, c2, sep = "_")]; ro <- names(sort(table(Dr[chosen == 1L, c2]), decreasing = TRUE))
+                   s1 <- s1_fit_fe(Dr, DUMP_RIV, ro); bb <- coef(s1$m); s1c(bb[!grepl("^tfe", names(bb))], "S1RIV") })
+  for (e in ERA_LB) v[[paste0("era", e)]] <- blk({ mm <- s1_fit_nofe(Db[era == e], dump); s1c(coef(mm), paste0("S1ERA_", e)) })
+  for (k in c("noise", "conf")) for (l in ME_L) {
+    v[[paste0("me1", k, l)]] <- blk({ mm <- s1_fit_nofe(me_D(Db, k, l), dump); s1c(coef(mm), paste0("S1ME_", k, lamtag(l))) })
+    v[[paste0("me2", k, l)]] <- blk(s2c(fit_mnl(XME[[paste(k, l)]], S2_REF_DESIGN, "me", vc = FALSE, w = wX)$b, paste0("S2ME_", k, lamtag(l)))) }
   ## stage 2 alone
   JS <- if (is.null(J)) integer(0) else J$bbt$dispnum
   v$full <- blk(s2c(fit_mnl(X, S2_REF_DESIGN, "full", vc = FALSE, w = wX)$b, "S2FULL"))
   v$js   <- blk({ k <- X$dispnum %in% JS0; s2c(fit_mnl(X[k], S2_REF_DESIGN, "js", vc = FALSE, w = wX[k])$b, "S2JS") })
   v$sep  <- blk(s2c(fit_mnl(X, DSEP, "sep", vc = FALSE, w = wX)$b, "S2SEP"))
   v$bin  <- blk(bin_all(X, wX, NULL, "S2BIN")); v$cfe <- blk(bin_all(X, wX, "ccode", "S2CFE")); v$dfe <- blk(bin_all(X, wX, "dispnum", "S2DFE"))
+  v$twfe <- blk(bin_all(X, wX, "twfe", "S2TWFE"))
   ## joint
   if (!is.null(J)) { X1 <- merge(X, J$bbt, by = "dispnum"); w1 <- as.numeric(m[as.character(X1$dispnum)])
     v$jm <- blk(s2c(fit_mnl(X1, lapply(S2_REF_DESIGN, c, "bbar"), "jm", vc = FALSE, w = w1)$b, "JMAIN"))
     v$jsep <- blk(s2c(fit_mnl(X1, lapply(DSEP, c, "bbar"), "jsep", vc = FALSE, w = w1)$b, "JSEP")) }
+  if (!is.null(JT)) { X2 <- merge(X, JT$bbt, by = "dispnum"); w2 <- as.numeric(m[as.character(X2$dispnum)])
+    v$jte <- blk(s2c(fit_mnl(X2, lapply(S2_REF_DESIGN, c, "bbar"), "jte", vc = FALSE, w = w2)$b, "JTE")) }
   if (monthly) v$mon <- blk(s2c(fit_mon(wmon = as.numeric(m[as.character(MX$dispnum)]), vc = FALSE)$b, "S2MON"))
   unlist(unname(v)) }
+
+XME <- list(); for (k in c("noise", "conf")) for (l in ME_L) XME[[paste(k, l)]] <- me_X(k, l)   # contaminated stage-2 data (fixed across draws)
 
 ## ---- 5. monthly competing-risk data: monthly rows of the reference cohort, onset covariates from X, ties by month, piecewise duration ----
 MX <- as.data.table(readRDS(file.path(BUILD, sprintf("s2_monthly_w%d.rds", W_REF))))
@@ -125,6 +170,21 @@ nm <- unique(c(names(PT), if (MONB) names(PM)))
 DM <- do.call(rbind, lapply(DR, function(x) if (is.numeric(x)) x[nm] else rep(NA_real_, length(nm)))); colnames(DM) <- nm
 cat(sprintf("draws done (%.1f min): %d of %d returned\n", as.numeric(difftime(Sys.time(), t0, units = "mins")), sum(vapply(DR, is.numeric, TRUE)), NB))
 
+## ---- 7b. permutation (point fits): relational gaps shuffled across candidates within each stage-1 event and within each stage-2
+## dispute (both gaps of a candidate move together). Seed 123 + i per permutation, so results do not depend on --cores.
+perm_one <- function(i) { set.seed(123 + i)
+  Dp <- copy(D); Dp[, dR := dR[sample.int(.N)], by = ev_id]; Dp <- s1_redo(Dp)
+  Xp <- copy(X); Xp[, c("dR_kA", "dR_kB") := { o <- sample.int(.N); list(dR_kA[o], dR_kB[o]) }, by = dispnum]; Xp <- add_surface(Xp)
+  c(blk(s1c(coef(s1_fit_nofe(Dp, dump)), "S1NF")), blk(s2c(fit_mnl(Xp, S2_REF_DESIGN, "perm", vc = FALSE)$b, "S2FULL"))) }
+if (NPERM > 0) {
+  PR <- mclapply(seq_len(NPERM), function(i) tryCatch(perm_one(i), error = function(e) NULL), mc.cores = CORES, mc.preschedule = FALSE)
+  qp <- grep("^(S1NF|S2FULL)\\.", names(PT), value = TRUE)
+  PMX <- do.call(rbind, lapply(PR, function(x) if (is.numeric(x)) x[qp] else rep(NA_real_, length(qp)))); colnames(PMX) <- qp
+  PRM <- rbindlist(lapply(qp, function(q) { x <- PMX[, q]; x <- x[is.finite(x)]; p <- strsplit(q, ".", fixed = TRUE)[[1]]
+    data.table(spec = p[1], q = paste(p[-1], collapse = "."), est = PT[[q]], perm_mean = mean(x), perm_sd = sd(x), p_perm = (1 + sum(abs(x) >= abs(PT[[q]]))) / (1 + length(x)), n_perm = length(x)) }))
+  fwrite(PRM, file.path(OUT, "explore_permutation.csv"))
+  cat(sprintf("permutations done (%.1f min): %d of %d returned\n", as.numeric(difftime(Sys.time(), t0, units = "mins")), sum(vapply(PR, is.numeric, TRUE)), NPERM)) }
+
 ## ---- 8. table: percentile intervals (>= 80% finite draws); monthly without bootstrap uses its two-way clustered SE ----
 L <- rbindlist(lapply(c(names(PT), names(PM)), function(q) {
   est <- if (q %in% names(PT)) PT[[q]] else PM[[q]]; x <- if (q %in% colnames(DM)) DM[, q] else numeric(0); x <- x[is.finite(x)]
@@ -137,7 +197,11 @@ L <- L[is.finite(est)][, sig := !is.na(lo) & (lo > 0 | hi < 0)]
 fwrite(L, file.path(OUT, "explore_long.csv"))
 
 ## ---- 9. summary: each variant vs its reference on the shared quantities ----
-REF <- c(S1FE = "S1NF", S1MUND = "S1NF", S1TE = "S1NF", S2JS = "S2FULL", S2SEP = "S2FULL", S2MON = "S2FULL", S2CFE = "S2BIN", S2DFE = "S2BIN", JSEP = "JMAIN")
+REF <- c(S1FE = "S1NF", S1MUND = "S1NF", S1TE = "S1NF", S1RIV = "S1NF", S2JS = "S2FULL", S2SEP = "S2FULL", S2MON = "S2FULL",
+         S2CFE = "S2BIN", S2DFE = "S2BIN", S2TWFE = "S2BIN", JSEP = "JMAIN", JTE = "JMAIN",
+         setNames(rep("S1NF", length(ERA_LB)), paste0("S1ERA_", ERA_LB)),
+         setNames(rep("S1NF", 4), paste0("S1ME_", rep(c("noise", "conf"), each = 2), lamtag(ME_L))),
+         setNames(rep("S2FULL", 4), paste0("S2ME_", rep(c("noise", "conf"), each = 2), lamtag(ME_L))))
 S <- rbindlist(lapply(names(REF), function(s) { a <- L[spec == s]; r <- L[spec == REF[[s]], .(q, est_ref = est, sig_ref = sig)]
   m <- merge(a[, .(spec, q, est, lo, hi, sig)], r, by = "q"); if (!nrow(m)) return(NULL)
   m[, verdict := fifelse(sig_ref & sig & sign(est) == sign(est_ref), "robust", fifelse(sig_ref & !sig & sign(est) == sign(est_ref), "attenuated",
