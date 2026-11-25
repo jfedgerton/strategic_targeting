@@ -105,10 +105,15 @@ fit_mon <- function(wmon, vc) {   # fit_mnl with the monthly availability masks 
 
 ## ---- 6. point estimates ----
 JS0 <- s1_bbar(D)$bbt$dispnum
-PT <- one_draw(setNames(rep(1, length(unique(c(D$disp, X$dispnum)))), unique(c(D$disp, X$dispnum))))
-FM <- fit_mon(rep(1, nrow(MX)), vc = TRUE); PM <- s2c(FM$b, "S2MON"); SEM <- s2c(sqrt(diag(FM$V)), "S2MON")   # theta absent; contrasts' SEs below
-for (q in grep("\\.(M|R)\\.", names(PM), value = TRUE)) { p <- strsplit(q, ".", fixed = TRUE)[[1]]; al <- p[2]; ax <- p[3]; sg <- as.numeric(p[4])
+cat("points: FE specs\n"); PT <- one_draw(setNames(rep(1, length(unique(c(D$disp, X$dispnum)))), unique(c(D$disp, X$dispnum))))
+## monthly: clustered SEs when the Hessian inverts; otherwise point only (singular Hessian under investigation; flagged in the log, never silent)
+cat("points: monthly model\n")
+FM <- tryCatch(fit_mon(rep(1, nrow(MX)), vc = TRUE), error = function(e) { cat("WARNING monthly SEs unavailable (", conditionMessage(e), "); point estimates only\n"); NULL })
+if (is.null(FM)) FM <- tryCatch(fit_mon(rep(1, nrow(MX)), vc = FALSE), error = function(e) { cat("WARNING monthly model failed:", conditionMessage(e), "\n"); NULL })
+PM <- if (is.null(FM)) c() else s2c(FM$b, "S2MON"); SEM <- c()
+if (!is.null(FM) && !is.null(FM$V)) for (q in grep("\\.(M|R)\\.", names(PM), value = TRUE)) { p <- strsplit(q, ".", fixed = TRUE)[[1]]; al <- p[2]; ax <- p[3]; sg <- as.numeric(p[4])
   a <- setNames(numeric(length(FM$b)), names(FM$b)); t1 <- paste0(al, ":", SURF_TERMS[[al]], "d", ax); a[t1] <- sg; a[paste0(t1, "2")] <- 1; SEM[q] <- sqrt(drop(t(a) %*% FM$V %*% a)) }
+if (!is.null(FM) && !is.null(FM$V)) for (al in c("A", "B", "O")) for (k in c("tie_own", "tie_opp")) { q <- paste("S2MON", al, k, sep = "."); t <- paste0(al, ":", if (k == "tie_own") TIE_OWN[[al]] else TIE_OPP[[al]]); if (q %in% names(PM) && t %in% rownames(FM$V)) SEM[q] <- sqrt(FM$V[t, t]) }
 cat(sprintf("points done (%.1f min): %d quantities; monthly rows %d\n", as.numeric(difftime(Sys.time(), t0, units = "mins")), length(PT), nrow(MX)))
 
 ## ---- 7. bootstrap draws (the main table's draws) ----
