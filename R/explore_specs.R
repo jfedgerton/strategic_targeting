@@ -98,6 +98,7 @@ onset_cols <- setdiff(unique(c(unlist(S2_REF_DESIGN), "likely")), c("tie_sum_A",
 MX <- merge(MX[, .(dispnum, ccode, m, y_m, avail_A, avail_B, avail_orig, tie_sum_A, tie_sum_B)], X[, c("dispnum", "ccode", onset_cols), with = FALSE], by = c("dispnum", "ccode"))
 MX[, `:=`(y = y_m, H = Inf, dur_1_2 = as.numeric(m %in% 1:2), dur_3_5 = as.numeric(m %in% 3:5), dur_6_11 = as.numeric(m %in% 6:11), dur_12p = as.numeric(m >= 12))]
 DMON <- lapply(S2_REF_DESIGN, c, "dur_1_2", "dur_3_5", "dur_6_11", "dur_12p")
+DMON$A <- setdiff(DMON$A, "dur_1_2")   # joining the attackers is available only after the originator window, so its four duration dummies sum to 1 (collinear with the intercept); months 1-2 are its reference
 fit_mon <- function(wmon, vc) {   # fit_mnl with the monthly availability masks (restored on exit)
   old <- mnl_avail; on.exit(assign("mnl_avail", old, envir = globalenv()))
   assign("mnl_avail", function(X, alts) cbind(A = X$avail_A, B = X$avail_B, O = X$avail_orig)[, alts, drop = FALSE], envir = globalenv())
