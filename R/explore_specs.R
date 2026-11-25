@@ -83,9 +83,16 @@ bin_fit <- function(Xs, w, al, strat = NULL) {
   b <- coef(m); b <- b[is.finite(b)]; setNames(b, paste0(al, ":", names(b))) }
 bin_all <- function(Xs, w, strat, tag) { b <- unlist(lapply(c("A", "B", "O"), function(al) blk(bin_fit(Xs, w, al, strat)))); if (is.null(b)) return(NULL); s2c(b, tag) }
 ## stage-1 target FE -> bbar per dispute (as joint_fe_draw); returns list(contrasts, bbar table)
+## finer FE (target x era, initiator x target): a level that appears only when chosen has an infinite FE, so its events are dropped
+## (iterated until none is left); the number of events dropped is returned as attribute "dropped"
+fe_prune <- function(Dx) { n0 <- uniqueN(Dx$ev_id)
+  repeat { tgb <- unique(Dx[chosen == 1L, c2]); dd <- Dx[c2 %in% tgb]; dd <- dd[dd[, .(k = .N), by = ev_id][k > 1L], on = "ev_id"]
+    bad <- setdiff(unique(dd[chosen == 1L, c2]), dd[chosen == 0L, unique(c2)])
+    if (!length(bad)) break; Dx <- Dx[!ev_id %in% Dx[chosen == 1L & c2 %in% bad, ev_id]] }
+  setattr(Dx, "dropped", n0 - uniqueN(Dx$ev_id)); Dx }
 ## te = TRUE: target x era FE; a dispute's bbar averages its onset targets' FE in the dispute's onset era (repeat target-eras only)
 s1_bbar <- function(Db, te = FALSE) {
-  if (te) Db <- copy(Db)[, c2 := paste(c2, era)]
+  if (te) Db <- fe_prune(copy(Db)[, c2 := paste(c2, era)])
   ro <- if (te) names(sort(table(Db[chosen == 1L, c2]), decreasing = TRUE)) else ref_order
   s1 <- s1_fit_fe(Db, dump, ro); bb <- coef(s1$m); be <- bb[grepl("^tfe", names(bb))]; names(be) <- sub("^tfe", "", names(be))
   refb <- setdiff(intersect(ro, as.character(unique(Db[chosen == 1L, c2]))), names(be))[1]; be <- c(setNames(0, refb), be)
@@ -113,7 +120,7 @@ one_draw <- function(m, monthly = FALSE) {
   v$s1mu <- blk({ mm <- s1_fit_nofe(Db, dump, MUND); b <- coef(mm); c(s1c(b, "S1MUND"), setNames(b[MUND], paste0("S1MUND.between.", MUND))) })
   JT <- blk(s1_bbar(Db, te = TRUE)); v$s1te <- JT$c
   J <- blk(s1_bbar(Db)); v$s1fe <- J$c
-  v$s1riv <- blk({ Dr <- copy(Db)[, c2 := paste(c1, c2, sep = "_")]; ro <- names(sort(table(Dr[chosen == 1L, c2]), decreasing = TRUE))
+  v$s1riv <- blk({ Dr <- fe_prune(copy(Db)[, c2 := paste(c1, c2, sep = "_")]); ro <- names(sort(table(Dr[chosen == 1L, c2]), decreasing = TRUE))
                    s1 <- s1_fit_fe(Dr, DUMP_RIV, ro); bb <- coef(s1$m); s1c(bb[!grepl("^tfe", names(bb))], "S1RIV") })
   for (e in ERA_LB) v[[paste0("era", e)]] <- blk({ mm <- s1_fit_nofe(Db[era == e], dump); s1c(coef(mm), paste0("S1ERA_", e)) })
   for (k in c("noise", "conf")) for (l in ME_L) {
