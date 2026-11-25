@@ -130,6 +130,10 @@ s2_prepare <- function(B, key, R, EDGE) {
   add_surface(X); attr(X, "dropped") <- n0 - nrow(X); X
 }
 
+## edge file behind a measure's ties (for content fingerprints): grid measures read grid_layers.rds; the book measures their own edge files
+s2_edge_file <- function(spec, edges_dir) {
+  f <- if (startsWith(spec, "G")) "grid_layers.rds" else if (startsWith(spec, "BOOKraw_")) "edges_book_raw.rds" else if (startsWith(spec, "BOOKc12_")) "edges_book_c12.rds" else stop("no edge-file rule for ", spec)
+  f <- file.path(edges_dir, f); if (!file.exists(f)) stop("missing edge file ", f); f }
 ## tie term of each option in a stage-2 design: "A:tie_sum_A", "B:tie_sum_B", "O:tie_sum_A" by default (exactly one tie_* term per option)
 tie_terms <- function(design) vapply(c("A", "B", "O"), function(al) { t <- grep("^tie_", design[[al]], value = TRUE); stopifnot(length(t) == 1L); paste0(al, ":", t) }, "")
 ## ---- the joint two-stage FE model on one cell ------------------------------------------------------------------------------------------

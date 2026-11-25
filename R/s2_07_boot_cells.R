@@ -5,7 +5,7 @@
 ## Usage: Rscript R/s2_07_boot_cells.R --cells=cells.csv --posdir=DIR --builds_root=DIR --dumps_dir=DIR --edges_dir=DIR --out=DIR [--cores=4] [--block=50] [--only=b001,b002]
 suppressPackageStartupMessages({ library(data.table); library(parallel) })
 this_file <- sub("^--file=", "", grep("^--file=", commandArgs(FALSE), value = TRUE)[1]); RD <- dirname(normalizePath(this_file))
-for (f in c("s2.R", "s2_fit.R", "sry.R", "s2_cell.R")) source(file.path(RD, "lib", f))
+for (f in c("s2.R", "s2_fit.R", "sry.R", "s2_cell.R", "grid.R")) source(file.path(RD, "lib", f))
 args <- commandArgs(trailingOnly = TRUE)
 opt <- function(name, default = NULL) { a <- grep(paste0("^--", name, "="), args, value = TRUE); if (length(a)) sub(paste0("^--", name, "="), "", a) else default }
 CELLS <- fread(opt("cells")); PD <- opt("posdir"); BR <- opt("builds_root"); DD <- opt("dumps_dir"); EDIR <- opt("edges_dir"); OUT <- opt("out")
@@ -32,12 +32,15 @@ run_cell <- function(cl) {
   ## a cell folder belongs to exactly one (file, spec, window, sample, n_boot, block); a regenerated cells.csv or changed --block stops loudly
   idf <- file.path(cd, "cell_identity.txt"); idv <- paste(cl$file, cl$spec_id, cl$window, cl$sample, cl$n_boot, BLOCK, sep = " | ")
   if (file.exists(idf)) { if (!identical(readLines(idf), idv)) stop(sprintf("%s holds a different cell (%s); use a new --out", cd, readLines(idf))) } else writeLines(idv, idf)
-  if (file.exists(file.path(cd, "summary.csv"))) return(invisible(NULL))
+  sf <- file.path(cd, "summary.csv")   # GPT P2-3: a finished cell is final only if no draw was lost to a worker; otherwise its blocks are retried below
+  if (file.exists(sf)) { S0 <- fread(sf); if (isTRUE(all(S0$n_draws_other_fail == 0))) return(invisible(NULL))
+    logf("%s: %d draws were lost to workers; retrying them", cl$cell_id, S0$n_draws_other_fail[1]); unlink(sf) }
   B <- s2_base(file.path(BR, sprintf("w%d_%s", cl$window, cl$sample))); W_REF <<- B$window; stopifnot(W_REF == cl$window)
   dump <- readRDS(file.path(DD, sprintf("long_init_bon%s_relyear_%s.rds", wtag(cl$window), cl$sample)))
   cm <- if (is.null(dump$coorig_months)) 0L else as.integer(dump$coorig_months); smp <- c(stage1 = "fmid", gml = "fmid", mid = "mid")[[B$meta$fatal_def]]
   if (dump$types != "init" || cm != cl$window || dump$sample != cl$sample || smp != cl$sample) stop("dump/build/cell mismatch for ", cl$cell_id)
   pz <- readRDS(file.path(PD, cl$file)); key <- as.data.table(pz$key); R <- pz$R[, cl$spec_id]; arm <- arm_of(cl$file)
+  if (startsWith(cl$file, "positions_core_G")) grid_check_provenance(pz, file.path(EDIR, "grid_layers.rds"))   # GPT P2-5
   E <- s2_spec_edges(arm, cl$spec_id, EDIR); D <- s1_add_tie(s1_prepare(dump, key, R), E, dump$roles); X <- s2_prepare(B, key, R, E)
   ref_order <- names(sort(table(D[chosen == 1L, c2]), decreasing = TRUE))
   pf <- file.path(cd, "point.csv")
@@ -97,5 +100,6 @@ ALL <- rbindlist(lapply(file.path(OUT, CELLS$cell_id), function(d) if (file.exis
   else if (file.exists(file.path(d, "error.csv"))) fread(file.path(d, "error.csv")) else data.table(cell_id = basename(d), status = "ERROR", msg = "not run")), fill = TRUE)
 s2_write_atomic(ALL, file.path(OUT, "boot_cells_summary.csv"))
 st <- ALL[, .(status = status[1]), by = cell_id]; logf("census: %s", paste(sprintf("%s %d", names(table(st$status)), table(st$status)), collapse = ", "))
-if (any(st$status == "ERROR")) { logf("S2_BOOT_GAPS: %d cells in ERROR (rerun to retry)", sum(st$status == "ERROR")); quit(status = 3) }
+## GPT P2-8: every bootstrapped cell is prespecified, so any status other than OK is a gap (ERROR is retried on rerun; INVALID / FAILED / SKIPPED are reported)
+if (any(st$status != "OK")) { logf("S2_BOOT_GAPS: %d cells not OK (%s)", sum(st$status != "OK"), paste(sprintf("%s %s", st[status != "OK", cell_id], st[status != "OK", status]), collapse = ", ")); quit(status = 3) }
 logf("S2_BOOT_DONE")

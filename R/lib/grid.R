@@ -38,3 +38,14 @@ grid_weight <- function(GL, spec_id) {   # GL: data.table from grid_layers.rds, 
   w <- numeric(length(comp)); for (ix in split(seq_along(comp), GL$year)) { m <- max(comp[ix]); if (m > 0) w[ix] <- comp[ix] / m }
   stopifnot(all(w >= 0 & w <= 1 + 1e-12)); pmin(w, 1) }
 grid_edges <- function(GL, spec_id) { w <- grid_weight(GL, spec_id); k <- w > 0; data.table(a = GL$ccode1[k], b = GL$ccode2[k], year = GL$year[k], w = w[k]) }
+
+## GPT P2-5: hashes of the code and layer file behind grid positions; written into every grid positions file by grid_build.R and verified by the
+## sweep and the bootstrap before fitting, so positions can never pair with ties rebuilt from a different grid.R or grid_layers.rds
+grid_provenance <- function(grid_layers_file, grid_code = file.path("R", "lib", "grid.R")) {
+  stopifnot(file.exists(grid_layers_file), file.exists(grid_code))
+  c(grid_R = unname(tools::md5sum(grid_code)), grid_layers = unname(tools::md5sum(grid_layers_file))) }
+grid_check_provenance <- function(pz, grid_layers_file) {
+  if (is.null(pz$provenance)) stop("grid positions file has no provenance (rebuild with R/grid_build.R)")
+  now <- grid_provenance(grid_layers_file)
+  if (!identical(pz$provenance[names(now)], now)) stop("grid positions were built from a different grid.R or grid_layers.rds than the current ones; rebuild step 1")
+  invisible(TRUE) }

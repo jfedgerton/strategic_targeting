@@ -20,6 +20,11 @@ cen <- unique(A[, .(spec_id, sample, status)]); fwrite(cen[, .N, by = .(sample, 
 for (sm in unique(cen$sample)) { cs <- cen[sample == sm]; if (uniqueN(cs$spec_id) != 236L) stop(sprintf("sweep %s has %d measures, expected 236", sm, uniqueN(cs$spec_id)))
   if (!identical(cs[spec_id == MAIN, status], "OK")) stop(sprintf("main measure %s is not OK in sample %s", MAIN, sm)) }
 stopifnot(uniqueN(cen$sample) == length(SW))
+## GPT P2-8: the only allowed non-OK status is SKIPPED (constant positions) for the 16 sy-scheme measures without IGO; anything else stops
+exp_skip <- function(id) grepl("^Gsy(c12|dist)_", id) & !grepl("igo", sub("^[^|]*\\|([^|]*)\\|.*$", "\\1", id))
+bad <- cen[status != "OK" & !(status == "SKIPPED" & exp_skip(spec_id))]
+if (nrow(bad)) stop(sprintf("unexpected non-OK grid cells: %s", paste(sprintf("%s %s %s", bad$sample, bad$spec_id, bad$status), collapse = "; ")))
+fit_n <- cen[status == "OK", .N, by = sample]; cat(sprintf("fitted measures per sample: %s (expected 236 minus the allowed constant-position skips)\n", paste(sprintf("%s %d", fit_n$sample, fit_n$N), collapse = ", ")))
 A <- A[status == "OK"]
 Q <- data.table(stage = c("S1NF", "S1NF", "S1NF", "S1NF", "S2", "S2", "S2", "S2"), alt = c("coal", "bil", "coal", "coal", "A", "B", "B", "B"),
                 axis = c("R", "R", "M", "M", "theta", "theta", "M", "R"), gap = c(1, 1, 1, -1, NA, NA, -1, 1),

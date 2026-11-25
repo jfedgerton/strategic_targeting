@@ -101,7 +101,7 @@ fit1 <- function(dat, tag, ch = CH, wu = WU, it = IT) { t0 <- Sys.time()
   f <- sampling(mod, data = dat, chains = ch, cores = ch, warmup = wu, iter = wu + it, seed = SEED, refresh = max(1, (wu + it) %/% 10),
                 control = list(adapt_delta = 0.9, max_treedepth = 11),
                 pars = c("beta1", "sigma_b", "sigma_del", "sigma_eta", "alpha", "betaA", "betaB", "betaO", "theta", "sigma_eps", "b", "del", "eta", "bbar", "eps_raw",
-                         if (dat$K) c("lam1_raw", "lam2_raw", "u_out", "v_out", "lat_norm1", "lat_share1")))
+                         if (dat$K) c("lam1_raw", "lam2_raw", "u_out", "v_out", "lat_norm1", "lat_share1", "lat_cov1")))
   saveRDS(f, ff); saveRDS(sig, sf); logf("%s: %.1f min; divergences %d; max treedepth hits %d", tag, as.numeric(difftime(Sys.time(), t0, units = "mins")),
     sum(get_divergent_iterations(f)), sum(get_max_treedepth_iterations(f))); f }
 
@@ -127,7 +127,7 @@ for (c in 1:3) OUTT[[length(OUTT) + 1]] <- summ(th[, c], sprintf("S2 theta_%s", 
 for (p in c("sigma_b", "sigma_del", "sigma_eta")) OUTT[[length(OUTT) + 1]] <- summ(rstan::extract(S1f, p)[[1]], p)
 S2f <- if (CELL == "cut") FITS$stage2 else list(FITS$joint)
 se <- do.call(rbind, lapply(S2f, function(f) rstan::extract(f, "sigma_eps")$sigma_eps)); for (c in 1:3) OUTT[[length(OUTT) + 1]] <- summ(se[, c], sprintf("sigma_eps_%s", alts[c]))
-if (CELL == "k1") for (p in c("lat_norm1", "lat_share1")) OUTT[[length(OUTT) + 1]] <- summ(rstan::extract(FITS$joint, p)[[1]], c(lat_norm1 = "K1 |lam1| ||u|| ||v|| (Frobenius norm of lam1 u v')", lat_share1 = "K1 latent share of stage-1 utility variance")[[p]])
+if (CELL == "k1") for (p in c("lat_norm1", "lat_share1", "lat_cov1")) OUTT[[length(OUTT) + 1]] <- summ(rstan::extract(FITS$joint, p)[[1]], c(lat_norm1 = "K1 |lam1| ||u|| ||v|| (Frobenius norm of lam1 u v')", lat_share1 = "K1 var(latent) / var(total stage-1 utility), pooled over rows", lat_cov1 = "K1 2 cov(rest, latent) / var(total stage-1 utility)")[[p]])
 ## ---- Williams-Savitsky adjustment (PI 2026-11-24; design section 6 main): fixed-parameter draws rescaled to the dispute-clustered sandwich ----
 source(file.path(RD, "ame", "ame_ws.R"))
 ws_fit <- function(f, dat) {
@@ -148,7 +148,8 @@ ws_fit <- function(f, dat) {
        paste(blk, collapse = ","), ncol(DR), length(llc(colMeans(DR))), median(r$ratio_sd), min(r$ratio_sd), max(r$ratio_sd))
   r }
 datS1 <- if (CELL == "cut") mk(1, 0, 0, 0) else if (CELL == "k1") mk(1, 1, 0, 1) else mk(1, 1, 0, 0)
-W1 <- tryCatch(ws_fit(S1f, datS1), error = function(e) { logf("WS adjustment failed (stage 1 fit): %s", conditionMessage(e)); NULL })
+WS_STATUS <- "ok"
+W1 <- tryCatch(ws_fit(S1f, datS1), error = function(e) { logf("WS adjustment failed (stage 1 fit): %s", conditionMessage(e)); WS_STATUS <<- paste("failed:", conditionMessage(e)); NULL })
 if (!is.null(W1)) { bw <- W1$draws[, grepl("^beta1", colnames(W1$draws)), drop = FALSE]; colnames(bw) <- X1N; bw <- sweep(bw, 2, sc1, "/")
   for (r in ROLES) for (ax in c("B", "W", "M")) for (g in c(1, -1)) OUTT[[length(OUTT) + 1]] <- summ(con(bw, r, ax, g), sprintf("S1 %s %s gap %+d [WS-adjusted]", r, c(B = "between R", W = "within R", M = "material")[ax], g))
   for (ax in c("B", "W")) for (g in c(1, -1)) OUTT[[length(OUTT) + 1]] <- summ(con(bw, ROLES[2], ax, g) - con(bw, ROLES[1], ax, g), sprintf("S1 coal-bil %s gap %+d [WS-adjusted]", c(B = "between R", W = "within R")[ax], g)) }
@@ -157,6 +158,7 @@ thw <- if (CELL == "cut") { L <- lapply(FITS$stage2, function(f) tryCatch(ws_fit
 } else if (!is.null(W1)) W1$draws[, paste0("theta[", 1:3, "]")] else NULL
 if (!is.null(thw)) for (c in 1:3) OUTT[[length(OUTT) + 1]] <- summ(thw[, c], sprintf("S2 theta_%s [WS-adjusted]", alts[c]))
 S <- rbindlist(OUTT); S[, cell := CELL]
+S[, ws_status := WS_STATUS]   # GPT P3-9: an adjustment failure is machine-readable; NOTE (GPT P1, 2026-11-24) the WS rows are provisional and not valid as implemented
 fs <- if (CELL == "cut") c(list(FITS$stage1), FITS$stage2) else list(FITS$joint)
 ## convergence over everything the gate names (audit P1-2): bulk / tail ESS and rank-normalized Rhat (rstan::monitor)
 GP <- c("beta1", "theta", "sigma_b", "sigma_del", "sigma_eta", "alpha", "betaA", "betaB", "betaO", "sigma_eps", "lam1_raw", "lam2_raw")

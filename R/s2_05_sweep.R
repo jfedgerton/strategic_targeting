@@ -8,7 +8,7 @@
 ##          [--validation=measure_validation.csv --set=all|plausible] [--chunk=50] [--cores=4] [--max_cells=0]
 suppressPackageStartupMessages({ library(data.table); library(parallel) })
 this_file <- sub("^--file=", "", grep("^--file=", commandArgs(FALSE), value = TRUE)[1]); RD <- dirname(normalizePath(this_file))
-for (f in c("s2.R", "s2_fit.R", "sry.R", "s2_cell.R")) source(file.path(RD, "lib", f))
+for (f in c("s2.R", "s2_fit.R", "sry.R", "s2_cell.R", "grid.R")) source(file.path(RD, "lib", f))
 args <- commandArgs(trailingOnly = TRUE)
 opt <- function(name, default = NULL) { a <- grep(paste0("^--", name, "="), args, value = TRUE); if (length(a)) sub(paste0("^--", name, "="), "", a) else default }
 known <- c("build", "dump", "edges_dir", "out", "positions", "validation", "set", "chunk", "cores", "max_cells")
@@ -47,6 +47,7 @@ one_cell <- function(spec, R, key, arm) {
 n_done <- 0L
 for (pf in POSF) {
   arm <- arm_of(pf); pz <- readRDS(pf); key <- as.data.table(pz$key); specs <- colnames(pz$R)
+  if (startsWith(basename(pf), "positions_core_G")) grid_check_provenance(pz, file.path(EDIR, "grid_layers.rds"))   # GPT P2-5
   if (!is.null(PLAUS)) specs <- specs[paste(basename(pf), specs) %in% PLAUS]
   if (MAXC > 0) specs <- head(specs, MAXC)
   if (!length(specs)) { logf("%s: no measures selected", basename(pf)); next }
@@ -81,5 +82,6 @@ ALLC <- rbindlist(lapply(list.files(OUT, pattern = "^cells_.*\\.csv$", full.name
 ALLC <- ALLC[positions_file %in% basename(POSF) & window == W_REF & sample == smp]
 st <- ALLC[, .(status = status[1]), by = .(positions_file, spec_id)]
 logf("census: %s", paste(sprintf("%s %d", names(table(st$status)), table(st$status)), collapse = ", "))
-if (any(st$status == "ERROR")) { logf("S2_SWEEP_GAPS: %d ERROR cells remain (rerun to retry)", sum(st$status == "ERROR")); quit(status = 3) }
+## GPT P2-8: INVALID and FAILED cells are gaps too (reported, not retried); SKIPPED (constant positions) is checked against the expected list in grid_summary.R
+if (any(st$status %in% c("ERROR", "INVALID", "FAILED"))) { logf("S2_SWEEP_GAPS: %s", paste(sprintf("%s %d", names(table(st$status[st$status %in% c("ERROR", "INVALID", "FAILED")])), table(st$status[st$status %in% c("ERROR", "INVALID", "FAILED")])), collapse = ", ")); quit(status = 3) }
 logf("S2_SWEEP_DONE (%d measures fitted this call)", n_done)

@@ -29,5 +29,5 @@ Items the appendix should state. Numbers are from the sandbox build on the main 
 
 ## AME (appendix)
 - rstan; stage-1 gaps in FE units; K = 1 latent term reported only through sign-free summaries.
-- Fits are weighted pseudo-posteriors; the Williams-Savitsky adjustment is not applied (open decision).
+- Fits are weighted pseudo-posteriors. A Williams-Savitsky rescaling is computed, but a GPT audit (2026-11-24) showed it mixes the marginal posterior covariance with scores taken at fixed random effects, so it is not a valid sandwich for this model; its "[WS-adjusted]" rows must not be reported until a corrected adjustment is validated (decision pending). Report the raw pseudo-posterior, and use the FE dispute bootstrap as the clustered inference.
 - Stage 2 uses era-specific intercepts; AME stage 2 keeps all 544 disputes (random effects pool one-time targets).

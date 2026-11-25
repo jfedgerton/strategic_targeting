@@ -45,23 +45,30 @@ ptb <- s2a(X, tag = "S2Ab"); nmb <- names(ptb)                # (2b) on all stag
 bJ0 <- fit_mnl(XJ, S2_REF_DESIGN, "S2A start", vc = FALSE)$b; bB0 <- fit_mnl(X, S2_REF_DESIGN, "S2Ab start", vc = FALSE)$b   # warm starts for the draws (same optimum)
 disp_all <- sort(unique(c(as.data.table(dump$D)$disp, B$X$dispnum)))
 MM <- boot_weights(disp_all, NB)   # Bayesian bootstrap, the same draws as s2_07 (lib/s2_cell.R)
-D0 <- mclapply(MM, function(m) tryCatch(s2a(XJ, as.numeric(m[as.character(XJ$dispnum)]), vc = FALSE, start_b = bJ0)[nm0], error = function(e) NULL), mc.cores = CORES, mc.preschedule = FALSE)
-M0 <- do.call(rbind, D0[!vapply(D0, is.null, TRUE)])
+## draws are kept only when numeric with exactly the expected names (GPT P2-2: a killed worker returns a try-error string, which would turn the
+## matrix into character); worker failures (anything that is not a numeric result or a recorded numerical failure) are retried once, indices kept
+run_draws <- function(ML, f, nm) {
+  ok <- function(x) is.numeric(x) && identical(names(x), nm)
+  wrap <- function(m) tryCatch(f(m), error = function(e) structure(conditionMessage(e), class = "numerical_fail"))
+  R <- mclapply(ML, wrap, mc.cores = CORES, mc.preschedule = FALSE)
+  rt <- which(!vapply(R, function(x) ok(x) || inherits(x, "numerical_fail"), TRUE))
+  if (length(rt)) { cat(sprintf("  retrying %d draws lost to workers\n", length(rt))); R[rt] <- mclapply(ML[rt], wrap, mc.cores = CORES, mc.preschedule = FALSE) }
+  good <- vapply(R, ok, TRUE); nwork <- sum(!good & !vapply(R, inherits, TRUE, what = "numerical_fail"))
+  if (nwork) cat(sprintf("  WARNING: %d draws still lost to workers after one retry\n", nwork))
+  if (!any(good)) return(NULL)
+  M <- do.call(rbind, R[good]); stopifnot(is.numeric(M), identical(colnames(M), nm)); M }
+M0 <- run_draws(MM, function(m) s2a(XJ, as.numeric(m[as.character(XJ$dispnum)]), vc = FALSE, start_b = bJ0)[nm0], nm0)
 ## robustness draws: the first N_ROBUST draws (boot_weights is prefix-stable, so these are draws 1..N_ROBUST of the main run)
 NR <- min(N_ROBUST, NB); MR <- MM[seq_len(NR)]
-Db <- mclapply(MR, function(m) tryCatch(s2a(X, as.numeric(m[as.character(X$dispnum)]), tag = "S2Ab", vc = FALSE, start_b = bB0)[nmb], error = function(e) NULL), mc.cores = CORES, mc.preschedule = FALSE)
-MB <- do.call(rbind, Db[!vapply(Db, is.null, TRUE)])
+MB <- run_draws(MR, function(m) s2a(X, as.numeric(m[as.character(X$dispnum)]), tag = "S2Ab", vc = FALSE, start_b = bB0)[nmb], nmb)
 PF <- joint_fe_cell(D, dump, X, B$TS, fill_b = TRUE); stopifnot(length(attr(PF, "disp_joint")) == uniqueN(X$dispnum))
-DF <- mclapply(MR, function(m) tryCatch(joint_fe_draw(D, dump, X, B$TS, m, ref_order, fill_b = TRUE), error = function(e) NULL), mc.cores = CORES, mc.preschedule = FALSE)
-MF <- do.call(rbind, DF[vapply(DF, function(x) is.numeric(x) && identical(names(x), boot_names(dump)), TRUE)])
+MF <- run_draws(MR, function(m) joint_fe_draw(D, dump, X, B$TS, m, ref_order, fill_b = TRUE), boot_names(dump))
 ## (3c) net ties: the joint model with tie_net_* in place of own-side ties (boot_names keeps the own-side labels; see the mapping below)
 XN <- copy(X)[, `:=`(tie_net_A = tie_sum_A - tie_sum_B, tie_net_B = tie_sum_B - tie_sum_A)]
 DN <- list(A = sub("^tie_sum_A$", "tie_net_A", S2_REF_DESIGN$A), B = sub("^tie_sum_B$", "tie_net_B", S2_REF_DESIGN$B), O = sub("^tie_sum_A$", "tie_net_A", S2_REF_DESIGN$O))
 stopifnot(sum(DN$A == "tie_net_A") == 1L, sum(DN$B == "tie_net_B") == 1L, sum(DN$O == "tie_net_A") == 1L)
 PNT <- joint_fe_cell(D, dump, XN, B$TS, design = DN)
-nt_draw <- function(m) { f <- joint_fe_draw(D, dump, XN, B$TS, m, ref_order, design = DN) ; f }
-DNT <- mclapply(MR, function(m) tryCatch(nt_draw(m), error = function(e) NULL), mc.cores = CORES, mc.preschedule = FALSE)
-MNT <- do.call(rbind, DNT[vapply(DNT, function(x) is.numeric(x) && identical(names(x), boot_names(dump)), TRUE)])
+MNT <- run_draws(MR, function(m) joint_fe_draw(D, dump, XN, B$TS, m, ref_order, design = DN), boot_names(dump))
 ## assemble
 ci <- function(M, k, est, nb) { x <- if (is.null(M)) numeric(0) else M[is.finite(M[, k]), k]; if (!is.finite(est) || length(x) < 0.8 * nb) c(NA, NA) else unname(quantile(x, c(.025, .975))) }
 row <- function(col, label, q, est, M, nb = NB) { b <- ci(M, q, est, nb); data.table(column = col, row = label, est = est, lo = b[1], hi = b[2], n_draws = if (is.null(M)) 0L else sum(is.finite(M[, q]))) }

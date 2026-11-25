@@ -9,7 +9,7 @@ set.seed(123)
 source("R/lib/grid.R")
 a <- commandArgs(trailingOnly = TRUE); stopifnot(length(a) >= 4)
 CORES <- as.integer(sub("--cores=", "", grep("^--cores=", a, value = TRUE)[1])); if (is.na(CORES)) CORES <- 2L
-GL <- readRDS(a[1]); setDT(GL); setorder(GL, year, ccode1, ccode2)
+GLF <- a[1]; GL <- readRDS(GLF); setDT(GL); setorder(GL, year, ccode1, ccode2)
 KEY <- as.data.table(readRDS(a[2])$key)[, .(ccode, year)]; OUTD <- a[4]; dir.create(OUTD, showWarnings = FALSE, recursive = TRUE)
 SP <- grid_specs()
 yr_ix <- split(seq_len(nrow(GL)), GL$year)
@@ -36,6 +36,7 @@ if (length(grep("^--c12=", a))) {   # run-stopping check listed in docs/PAPER_PI
 cst <- vapply(seq_len(ncol(R)), function(j) sum(tapply(R[, j], KEY$year, function(z) sd(z) < 1e-8), na.rm = TRUE), 0)
 if (any(cst > 0)) cat("specs with constant-position years:", paste(sprintf("%s (%d)", SP$spec_id[cst > 0], cst[cst > 0]), collapse = "; "), "\n")
 for (b in unique(SP$block)) { S <- SP[block == b]
-  saveRDS(list(R = R[, S$spec_id, drop = FALSE], key = as.data.frame(KEY), specs = as.data.frame(S), built = format(Sys.time())), file.path(OUTD, sprintf("positions_core_G%s.rds", b))) }
+  saveRDS(list(R = R[, S$spec_id, drop = FALSE], key = as.data.frame(KEY), specs = as.data.frame(S), built = format(Sys.time()),
+               provenance = grid_provenance(GLF)), file.path(OUTD, sprintf("positions_core_G%s.rds", b))) }   # GPT P2-5: positions bound to the code and layers that built them
 fwrite(SP, file.path(OUTD, "grid_specs.csv"))
 cat(sprintf("GRID_BUILD_DONE %s: %s\n", OUTD, paste(sprintf("%s %d", names(table(SP$block)), table(SP$block)), collapse = ", ")))

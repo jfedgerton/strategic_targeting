@@ -49,7 +49,7 @@ if has 1; then
   { [ -s $BRP ] && [ -s $BRE ] && fresh $BRP "$S"; } || { runR "BOOK_RAW_DONE|pooled|Error" R/book_measure_raw.R $O/layers_dy.rds $BL $KEYF $BRP $BRE || die "main measure failed"; stamp $BRP "$S"; }
   BKP=$POSD/positions_core_BOOKc12_ptadesta.rds; BKE=$S2/edges/edges_book_c12.rds; S="$(h R/book_measure_c12.R) $(h $O/layers_dy.rds) $(h $KEYF) $(h $BL)"
   { [ -s $BKP ] && [ -s $BKE ] && fresh $BKP "$S"; } || { runR "BOOK_MEASURE_DONE|PTA layer|Error" R/book_measure_c12.R $O/layers_dy.rds $KEYF $BKP $BKE $BL || die "weighted book measure failed"; stamp $BKP "$S"; }
-  GL=$S2/edges/grid_layers.rds; S="$(h R/grid_layers.R) $(h $O/layers_dy.rds) $(h $BL) $(cat data_book/MD5SUMS | shasum -a 256 | cut -c1-16)"
+  GL=$S2/edges/grid_layers.rds; S="$(h R/grid_layers.R) $(h R/lib/grid.R) $(h $O/layers_dy.rds) $(h $BL) $(for f in data_book/desta23_dyadic_withdrawal.csv data_book/desta23_dyads.csv data_book/desta23_indices.csv data_book/cow_igo_state_year_formatv3.csv.gz data_book/desta_list_of_treaties_02_02.txt; do [ -s $f ] || die "missing $f"; h $f; done)"   # GPT P2-4: the files read, not the manifest
   { [ -s $GL ] && fresh $GL "$S"; } || { runR "GRID_LAYERS_DONE|IGO count|PTA depth|Error" R/grid_layers.R $O/layers_dy.rds $BL data_book $GL --cores=$CORES || die "grid layers failed"; stamp $GL "$S"; }
   GS=$POSD/grid_specs.csv; S="$(h R/grid_build.R) $(h R/lib/grid.R) $(h $GL) $(h $KEYF) $(h $BRP) $(h $BKP)"
   { [ -s $GS ] && fresh $GS "$S"; } || { runR "GRID_BUILD_DONE|specs in|vs BOOKraw|vs BOOKc12|constant|Error" R/grid_build.R $GL $KEYF $BRP $POSD --cores=$CORES --c12=$BKP || die "grid positions failed"; stamp $GS "$S"; }

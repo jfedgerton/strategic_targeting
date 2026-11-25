@@ -88,12 +88,15 @@ model {
   }
 }
 generated quantities {
-  vector[K ? J : 0] u_out; vector[K ? J : 0] v_out; real lat_norm1 = 0; real lat_share1 = 0;
+  vector[K ? J : 0] u_out; vector[K ? J : 0] v_out; real lat_norm1 = 0; real lat_share1 = 0; real lat_cov1 = 0;
   if (K) { u_out = (u_free - dot_product(u_free, u_set) / sum(u_set)) .* u_set; v_out = Pv * v_free;
     if (v_out[ref_v] < 0) { u_out = -u_out; v_out = -v_out; }   // reporting anchor only; the products below are sign-free
     lat_norm1 = lam1_raw[1] * norm2(u_out) * norm2(v_out);       // Frobenius norm of lam1 * u v'
     if (use_s1) {   // share of the stage-1 utility variance (over event rows) carried by the latent term (design section 4 / 9)
       vector[N1] lin = X1 * beta1; vector[N1] lat;
       for (r in 1:N1) { lin[r] += b[tgt1[r]] + eta[tgt1[r], era1[r]] + coal1[r] * del[tgt1[r]]; lat[r] = lam1_raw[1] * u_out[ini1[r]] * v_out[tgt1[r]]; }
-      lat_share1 = variance(lat) / (variance(lin) + variance(lat)); } }
+      // GPT P2-7: share of the TOTAL stage-1 utility variance over event rows, var(lat) / var(lin + lat); lat_cov1 = 2 cov(lin, lat) / var(lin + lat)
+      // (pooled over rows, so it mixes within- and between-event variation)
+      lat_share1 = variance(lat) / variance(lin + lat);
+      lat_cov1 = (variance(lin + lat) - variance(lin) - variance(lat)) / variance(lin + lat); } }
 }
