@@ -13,6 +13,7 @@ Items the appendix should state. Numbers are from the sandbox build on the main 
 ## Timing and missing data
 - All covariates and positions are measured at onset year - 1.
 - Stage 2 build: 560 disputes -> 544 in the reference cohort. Rows removed: 1,262 (target not a state at t-1; 12 disputes), 455 (initiating side without CINC at t-1; 3 disputes), 414 (candidate not in the system at t-1), 142 (dispute window past 2014). Table: main_table_missingness.csv.
+- Originator entry is available only to likely-tier candidates. A dispute whose observed originator is outside the likely tier is dropped and counted (PI 2026-11-25): none in fatal MIDs; one in all MIDs at window 1 (dispute 220, 1870, the US).
 - Joint model: 33 disputes have no repeat target (every onset target chosen fewer than 2 times in stage 1), so no target trait; main-table columns (2) and (3) both use the remaining 511 disputes.
 - Robustness: (2b) stage 2 alone on all 544 disputes; (3b) joint model with b = 0 for one-time targets; new-state cell using year t where t - 1 does not exist (stage 2 only; 560 disputes, 65,274 rows).
 

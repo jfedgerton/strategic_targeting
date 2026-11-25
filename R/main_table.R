@@ -132,6 +132,8 @@ O1 <- as.data.table(readRDS(file.path(BUILD, sprintf("s2_oneshot_w%d.rds", W_REF
 ## each excluded row is counted once, under its FIRST failing check (s2_ref_cohort order); "incomplete horizon" is the 2014 data end, not the t-1 rule
 MC <- rbind(O1[excl_reason != "", .(rows = .N, disputes_lost_entirely = NA_integer_, joins = sum(y != "out")), by = .(rule = paste0("build (first failing check): ", excl_reason))],
             data.table(rule = "build: disputes with no reference-cohort row", rows = 0L, disputes_lost_entirely = uniqueN(O1$dispnum) - uniqueN(O1[in_ref == TRUE]$dispnum), joins = NA_integer_),
+            data.table(rule = "s2_base: observed originator outside the likely tier (dispute dropped)", rows = O1[in_ref == TRUE & dispnum %in% B$dropped_unlikely_orig, .N],
+                       disputes_lost_entirely = length(B$dropped_unlikely_orig), joins = O1[in_ref == TRUE & dispnum %in% B$dropped_unlikely_orig, sum(y != "out")]),
             data.table(rule = "measure step (s2_prepare): rows without the measure's gaps / ties", rows = as.integer(attr(X, "dropped")), disputes_lost_entirely = NA_integer_, joins = NA_integer_),
             data.table(rule = "joint: no repeat target (bbar undefined)", rows = nrow(X) - nrow(XJ), disputes_lost_entirely = uniqueN(X$dispnum) - length(JS), joins = sum(X[!dispnum %in% JS]$y != "out")))
 fwrite(MC, file.path(OUT, "main_table_missingness.csv"))

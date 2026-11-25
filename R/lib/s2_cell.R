@@ -217,9 +217,14 @@ s2_base <- function(build_dir) {
   ONE <- as.data.table(readRDS(file.path(build_dir, sprintf("s2_oneshot_w%d.rds", W))))
   w0 <- W; CL <- as.data.table(readRDS(file.path(build_dir, "s2_classification_w0_6.rds")))[W == w0]   # (audit P2: `W == W` filtered nothing)
   X <- ONE[in_ref == TRUE]; for (v in names(X)) if (is.logical(X[[v]])) X[, (v) := as.numeric(get(v))]
+  ## PI 2026-11-25: originator entry is available only to likely-tier candidates (mnl_avail). A dispute whose observed originator is outside the
+  ## likely tier cannot be fitted under that mask; it is dropped and reported (all MIDs w1: dispute 220, 1870, US). None in the fatal sample.
+  bad_o <- if (W >= 1L) sort(unique(X[y == "orig" & likely != 1, dispnum])) else integer(0)
+  if (length(bad_o)) { message(sprintf("s2_base: dropping %d dispute(s) with an observed originator outside the likely tier: %s", length(bad_o), paste(bad_o, collapse = " ")))
+    X <- X[!dispnum %in% bad_o] }
   ROS <- as.data.table(readRDS(file.path(build_dir, "s2_rosters_carry.rds")))
   E <- as.data.table(readRDS(file.path(build_dir, "s2_main_edges.rds")))
-  list(meta = META, window = W, X = X, SI = readRDS(file.path(build_dir, "s2_surface_inputs.rds")), row0 = ONE[, .(dispnum, ccode, onset_year)],
+  list(meta = META, window = W, X = X, dropped_unlikely_orig = bad_o, SI = readRDS(file.path(build_dir, "s2_surface_inputs.rds")), row0 = ONE[, .(dispnum, ccode, onset_year)],
        R0 = ROS[m == 0L], cover = if (!is.null(META$cover)) sort(META$cover) else { warning("build predates META$cover; using main-edge years"); sort(unique(E$year)) }, TS = CL[baseline == TRUE & side_rel == "B", .(dispnum, ccode)], main_edges = E)
 }
 
