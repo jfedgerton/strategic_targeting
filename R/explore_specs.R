@@ -90,11 +90,21 @@ fe_prune <- function(Dx) { n0 <- uniqueN(Dx$ev_id)
     bad <- setdiff(unique(dd[chosen == 1L, c2]), dd[chosen == 0L, unique(c2)])
     if (!length(bad)) break; Dx <- Dx[!ev_id %in% Dx[chosen == 1L & c2 %in% bad, ev_id]] }
   setattr(Dx, "dropped", n0 - uniqueN(Dx$ev_id)); Dx }
+## finer-FE fit: like s1_fit_fe, but FE levels that are aliased (NA) or not converged are tolerated; the gap and control coefficients must
+## be finite and below 15 in absolute value (else the fit is invalid, as in s1_fit_fe). Aliased / diverging levels get no FE (no bbar).
+s1_fit_fe_tol <- function(Dx, dmp, ro) {
+  tgb <- unique(Dx[chosen == 1L, c2]); dd <- Dx[c2 %in% tgb]; dd <- dd[dd[, .(k = .N), by = ev_id][k > 1L], on = "ev_id"]
+  dd[, tfe := droplevels(factor(as.character(c2), levels = intersect(ro, as.character(tgb))))]
+  f <- as.formula(paste("Surv(rep(1, nrow(dd)), chosen) ~", paste(c(s1_terms(dmp), dmp$Z_cols, "tfe"), collapse = " + "), "+ strata(ev_id)"))
+  m <- suppressWarnings(coxph(f, data = dd, weights = w, method = "breslow", control = coxph.control(iter.max = 50)))
+  b <- coef(m); g <- b[!grepl("^tfe", names(b))]
+  if (!all(is.finite(g)) || any(abs(g) > 15)) stop("finer-FE fit invalid: gap / control coefficients not finite")
+  b[grepl("^tfe", names(b)) & (!is.finite(b) | abs(b) > 15)] <- NA; list(b = b, dd = dd) }
 ## te = TRUE: target x era FE; a dispute's bbar averages its onset targets' FE in the dispute's onset era (repeat target-eras only)
 s1_bbar <- function(Db, te = FALSE) {
   if (te) Db <- fe_prune(copy(Db)[, c2 := paste(c2, era)])
   ro <- if (te) names(sort(table(Db[chosen == 1L, c2]), decreasing = TRUE)) else ref_order
-  s1 <- s1_fit_fe(Db, dump, ro); bb <- coef(s1$m); be <- bb[grepl("^tfe", names(bb))]; names(be) <- sub("^tfe", "", names(be))
+  bb <- if (te) s1_fit_fe_tol(Db, dump, ro)$b else coef(s1_fit_fe(Db, dump, ro)$m); be <- bb[grepl("^tfe", names(bb))]; names(be) <- sub("^tfe", "", names(be))
   refb <- setdiff(intersect(ro, as.character(unique(Db[chosen == 1L, c2]))), names(be))[1]; be <- c(setNames(0, refb), be)
   b <- be[names(be) %in% (if (te) REP_TE else REP0) & is.finite(be)]; b <- pmin(pmax(b - mean(b), -5), 5)
   bbt <- if (te) TSE[, .(dispnum, b = b[key])][, .(bbar = mean(b, na.rm = TRUE)), by = dispnum][is.finite(bbar)]
@@ -121,7 +131,7 @@ one_draw <- function(m, monthly = FALSE) {
   JT <- blk(s1_bbar(Db, te = TRUE)); v$s1te <- JT$c
   J <- blk(s1_bbar(Db)); v$s1fe <- J$c
   v$s1riv <- blk({ Dr <- fe_prune(copy(Db)[, c2 := paste(c1, c2, sep = "_")]); ro <- names(sort(table(Dr[chosen == 1L, c2]), decreasing = TRUE))
-                   s1 <- s1_fit_fe(Dr, DUMP_RIV, ro); bb <- coef(s1$m); s1c(bb[!grepl("^tfe", names(bb))], "S1RIV") })
+                   bb <- s1_fit_fe_tol(Dr, DUMP_RIV, ro)$b; s1c(bb[!grepl("^tfe", names(bb))], "S1RIV") })
   for (e in ERA_LB) v[[paste0("era", e)]] <- blk({ mm <- s1_fit_nofe(Db[era == e], dump); s1c(coef(mm), paste0("S1ERA_", e)) })
   for (k in c("noise", "conf")) for (l in ME_L) {
     v[[paste0("me1", k, l)]] <- blk({ mm <- s1_fit_nofe(me_D(Db, k, l), dump); s1c(coef(mm), paste0("S1ME_", k, lamtag(l))) })
