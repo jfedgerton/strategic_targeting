@@ -33,6 +33,15 @@ Q <- data.table(stage = c("S1NF", "S1NF", "S1NF", "S1NF", "S2", "S2", "S2", "S2"
                           "Join target: ties to the attacker", "Originator entry: ties to the attacker"))   # tie rows added with the both-ties design (PI 2026-11-24)
 K <- merge(A, Q, by = c("stage", "alt", "axis", "gap"))
 K[, `:=`(lo = est - 1.96 * se, hi = est + 1.96 * se, p = 2 * pnorm(-abs(est / se)))]
+## GPT recheck P2-2: a quantity can be NA in an OK cell (a term dropped by fit_mnl). Write a per-quantity census, require finite headline
+## quantities for the main measure, and aggregate / regress over finite estimates only (denominators reported).
+K[, finite := is.finite(est) & is.finite(se) & se > 0]
+CEN <- K[, .(measures = .N, finite = sum(finite), missing = sum(!finite), missing_specs = paste(head(spec_id[!finite], 10), collapse = "; ")), by = .(label, sample)]
+fwrite(CEN, file.path(OUT, "grid_quantity_census.csv"))
+badm <- K[spec_id == MAIN & !finite]
+if (nrow(badm)) stop(sprintf("main measure has non-finite headline quantities: %s", paste(sprintf("%s %s", badm$sample, badm$label), collapse = "; ")))
+if (any(CEN$missing > 0)) cat(sprintf("NOTE non-finite grid quantities (excluded, see grid_quantity_census.csv): %s\n", paste(sprintf("%s/%s %d", CEN[missing > 0, label], CEN[missing > 0, sample], CEN[missing > 0, missing]), collapse = "; ")))
+K <- K[finite == TRUE]
 ## decision indicators
 dec <- function(sp) { if (startsWith(sp, "G")) { g <- grid_parse(sp); L <- g$layers; b <- g$block } else { L <- strsplit(strsplit(sp, "|", fixed = TRUE)[[1]][2], "+", fixed = TRUE)[[1]]; b <- if (startsWith(sp, "BOOKraw")) "raw" else "other"; g <- list(igo = "count", pta = "book") }
   data.table(spec_id = sp, block = b, inc_igo = "igo" %in% L, inc_def = "def" %in% L, inc_off = "off" %in% L, inc_dca = "dca" %in% L, inc_pta = "pta" %in% L, inc_ally = "ally" %in% L,
@@ -40,7 +49,7 @@ dec <- function(sp) { if (startsWith(sp, "G")) { g <- grid_parse(sp); L <- g$lay
              w_sryc12 = b == "sryc12", w_srydist = b == "srydist", w_syc12 = b == "syc12", w_sydist = b == "sydist") }
 DEC <- rbindlist(lapply(unique(K$spec_id), dec)); K <- merge(K, DEC, by = "spec_id"); K[, mid := sample == "mid"][, is_main := spec_id == MAIN]
 ## (a) distributions
-S <- K[, .(measures = .N, median = median(est), share_ci_pos = mean(lo > 0), share_ci_neg = mean(hi < 0), main_est = est[is_main][1]), by = .(label, sample)]
+S <- K[, .(measures_finite = .N, median = median(est), share_ci_pos = mean(lo > 0), share_ci_neg = mean(hi < 0), main_est = est[is_main][1]), by = .(label, sample)]
 fwrite(S, file.path(OUT, "grid_distribution.csv"))
 ## (b) decision regressions
 X <- c("inc_igo", "inc_def", "inc_off", "inc_dca", "inc_pta", "inc_ally", "igo_cos", "igo_hyper", "dca_v1", "w_sryc12", "w_srydist", "w_syc12", "w_sydist", "mid")

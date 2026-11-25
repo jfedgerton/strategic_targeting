@@ -97,6 +97,7 @@ s1_fit_fe_tol <- function(Dx, dmp, ro) {
   dd[, tfe := droplevels(factor(as.character(c2), levels = intersect(ro, as.character(tgb))))]
   f <- as.formula(paste("Surv(rep(1, nrow(dd)), chosen) ~", paste(c(s1_terms(dmp), dmp$Z_cols, "tfe"), collapse = " + "), "+ strata(ev_id)"))
   m <- suppressWarnings(coxph(f, data = dd, weights = w, method = "breslow", control = coxph.control(iter.max = 50)))
+  if (m$iter >= 50) stop("finer-FE fit invalid: iteration limit reached")   # GPT recheck P2-5: global non-convergence rejects the fit
   b <- coef(m); g <- b[!grepl("^tfe", names(b))]
   if (!all(is.finite(g)) || any(abs(g) > 15)) stop("finer-FE fit invalid: gap / control coefficients not finite")
   b[grepl("^tfe", names(b)) & (!is.finite(b) | abs(b) > 15)] <- NA; list(b = b, dd = dd) }
@@ -160,9 +161,9 @@ MX <- merge(MX[, .(dispnum, ccode, m, y_m, avail_A, avail_B, avail_orig, tie_sum
 MX[, `:=`(y = y_m, H = Inf, dur_1_2 = as.numeric(m %in% 1:2), dur_3_5 = as.numeric(m %in% 3:5), dur_6_11 = as.numeric(m %in% 6:11), dur_12p = as.numeric(m >= 12))]
 DMON <- lapply(S2_REF_DESIGN, c, "dur_1_2", "dur_3_5", "dur_6_11", "dur_12p")
 DMON$A <- setdiff(DMON$A, "dur_1_2")   # joining the attackers is available only after the originator window, so its four duration dummies sum to 1 (collinear with the intercept); months 1-2 are its reference
-fit_mon <- function(wmon, vc) {   # fit_mnl with the monthly availability masks (restored on exit)
+fit_mon <- function(wmon, vc) {   # fit_mnl with the monthly availability masks (restored on exit); O keeps the reference likely-tier restriction (GPT recheck P2-4)
   old <- mnl_avail; on.exit(assign("mnl_avail", old, envir = globalenv()))
-  assign("mnl_avail", function(X, alts) cbind(A = X$avail_A, B = X$avail_B, O = X$avail_orig)[, alts, drop = FALSE], envir = globalenv())
+  assign("mnl_avail", function(X, alts) cbind(A = X$avail_A, B = X$avail_B, O = X$avail_orig & X$likely == 1)[, alts, drop = FALSE], envir = globalenv())
   fit_mnl(MX, DMON, "monthly", vc = vc, w = wmon) }
 
 ## ---- 6. point estimates ----

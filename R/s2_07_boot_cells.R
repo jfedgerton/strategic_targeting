@@ -97,10 +97,13 @@ for (r in seq_len(nrow(CELLS))) { cl <- CELLS[r]
     logf("%s %s: %s %s", cl$cell_id, cl$spec_id, stt, m)
     s2_write_atomic(data.table(cell_id = cl$cell_id, file = cl$file, spec_id = cl$spec_id, window = cl$window, sample = cl$sample, rule = cl$rule, status = stt, msg = m),
                     file.path(OUT, cl$cell_id, "error.csv")) }) }
-ALL <- rbindlist(lapply(file.path(OUT, CELLS$cell_id), function(d) if (file.exists(file.path(d, "summary.csv"))) fread(file.path(d, "summary.csv"))[, status := "OK"]
+## GPT recheck P2-1: a summary with draws lost to workers (n_draws_other_fail > 0) is INCOMPLETE, not OK: the summary is kept and the next
+## invocation retries those draws; numerical failures stay separate (they are part of the bootstrap distribution, not unfinished work)
+ALL <- rbindlist(lapply(file.path(OUT, CELLS$cell_id), function(d) if (file.exists(file.path(d, "summary.csv"))) { s <- fread(file.path(d, "summary.csv"))
+    s[, status := if (any(s$n_draws_other_fail > 0)) "INCOMPLETE" else "OK"] }
   else if (file.exists(file.path(d, "error.csv"))) fread(file.path(d, "error.csv")) else data.table(cell_id = basename(d), status = "ERROR", msg = "not run")), fill = TRUE)
 s2_write_atomic(ALL, file.path(OUT, "boot_cells_summary.csv"))
 st <- ALL[, .(status = status[1]), by = cell_id]; logf("census: %s", paste(sprintf("%s %d", names(table(st$status)), table(st$status)), collapse = ", "))
-## GPT P2-8: every bootstrapped cell is prespecified, so any status other than OK is a gap (ERROR is retried on rerun; INVALID / FAILED / SKIPPED are reported)
+## GPT P2-8: every bootstrapped cell is prespecified, so any status other than OK is a gap (ERROR and INCOMPLETE are retried on rerun; INVALID / FAILED / SKIPPED are reported)
 if (any(st$status != "OK")) { logf("S2_BOOT_GAPS: %d cells not OK (%s)", sum(st$status != "OK"), paste(sprintf("%s %s", st[status != "OK", cell_id], st[status != "OK", status]), collapse = ", ")); quit(status = 3) }
 logf("S2_BOOT_DONE")
