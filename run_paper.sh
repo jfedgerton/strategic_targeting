@@ -80,9 +80,13 @@ if has 3; then
   printf 'file,spec_id,window,sample,rule,n_boot,cell_id\n%s,%s,%s,fmid,main,%s,m_fmid\n%s,%s,%s,mid,main,%s,m_mid\n' "$(basename $MAINF)" "$MAIN_SPEC" $WINDOW_MAIN $B_MAIN "$(basename $MAINF)" "$MAIN_SPEC" $WINDOW_MAIN $B_MAIN > $MC
   runR "draws ok|census|INVALID|SKIPPED|S2_BOOT_DONE|S2_BOOT_GAPS|Error" R/s2_07_boot_cells.R --cells=$MC --posdir=$POSD --builds_root=$PP/builds --dumps_dir=$O/dumps \
     --edges_dir=$S2/edges --out=$PP/main_table/boot --cores=$CORES && rc=0 || rc=$?; gap $rc main_boot
-  for SM in fmid mid; do
-    runR "MAIN_TABLE_DONE|Error" R/main_table.R --build=$PP/builds/w${WINDOW_MAIN}_${SM} --dump=$O/dumps/long_init_bon$(wtag $WINDOW_MAIN)_relyear_${SM}.rds --positions=$MAINF \
+  for SM in fmid mid; do   # (2026-11-26) skipped when its outputs are stamped with the same code, cell summary, build and inputs
+    DPM=$O/dumps/long_init_bon$(wtag $WINDOW_MAIN)_relyear_${SM}.rds; BDM=$PP/builds/w${WINDOW_MAIN}_${SM}
+    MTS="$(h R/main_table.R) $(h R/lib/s2.R) $(h R/lib/s2_fit.R) $(h R/lib/s2_cell.R) $(h R/lib/sry.R) $(h $PP/main_table/boot/m_$SM/summary.csv) $(h $BDM/s2_meta.rds) $(h $BDM/s2_oneshot_w${WINDOW_MAIN}.rds) $(h $DPM) $(h $MAINF) $(h $S2/edges/edges_book_raw.rds) $B_CELL"
+    if [ -s $PP/main_table/$SM/main_table_wide.csv ] && fresh $PP/main_table/$SM/main_table_wide.csv "$MTS"; then say "main table $SM up to date (skipped)"; continue; fi
+    runR "MAIN_TABLE_DONE|Error" R/main_table.R --build=$BDM --dump=$DPM --positions=$MAINF \
       --spec="$MAIN_SPEC" --edges_dir=$S2/edges --cell_dir=$PP/main_table/boot/m_$SM --out=$PP/main_table/$SM --cores=$CORES || die "main table $SM failed"
+    stamp $PP/main_table/$SM/main_table_wide.csv "$MTS"
   done
   runR "MARGINAL_EFFECTS_DONE|bootstrap:|Error" R/marginal_effects.R --build=$PP/builds/w${WINDOW_MAIN}_fmid --dump=$O/dumps/long_init_bon$(wtag $WINDOW_MAIN)_relyear_fmid.rds \
     --positions=$MAINF --spec="$MAIN_SPEC" --edges_dir=$S2/edges --n_boot=$B_CELL --out=$PP/marginal_effects --cores=$CORES || die "marginal effects failed"
@@ -122,13 +126,15 @@ fi
 ## ---- 6. bootstrapped grid cells ----
 if has 6; then
   CST="$(h R/grid_pick_boot_cells.R) $(h $POSD/grid_specs.csv) $MAIN_SPEC $WINDOW_MAIN $WINDOWS $B_CELL"   # regenerate the list when its inputs change (audit 2026-11-24)
-  ## a boot folder from a run before the provenance checks (cell folders, no fingerprint.tsv) is moved aside, never reused (2026-11-26)
-  if [ -d "$PP/boot" ] && [ ! -f "$PP/boot/fingerprint.tsv" ] && [ -n "$(find "$PP/boot" -mindepth 1 -maxdepth 1 -type d -print -quit)" ]; then
-    LEG="$PP/boot_legacy_$(date +%Y%m%d_%H%M%S)"; mv "$PP/boot" "$LEG"; say "moved a pre-provenance grid boot folder to $LEG (not reused)"; fi
-  mkdir -p "$PP/boot"
-  { [ -s $PP/boot/cells.csv ] && fresh $PP/boot/cells.csv "$CST"; } || { runR "wrote|Error" R/grid_pick_boot_cells.R --posdir=$POSD --main_spec="$MAIN_SPEC" --main_window=$WINDOW_MAIN --windows="$WINDOWS" \
-    --b_main=$B_MAIN --b_cell=$B_CELL --out=$PP/boot/cells.csv || die "cell list failed"; stamp $PP/boot/cells.csv "$CST"; }
-  runR "draws ok|census|INVALID|SKIPPED|S2_BOOT_DONE|S2_BOOT_GAPS|Error" R/s2_07_boot_cells.R --cells=$PP/boot/cells.csv --posdir=$POSD --builds_root=$PP/builds --dumps_dir=$O/dumps \
+  ## (2026-11-26) the cell list lives OUTSIDE the boot folder ($PP/boot_cells.csv): s2_07 refuses a folder that holds files but no fingerprint, so a
+  ## list written inside a fresh boot folder made every first run stop. A boot folder without fingerprint.tsv holding anything but its log
+  ## (an older run, or an old cell list) is moved aside, never reused.
+  if [ -d "$PP/boot" ] && [ ! -f "$PP/boot/fingerprint.tsv" ] && [ -n "$(find "$PP/boot" -mindepth 1 -maxdepth 1 ! -name s2_boot.log -print -quit)" ]; then
+    LEG="$PP/boot_legacy_$(date +%Y%m%d_%H%M%S)"; mv "$PP/boot" "$LEG"; say "moved a grid boot folder without provenance to $LEG (not reused)"; fi
+  GC=$PP/boot_cells.csv
+  { [ -s $GC ] && fresh $GC "$CST"; } || { runR "wrote|Error" R/grid_pick_boot_cells.R --posdir=$POSD --main_spec="$MAIN_SPEC" --main_window=$WINDOW_MAIN --windows="$WINDOWS" \
+    --b_main=$B_MAIN --b_cell=$B_CELL --out=$GC || die "cell list failed"; stamp $GC "$CST"; }
+  runR "draws ok|census|INVALID|SKIPPED|S2_BOOT_DONE|S2_BOOT_GAPS|Error" R/s2_07_boot_cells.R --cells=$GC --posdir=$POSD --builds_root=$PP/builds --dumps_dir=$O/dumps \
     --edges_dir=$S2/edges --out=$PP/boot --cores=$CORES && rc=0 || rc=$?; gap $rc grid_boot
   say "6 bootstrapped grid cells done"
 fi

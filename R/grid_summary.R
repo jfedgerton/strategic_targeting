@@ -22,7 +22,12 @@ for (sm in unique(cen$sample)) { cs <- cen[sample == sm]; if (uniqueN(cs$spec_id
 stopifnot(uniqueN(cen$sample) == length(SW))
 ## GPT P2-8: the only allowed non-OK status is SKIPPED (constant positions) for the 16 sy-scheme measures without IGO; anything else stops
 exp_skip <- function(id) grepl("^Gsy(c12|dist)_", id) & !grepl("igo", sub("^[^|]*\\|([^|]*)\\|.*$", "\\1", id))
-bad <- cen[status != "OK" & !(status == "SKIPPED" & exp_skip(spec_id))]
+## (PI 2026-11-26) INVALID = numerical failure of a fit (e.g. stage-1 separation): recorded and reported (grid_invalid.csv, counted in the
+## denominator), not a stop; ERROR / FAILED / unexpected SKIPPED still stop. The sweep step already marks the run PAPER_DONE_WITH_GAPS.
+inv <- unique(A[status == "INVALID", .(sample, spec_id, msg = if ("msg" %in% names(A)) msg else NA_character_)])
+fwrite(inv, file.path(OUT, "grid_invalid.csv"))
+if (nrow(inv)) cat(sprintf("NOTE %d invalid (numerical) grid cell(s), excluded and disclosed: %s\n", nrow(inv), paste(sprintf("%s %s", inv$sample, inv$spec_id), collapse = "; ")))
+bad <- cen[status != "OK" & status != "INVALID" & !(status == "SKIPPED" & exp_skip(spec_id))]
 if (nrow(bad)) stop(sprintf("unexpected non-OK grid cells: %s", paste(sprintf("%s %s %s", bad$sample, bad$spec_id, bad$status), collapse = "; ")))
 fit_n <- cen[status == "OK", .N, by = sample]; cat(sprintf("fitted measures per sample: %s (expected 236 minus the allowed constant-position skips)\n", paste(sprintf("%s %d", fit_n$sample, fit_n$N), collapse = ", ")))
 A <- A[status == "OK"]
