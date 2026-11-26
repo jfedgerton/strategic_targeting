@@ -122,6 +122,10 @@ fi
 ## ---- 6. bootstrapped grid cells ----
 if has 6; then
   CST="$(h R/grid_pick_boot_cells.R) $(h $POSD/grid_specs.csv) $MAIN_SPEC $WINDOW_MAIN $WINDOWS $B_CELL"   # regenerate the list when its inputs change (audit 2026-11-24)
+  ## a boot folder from a run before the provenance checks (cell folders, no fingerprint.tsv) is moved aside, never reused (2026-11-26)
+  if [ -d "$PP/boot" ] && [ ! -f "$PP/boot/fingerprint.tsv" ] && [ -n "$(find "$PP/boot" -mindepth 1 -maxdepth 1 -type d -print -quit)" ]; then
+    LEG="$PP/boot_legacy_$(date +%Y%m%d_%H%M%S)"; mv "$PP/boot" "$LEG"; say "moved a pre-provenance grid boot folder to $LEG (not reused)"; fi
+  mkdir -p "$PP/boot"
   { [ -s $PP/boot/cells.csv ] && fresh $PP/boot/cells.csv "$CST"; } || { runR "wrote|Error" R/grid_pick_boot_cells.R --posdir=$POSD --main_spec="$MAIN_SPEC" --main_window=$WINDOW_MAIN --windows="$WINDOWS" \
     --b_main=$B_MAIN --b_cell=$B_CELL --out=$PP/boot/cells.csv || die "cell list failed"; stamp $PP/boot/cells.csv "$CST"; }
   runR "draws ok|census|INVALID|SKIPPED|S2_BOOT_DONE|S2_BOOT_GAPS|Error" R/s2_07_boot_cells.R --cells=$PP/boot/cells.csv --posdir=$POSD --builds_root=$PP/builds --dumps_dir=$O/dumps \
