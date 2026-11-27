@@ -20,6 +20,9 @@ Items the appendix should state. Numbers are from the sandbox build on the main 
 ## Stage-2 ties
 - Main design: ties to both sides per option (own side joined, opposing side fought); own-side-only ties reported as (3c). Net ties dropped (collinear with both ties).
 
+## Permutation tests (run_paper step 8)
+- 1,000 permutations per test, seed 123 + i, two-sided p against the permutation distribution: (1) relational gaps shuffled within stage-1 events; (2) ties to the attacker shuffled within disputes; (3) bbar shuffled across disputes; (4) target FE shuffled across repeat targets. Fatal MIDs all four; all MIDs tests 2-4.
+
 ## Inference
 - Two-stage dispute-level Bayesian bootstrap (Exp(1) dispute weights scaled to mean 1; Rubin 1981), common draws across stage 1, stage 2 and the joint model; 95% percentile intervals; a quantity is reported only with >= 80% finite draws.
 - Window 0 has no originator alternative; its O quantities are not estimated.
