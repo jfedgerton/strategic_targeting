@@ -14,12 +14,12 @@
 ##   5. grid sweep: 236 measures x main window x {fmid, mid} (joint two-stage FE point fits)
 ##   6. bootstrapped grid cells (R/grid_pick_boot_cells.R; B_CELL; the main-window main cells come from step 3)
 ##   7. grid summaries (distributions, decision regressions, specification curves)
-##   8. (off by default; AME dropped 2026-11-24) AME data bundle; P_STEPS="... 8" to build it
+##   8. permutation tests of the headline results (coalition relational gaps, ties to the attacker, theta); AME dropped 2026-11-24
 ## Usage: OUT=output_init ./run_paper.sh            (optional: P_STEPS="1 2 3 4 5 6 7", B_MAIN=2000, B_CELL=500)
 set -euo pipefail
 cd "$(dirname "$0")"; source config.sh
 O="${OUT:-output_init}"; [[ "$O" != *" "* ]] || { echo "STOP: OUT must not contain spaces (paths are unquoted in this runner)"; exit 1; }; S2=$O/stage2; PP=$O/paper; mkdir -p $S2/{edges,logs} $PP/{builds,main_table,marginal_effects,table1,sweep,boot,summary,ame}
-STEPS="${P_STEPS:-1 2 3 4 5 6 7}"; B_MAIN="${B_MAIN:-2000}"; B_CELL="${B_CELL:-500}"   # step 8 (AME bundle) off by default: AME dropped (PI 2026-11-24)
+STEPS="${P_STEPS:-1 2 3 4 5 6 7 8}"; B_MAIN="${B_MAIN:-2000}"; B_CELL="${B_CELL:-500}"; N_PERM="${N_PERM:-1000}"   # step 8 = permutation tests (AME dropped 2026-11-24)
 LOG=$PP/run_$(date +%Y%m%d_%H%M%S).log
 say() { echo "[$(date +%H:%M:%S)] $*" | tee -a "$LOG"; }
 die() { say "STOP: $*"; exit 1; }
@@ -145,11 +145,16 @@ if has 7; then
   say "7 grid summaries done"
 fi
 
-## ---- 8. AME data bundle ----
+## ---- 8. permutation tests (PI 2026-11-27): main measure, main window; fmid all four tests, mid the stage-2 tests (ties, theta) ----
 if has 8; then
-  AB=$PP/ame/ame_bundle_w${WINDOW_MAIN}_fmid_main.rds
-  runR "bundle|Error" R/ame/ame_cell.R --prep_only=1 --bundle=$AB --build=$PP/builds/w${WINDOW_MAIN}_fmid --dump=$O/dumps/long_init_bon$(wtag $WINDOW_MAIN)_relyear_fmid.rds \
-    --positions=$MAINF --spec="$MAIN_SPEC" --edges_dir=$S2/edges --out=$PP/ame || die "AME bundle failed"
-  say "8 AME bundle: $AB (copy to Roar; BUNDLE=... sbatch slurm/ame_cells.sbatch)"
+  for SM in fmid mid; do
+    TS_=$([ $SM = fmid ] && echo 1,2,3,4 || echo 2,3,4)
+    PST="$(h R/permutation.R) $(h R/lib/s2.R) $(h R/lib/s2_fit.R) $(h R/lib/s2_cell.R) $(h R/lib/sry.R) $(h $PP/builds/w${WINDOW_MAIN}_${SM}/s2_meta.rds) $(h $O/dumps/long_init_bon$(wtag $WINDOW_MAIN)_relyear_${SM}.rds) $(h $MAINF) $(h $S2/edges/edges_book_raw.rds) $N_PERM $TS_"
+    if [ -s $PP/permutation/$SM/permutation_results.csv ] && fresh $PP/permutation/$SM/permutation_results.csv "$PST"; then say "permutation $SM up to date (skipped)"; continue; fi
+    runR "observed|permutations usable|reusing|PERMUTATION_DONE|Error" R/permutation.R --build=$PP/builds/w${WINDOW_MAIN}_${SM} --dump=$O/dumps/long_init_bon$(wtag $WINDOW_MAIN)_relyear_${SM}.rds \
+      --positions=$MAINF --spec="$MAIN_SPEC" --edges_dir=$S2/edges --out=$PP/permutation/$SM --n_perm=$N_PERM --cores=$CORES --tests=$TS_ || die "permutation $SM failed"
+    stamp $PP/permutation/$SM/permutation_results.csv "$PST"
+  done
+  say "8 permutation tests done"
 fi
 [ -z "$GAPS" ] && say "PAPER_DONE" || { say "PAPER_DONE_WITH_GAPS:$GAPS (rerun the same command to retry ERROR cells)"; exit 3; }
